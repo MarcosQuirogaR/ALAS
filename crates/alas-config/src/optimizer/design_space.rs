@@ -5,7 +5,7 @@
 //!
 //! A clean-sheet study lets every geometry variable roam its global bounds
 //! and sizes what the brief fixes (the fuselage from the cabin, the engine
-//! from the thrust the mission needs). A reference-aircraft adaptation
+//! rating from the thrust requirements). A reference-aircraft adaptation
 //! starts from a registered type and keeps it recognisable: each variable is
 //! either fixed at the reference value or free inside an explicit window
 //! around it, and the window is recorded with the run so a "redesigned A320"
@@ -16,6 +16,7 @@ use std::collections::BTreeMap;
 use serde::{Deserialize, Serialize};
 
 use crate::design_variables::{DesignVariableSpec, DesignVector, SPECS};
+use crate::presets::AircraftClass;
 use crate::{ConfigNode, Kind, Leaf};
 
 /// How the search treats the aircraft it starts from.
@@ -23,7 +24,7 @@ use crate::{ConfigNode, Kind, Leaf};
 #[serde(rename_all = "snake_case")]
 pub enum DesignMode {
     /// Every geometry variable is free inside its global bounds; the fuselage
-    /// is sized by the cabin. The selected catalogue engine remains fixed.
+    /// is sized by the cabin and the engine rating by the thrust requirements.
     #[default]
     CleanSheet,
     /// The registered aircraft is the reference; only the variables listed as
@@ -74,51 +75,53 @@ pub struct DesignSpaceConfig {
     #[config(
         options = DesignMode,
         label = "Design mode",
-        help = "Clean sheet lets every geometry variable move inside its global bounds, sizes the fuselage from the cabin and may scale the engine. Reference adaptation starts from the registered aircraft, keeps the variables listed as fixed at their reference values and moves the others only inside the windows below."
+        help = "Clean sheet moves every geometry variable inside its global bounds, sizes the fuselage from the cabin and scales the engine rating.",
+        long_help = "Clean sheet lets every geometry variable move inside its global bounds, sizes the fuselage from the cabin and, unless disabled below, scales the engine rating to the thrust requirements. Reference adaptation starts from the registered aircraft, keeps the variables listed as fixed at their reference values and moves the others only inside the windows below."
     )]
     pub mode: DesignMode,
 
     /// Whether the fuselage length is derived from the cabin in clean-sheet mode.
     #[config(
         label = "Size fuselage from cabin",
-        help = "In clean-sheet mode, set the fuselage length to the shortest length whose cabin seats the brief, instead of treating it as a search variable with an integer seat-count step. Reference adaptation ignores this and keeps the fuselage as configured."
+        help = "In clean-sheet mode, set the fuselage length to the shortest one whose cabin seats the brief, instead of searching it with an integer seat-count step.",
+        long_help = "In clean-sheet mode, set the fuselage length to the shortest length whose cabin seats the brief, instead of treating it as a search variable with an integer seat-count step. Reference adaptation ignores this and keeps the fuselage as configured."
     )]
     pub fuselage_sized_by_cabin: bool,
 
-    /// Deprecated compatibility field. Engine scaling is not a supported
-    /// design freedom: the selected catalogue engine, including its off-design
-    /// deck, is bound once and used by every discipline.
-    #[config(skip)]
-    pub engine_scale_enabled: bool,
-
-    /// Lowest engine thrust scale the search may select.
+    /// Whether the engine rating is sized from the thrust requirements in
+    /// clean-sheet mode.
     #[config(
-        label = "Engine scale, lower bound",
-        help = "Smallest multiplier on the selected engine's rated thrust the clean-sheet search may choose."
+        label = "Size engine from requirements",
+        help = "In clean-sheet mode, scale the catalogue engine to the smallest rating meeting every thrust requirement of the closed design.",
+        long_help = "In clean-sheet mode, scale the selected catalogue engine to the smallest rating that meets every thrust requirement of the closed design (take-off field, engine-out second segment, final segment, approach and landing climb, and level flight at the design cruise condition at mid-cruise mass; a turboprop sizes on its planned cruise level), instead of keeping its catalogue rating. The catalogue engine is the baseline cycle; its dimensions, fuel flow and mass follow the rating (Raymer, Aircraft Design, 6th ed., Eqs. 10.1-10.3; Jenkinson, Civil Jet Aircraft Design, Sec. 9.10). A held engine (this option off, or a promoted sandbox) whose own requirement is more than the engine rating window below its rating (the rating exceeds the requirement by more than 1/(1 - window) - 1, 25 percent at the default 20 percent window) is only flagged, as a warning finding shown with the results; the design stays feasible. Reference adaptation and baseline analysis always keep the declared engine."
     )]
-    pub engine_scale_lower: f64,
+    pub engine_sized_by_requirements: bool,
 
-    /// Highest engine thrust scale the search may select.
+    /// Largest departure of the sized engine rating from the catalogue's.
     #[config(
-        label = "Engine scale, upper bound",
-        help = "Largest multiplier on the selected engine's rated thrust the clean-sheet search may choose."
+        label = "Engine rating window",
+        unit = "fraction",
+        help = "Largest departure of the sized engine rating from the catalogue engine's, as a fraction of that rating, up to 0.6.",
+        long_help = "Largest departure of the sized engine rating from the selected catalogue engine's, as a fraction of that rating, up to 0.6 (the end of the sizing search). Jenkinson (Civil Jet Aircraft Design, Sec. 9.10) limits scaling an engine to about 20 percent; a design that needs a rating outside the window is infeasible instead of being extrapolated. Select a catalogue engine closer to the rating the brief needs, or widen the window, to study it anyway."
     )]
-    pub engine_scale_upper: f64,
+    pub engine_rating_window: f64,
 
     /// Design variables held at their reference value in reference mode.
     ///
     /// The default is [`DEFAULT_REFERENCE_FIXED_VARIABLES`].
     #[config(
         label = "Fixed variables (reference mode)",
-        help = "Comma-separated design-variable names that reference adaptation holds at the registered aircraft's values. The default holds the fuselage length, the tail position and every variable whose effect on block fuel is below 0.1 % per full window width on the A320-200, B787-9 and A380-800, which today is only the rear lower Hicks-Henne bump. Remove a name to let the search move it again. The tail scale is always derived from the wing in reference adaptation, so the tails keep the registered tail volume coefficients. Every other variable moves inside the windows below."
+        help = "Comma-separated design-variable names that reference adaptation holds at the registered aircraft's values.",
+        long_help = "Comma-separated design-variable names that reference adaptation holds at the registered aircraft's values. The default holds the fuselage length, the tail position and every variable whose effect on block fuel is below 0.1 % per full window width on the A320-200, B787-9 and A380-800, which today is only the rear lower Hicks-Henne bump. Remove a name to let the search move it again. The tail scale is always derived from the wing in reference adaptation, so the tails keep the registered tail volume coefficients. Every other variable moves inside the windows below."
     )]
     pub reference_fixed_variables: String,
 
     /// Relative half-width of the window on lengths and scale factors.
     #[config(
         label = "Reference window, lengths and scales",
-        unit = "fraction",
-        help = "Half-width of the search window around the reference value for spans, chords, the fuselage length and the scale factors (thickness, camber, tail), as a fraction of that value. 0.10 lets a 34 m span move between 30.6 and 37.4 m."
+        unit = "fraction of reference value",
+        help = "Half-width of the search window around the reference value for spans, chords, fuselage length and scale factors, as a fraction of it. 0.10 moves a 34 m span 30.6-37.4 m.",
+        long_help = "Half-width of the search window around the reference value for spans, chords, the fuselage length and the scale factors (thickness, camber, tail), as a fraction of that value. 0.10 lets a 34 m span move between 30.6 and 37.4 m."
     )]
     pub reference_fraction_half_width: f64,
 
@@ -141,7 +144,7 @@ pub struct DesignSpaceConfig {
     /// Half-width of the window on airfoil bump amplitudes.
     #[config(
         label = "Reference window, airfoil bumps",
-        unit = "chord fraction",
+        unit = "fraction of chord",
         help = "Half-width of the search window around the reference Hicks-Henne bump amplitudes."
     )]
     pub reference_bump_half_width: f64,
@@ -175,6 +178,18 @@ pub struct DesignSpaceConfig {
     #[serde(default, skip_serializing_if = "Option::is_none")]
     #[config(skip)]
     pub clean_sheet_brief: Option<bool>,
+
+    /// The class of a clean-sheet brief, which selects its guardrails
+    /// ([`DesignVariableSpec::guardrails_for`]); a registered preset's own
+    /// class takes precedence ([`crate::AlasConfig::aircraft_class`]).
+    #[serde(default, skip_serializing_if = "AircraftClass::is_transport")]
+    #[config(
+        options = AircraftClass,
+        label = "Aircraft class",
+        help = "Class of a clean-sheet brief: its design-variable guardrails. A registered aircraft keeps the class its preset declares.",
+        long_help = "Class of a clean-sheet brief, which selects the guardrails its design variables are held to: a transport is bounded by the transport pair (a 20 m span floor), a business jet by the business-jet envelope of Jane's All the World's Aircraft 2008-2009 (span 11.40 to 28.65 m). A registered aircraft keeps the class its preset declares, whatever this says."
+    )]
+    pub aircraft_class: AircraftClass,
 }
 
 impl Default for DesignSpaceConfig {
@@ -182,9 +197,8 @@ impl Default for DesignSpaceConfig {
         Self {
             mode: DesignMode::CleanSheet,
             fuselage_sized_by_cabin: true,
-            engine_scale_enabled: false,
-            engine_scale_lower: 0.7,
-            engine_scale_upper: 1.4,
+            engine_sized_by_requirements: true,
+            engine_rating_window: crate::ENGINE_SCALE_VALIDITY_FRACTION,
             reference_fixed_variables: DEFAULT_REFERENCE_FIXED_VARIABLES.to_owned(),
             reference_fraction_half_width: 0.10,
             reference_angle_half_width_deg: 3.0,
@@ -193,6 +207,7 @@ impl Default for DesignSpaceConfig {
             initial_design: BTreeMap::new(),
             bounds: BTreeMap::new(),
             clean_sheet_brief: None,
+            aircraft_class: AircraftClass::Transport,
         }
     }
 }
@@ -209,7 +224,8 @@ impl Default for DesignSpaceConfig {
 /// bumps read 0.19-0.83 on the wide-bodies, `sweep_deg` 0.08 on the A320-200
 /// but 1.7-8.7 on the wide-bodies and `break_chord_m` 0.12 on the B787-9 but
 /// 1.5-2.2 elsewhere, so they stay free. The full table is in
-/// `docs/optimizer-design-vector.md`. Removing a name re-enables it.
+/// `docs/optimizer-design-vector.md`. Removing a name re-enables it, except
+/// the section shape, which every search holds ([`SECTION_SHAPE_VARIABLES`]).
 pub const DEFAULT_REFERENCE_FIXED_VARIABLES: &str =
     "fuselage_length_m, tail_x_shift_m, bump_lower_rear";
 
@@ -217,6 +233,46 @@ pub const DEFAULT_REFERENCE_FIXED_VARIABLES: &str =
 /// searching: the optimizer's tail auto-sizing sets it so the tails keep the
 /// registered aircraft's volume coefficients.
 const TAIL_SCALE_VARIABLE: &str = "tail_scale";
+
+/// The wing twist variable, held at its nominal value in every search.
+///
+/// The trimmed drag table takes the induced drag of the wing twist as the
+/// handbook allowance for a non-optimum twist (`alas_aero::analysis`
+/// `NON_OPTIMUM_TWIST_DRAG_FACTOR`: Jenkinson, *Civil Jet Aircraft Design*,
+/// 1999, pp. 179-180) in place of the wake energy of the lattice's zero-lift
+/// loading, which the flight-test drag polars do not show. No published form
+/// gives that allowance as a function of the departure of a twist distribution
+/// from its optimum, so a search over the twist would be credited the
+/// interaction of the twist loading with the lift loading without the cost of
+/// the twist loading itself. The twist still sets the trim, the buffet onset
+/// and the loads at its declared value.
+const TWIST_VARIABLE: &str = "tip_twist_deg";
+
+/// The wing-section shape variables, held at their nominal values in every
+/// search.
+///
+/// The in-loop analysis carries a section's thickness into the wing mass
+/// (FLOPS bending term), the tank volume, the form factor and the
+/// compressibility drag, and its camber into the lattice and the trim, but
+/// not into the section maximum lift or a section drag polar: the clean and
+/// flapped CLmax scale the declared coefficients with planform terms only
+/// (`alas_opt::mdo::sizing::clmax_geometry`), and the profile drag is skin
+/// friction times a thickness form factor. A thinner or more cambered
+/// section, or a Hicks-Henne bump, would therefore be credited its drag and
+/// lift without the loss of maximum lift with leading-edge sharpness
+/// (USAF DATCOM Sec. 4.1.3.4) or the profile drag away from the section's
+/// design lift (Abbott and von Doenhoff, Theory of Wing Sections, 1959,
+/// Ch. 7). An ATR 72-600 search found exactly that: camber
+/// +10 % and thickness -10 % on the window edges. Until a section model
+/// prices them the section stays as declared.
+const SECTION_SHAPE_VARIABLES: [&str; 6] = [
+    "airfoil_thickness_scale",
+    "airfoil_camber_scale",
+    "bump_upper_front",
+    "bump_upper_rear",
+    "bump_lower_mid",
+    "bump_lower_rear",
+];
 
 /// How a variable's reference window is measured.
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
@@ -259,24 +315,36 @@ impl DesignSpaceConfig {
         self.mode == DesignMode::CleanSheet && self.fuselage_sized_by_cabin
     }
 
-    /// Whether the engine thrust scale is a search variable for this run.
-    pub fn scales_engine(&self) -> bool {
-        // No design-vector coordinate represents engine thrust. Keep this
-        // method for saved-config/source compatibility, but never expose a
-        // rubber-engine degree of freedom that would bypass the catalogue
-        // off-design deck and propulsion-mass binding.
-        false
+    /// Hold the aircraft as drawn: no cabin-derived fuselage and no sized
+    /// engine, as a promoted sandbox baseline needs.
+    pub fn hold_as_drawn(&mut self) {
+        self.fuselage_sized_by_cabin = false;
+        self.engine_sized_by_requirements = false;
     }
 
-    /// Reject windows and scale bounds the search cannot run with.
+    /// Whether the engine rating is sized from the thrust requirements for
+    /// this run.
+    pub fn sizes_engine(&self) -> bool {
+        self.mode == DesignMode::CleanSheet && self.engine_sized_by_requirements
+    }
+
+    /// Reject windows the search cannot run with.
     ///
     /// # Errors
     ///
     /// A description of the first invalid value.
     pub fn validate(&self) -> Result<(), String> {
+        self.validate_for(AircraftClass::Transport)
+    }
+
+    /// [`Self::validate`] with the explicit bounds held to the guardrails of
+    /// an aircraft of `class`.
+    ///
+    /// # Errors
+    ///
+    /// The first invalid entry, as [`Self::validate`] reports it.
+    pub fn validate_for(&self, class: AircraftClass) -> Result<(), String> {
         for (name, value) in [
-            ("engine_scale_lower", self.engine_scale_lower),
-            ("engine_scale_upper", self.engine_scale_upper),
             (
                 "reference_fraction_half_width",
                 self.reference_fraction_half_width,
@@ -297,20 +365,26 @@ impl DesignSpaceConfig {
                 ));
             }
         }
-        if self.engine_scale_lower <= 0.0 || self.engine_scale_upper < self.engine_scale_lower {
-            return Err("engine scale bounds must satisfy 0 < lower <= upper".to_owned());
+        let widest = 1.0 - crate::ENGINE_SCALE_SEARCH_BRACKET.0;
+        if !(self.engine_rating_window.is_finite()
+            && self.engine_rating_window > 0.0
+            && self.engine_rating_window <= widest)
+        {
+            return Err(format!(
+                "design space engine_rating_window must be a fraction in (0, {widest}], the end of the sizing search"
+            ));
         }
         for name in self.fixed_variable_names() {
             if !SPECS.iter().any(|spec| spec.name == name) {
                 return Err(format!("fixed variable '{name}' is not a design variable"));
             }
         }
-        self.validate_explicit_space()
+        self.validate_explicit_space(class)
     }
 
     /// Reject explicit start values and bounds that name no design variable,
     /// are not finite, are inverted, or put a start outside its own bound.
-    fn validate_explicit_space(&self) -> Result<(), String> {
+    fn validate_explicit_space(&self, class: AircraftClass) -> Result<(), String> {
         let known = |name: &str| SPECS.iter().any(|spec| spec.name == name);
         for (name, value) in &self.initial_design {
             if !known(name) || !value.is_finite() {
@@ -325,13 +399,12 @@ impl DesignSpaceConfig {
                     "design space bounds entry '{name}' must name a design variable with finite lower <= upper"
                 ));
             }
-            // The guardrails every registered aircraft's window respects
-            // bound an explicit box too.
+            // The guardrails of the aircraft's class bound an explicit box too.
             if let Some(spec) = SPECS.iter().find(|spec| spec.name == name) {
-                if lower < spec.preset_lower || upper > spec.preset_upper {
+                let (guard_lower, guard_upper) = spec.guardrails_for(class);
+                if lower < guard_lower || upper > guard_upper {
                     return Err(format!(
-                        "design space bounds entry '{name}' [{lower}, {upper}] leaves the design-variable guardrails [{}, {}]",
-                        spec.preset_lower, spec.preset_upper
+                        "design space bounds entry '{name}' [{lower}, {upper}] leaves the design-variable guardrails [{guard_lower}, {guard_upper}]"
                     ));
                 }
             }
@@ -371,7 +444,20 @@ impl DesignSpaceConfig {
     /// the global bounds, and the listed variables fixed. A nominal outside
     /// its global bounds keeps a window around itself rather than being
     /// snapped: the reference aircraft is the truth the study starts from.
+    ///
+    /// The windows are bounded by the transport guardrails;
+    /// [`Self::envelope_for`] bounds them by another class's.
     pub fn envelope(&self, nominal: &DesignVector) -> Vec<VariableEnvelope> {
+        self.envelope_for(nominal, AircraftClass::Transport)
+    }
+
+    /// [`Self::envelope`] for an aircraft of `class`, whose guardrails bound
+    /// the reference windows.
+    pub fn envelope_for(
+        &self,
+        nominal: &DesignVector,
+        class: AircraftClass,
+    ) -> Vec<VariableEnvelope> {
         let values = nominal.to_array();
         let fixed = self.fixed_variable_names();
         SPECS
@@ -379,12 +465,22 @@ impl DesignSpaceConfig {
             .zip(values)
             .map(|(spec, value)| match self.mode {
                 DesignMode::CleanSheet => {
-                    let fixed = spec.name == "fuselage_length_m" && self.fuselage_sized_by_cabin;
+                    let fixed = spec.name == TWIST_VARIABLE
+                        || SECTION_SHAPE_VARIABLES.contains(&spec.name)
+                        || (spec.name == "fuselage_length_m" && self.fuselage_sized_by_cabin);
                     self.clean_sheet_envelope(spec, value, fixed)
                 }
                 DesignMode::ReferenceAdaptation => {
                     let derived = spec.name == TAIL_SCALE_VARIABLE;
-                    self.reference_envelope(spec, value, derived || fixed.contains(&spec.name))
+                    self.reference_envelope(
+                        spec,
+                        value,
+                        derived
+                            || spec.name == TWIST_VARIABLE
+                            || SECTION_SHAPE_VARIABLES.contains(&spec.name)
+                            || fixed.contains(&spec.name),
+                        class,
+                    )
                 }
                 DesignMode::BaselineSandbox => VariableEnvelope {
                     name: spec.name,
@@ -437,6 +533,7 @@ impl DesignSpaceConfig {
         spec: &DesignVariableSpec,
         value: f64,
         fixed: bool,
+        class: AircraftClass,
     ) -> VariableEnvelope {
         if fixed {
             return VariableEnvelope {
@@ -447,19 +544,30 @@ impl DesignSpaceConfig {
                 fixed: true,
             };
         }
-        let half_width = match window_kind(spec.name) {
-            WindowKind::Fraction => self.reference_fraction_half_width * value.abs(),
-            WindowKind::Angle => self.reference_angle_half_width_deg,
-            WindowKind::Shift => self.reference_shift_half_width_m,
-            WindowKind::Bump => self.reference_bump_half_width,
-        };
+        let half_width = reference_half_width(self, spec, value);
+        let (guard_lower, guard_upper) = spec.guardrails_for(class);
         VariableEnvelope {
             name: spec.name,
             nominal: value,
-            lower: (value - half_width).max(spec.preset_lower),
-            upper: (value + half_width).min(spec.preset_upper),
+            lower: (value - half_width).max(guard_lower),
+            upper: (value + half_width).min(guard_upper),
             fixed: half_width <= 0.0,
         }
+    }
+}
+
+/// Half-width of the reference-adaptation window `config` searches around
+/// `value` of the variable `spec`, in its native units.
+pub(super) fn reference_half_width(
+    config: &DesignSpaceConfig,
+    spec: &DesignVariableSpec,
+    value: f64,
+) -> f64 {
+    match window_kind(spec.name) {
+        WindowKind::Fraction => config.reference_fraction_half_width * value.abs(),
+        WindowKind::Angle => config.reference_angle_half_width_deg,
+        WindowKind::Shift => config.reference_shift_half_width_m,
+        WindowKind::Bump => config.reference_bump_half_width,
     }
 }
 
@@ -475,7 +583,6 @@ mod tests {
         let config = DesignSpaceConfig::default();
         assert_eq!(config.mode, DesignMode::CleanSheet);
         assert!(config.sizes_fuselage_from_cabin());
-        assert!(!config.scales_engine());
         assert!(config.validate().is_ok());
         let envelope = config.envelope(&DesignVector::default());
         let fuselage = envelope
@@ -491,36 +598,43 @@ mod tests {
     }
 
     #[test]
-    fn reference_mode_holds_only_the_flat_bump_by_default_and_frees_it_on_request() {
+    fn every_search_holds_the_section_shape_and_a_reference_adaptation_the_listed_variables() {
         let nominal = DesignVector {
             bump_upper_rear: 0.001,
             bump_lower_rear: 0.001,
             ..DesignVector::default()
         };
-        let bump = |config: &DesignSpaceConfig, name: &str| {
+        let variable = |config: &DesignSpaceConfig, name: &str| {
             config
                 .envelope(&nominal)
                 .into_iter()
                 .find(|v| v.name == name)
                 .unwrap()
         };
-        let default = DesignSpaceConfig {
+        let reference = DesignSpaceConfig {
             mode: DesignMode::ReferenceAdaptation,
             ..Default::default()
         };
-        let held = bump(&default, "bump_lower_rear");
-        assert!(held.fixed && held.lower == 0.001 && held.upper == 0.001);
-        let free = bump(&default, "bump_upper_rear");
-        assert!(!free.fixed && free.lower < 0.001 && free.upper > 0.001);
-        let freed = bump(
-            &DesignSpaceConfig {
-                mode: DesignMode::ReferenceAdaptation,
-                reference_fixed_variables: "fuselage_length_m, tail_x_shift_m".to_owned(),
-                ..Default::default()
-            },
-            "bump_lower_rear",
-        );
-        assert!(!freed.fixed && freed.lower < 0.001 && freed.upper > 0.001);
+        let freed = DesignSpaceConfig {
+            mode: DesignMode::ReferenceAdaptation,
+            reference_fixed_variables: "fuselage_length_m, tail_x_shift_m, sweep_deg".to_owned(),
+            ..Default::default()
+        };
+        // The section shape is held in every mode, listed or not.
+        for config in [&reference, &freed, &DesignSpaceConfig::default()] {
+            for name in SECTION_SHAPE_VARIABLES {
+                let held = variable(config, name);
+                assert!(
+                    held.fixed && held.lower == held.upper,
+                    "{:?} {name}",
+                    config.mode
+                );
+            }
+        }
+        assert_eq!(variable(&freed, "bump_upper_rear").lower, 0.001);
+        // A listed planform variable is held; unlisted, it moves.
+        assert!(!variable(&reference, "sweep_deg").fixed);
+        assert!(variable(&freed, "sweep_deg").fixed);
         assert!(DesignSpaceConfig::default().validate().is_ok());
     }
 
@@ -546,7 +660,6 @@ mod tests {
         assert!(fuselage.fixed && fuselage.lower == 37.57 && fuselage.upper == 37.57);
         let sweep = envelope.iter().find(|v| v.name == "sweep_deg").unwrap();
         assert!((sweep.lower - 31.0).abs() < 1e-9 && (sweep.upper - 37.0).abs() < 1e-9);
-        assert!(!config.scales_engine());
         assert!(!config.sizes_fuselage_from_cabin());
     }
 
@@ -591,18 +704,60 @@ mod tests {
     }
 
     #[test]
-    fn an_unknown_fixed_variable_and_a_bad_scale_window_are_rejected() {
+    fn an_unknown_fixed_variable_is_rejected() {
         let config = DesignSpaceConfig {
             reference_fixed_variables: "span, wing_x_shift_m".to_owned(),
             ..Default::default()
         };
         assert!(config.validate().is_err());
-        let config = DesignSpaceConfig {
-            engine_scale_lower: 1.5,
-            engine_scale_upper: 1.2,
+    }
+
+    #[test]
+    fn only_a_clean_sheet_run_sizes_its_engine_and_the_default_window_is_jenkinsons() {
+        let mut config = DesignSpaceConfig::default();
+        assert!(config.engine_sized_by_requirements);
+        assert!(config.sizes_engine());
+        assert_eq!(config.engine_rating_window, 0.20);
+        for mode in [DesignMode::ReferenceAdaptation, DesignMode::BaselineSandbox] {
+            config.mode = mode;
+            assert!(!config.sizes_engine(), "{mode:?}");
+        }
+        config.mode = DesignMode::CleanSheet;
+        config.engine_sized_by_requirements = false;
+        assert!(!config.sizes_engine());
+    }
+
+    #[test]
+    fn the_engine_window_must_be_a_fraction_up_to_the_end_of_the_search() {
+        for window in [0.0, -0.1, 0.65, 1.0, 1.5, f64::NAN, f64::INFINITY] {
+            let config = DesignSpaceConfig {
+                engine_rating_window: window,
+                ..Default::default()
+            };
+            assert!(config.validate().is_err(), "window {window}");
+        }
+        let wide = DesignSpaceConfig {
+            engine_rating_window: 0.35,
             ..Default::default()
         };
-        assert!(config.validate().is_err());
+        assert!(wide.validate().is_ok());
+    }
+
+    #[test]
+    fn a_saved_group_without_the_engine_fields_loads_with_their_defaults() {
+        let config: DesignSpaceConfig =
+            serde_json::from_value(serde_json::json!({"mode": "clean_sheet"})).unwrap();
+        assert!(config.engine_sized_by_requirements);
+        assert_eq!(config.engine_rating_window, 0.20);
+        assert!(config.is_default());
+    }
+
+    #[test]
+    fn holding_the_aircraft_as_drawn_stops_both_derivations() {
+        let mut config = DesignSpaceConfig::default();
+        config.hold_as_drawn();
+        assert!(!config.sizes_fuselage_from_cabin());
+        assert!(!config.sizes_engine());
     }
 
     #[test]

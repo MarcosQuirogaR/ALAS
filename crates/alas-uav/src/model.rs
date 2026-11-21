@@ -310,7 +310,7 @@ pub struct UavDesign {
     /// Structural cases from the selected structural model.
     pub structural_cases: Vec<StructuralCase>,
     /// Inputs of the airframe analysis (geometry, cruise, trim, spar); every
-    /// evaluated design carries them (UAV-PLAN M4).
+    /// evaluated design carries them.
     pub airframe_inputs: crate::airframe::analysis::AirframeInputs,
 }
 
@@ -358,7 +358,7 @@ pub struct UavReport {
     pub flight_conditions: Vec<FlightConditionResult>,
     /// Proven failures and unverified constraints.
     pub findings: Vec<Finding>,
-    /// Stability, trim, tail-volume and spar result (UAV-PLAN M4). `None` until
+    /// Stability, trim, tail-volume and spar result. `None` until
     /// the caller supplies the cruise, trim and spar inputs (see
     /// [`crate::airframe::analysis::analyse_airframe`]).
     pub airframe: Option<crate::airframe::analysis::AirframeAnalysis>,

@@ -13,6 +13,8 @@
 
 use alas_config::{CertifiedExitLayout, PassengerCabinConfig};
 
+use super::seat_bands::{band_limit, table_limit};
+
 /// One FAR/CS-25.807 emergency-exit class: what it may evacuate, and the
 /// smallest cutout it may be built at.
 #[derive(Debug, Clone, Copy, PartialEq)]
@@ -98,13 +100,48 @@ pub fn pair_rating(letter: &str) -> i64 {
     exit_spec(letter).map_or(0, |spec| spec.capacity_per_pair)
 }
 
-/// The seat ceiling of a declared arrangement: the sum of its pair ratings.
-pub fn layout_rating(layout: &CertifiedExitLayout) -> i64 {
+/// The exit letters of both decks of a declared arrangement.
+fn all_letters(layout: &CertifiedExitLayout) -> Vec<&'static str> {
     layout
         .pairs
         .iter()
-        .map(|pair| pair_rating(pair.exit_type))
-        .sum()
+        .chain(layout.upper_deck_pairs)
+        .map(|pair| pair.exit_type)
+        .collect()
+}
+
+/// The seat ceiling of a declared arrangement: the table sum of its pair
+/// ratings (the Type III exits together held to 70, CS 25.807(g)(7)) or the
+/// seat band its exits qualify for across both decks, CS 25.807(g)(1)-(8),
+/// whichever is smaller.
+pub fn layout_rating(layout: &CertifiedExitLayout) -> i64 {
+    let letters: Vec<&str> = layout.pairs.iter().map(|pair| pair.exit_type).collect();
+    table_limit(&letters, false).min(band_limit(&all_letters(layout)))
+}
+
+/// The seat ceiling of a declared upper deck, as [`layout_rating`] rates the
+/// main deck: zero when the arrangement declares none.
+pub fn upper_deck_rating(layout: &CertifiedExitLayout) -> i64 {
+    let letters: Vec<&str> = layout
+        .upper_deck_pairs
+        .iter()
+        .map(|pair| pair.exit_type)
+        .collect();
+    table_limit(&letters, false).min(band_limit(&all_letters(layout)))
+}
+
+/// The pairs a declared arrangement puts on the cabin deck of `deck_index`
+/// (0 the main deck, 1 an upper deck), or `None` when it declares none there.
+pub(crate) fn deck_pairs(
+    layout: &CertifiedExitLayout,
+    deck_index: usize,
+) -> Option<&'static [alas_config::CertifiedExitPair]> {
+    let pairs = if deck_index == 0 {
+        layout.pairs
+    } else {
+        layout.upper_deck_pairs
+    };
+    (!pairs.is_empty()).then_some(pairs)
 }
 
 /// The highest pair rating of a declared arrangement, at least one so it can
@@ -117,6 +154,11 @@ pub(crate) fn largest_pair_rating(layout: &CertifiedExitLayout) -> i64 {
         .max()
         .unwrap_or(1)
         .max(1)
+}
+
+/// The Type IV pair CS 25.807(g) allows a cabin of at most nine passengers.
+pub(crate) fn small_cabin_exit(deck_pax: i64) -> Option<&'static ExitSpec> {
+    (deck_pax <= 9).then(|| exit_spec("IV")).flatten()
 }
 
 /// A representative exit type for a body of this diameter: a widebody
@@ -184,6 +226,14 @@ mod tests {
     }
 
     #[test]
+    fn a_cabin_of_at_most_nine_seats_without_declared_exits_gets_the_type_iv_pair() {
+        // CS 25.807(g)(1): one Type IV pair for 1 to 9 passengers.
+        assert_eq!(small_cabin_exit(9).map(|spec| spec.name), Some("IV"));
+        assert_eq!(small_cabin_exit(1).map(|spec| spec.name), Some("IV"));
+        assert!(small_cabin_exit(10).is_none());
+    }
+
+    #[test]
     fn pair_ratings_are_the_cs_25_807_g_table() {
         // CS 25.807(g)(1)-(7): Type A 110, B 75, C 55, I 45, II 40, III 35
         // per pair; Type IV 9.
@@ -231,12 +281,41 @@ mod tests {
         let layout = |pairs: &'static [CertifiedExitPair]| CertifiedExitLayout {
             label: "",
             pairs,
+            upper_deck_pairs: &[],
             station_body_length_m: None,
             source: "",
         };
-        assert_eq!(layout_rating(&layout(&ONE)), 55);
+        // One exit in each side seats 19 whatever its type (25.807(g)(3)); a
+        // second one lifts the band to the table sum (55 + 35 = 90).
+        assert_eq!(layout_rating(&layout(&ONE)), 19);
         assert_eq!(layout_rating(&layout(&TWO)), 90);
         assert!(layout_rating(&layout(&TWO)) > layout_rating(&layout(&ONE)));
+    }
+
+    #[test]
+    fn the_seat_bands_bind_only_the_registered_layouts_with_a_single_exit_pair() {
+        // 25.807(g)(3)-(6) need a second exit in each side (with a Type I or
+        // larger one above 40 seats) for more than 19 seats: every registered
+        // arrangement with two or more pairs keeps its table sum, and the
+        // one with a single pair (the LJ60) is held to 19.
+        for name in presets::available() {
+            let preset = presets::get(name).unwrap();
+            let Some(layout) = preset.reference.certified_exit_layout else {
+                continue;
+            };
+            let letters: Vec<&str> = layout
+                .pairs
+                .iter()
+                .chain(layout.upper_deck_pairs)
+                .map(|pair| pair.exit_type)
+                .collect();
+            let table = table_limit(&letters, false);
+            if letters.len() >= 2 {
+                assert!(band_limit(&letters) >= table, "{name}: {letters:?}");
+            } else {
+                assert_eq!(band_limit(&letters), 19, "{name}");
+            }
+        }
     }
 
     #[test]
@@ -246,7 +325,7 @@ mod tests {
             let Some(layout) = preset.reference.certified_exit_layout else {
                 continue;
             };
-            for pair in layout.pairs {
+            for pair in layout.pairs.iter().chain(layout.upper_deck_pairs) {
                 assert!(
                     exit_spec(pair.exit_type).is_some(),
                     "{name}: exit letter {} is not a CS 25.807 type",
@@ -255,18 +334,19 @@ mod tests {
             }
             // A certified maximum above what the declared exits are rated
             // for would be an arrangement that could not be certified.
-            // The declared pairs are the main deck's; an upper-deck hump adds
-            // its own exits, so only a single-deck body is held to the sum.
-            let main_deck_only = preset.geometry.fuselage.upper_deck().is_none();
+            // A double-deck body is held to the sum only when the
+            // arrangement declares its upper-deck exits too.
+            let declared_whole = preset.geometry.fuselage.upper_deck().is_none()
+                || !layout.upper_deck_pairs.is_empty();
+            let rating = layout_rating(&layout) + upper_deck_rating(&layout);
             if let Some(certified) = preset
                 .reference
                 .certified_max_seats
-                .filter(|_| main_deck_only)
+                .filter(|_| declared_whole)
             {
                 assert!(
-                    layout_rating(&layout) >= certified,
-                    "{name}: exits rated {} below the certified {certified}",
-                    layout_rating(&layout)
+                    rating >= certified,
+                    "{name}: exits rated {rating} below the certified {certified}"
                 );
             }
         }

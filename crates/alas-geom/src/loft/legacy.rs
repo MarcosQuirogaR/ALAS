@@ -197,6 +197,7 @@ pub fn from_legacy_with(
         fit: FitRecord::default(),
         provenance: Vec::new(),
         residual: None,
+        apu_cone: None,
     };
 
     let curves = vec![

@@ -8,6 +8,8 @@ authors.workspace = true
 rust-version.workspace = true
 
 [dependencies]
+# The partial-run report cache (`alas --only`) stores report types.
+serde = { workspace = true }
 # `size_landing_gear` reads a `LandingGearConfig` for its tire ladder, gear-count
 # thresholds and turnover limit.
 alas-config = { path = "../alas-config" }

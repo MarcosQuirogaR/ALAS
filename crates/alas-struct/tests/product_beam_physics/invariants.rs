@@ -15,6 +15,30 @@ fn assert_roundoff_equal(actual: f64, expected: f64) {
     );
 }
 
+/// Web shear deflection of a case, m: the trapezoid of `|V| / (G A_w cos L)` over
+/// the stations, `A_w` the two webs' `t h`. The beam adds it to bending
+/// (Megson, unit-load shear deflection); the closed-form bending checks below
+/// subtract it.
+fn web_shear_tip(
+    case: &alas_struct::analytical::LoadCaseResult,
+    web: &MaterialSpec,
+    web_thickness: f64,
+    depth: f64,
+    cos_l: f64,
+) -> f64 {
+    let compliance = 1.0 / (web.g_pa() * 2.0 * web_thickness * depth * cos_l);
+    case.y
+        .windows(2)
+        .zip(case.shear_n.windows(2))
+        .map(|(y, v)| 0.5 * (v[0].abs() + v[1].abs()) * compliance * (y[1] - y[0]))
+        .sum::<f64>()
+        * if case.tip_deflection_m < 0.0 {
+            -1.0
+        } else {
+            1.0
+        }
+}
+
 pub(super) fn assert_material_volumes(
     geometry: &WingStructureGeometry,
     sizing: &WingboxSizing,
@@ -244,6 +268,7 @@ fn tip_point_load_recovers_closed_form_deflection_and_exact_refinement_error() {
         sizing.chord = vec![4.0; count];
         // A straight rectangular beam: the preset's swept-axis record does not apply.
         sizing.axis_cos = Vec::new();
+        sizing.cover_shape = Vec::new();
         sizing.spar_fracs = vec![0.25, 0.70];
         for (spar, fraction) in sizing.spars.iter_mut().zip(&sizing.spar_fracs) {
             spar.chord_fraction = *fraction;
@@ -285,7 +310,11 @@ fn tip_point_load_recovers_closed_form_deflection_and_exact_refinement_error() {
             // loads and uniform self-weight. Bruhn, 1973, A6: delta=F*L^3/(3EI).
             let force = base.load_factor * config.requirements.gravity_m_s2 * tip_mass;
             let expected = force * length.powi(3) / (3.0 * stiffness);
-            let actual = base.tip_deflection_m - with_mass.tip_deflection_m;
+            // The tip force also shears the webs; its web shear deflection is
+            // removed with the library's own trapezoid so only bending remains.
+            let shear = web_shear_tip(base, material, web_thickness, depth, 1.0)
+                - web_shear_tip(with_mass, material, web_thickness, depth, 1.0);
+            let actual = base.tip_deflection_m - with_mass.tip_deflection_m - shear;
             // Trapezoidal integration of (L-y)^2 adds L*h^2/6 exactly;
             // therefore its relative tip error is 1/(2*N^2), not a fit band.
             let relative_error = actual / expected - 1.0;
@@ -296,7 +325,7 @@ fn tip_point_load_recovers_closed_form_deflection_and_exact_refinement_error() {
             }
             assert_roundoff_equal(
                 *base.deflection_m.last().unwrap() - with_mass.deflection_m.last().unwrap(),
-                actual,
+                actual + shear,
             );
         }
         if let Some(previous) = previous_error {
@@ -323,6 +352,7 @@ fn swept_axis_follows_the_normal_section_theory() {
     let (web_thickness, skin_thickness) = (0.004, 0.003);
     let count = 41;
     let mut sizing = dry_strength_size(&config, &presets::get("A320-200").unwrap().design_vector);
+    sizing.cover_shape = Vec::new();
     sizing.y_stations = (0..count).map(|i| length * i as f64 / 40.0).collect();
     sizing.eta_stations = sizing.y_stations.iter().map(|y| y / length).collect();
     sizing.chord = vec![4.0; count];
@@ -370,31 +400,26 @@ fn swept_axis_follows_the_normal_section_theory() {
     let covers = 2.0 * 1.8 * skin_thickness * (0.5 * depth).powi(2);
     let ei_straight = material.e_pa * (caps + webs + covers);
     let ei_swept = material.e_pa * (caps + webs + covers * c) * c.powi(3);
-    // The stiff root triangle (root box width times tan L, here 1.8 m x 0.577,
-    // under the 0.2 semi-span cap) does not bend: only the cells outboard of
-    // it enter the tip integral, which the straight beam integrates in full.
-    let root_zone = (1.8 * sweep.tan()).min(0.2 * length);
+    // No stiff root triangle (removed: its length had no source): the swept beam
+    // bends over its whole length. The web shear deflection is subtracted so the
+    // ratio is the bending stiffness ratio.
     let cell = length / 40.0;
-    let flexible_integral = |case: usize| {
-        let m = &swept.load_cases[case].moment_nm;
-        let y = &sizing.y_stations;
-        let terms: Vec<f64> = (0..count)
-            .map(|j| {
-                let flexible = ((y[j] + 0.5 * cell - root_zone) / cell).clamp(0.0, 1.0);
-                flexible * m[j] * (length - y[j])
-            })
-            .collect();
-        let full: Vec<f64> = (0..count).map(|j| m[j] * (length - y[j])).collect();
-        let trapezoid = |v: &[f64]| {
-            (1..count)
-                .map(|j| 0.5 * (v[j] + v[j - 1]) * cell)
-                .sum::<f64>()
+    let _ = cell;
+    let flexible_integral = |_case: usize| 1.0;
+    let bending_tip =
+        |report: &alas_struct::analytical::StructuralAnalysisReport, case: usize, cos_l: f64| {
+            report.load_cases[case].tip_deflection_m
+                - web_shear_tip(
+                    &report.load_cases[case],
+                    material,
+                    web_thickness,
+                    depth,
+                    cos_l,
+                )
         };
-        trapezoid(&terms) / trapezoid(&full)
-    };
     for case in 0..3 {
-        let ratio = swept.load_cases[case].tip_deflection_m
-            / straight.load_cases[case].tip_deflection_m
+        let ratio = bending_tip(&swept, case, c)
+            / bending_tip(&straight, case, 1.0)
             / flexible_integral(case);
         assert!(
             (ratio - ei_straight / ei_swept).abs() < 1.0e-9 * ratio,
@@ -410,14 +435,8 @@ fn swept_axis_follows_the_normal_section_theory() {
         }
     }
     // Between the all-cover bound 1/cos^4 and the all-cap bound 1/cos^3.
-    let ratio = swept.load_cases[0].tip_deflection_m
-        / straight.load_cases[0].tip_deflection_m
-        / flexible_integral(0);
+    let ratio = bending_tip(&swept, 0, c) / bending_tip(&straight, 0, 1.0) / flexible_integral(0);
     assert!(ratio > 1.0 / c.powi(3) - 1.0e-9 && ratio < 1.0 / c.powi(4) + 1.0e-9);
-    assert!(
-        flexible_integral(0) < 0.97,
-        "the root triangle must matter here"
-    );
     // Cap stress follows kappa_n = (M_x / cos L) / EI_n with
     // EI_n = covers cos L + webs + caps, against M_x / EI_s unswept.
     let ei_normal = material.e_pa * (caps + webs + covers * c);

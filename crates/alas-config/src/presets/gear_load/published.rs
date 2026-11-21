@@ -7,9 +7,12 @@
 //! the most-aft CG of each weight variant at its own maximum ramp weight;
 //! the nose share is one minus the summed main-gear loads over that weight.
 //! The lighter weight variants of the same airframe are read as points of
-//! the airframe's ground aft limit at their weights; where one weight
-//! carries several CG options the most-aft one is taken (the least
-//! restrictive the manufacturer certifies there). Chart points (Boeing and
+//! the airframe's ground aft limit at their weights only where they lie on
+//! one aft-limit line (the share moves monotonically with weight, as the
+//! Airbus rows do); where one weight carries several CG options the
+//! most-aft one is taken (the least restrictive the manufacturer certifies
+//! there). Rows that do not lie on one line are separate CG options of
+//! different variants and only one variant's line is entered (E195-E2 enters the Figure 7.6 aft boundary). Chart points (Boeing and
 //! A220 section 7.4 ground CG envelopes, percent of weight on the main gear
 //! against weight) are the envelope vertices read off the aft boundary; the
 //! chart read uncertainty is stated per source.
@@ -86,6 +89,17 @@ pub(crate) const A220_300: PublishedAftCgNoseLoad = PublishedAftCgNoseLoad {
     source: "Airbus A220 ACP Issue 013, 2025-11-27, DM BD500-A-J00-00-00-11AAB-030A-A Figure 14 (A220-300 ground CG envelope, percent of weight on the main gear; aft-boundary vertices read 93.12 % at 80,000 lb, 94.85 % at 100,000 lb, 94.87 % at 134,000 lb, 93.50 % at 150,000 lb, read +-0.02 %); aft CG from Airbus A220 ARP BD500-3AB48-10400-00, DM BD500-A-J08-41-03-01AAA-030A-A Table 3 (ground aft limit 29.0 / 35.8 / 35.8 / 30.3 % MAC at the same weights)",
 };
 
+/// Learjet 60, one nose wheel and two main-gear struts: the static nose share
+/// at the certified ground-handling aft limit, between the PTM fig 19-2 static
+/// wheel stations (nose F.S. 92.42 in, main F.S. 396.82 in).
+pub(crate) const LJ60: PublishedAftCgNoseLoad = PublishedAftCgNoseLoad {
+    points: &[
+        point(10_427.0, (396.82 - 391.92) / (396.82 - 92.42), 33.5),
+        point(10_433.0, (396.82 - 391.75) / (396.82 - 92.42), 33.3),
+    ],
+    source: "EASA TCDS IM.A.212 Learjet M60 Issue 04 (12 Nov 2024) III.5, ground handling limit: aft limit F.S. 391.92 in (33.5 % MAC) up to 22,987 lb (10,427 kg), tapering to F.S. 391.75 in (33.3 % MAC) at 23,000 lb (10,433 kg); nose share by static balance between the FlightSafety Learjet 60 PTM fig 19-2 static wheel stations, nose F.S. 92.42 in and main F.S. 396.82 in",
+};
+
 /// Boeing 787-9, MTW 563,000 lb, two main-gear struts.
 pub(crate) const B787_9: PublishedAftCgNoseLoad = PublishedAftCgNoseLoad {
     points: &[
@@ -113,8 +127,39 @@ pub(crate) const DC_10_30: PublishedAftCgNoseLoad = PublishedAftCgNoseLoad {
 pub(crate) const B747_400: PublishedAftCgNoseLoad = PublishedAftCgNoseLoad {
     points: &[
         chart_point(353_260.0, 1.0 - 0.963),
+        // Section 7.3 rows without tail-tank fuel: 4 x 191,500 lb at 803,000 lb,
+        // 4 x 197,300 lb at 836,000 lb, 4 x 200,300 lb at 853,000 lb.
+        chart_point(364_223.0, 1.0 - 4.0 * 191_500.0 / 803_000.0),
+        chart_point(379_203.0, 1.0 - 4.0 * 197_300.0 / 836_000.0),
+        chart_point(386_914.0, 1.0 - 4.0 * 200_300.0 / 853_000.0),
         chart_point(395_986.0, 1.0 - 4.0 * 204_500.0 / 873_000.0),
         chart_point(397_800.0, 1.0 - 4.0 * 204_600.0 / 877_000.0),
     ],
-    source: "Boeing 747-400 ACAP D6-58326-1 Rev F, December 2024, Figure 7.4.1 (p.7-9; 747-400, -400 Combi, -400 Domestic: aft boundary of the ground CG envelope read 96.3 % on the main gear up to 750,000 lb on the main gear, i.e. 778,800 lb total, read +-0.15 % and +-3,000 lb) and section 7.3 (p.7-8; maximum main-gear load at the most-aft CG per strut, four struts: 204,500 lb at the 873,000 lb and 204,600 lb at the 877,000 lb maximum design taxi weight)",
+    source: "Boeing 747-400 ACAP D6-58326-1 Rev F, December 2024, Figure 7.4.1 (p.7-9; 747-400, -400 Combi, -400 Domestic: aft boundary of the ground CG envelope read 96.3 % on the main gear up to 750,000 lb on the main gear, i.e. 778,800 lb total, read +-0.15 % and +-3,000 lb) and section 7.3 (p.7-8; maximum main-gear load at the most-aft CG per strut, four struts, rows without tail-tank fuel: 191,500 lb at 803,000 lb, 197,300 lb at 836,000 lb, 200,300 lb at 853,000 lb, 204,500 lb at 873,000 lb and 204,600 lb at the 877,000 lb maximum design taxi weight)",
+};
+
+/// Embraer E195-E2 (ERJ 190-400, SB 190E2-00-0058 variant), two main-gear
+/// struts of two wheels.
+///
+/// The aft boundary of the 195-E2 ground CG envelope, APM 5824 Rev 25 Figure
+/// 7.6 (section 07 page 9 of 40, rendered): percent of weight on the main
+/// gear against weight on the main gear, vertices read +-0.1 % and +-500 kgf.
+/// Aircraft weight is the weight on the mains over that percentage, matched to
+/// the weight lines the chart prints. The same table 7.3 rows (62,700 kg
+/// 46.4 % and 34,700 kg 46.0 % per leg) are the two ends of that boundary, so
+/// they are entered as the same points. Between 46,660 and 53,980 kg the
+/// boundary is the 40.0 % MAC aft CG line (94.3 % on the mains, a constant
+/// share; the chart's %MAC is in the manufacturer's frame, so no model-frame
+/// CG is entered); above it the boundary is curtailed forward to 92.8 % at 61,700 kg
+/// (a load-limited edge of this reference aircraft, not a CG property).
+pub(crate) const E195_E2: PublishedAftCgNoseLoad = PublishedAftCgNoseLoad {
+    points: &[
+        chart_point(34_700.0, 1.0 - 0.920),
+        chart_point(41_060.0, 1.0 - 0.940),
+        chart_point(46_660.0, 1.0 - 0.943),
+        chart_point(53_980.0, 1.0 - 0.943),
+        chart_point(61_700.0, 1.0 - 0.928),
+        chart_point(62_700.0, 1.0 - 2.0 * 0.464),
+    ],
+    source: "Embraer E-Jets E2 Airport Planning Manual APM 5824 Rev 25 (29 Nov 2024) section 07 Figure 7.6 (page 9 of 40, EMBRAER 195-E2 landing gear loading on pavement, rendered): aft boundary vertices (percent of weight on main gear, weight on main gear kgf) 92.0 % 31,900 (34,700 kg line), 94.0 % 38,600, 94.3 % 44,000 and 50,900 (the 40.0 % MAC dashed aft line), 92.8 % 57,300 (61,700 kg line); section 7.10.2 Table 7.3 (ACR calculation for ERJ 190-400, MTOW 62,500 kg): maximum ramp weight 62,700 kg 46.4 % on one main leg and 34,700 kg 46.0 %, the same 92.8 % and 92.0 % as the chart ends. Fig 7.4 (section 7.3) prints 29,185 kg per strut (94.6 %) at 61,700 kg and 26,921 kg (89.6 %) at 60,100 kg for the same airframe, which do not agree with the chart vertex and are not entered",
 };

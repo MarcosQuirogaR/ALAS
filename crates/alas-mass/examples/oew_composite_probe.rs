@@ -1,7 +1,7 @@
 // SPDX-License-Identifier: AGPL-3.0-or-later
 // Copyright (C) 2026 Marcos Quiroga Rodriguez
 
-//! Diagnostic probe for the mass lane E1 (WB-01, WB-02, WB-05, engine mass).
+//! Diagnostic probe for the composite-mass work (WB-01, WB-02, WB-05, engine mass).
 //!
 //! For each registered preset (all of them, or those named on the command
 //! line) this prints, as tab-free fixed text:

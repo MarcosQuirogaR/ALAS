@@ -190,7 +190,12 @@ fn main() -> Result<(), Box<dyn Error>> {
         .or(result.baseline_analysis.as_ref())
     {
         for theme in ["dark", "light"] {
-            let scene = figure_stability_metrics(report, Some(&config), Some(theme));
+            let scene = figure_stability_metrics(
+                report,
+                Some(&config),
+                result.feasibility.model_cg.as_ref(),
+                Some(theme),
+            );
             let path = figures_out.join(format!("ave-stability-metrics-{theme}.png"));
             write_png(&path, scene)?;
             written += 1;

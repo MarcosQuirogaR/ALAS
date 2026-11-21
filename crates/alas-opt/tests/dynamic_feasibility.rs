@@ -9,7 +9,7 @@
 
 use alas_config::design_variables::DesignVector;
 use alas_config::AlasConfig;
-use alas_opt::{DesignOptimizer, ObjectiveEvaluation, OptimizationError};
+use alas_opt::{DesignOptimizer, ObjectiveEvaluation};
 
 #[test]
 fn public_de_returns_a_valid_candidate_when_an_invalid_one_is_cheaper() {
@@ -67,7 +67,7 @@ fn public_de_returns_a_valid_candidate_when_an_invalid_one_is_cheaper() {
 }
 
 #[test]
-fn public_de_returns_typed_failure_for_an_all_invalid_population() {
+fn public_de_flags_an_all_invalid_population_instead_of_failing() {
     let mut config = AlasConfig::default();
     config.optimizer.solver.method = alas_config::optimizer::PRODUCT_DE_METHOD.to_owned();
     config.optimizer.solver.refinement.max_evaluations = 24;
@@ -76,20 +76,20 @@ fn public_de_returns_typed_failure_for_an_all_invalid_population() {
     let mut evaluator = |_design: &DesignVector| {
         ObjectiveEvaluation::rejected(-1_000.0, "static_margin+cg_envelope")
     };
-    let error = DesignOptimizer::new(config)
+    let flagged = DesignOptimizer::new(config)
         .run_with_evaluator(None, None, &mut evaluator, None)
-        .expect_err("an all-invalid population must not produce a design");
-
-    let OptimizationError::NoFeasibleDesign(summary) = error else {
-        panic!("expected NoFeasibleDesign, got {error:?}");
-    };
-    assert!(summary.evaluated_candidates > 0);
-    assert_eq!(
-        summary.rejection_reason_counts["static_margin"],
-        summary.evaluated_candidates
-    );
-    assert_eq!(
-        summary.rejection_reason_counts["cg_envelope"],
-        summary.evaluated_candidates
-    );
+        .expect("an all-invalid population is flagged, not aborted");
+    assert!(!flagged.best_valid);
+    assert_eq!(flagged.termination, "no_feasible_design");
+    let evaluated = flagged.history.n_evaluations();
+    assert!(evaluated > 0);
+    for reason in ["static_margin", "cg_envelope"] {
+        let count = flagged
+            .history
+            .reject_reason
+            .iter()
+            .filter(|row| row.split('+').any(|part| part == reason))
+            .count();
+        assert_eq!(count, evaluated, "{reason}");
+    }
 }

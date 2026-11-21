@@ -39,8 +39,19 @@ const CANDIDATE_ENTRIES: usize = 8;
 /// Most recently used first.
 type CandidateEntries = Vec<(String, Arc<SizingResult>)>;
 
+/// Most recently used strength-sized boxes kept per thread, keyed on the
+/// inputs [`alas_struct::sizing::size_wingbox_with_torque_sources`] reads.
+/// The wing-position search, the balance ledger and the reference
+/// reconciliation size the same box with a different wing root, engine
+/// record or mass model, which that solve never reads: they share it here.
+const STRENGTH_ENTRIES: usize = 16;
+
+/// Most recently used first.
+type StrengthEntries = Vec<(String, Arc<WingboxSizing>)>;
+
 thread_local! {
     static CANDIDATE: RefCell<CandidateEntries> = const { RefCell::new(Vec::new()) };
+    static STRENGTH: RefCell<StrengthEntries> = const { RefCell::new(Vec::new()) };
 }
 
 #[derive(Debug)]
@@ -51,7 +62,6 @@ pub(super) struct PreparedSizing<'a> {
     pub(super) engine: &'a EngineConfig,
     pub(super) mass_model: &'a MassModelConfig,
     pub(super) materials: [&'static MaterialSpec; 4],
-    pub(super) declared_fuel: bool,
     pub(super) fuel: Vec<f64>,
     pub(super) wing_mounted: Vec<(f64, f64)>,
     pub(super) torque: alas_struct::torque_sources::TorqueSources,
@@ -65,9 +75,27 @@ impl PreparedSizing<'_> {
         (!has_non_finite_token(&representation)).then_some(representation)
     }
 
-    pub(super) fn solve(&self) -> SizingResult {
+    /// The key of the strength sizing: exactly the arguments
+    /// [`Self::strength_sizing`] passes, so equal keys give bit-equal boxes.
+    fn strength_key(&self) -> Option<String> {
+        let representation = format!(
+            "{:?}",
+            (
+                &self.geometry,
+                self.structures,
+                self.requirements,
+                self.materials,
+                &self.fuel,
+                &self.wing_mounted,
+                &self.torque,
+            )
+        );
+        (!has_non_finite_token(&representation)).then_some(representation)
+    }
+
+    fn strength_sizing(&self) -> WingboxSizing {
         let [skin, web, cap, rib] = self.materials;
-        let sizing = alas_struct::sizing::size_wingbox_with_torque_sources(
+        alas_struct::sizing::size_wingbox_with_torque_sources(
             &self.geometry,
             self.structures,
             self.requirements,
@@ -75,11 +103,43 @@ impl PreparedSizing<'_> {
             web,
             cap,
             rib,
-            self.declared_fuel.then_some(self.fuel.as_slice()),
+            // Always the prepared distribution: the declared cells, else the
+            // enclosed-volume estimate at the inventory density.
+            Some(self.fuel.as_slice()),
             &self.wing_mounted,
             &self.torque,
             alas_struct::sizing::CaseSet::ALL,
-        );
+        )
+    }
+
+    /// [`Self::strength_sizing`] through the per-thread strength cache.
+    fn cached_strength_sizing(&self) -> WingboxSizing {
+        let Some(key) = self.strength_key() else {
+            return self.strength_sizing();
+        };
+        let cached = STRENGTH.with(|entries| {
+            let mut entries = entries.borrow_mut();
+            let position = entries
+                .iter()
+                .position(|(cached_key, _)| *cached_key == key)?;
+            entries[..=position].rotate_right(1);
+            Some(Arc::clone(&entries[0].1))
+        });
+        if let Some(sizing) = cached {
+            return sizing.as_ref().clone();
+        }
+        let sizing = self.strength_sizing();
+        STRENGTH.with(|entries| {
+            let mut entries = entries.borrow_mut();
+            entries.insert(0, (key, Arc::new(sizing.clone())));
+            entries.truncate(STRENGTH_ENTRIES);
+        });
+        sizing
+    }
+
+    pub(super) fn solve(&self) -> SizingResult {
+        let [skin, web, cap, _] = self.materials;
+        let sizing = self.cached_strength_sizing();
         let final_section = alas_struct::sizing::size_for_linear_model(
             &self.geometry,
             sizing,
@@ -99,29 +159,10 @@ impl PreparedSizing<'_> {
         let sizing = final_section.sizing;
         // The shared arithmetic zero band makes the mass and downstream
         // structural gates apply one predicate to the same sized margins.
-        let strength_margins_ok = sizing
-            .spars
-            .iter()
-            .flat_map(|spar| spar.margin_of_safety.iter())
-            .all(|margin| alas_struct::sizing::margin_is_structurally_non_negative(*margin));
-        if !sizing.total_mass_kg.is_finite()
-            || sizing.total_mass_kg <= 0.0
-            || !strength_margins_ok
-            || !sizing.rib_spacing_pass()
-            || [
-                sizing.mass_breakdown_kg.spar_caps,
-                sizing.mass_breakdown_kg.spar_webs,
-                sizing.mass_breakdown_kg.skin,
-                sizing.mass_breakdown_kg.ribs,
-            ]
-            .iter()
-            .any(|mass| !mass.is_finite() || *mass < 0.0)
-        {
-            return Err(WingReconciliationError::StructuralSizing);
-        }
+        super::super::sizing_cause::sized_box_check(&sizing)?;
         let centroid =
             crate::wing_centroid::sized_wingbox_centroid(&self.geometry, &sizing, self.root_x_m)
-                .map_err(|_| WingReconciliationError::StructuralSizing)?;
+                .map_err(|error| super::super::sizing_cause::centroid(&error))?;
         let quantities = alas_struct::non_optimum::BoxQuantities::from_sizing(
             &self.geometry,
             &sizing,
@@ -386,6 +427,7 @@ mod tests {
             &sizing.eta_stations,
             &sizing.chord,
             &sizing.spar_fracs,
+            &sizing.skin_gauge_m,
         ] {
             values.extend(array);
         }
@@ -440,9 +482,6 @@ mod tests {
         assert_ne!(changed.cache_key(), Some(key.clone()));
         let mut changed = prepare();
         changed.fuel[0] = f64::from_bits(changed.fuel[0].to_bits() + 1);
-        assert_ne!(changed.cache_key(), Some(key.clone()));
-        let mut changed = prepare();
-        changed.declared_fuel = !changed.declared_fuel;
         assert_ne!(changed.cache_key(), Some(key.clone()));
         let mut changed = prepare();
         changed.wing_mounted.push((1.0, 1.0));

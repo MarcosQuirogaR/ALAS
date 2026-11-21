@@ -60,11 +60,15 @@ fn sample_structural_result() -> StructuralAnalysisResult {
     let sizing = WingboxSizing {
         y_stations: y.clone(),
         axis_cos: Vec::new(),
+        cover_shape: Vec::new(),
+        cover_depth_m: Vec::new(),
+        cover_shear_flow_n_per_m: Vec::new(),
         eta_stations: vec![0.0, 0.5, 1.0],
         chord: vec![6.0, 4.0, 2.0],
         spar_fracs: vec![0.2],
         spars: vec![spar.clone()],
         t_skin: 0.004,
+        skin_gauge_m: Vec::new(),
         num_ribs: 10,
         rib_spacing_m: 1.8,
         mass_breakdown_kg: MassBreakdown {
@@ -85,6 +89,7 @@ fn sample_structural_result() -> StructuralAnalysisResult {
         shear_n: vec![0.0; 3],
         moment_nm: vec![0.0; 3],
         deflection_m: vec![0.0; 3],
+        shear_deflection_m: Vec::new(),
         tip_deflection_m: 0.0,
         spar_stress: vec![alas_struct::analytical::SparStressResult {
             chord_fraction: 0.2,
@@ -110,7 +115,7 @@ fn sample_structural_result() -> StructuralAnalysisResult {
         nastran95: None,
         nastran: None,
         patran: None,
-        torenbeek_wing_mass_kg: 400.0,
+        ledger_complete_wing_mass_kg: 400.0,
         wing_mass: None,
         evaluation_inputs: None,
     }

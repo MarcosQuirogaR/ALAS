@@ -13,6 +13,8 @@ fn seat_meta(filled: i64) -> SeatMeta {
         blocks: vec![3, 4, 3],
         seat_w: 0.46,
         aisle_w: 0.51,
+        cg_z: 0.0,
+        floor_z: 0.0,
     }
 }
 

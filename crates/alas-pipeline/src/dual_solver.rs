@@ -38,7 +38,7 @@ use alas_opt::{
     OptimizationResult,
 };
 
-use crate::acceptance::{AcceptanceRoute, FinalistVerification, MAX_VERIFIED_CANDIDATES};
+use crate::acceptance::{AcceptanceRoute, FinalistVerification};
 use crate::avl::{run_avl_analysis, AvlAnalysisResult, AvlAnalysisStatus};
 use crate::full_analysis::{AnalysisReport, FullAnalysis};
 use crate::solver_mode::{OptimizationSolverMode, SolverKind};

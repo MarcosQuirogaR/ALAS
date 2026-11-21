@@ -12,7 +12,10 @@ use std::sync::Arc;
 
 use super::fast_kernel;
 use super::schur::{AicFactorization, FrozenLattice};
-use super::{build_kernel_cache, mesh_wing_panels, Panel, VlmError, VlmSystem, MAX_PIVOT_RATIO};
+use super::{
+    assign_lattice_components, build_kernel_cache, lattice_components, mesh_wing_panels,
+    trailing_leg_stations, Panel, VlmError, VlmSystem, MAX_PIVOT_RATIO,
+};
 use alas_geom::aircraft::airplane::Airplane;
 use alas_math::block_lu::BlockFactorization;
 use alas_math::linalg::DenseMatrix;
@@ -26,19 +29,31 @@ use alas_math::linalg::DenseMatrix;
 #[derive(Debug, Default)]
 pub struct VlmGeometryCache {
     wings: Vec<alas_geom::aircraft::wing::Wing>,
+    /// Each surface's strip-boundary stations, see [`trailing_leg_stations`].
+    stations: Vec<Vec<f64>>,
     resolution: (usize, usize),
     panels: Vec<Panel>,
     aic: Arc<Vec<f64>>,
     factorization: Option<Arc<AicFactorization>>,
+    /// The superposition basis of [`Self::factorization`]'s lattice.
+    basis: super::superposition::BasisSlot,
     /// Frozen-panel base for the Schur update, see [`super::schur`].
     frozen: Option<FrozenLattice>,
-    /// Whether the previous assembly was an incremental update.
-    incremental_before: bool,
     /// Per-cache override of [`crate::vlm::speed::schur_lu`].
     schur_override: Option<bool>,
     kernel: Option<Arc<Vec<[f64; 3]>>>,
     trace: Vec<(usize, usize, [u64; 4])>,
     trefftz: Arc<std::sync::OnceLock<Option<super::super::trefftz::TrefftzOperator>>>,
+    /// Lattices of airplanes with another number of surfaces than this one
+    /// (the main wing alone, say, for a downwash probe), each in its own
+    /// cache keyed by that number. Without them such a query resizes this
+    /// cache and the next full-airplane assembly fills and refactors the
+    /// whole matrix from scratch.
+    satellites: Vec<(usize, VlmGeometryCache)>,
+    /// A persistent cache for a related family of lattices of the same size
+    /// (the Goethert-stretched lattice of the compressible trim), which
+    /// would otherwise start from scratch at every trim.
+    companion: Option<Arc<std::sync::Mutex<VlmGeometryCache>>>,
 }
 
 impl VlmGeometryCache {
@@ -56,20 +71,41 @@ impl VlmGeometryCache {
         Self::with_schur_update_override(Some(use_schur))
     }
 
-    /// The block factorization of the current `aic`, when the frozen-panel
-    /// base applies (or can now be built because the previous assembly was
-    /// also an incremental update). `None` selects the ordinary LU.
-    fn block_factorization(
-        &mut self,
-        panels: &[Panel],
-        changed: &[bool],
-    ) -> Option<BlockFactorization> {
-        if !self.frozen.as_ref().is_some_and(|f| f.applies_to(panels)) {
-            self.frozen = None;
-            let moving = changed.iter().filter(|&&c| c).count();
-            if self.incremental_before && moving > 0 && 2 * moving <= panels.len() {
-                self.frozen = FrozenLattice::build(&self.aic, panels, changed);
-            }
+    /// The persistent cache for the family of lattices related to this one
+    /// but never shared with it, such as the Goethert-stretched lattice of
+    /// the compressible trim: created on first use and shared by every
+    /// caller of the same candidate cache, so that the second trim starts
+    /// from the first one's factorization.
+    pub fn companion(&mut self) -> Arc<std::sync::Mutex<VlmGeometryCache>> {
+        let schur_override = self.schur_override;
+        self.companion
+            .get_or_insert_with(|| {
+                Arc::new(std::sync::Mutex::new(Self::with_schur_update_override(
+                    schur_override,
+                )))
+            })
+            .clone()
+    }
+
+    /// The block factorization of the current `aic` over the main
+    /// surface's panels (wing 0; every other surface moves), or `None` for
+    /// the ordinary LU. The split is a rule on this lattice alone and the
+    /// base is a function of the frozen panels alone, so a lattice gets the
+    /// same factorization, to the bit, whichever lattices this cache
+    /// assembled before it: callers that share a cache from several threads
+    /// (the companion cache, a trim beside a drag table) cannot change a
+    /// result by their order.
+    fn block_factorization(&mut self, panels: &[Panel]) -> Option<BlockFactorization> {
+        let moving: Vec<bool> = panels.iter().map(|panel| panel.wing_index != 0).collect();
+        if !self
+            .frozen
+            .as_ref()
+            .is_some_and(|frozen| frozen.applies_to(panels, &moving))
+        {
+            let count = moving.iter().filter(|&&moves| moves).count();
+            self.frozen = (count > 0 && 2 * count <= panels.len())
+                .then(|| FrozenLattice::build(&self.aic, panels, &moving))
+                .flatten();
         }
         self.frozen
             .as_ref()?
@@ -82,12 +118,32 @@ impl VlmGeometryCache {
         spanwise: usize,
         chordwise: usize,
     ) -> Result<VlmSystem<'a>, VlmError> {
+        if !self.wings.is_empty() && self.wings.len() != airplane.wings.len() {
+            let key = airplane.wings.len();
+            let index = match self.satellites.iter().position(|(count, _)| *count == key) {
+                Some(index) => index,
+                None => {
+                    self.satellites
+                        .push((key, Self::with_schur_update_override(self.schur_override)));
+                    self.satellites.len() - 1
+                }
+            };
+            return self.satellites[index]
+                .1
+                .assemble(airplane, spanwise, chordwise);
+        }
         let _profile =
             alas_math::stage_profile::scope(alas_math::stage_profile::Stage::VlmAssembly);
         alas_math::stage_profile::count(alas_math::stage_profile::Counter::VlmAssemblies, 1);
         let mut panels = Vec::with_capacity(self.panels.len());
+        let components = lattice_components(&airplane.wings);
+        let mut all_stations = Vec::with_capacity(airplane.wings.len());
         for (index, wing) in airplane.wings.iter().enumerate() {
-            if self.resolution == (spanwise, chordwise) && self.wings.get(index) == Some(wing) {
+            let stations = trailing_leg_stations(&airplane.wings, &components, index, &panels);
+            if self.resolution == (spanwise, chordwise)
+                && self.wings.get(index) == Some(wing)
+                && self.stations.get(index) == Some(&stations)
+            {
                 panels.extend(
                     self.panels
                         .iter()
@@ -95,9 +151,19 @@ impl VlmGeometryCache {
                         .cloned(),
                 );
             } else {
-                mesh_wing_panels(wing, index, spanwise, chordwise, &mut panels)?;
+                mesh_wing_panels(
+                    wing,
+                    index,
+                    spanwise,
+                    chordwise,
+                    &stations,
+                    true,
+                    &mut panels,
+                )?;
             }
+            all_stations.push(stations);
         }
+        assign_lattice_components(&airplane.wings, &mut panels);
         let n = panels.len();
         let same_size = n == self.panels.len() && self.factorization.is_some();
         let changed: Vec<bool> = panels
@@ -134,12 +200,11 @@ impl VlmGeometryCache {
             fast_kernel::fill_changed(&panels, &changed, fast, aic, kernel_entries);
             drop(fill_profile);
             let factor_profile = scope(factor_stage);
-            let block = if same_size
-                && self
-                    .schur_override
-                    .unwrap_or_else(crate::vlm::speed::schur_lu)
+            let block = if self
+                .schur_override
+                .unwrap_or_else(crate::vlm::speed::schur_lu)
             {
-                self.block_factorization(&panels, &changed)
+                self.block_factorization(&panels)
             } else {
                 None
             };
@@ -157,8 +222,8 @@ impl VlmGeometryCache {
                 }
             };
             drop(factor_profile);
-            self.incremental_before = same_size;
             self.factorization = Some(Arc::new(factorization));
+            self.basis = Arc::default();
             if !update_kernel {
                 let _kernel_profile = scope(fill_stage);
                 let centers: Vec<_> = panels.iter().map(|panel| panel.vortex_center).collect();
@@ -202,6 +267,7 @@ impl VlmGeometryCache {
                 }
             }
         }
+        self.stations = all_stations;
         self.resolution = (spanwise, chordwise);
         // The factorization is installed above even for an empty lattice.
         let factorization = self
@@ -213,7 +279,8 @@ impl VlmGeometryCache {
             airplane,
             panels,
             factorization,
-            kernel_cache: std::sync::OnceLock::from(self.kernel.clone()),
+            kernel_cache: Arc::new(std::sync::OnceLock::from(self.kernel.clone())),
+            basis: self.basis.clone(),
             trefftz: self.trefftz.clone(),
             solves: std::sync::atomic::AtomicUsize::new(1),
         })
@@ -276,6 +343,9 @@ mod tests {
                 OperatingPoint::new(Atmosphere::new(9000.0), 180.0, alpha, 0.0, 0.0, 0.0, 0.0);
             let fresh = VlmSystem::assemble(&plane, 1, chordwise).unwrap();
             let reused = VlmSystem::assemble_cached(&plane, 1, chordwise, &mut cache).unwrap();
+            // A cached system's solves combine its lattice's basis solves,
+            // as a fresh system's do from its second solve on.
+            fresh.solve(&point).unwrap();
             let expected = fresh.solve(&point).unwrap();
             let actual = reused.solve(&point).unwrap();
             assert_eq!(actual, expected);
@@ -294,7 +364,7 @@ mod tests {
             section.twist = 4.0;
             section.xyz_le[2] = 0.05;
         }
-        let panels = super::super::mesh_panels(&plane, 3, 4).unwrap();
+        let panels = super::super::mesh_panels(&plane, 3, 4, true).unwrap();
         let n = panels.len();
         let tail_only: Vec<bool> = panels.iter().map(|p| p.wing_index == 1).collect();
         for mask in [vec![true; n], tail_only] {
@@ -349,10 +419,77 @@ mod tests {
                 assert!((a - e).abs() <= 1.0e-11 * e.abs().max(1.0e-3), "{a} vs {e}");
             }
         }
-        // Cold, one ordinary incremental LU to arm the base, then blocks.
-        assert_eq!(taken, 4);
+        // Every lattice, the cold one included, splits on the main wing.
+        assert_eq!(taken, 6);
     }
 
+    #[test]
+    fn a_lattice_factors_the_same_whichever_lattices_came_before() {
+        let solved = |order: &[f64]| {
+            let mut plane = airplane();
+            let mut cache = VlmGeometryCache::with_schur_update(true);
+            let point =
+                OperatingPoint::new(Atmosphere::new(9000.0), 180.0, 3.0, 0.0, 0.0, 0.0, 0.0);
+            let mut bits = std::collections::BTreeMap::new();
+            for &incidence in order {
+                for section in &mut plane.wings[1].xsecs {
+                    section.twist = incidence;
+                }
+                let system = VlmSystem::assemble_cached(&plane, 2, 4, &mut cache).unwrap();
+                let result = system.solve(&point).unwrap();
+                let strengths: Vec<u64> = result
+                    .vortex_strengths
+                    .iter()
+                    .map(|g| g.to_bits())
+                    .collect();
+                bits.insert(incidence.to_bits(), strengths);
+            }
+            bits
+        };
+        assert_eq!(solved(&[-4.0, 2.0, 3.5]), solved(&[3.5, -4.0, 2.0]));
+        let key = 2.0_f64.to_bits();
+        assert_eq!(solved(&[2.0])[&key], solved(&[-4.0, 3.5, 2.0])[&key]);
+    }
+
+    #[test]
+    fn a_wing_alone_query_does_not_evict_the_full_airplane_lattice() {
+        let plane = airplane();
+        let mut wing_alone = plane.clone();
+        wing_alone.wings.truncate(1);
+        let mut cache = VlmGeometryCache::default();
+        let full = VlmSystem::assemble_cached(&plane, 1, 4, &mut cache).unwrap();
+        let alone = VlmSystem::assemble_cached(&wing_alone, 1, 4, &mut cache).unwrap();
+        assert!(alone.panel_count() < full.panel_count());
+        let again = VlmSystem::assemble_cached(&plane, 1, 4, &mut cache).unwrap();
+        assert!(Arc::ptr_eq(&full.factorization, &again.factorization));
+        let alone_again = VlmSystem::assemble_cached(&wing_alone, 1, 4, &mut cache).unwrap();
+        assert!(Arc::ptr_eq(
+            &alone.factorization,
+            &alone_again.factorization
+        ));
+        // The satellite answers as a fresh assembly does, to the bit.
+        let point = OperatingPoint::new(Atmosphere::new(0.0), 80.0, 3.0, 0.0, 0.0, 0.0, 0.0);
+        let fresh = VlmSystem::assemble(&wing_alone, 1, 4).unwrap();
+        assert_eq!(
+            alone_again.solve(&point).unwrap().cl_lift.to_bits(),
+            fresh.solve(&point).unwrap().cl_lift.to_bits()
+        );
+    }
+
+    #[test]
+    fn the_companion_cache_is_one_persistent_cache() {
+        let mut cache = VlmGeometryCache::with_schur_update(false);
+        let first = cache.companion();
+        let second = cache.companion();
+        assert!(Arc::ptr_eq(&first, &second));
+        let plane = airplane();
+        let mut guard = first.lock().unwrap();
+        let system = VlmSystem::assemble_cached(&plane, 1, 4, &mut guard).unwrap();
+        let kept = system.factorization.clone();
+        drop(system);
+        let again = VlmSystem::assemble_cached(&plane, 1, 4, &mut guard).unwrap();
+        assert!(Arc::ptr_eq(&kept, &again.factorization));
+    }
     #[test]
     fn identical_mesh_reuses_lu_and_incidence_only_reuses_checked_wake() {
         let plane = airplane();
@@ -410,5 +547,73 @@ mod tests {
         let error = (frozen_cd / expected_cd - 1.0).abs();
         assert!(error > 1.0e-6, "frozen AIC relative CDi error {error:e}");
         assert!((error - 8.4149e-6).abs() < 1.0e-9);
+    }
+
+    /// AVL 3.52 user guide, vortex-spacing rule 1: the C295 stabilizer, at
+    /// the height of the wing's trailing legs, takes a strip boundary at every
+    /// wing trailing leg inside its span, and no strip narrower than half the
+    /// narrowest wing strip there; the frozen reference lattice keeps its
+    /// own stations.
+    #[allow(clippy::expect_used)]
+    #[test]
+    fn the_stabilizer_strips_line_up_with_the_wing_trailing_legs() {
+        use alas_geom::aircraft::airplane::HORIZONTAL_STABILIZER_NAME;
+        use alas_geom::builder::AircraftBuilder;
+        let config = alas_config::AlasConfig::from_value(&serde_json::json!({ "preset": "C295" }))
+            .expect("preset");
+        let design = config.configured_nominal_design();
+        let mut geometry = config.geometry.clone();
+        geometry.empennage.n_subdivisions = 24;
+        let plane = AircraftBuilder::new(Some(geometry))
+            .build(Some(&design), true)
+            .expect("builds");
+        let tail = plane
+            .wings
+            .iter()
+            .position(|wing| wing.name == HORIZONTAL_STABILIZER_NAME)
+            .expect("stabilizer");
+        let chordwise = config.analysis.chordwise_resolution.max(1) as usize;
+        let edges = |panels: &[Panel], index: usize| -> Vec<f64> {
+            let mut ys: Vec<f64> = panels
+                .iter()
+                .filter(|p| {
+                    p.wing_index == index
+                        && p.is_trailing_edge
+                        && p.core_component.half == 2 * index
+                })
+                .flat_map(|p| [p.left_vortex_vertex[1], p.right_vortex_vertex[1]])
+                .collect();
+            ys.sort_by(f64::total_cmp);
+            ys.dedup_by(|a, b| (*a - *b).abs() < 1.0e-9);
+            ys
+        };
+        let aligned = super::super::mesh_panels(&plane, 1, chordwise, true).expect("meshes");
+        let reference = super::super::mesh_panels(&plane, 1, chordwise, false).expect("meshes");
+        let tail_edges = edges(&aligned, tail);
+        let (inner, outer) = (tail_edges[0], tail_edges[tail_edges.len() - 1]);
+        let wing_legs: Vec<f64> = edges(&aligned, 0)
+            .into_iter()
+            .filter(|&y| y > inner + 1.0e-6 && y < outer - 1.0e-6)
+            .collect();
+        assert!(wing_legs.len() >= 6, "{wing_legs:?}");
+        let on_a_boundary =
+            |edges: &[f64], y: f64| edges.iter().any(|&e| (e - y).abs() <= 1.0e-9 * outer);
+        assert!(wing_legs.iter().all(|&y| on_a_boundary(&tail_edges, y)));
+        let reference_edges = edges(&reference, tail);
+        assert!(!wing_legs
+            .iter()
+            .all(|&y| on_a_boundary(&reference_edges, y)));
+        let narrowest_wing = wing_legs
+            .windows(2)
+            .map(|pair| pair[1] - pair[0])
+            .fold(f64::INFINITY, f64::min);
+        let narrowest_tail = tail_edges
+            .windows(2)
+            .map(|pair| pair[1] - pair[0])
+            .fold(f64::INFINITY, f64::min);
+        assert!(
+            narrowest_tail >= 0.5 * narrowest_wing,
+            "{narrowest_tail} {narrowest_wing}"
+        );
     }
 }

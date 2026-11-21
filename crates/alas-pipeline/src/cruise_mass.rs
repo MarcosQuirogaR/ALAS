@@ -116,7 +116,7 @@ fn interpolate_at_cl(
     }
     let mut best: Option<(usize, f64)> = None;
     for (index, pair) in points.windows(2).enumerate() {
-        let ((cl_a, v_a), (cl_b, v_b)) = (pair[0], pair[1]);
+        let ((cl_a, _), (cl_b, _)) = (pair[0], pair[1]);
         if cl < cl_a.min(cl_b) || cl > cl_a.max(cl_b) {
             continue;
         }
@@ -130,11 +130,7 @@ fn interpolate_at_cl(
         if best.is_some_and(|(best_distance, _)| best_distance <= distance) {
             continue;
         }
-        let value = if cl_b == cl_a {
-            v_a
-        } else {
-            v_a + (v_b - v_a) * (cl - cl_a) / (cl_b - cl_a)
-        };
+        let value = bracket_value(&points, index, cl);
         best = Some((distance, value));
     }
     // A single finite point has no pair; `cl` then equals its CL.
@@ -145,10 +141,61 @@ fn interpolate_at_cl(
     })
 }
 
-/// The polar's L/D at lift coefficient `cl`; see [`interpolate_at_cl`] for the
-/// bracket choice (nearest `anchor_cl`) and the end-value clamping.
+/// The value at `cl` inside the sweep bracket `points[index]`, `points[index + 1]`.
+///
+/// The drag polar is parabolic in CL (`CD = CD0 + k CL^2` near the attached
+/// range), so a straight line across a bracket of a coarse sweep overstates
+/// the drag between its ends. The bracket is therefore fitted by a parabola
+/// through its two ends and the neighbouring sweep point on the side of `cl`.
+/// A parabola through three points reproduces any parabola
+/// exactly. At the ends of the sweep, or where the three CL values are not
+/// distinct, the straight line is kept.
+fn bracket_value(points: &[(f64, f64)], index: usize, cl: f64) -> f64 {
+    let ((cl_a, v_a), (cl_b, v_b)) = (points[index], points[index + 1]);
+    let linear = || {
+        if cl_b == cl_a {
+            v_a
+        } else {
+            v_a + (v_b - v_a) * (cl - cl_a) / (cl_b - cl_a)
+        }
+    };
+    let nearer_a = (cl - cl_a).abs() <= (cl - cl_b).abs();
+    let outer = if nearer_a {
+        index.checked_sub(1)
+    } else {
+        (index + 2 < points.len()).then_some(index + 2)
+    };
+    let Some(outer) = outer else {
+        return linear();
+    };
+    let (cl_c, v_c) = points[outer];
+    let distinct = cl_c != cl_a && cl_c != cl_b && cl_a != cl_b;
+    if !distinct {
+        return linear();
+    }
+    let basis = |x: f64, others: [f64; 2], own: f64| {
+        (x - others[0]) * (x - others[1]) / ((own - others[0]) * (own - others[1]))
+    };
+    v_a * basis(cl, [cl_b, cl_c], cl_a)
+        + v_b * basis(cl, [cl_a, cl_c], cl_b)
+        + v_c * basis(cl, [cl_a, cl_b], cl_c)
+}
+
+/// The polar's L/D at lift coefficient `cl`, taken as `cl / CD(cl)` with CD
+/// interpolated by [`polar_cd_at_cl`]. The drag polar is quadratic in CL but
+/// L/D is not, so L/D is never interpolated directly. Bracket choice (nearest
+/// `anchor_cl`) and end-value clamping follow [`interpolate_at_cl`]; a clamped
+/// lookup returns the polar's own end L/D.
 pub fn polar_l_over_d_at_cl(polar: &PolarSweep, cl: f64, anchor_cl: f64) -> Option<PolarLookup> {
-    interpolate_at_cl(&polar.cl, &polar.l_over_d, cl, anchor_cl)
+    let end_value = interpolate_at_cl(&polar.cl, &polar.l_over_d, cl, anchor_cl)?;
+    if end_value.clamped {
+        return Some(end_value);
+    }
+    let drag = polar_cd_at_cl(polar, cl, anchor_cl)?;
+    (drag.value > 0.0).then_some(PolarLookup {
+        value: cl / drag.value,
+        clamped: false,
+    })
 }
 
 /// The polar's total drag coefficient at lift coefficient `cl`; same bracket

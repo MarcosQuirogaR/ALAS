@@ -11,6 +11,14 @@
 
 use egui::{Id, Ui};
 
+/// The `ComboBox::height` of a searchable list. A combo's popup always wraps
+/// its content in one scroll area of this height; a list that scrolls itself
+/// below a fixed search field would then show two scrollbars, and scrolling
+/// the outer one would carry the search field away. An unbounded outer height
+/// leaves the list's own scroll area as the only scrollbar and the search
+/// field above it fixed.
+pub const FIXED_SEARCH_COMBO_HEIGHT: f32 = f32::INFINITY;
+
 /// Case-insensitive substring match of `query` over any of `fields`.
 ///
 /// An empty (or all-blank) query matches everything. Matching is on the
@@ -49,8 +57,15 @@ pub fn search_field(ui: &mut Ui, salt: &str) -> String {
             .desired_width(ui.available_width().max(160.0)),
     );
     if first_frame {
+        // A popup lays out invisibly on its first frame, and a focus request
+        // made then is dropped, so the text typed right after opening was
+        // lost. Keep asking, with a frame in between, until the field has it.
         response.request_focus();
-        ui.data_mut(|data| data.insert_temp(focused_key, true));
+        if response.has_focus() {
+            ui.data_mut(|data| data.insert_temp(focused_key, true));
+        } else {
+            ui.ctx().request_repaint();
+        }
     }
     ui.data_mut(|data| data.insert_temp(query_key, query.clone()));
     ui.separator();
@@ -87,7 +102,10 @@ pub fn named_list_combo(
     current: &str,
 ) -> Option<String> {
     let mut chosen = None;
-    let mut combo = egui::ComboBox::from_id_salt(salt).selected_text(selected_text);
+    let mut combo = egui::ComboBox::from_id_salt(salt)
+        .icon(crate::combo_icon::down_arrow)
+        .height(FIXED_SEARCH_COMBO_HEIGHT)
+        .selected_text(selected_text);
     if let Some(width) = width {
         combo = combo.width(width);
     }
@@ -154,5 +172,81 @@ mod tests {
             });
         }
         assert_eq!(observed, vec!["", "abc", ""]);
+    }
+}
+
+#[cfg(test)]
+mod popup_fill_tests {
+    use super::*;
+
+    /// Run one frame of a page whose label sits where the open selector list
+    /// is drawn, then return every rect fill and text rect of the frame.
+    fn frame(
+        ctx: &egui::Context,
+        events: Vec<egui::Event>,
+        names: &[String],
+    ) -> Vec<egui::epaint::ClippedShape> {
+        let input = egui::RawInput {
+            screen_rect: Some(egui::Rect::from_min_size(
+                egui::Pos2::ZERO,
+                egui::vec2(800.0, 600.0),
+            )),
+            events,
+            ..Default::default()
+        };
+        ctx.run(input, |ctx| {
+            egui::CentralPanel::default().show(ctx, |ui| {
+                let _ = named_list_combo(ui, "popup_fill", Some(300.0), "A", names, "A");
+                for _ in 0..6 {
+                    ui.label("Cabin preset form label under the list");
+                }
+            });
+        })
+        .shapes
+    }
+
+    #[test]
+    fn the_open_list_paints_an_opaque_frame_under_every_entry() {
+        for theme in [
+            crate::theme::AppTheme::Light,
+            crate::theme::AppTheme::Dark,
+            crate::theme::AppTheme::Grey,
+        ] {
+            let ctx = egui::Context::default();
+            crate::theme::apply_theme(theme, &ctx);
+            let names: Vec<String> = (0..8).map(|k| format!("Airbus A38{k}-800")).collect();
+            let at = egui::pos2(60.0, 24.0);
+            let click = |pressed| egui::Event::PointerButton {
+                pos: at,
+                button: egui::PointerButton::Primary,
+                pressed,
+                modifiers: egui::Modifiers::NONE,
+            };
+            let _ = frame(&ctx, vec![egui::Event::PointerMoved(at)], &names);
+            let _ = frame(&ctx, vec![click(true)], &names);
+            let _ = frame(&ctx, vec![click(false)], &names);
+            let mut shapes = Vec::new();
+            for _ in 0..4 {
+                shapes = frame(&ctx, vec![], &names);
+            }
+            let entry = |s: &egui::epaint::ClippedShape| match &s.shape {
+                egui::Shape::Text(text) => text.galley.job.text.contains("Airbus A38"),
+                _ => false,
+            };
+            let first = shapes.iter().position(entry).expect("entries are drawn");
+            let text_rect = match &shapes[first].shape {
+                egui::Shape::Text(text) => {
+                    egui::Rect::from_min_size(text.pos, text.galley.size())
+                }
+                _ => unreachable!(),
+            };
+            let covered = shapes[..first].iter().any(|s| match &s.shape {
+                egui::Shape::Rect(rect) => {
+                    rect.fill.a() == 255 && rect.rect.contains_rect(text_rect)
+                }
+                _ => false,
+            });
+            assert!(covered, "{theme:?}: no opaque frame under the list entries");
+        }
     }
 }

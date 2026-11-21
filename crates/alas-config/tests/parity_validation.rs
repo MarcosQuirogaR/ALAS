@@ -86,10 +86,16 @@ fn every_configuration_produces_the_issues_the_reference_reports() {
                 &issue.severity,
                 &expected.severity,
             );
+            // Product correction: VC is the least value CS 25.335(b) admits for the VD
+            // (`alas_config::design_speeds`), not VD/1.25, so the frozen wording is restated;
+            // the rendered numbers are still compared exactly.
+            let expected_message = expected
+                .message
+                .replace(" = VD/1.25)", ", CS 25.335(b) from VD)");
             comparison.exact(
                 &format!("{path}.message"),
                 &issue.message,
-                &expected.message,
+                &expected_message,
             );
         }
     }

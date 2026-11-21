@@ -320,15 +320,16 @@ fn no_registered_preset_can_be_reached_by_the_cargo_objective() {
         // old: every preset "passenger" -> new: the A400M is the registered
         // military freighter; its objective is still unset (checked below), so
         // the cargo target resolves to its fixed capacity and the run is
-        // unchanged.
-        let expected_type = if name == "A400M" {
+        // unchanged. The C295 is the second registered military freighter
+        // (hold: Jane's 2008-2009 p.545), held to the same unset objective.
+        let expected_type = if matches!(name, "A400M" | "C295") {
             "cargo"
         } else {
             "passenger"
         };
         assert_eq!(
             config.requirements.aircraft_type, expected_type,
-            "{name}: only the A400M is a freighter and none reaches the cargo target by default"
+            "{name}: only the A400M and the C295 are freighters and none reaches the cargo target by default"
         );
         assert_eq!(config.requirements.cargo_objective_kg, 0.0, "{name}");
         assert_eq!(

@@ -230,7 +230,7 @@ mod preview_scene_tests {
         let mut state = AppState::default();
         let mut previous = Scene::new(320.0, 200.0, None);
         previous.title = Some("last valid".to_owned());
-        state.preview_scene = Some(previous.clone());
+        state.preview_scene = Some(std::sync::Arc::new(previous.clone()));
         state.preview_scene_revision = 17;
         state.config_values["geometry"]["wing"]["custom_sections"] = json!([{
             "span_fraction": 1.0,
@@ -243,7 +243,7 @@ mod preview_scene_tests {
 
         state.update_preview_scene();
 
-        assert_eq!(state.preview_scene, Some(previous));
+        assert_eq!(state.preview_scene.as_deref(), Some(&previous));
         assert_eq!(state.preview_scene_revision, 17);
     }
 }

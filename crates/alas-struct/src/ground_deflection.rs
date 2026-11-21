@@ -96,6 +96,50 @@ pub fn box_bending_stiffness_nm2(
         .collect()
 }
 
+/// The sized box's torsional rigidity `G J`, N.m^2, at every sizing station, on
+/// the section normal to the box axis: Bredt-Batho single closed cell between
+/// the outermost active spars, `J = 4 A^2 / (sum of ds/(G t))` (Megson,
+/// *Aircraft Structures for Engineering Students*, 4th ed., 2007, ch. 18).
+/// The covers (the station's skin gauge) are `cos L` as wide as the streamwise
+/// cut and the webs keep their depth. Intermediate spars would add cells and
+/// stiffness, so omitting them under-states `G J`. Zero where fewer than two
+/// spars are active or a wall has no thickness.
+pub fn box_torsional_stiffness_nm2(
+    sizing: &crate::sizing::WingboxSizing,
+    skin: &alas_config::materials::MaterialSpec,
+    web: &alas_config::materials::MaterialSpec,
+) -> Vec<f64> {
+    (0..sizing.y_stations.len())
+        .map(|j| {
+            let active: Vec<&crate::sizing::SparSizing> =
+                sizing.spars.iter().filter(|s| s.h[j] > 0.0).collect();
+            let (Some(front), Some(rear)) = (active.first(), active.last()) else {
+                return 0.0;
+            };
+            if active.len() < 2
+                || front.t_web[j] <= 0.0
+                || rear.t_web[j] <= 0.0
+                || sizing.skin_at(j) <= 0.0
+            {
+                return 0.0;
+            }
+            let cos_l = sizing.axis_cos_at(j).max(1.0e-3);
+            let width = (rear.chord_fraction - front.chord_fraction) * sizing.chord[j] * cos_l;
+            let (a, b) = (front.h[j], rear.h[j]);
+            let area = width * 0.5 * (a + b);
+            let cover = (width * width + (a - b) * (a - b)).sqrt();
+            let flexibility = 2.0 * cover / (skin.g_pa() * sizing.skin_at(j))
+                + a / (web.g_pa() * front.t_web[j])
+                + b / (web.g_pa() * rear.t_web[j]);
+            if area > 0.0 && flexibility.is_finite() && flexibility > 0.0 {
+                4.0 * area * area / flexibility
+            } else {
+                0.0
+            }
+        })
+        .collect()
+}
+
 fn interpolate(x: &[f64], values: &[f64], at: f64) -> f64 {
     let (Some(&first), Some(&last)) = (x.first(), x.last()) else {
         return 0.0;

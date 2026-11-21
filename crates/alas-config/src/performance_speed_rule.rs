@@ -72,6 +72,21 @@ impl PerformanceConfig {
         cl_max_to / self.improved_climb_field_factor()
     }
 
+    /// `V2 / VSR` that holds whatever the minimum control speed is: the greatest of
+    /// the selected factor, `V2MIN` from stall (CS 25.107(b)(1)) and the rotation
+    /// stall floor. The control term `1.10 VMC` can only raise it. A published V2
+    /// minimum is inverted with this ratio, so that every path that resolves the
+    /// aircraft's own control speed flies at least the published speed, and the
+    /// paths that fall back on the declared ratio fly above it (a minimum).
+    pub fn control_free_v2_over_vsr(&self) -> f64 {
+        let v2_min = if self.legacy_field_correlations {
+            0.0
+        } else {
+            self.v2_min_vsr_factor
+        };
+        self.v2_vstall_factor.max(v2_min).max(self.vr_vstall_factor)
+    }
+
     /// The schedule ratios without any improved-climb override.
     pub fn schedule_takeoff_speed_ratios(&self) -> TakeoffSpeedRatios {
         let vmc = self.vmc_vstall_factor;
@@ -124,5 +139,39 @@ mod tests {
             ..PerformanceConfig::default()
         };
         assert!((low.takeoff_speed_ratios().v2 - 1.13).abs() < 1e-15);
+    }
+
+    /// A direct check of the control-free ratio, not a
+    /// round trip through `takeoff_reference`. The selected factor governs when
+    /// it is above both floors; the published V2 minimum (CS 25.107 V2MIN,
+    /// 1.13 VSR for a turbo-propeller twin) governs when the selected factor
+    /// is below it; VR never lowers the ratio.
+    #[test]
+    fn the_control_free_ratio_is_the_largest_of_the_selected_factor_and_the_floors() {
+        let selected_1_20 = PerformanceConfig {
+            v2_vstall_factor: 1.20,
+            v2_min_vsr_factor: 1.13,
+            vr_vstall_factor: 1.05,
+            ..PerformanceConfig::default()
+        };
+        assert_eq!(selected_1_20.control_free_v2_over_vsr(), 1.20);
+
+        let below_minimum = PerformanceConfig {
+            v2_vstall_factor: 1.10,
+            v2_min_vsr_factor: 1.13,
+            vr_vstall_factor: 1.05,
+            ..PerformanceConfig::default()
+        };
+        assert_eq!(below_minimum.control_free_v2_over_vsr(), 1.13);
+
+        // Legacy replay drops the V2MIN term: only the selected factor and VR.
+        let legacy = PerformanceConfig {
+            legacy_field_correlations: true,
+            v2_vstall_factor: 1.10,
+            v2_min_vsr_factor: 1.13,
+            vr_vstall_factor: 1.05,
+            ..PerformanceConfig::default()
+        };
+        assert_eq!(legacy.control_free_v2_over_vsr(), 1.10);
     }
 }

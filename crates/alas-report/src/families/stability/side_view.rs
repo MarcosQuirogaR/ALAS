@@ -238,7 +238,7 @@ pub fn figure_stability_side_view(report: &AnalysisReport, theme: Option<&str>) 
     scene.title = Some(title.clone());
     draw_title(&mut scene, &title, pal);
     scene.suppress_derived_title();
-    axes.draw_frame(&mut scene, pal);
+    axes.draw_frame_with_labels(&mut scene, pal, "Longitudinal X [m]", "Height Z [m]");
     let outline = fus
         .xsecs
         .iter()
@@ -284,7 +284,7 @@ pub fn figure_stability_side_view(report: &AnalysisReport, theme: Option<&str>) 
     }
 
     let mac_color = Color::from_hex(WING_MAC_COLOR);
-    let mac_z = s.wing.aerodynamic_center(AC_CHORD_FRACTION)[2];
+    let mac_z = s.wing.carried_box().aerodynamic_center(AC_CHORD_FRACTION)[2];
     draw_mac_airfoil_outline(&mut scene, &axes, s.wing, s.x_lemac, mac_z, s.c_ref);
     draw_legend(
         &mut scene,
@@ -315,7 +315,14 @@ pub fn figure_stability_side_view(report: &AnalysisReport, theme: Option<&str>) 
             stroke: Stroke::dashed(Color::from_hex(color), 1.3, 5.0, 3.0),
         });
         scene.add(SceneElement::Text {
-            text: format!("{}\n{:.1} m ({:.0}% MAC)", name, x, s.pct(*x)),
+            // A percentage of the wing MAC means nothing for the tail's
+            // aerodynamic centre, which sits several MACs aft: give its
+            // station and its arm from the wing AC instead.
+            text: if *name == "H-Stab AC" {
+                format!("{}\n{:.1} m (arm {:.1} m)", name, x, x - s.x_wing_ac)
+            } else {
+                format!("{}\n{:.1} m ({:.0}% MAC)", name, x, s.pct(*x))
+            },
             // The values can legitimately cluster within a small fraction of
             // one MAC. A dedicated, ordered margin keeps their identifiers
             // readable while the color-matched datum lines retain association.

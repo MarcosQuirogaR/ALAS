@@ -105,6 +105,8 @@ pub fn design_mission_band_check(
         Err(error) => return DesignMissionBand::unavailable(error.to_string()),
     };
     let oew_kg = super::report_oew_kg(report);
+    // The design mission flies the reserve rule its charted range is quoted under.
+    let policy = config.design_mission_fuel_policy();
     let range_at = |tow_max_kg: f64| -> Result<f64, String> {
         let fuel_kg = (tank_kg - taxi_kg)
             .min(tow_max_kg - oew_kg - design_payload_kg)
@@ -112,7 +114,7 @@ pub fn design_mission_band_check(
         let corner = max_range_with_reserves(
             oew_kg + design_payload_kg + fuel_kg,
             fuel_kg,
-            &config.fuel_policy,
+            &policy,
             &PlannedTrips(&model),
             CORNER_TOLERANCE_M,
         );
@@ -131,7 +133,7 @@ pub fn design_mission_band_check(
         status: classify_band(range_at_lo_m, range_at_hi_m, design_range_m),
         note: format!(
             "quick estimate with the operating empty mass held at {oew_kg:.0} kg, scheme {}",
-            config.fuel_policy.scheme.as_str()
+            policy.scheme.as_str()
         ),
     }
 }

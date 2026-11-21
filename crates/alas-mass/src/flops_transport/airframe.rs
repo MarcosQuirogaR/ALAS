@@ -20,10 +20,11 @@ use alas_geom::aircraft::airplane::Airplane;
 use alas_geom::aircraft::fuselage::{Fuselage, FuselageXSec, DEFAULT_SHAPE};
 
 use super::airframe_geometry::{
-    average_thickness, detailed_stations, find_surface, nacelle_dimensions, surface_wetted_area,
-    BuiltFuselage,
+    average_thickness, detailed_stations, fin_factor, find_surface, nacelle_dimensions,
+    semi_wing_pod_stations, surface_wetted_area, BuiltFuselage,
 };
 use super::movable_area::movable_surface_area;
+use super::product::gust_ratio::{estimate_priced_structure, wing_ultimate_load_factor};
 use super::product::{main_wing, primary_fuselage};
 use super::propulsion::{
     distributed_scaling, estimate_flops_propulsion, pod_mass_kg, total_nacelles,
@@ -34,7 +35,7 @@ use super::structure::pressurized_fuselage::{
     regional_turboprop_inputs, wing_mounted_turboprop_kg,
 };
 use super::structure::{
-    estimate_flops_structure, nacelle_kg, FlopsStructureBreakdown, FlopsStructureInputs,
+    nacelle_kg, service_life_bending_factor, FlopsStructureBreakdown, FlopsStructureInputs,
     FlopsWingInputs, WingBendingFactor,
 };
 use super::turboprop::{
@@ -44,34 +45,11 @@ use super::turboprop::{
 use super::wing_bending::{detailed_bending_factor, DetailedBendingFactor};
 use super::{FlopsSystemsBreakdown, FlopsTransportUnverifiedReason as Reason};
 
-/// What the caller wants evaluated.
-#[derive(Debug, Clone, Copy, PartialEq, Eq)]
-pub struct FlopsAirframeSelection {
-    /// Evaluate the structural group.
-    pub structure: bool,
-    /// Evaluate the propulsion group.
-    pub propulsion: bool,
-}
-
-/// How the quantities FLOPS estimates when not declared were obtained.
-#[derive(Debug, Clone, Copy, PartialEq, Eq)]
-pub struct FlopsAirframeSources {
-    /// `declared` or `mlw_fraction_of_mtow`.
-    pub landing_mass: &'static str,
-    /// `declared`, `fuselage_mounted_ground_datum` or `flops_equation_66`.
-    pub main_gear_length: &'static str,
-    /// `declared` or `flops_equation_67`.
-    pub nose_gear_length: &'static str,
-    /// `declared` or `flops_equation_76`.
-    pub baseline_engine_mass: &'static str,
-    /// `declared` (a `flops_structure.design_gross_mass_kg` override, which
-    /// is also how a fixed-aircraft closure pins the basis) or
-    /// `requirements_mtow`.
-    pub design_gross_mass: &'static str,
-}
+mod types;
+pub use types::{FlopsAirframeSelection, FlopsAirframeSources};
 
 /// The evaluated groups with the resolved inputs kept for audit.
-#[derive(Debug, Clone, PartialEq)]
+#[derive(serde::Serialize, serde::Deserialize, Debug, Clone, PartialEq)]
 pub struct FlopsAirframeBreakdown {
     /// Structural group, when selected.
     pub structure: Option<FlopsStructureBreakdown>,
@@ -126,6 +104,10 @@ pub struct FlopsAirframeRequest<'a> {
     pub landing_gear: &'a LandingGearConfig,
     /// Which groups to evaluate.
     pub selection: FlopsAirframeSelection,
+    /// Whether the aircraft is a civil main-deck freighter
+    /// ([`super::military_cargo::carries_main_deck_freight`]), whose fuselage
+    /// carries the large main-deck cargo door.
+    pub main_deck_freighter: bool,
 }
 
 fn sort_reasons(mut reasons: Vec<Reason>) -> FlopsAirframeEvaluation {
@@ -225,6 +207,7 @@ pub fn evaluate_airframe_product(request: &FlopsAirframeRequest<'_>) -> FlopsAir
         systems,
         landing_gear,
         selection,
+        main_deck_freighter,
     } = request;
     let flops = &mass_model.flops_transport;
     let technology = &mass_model.flops_structure;
@@ -243,6 +226,10 @@ pub fn evaluate_airframe_product(request: &FlopsAirframeRequest<'_>) -> FlopsAir
         }
         return sort_reasons(reasons);
     };
+    // The detailed stations, the section thickness and the painted area describe
+    // structure and skin, so they read the carried box inside the body.
+    let wing = wing.carried_box();
+    let wing = &*wing;
     let horizontal = find_surface(plane, "Horizontal Stabilizer", 1);
     let vertical = find_surface(plane, "Vertical Stabilizer", 2);
     let (Some(horizontal), Some(vertical)) = (horizontal, vertical) else {
@@ -275,7 +262,15 @@ pub fn evaluate_airframe_product(request: &FlopsAirframeRequest<'_>) -> FlopsAir
     // equations. Its rated thrust stays zero and is never read.
     let mut turboprop_spec = None;
     let rated_thrust_per_engine_n = match geometry.engine.active_model() {
-        Ok(ActiveEngineModel::Turbofan(spec)) => spec.rated_thrust_kn * 1_000.0,
+        // The mass basis of the hardware, not the rating: a re-rating of the
+        // same engine does not size a heavier one.
+        Ok(ActiveEngineModel::Turbofan(spec)) => {
+            geometry
+                .engine
+                .mass_basis_thrust_kn()
+                .unwrap_or(spec.rated_thrust_kn)
+                * 1_000.0
+        }
         Ok(ActiveEngineModel::Turboprop(spec)) => {
             turboprop_spec = Some(spec.clone());
             0.0
@@ -285,15 +280,12 @@ pub fn evaluate_airframe_product(request: &FlopsAirframeRequest<'_>) -> FlopsAir
             0.0
         }
     };
-    let built_engines = geometry.engine.spanwise_positions_m.len();
-    let (wing_engines, fuselage_engines) = match (
+    let (wing_engines, fuselage_engines) = match geometry.engine.resolved_engine_mounting(
         flops.wing_mounted_engine_count,
         flops.fuselage_mounted_engine_count,
     ) {
-        (Some(wing), Some(body)) if wing + body == built_engines && built_engines > 0 => {
-            (wing, body)
-        }
-        _ => {
+        Some(counts) => counts,
+        None => {
             reasons.push(Reason::EngineMounting);
             (0, 0)
         }
@@ -355,6 +347,7 @@ pub fn evaluate_airframe_product(request: &FlopsAirframeRequest<'_>) -> FlopsAir
         nozzle_scaling_exponent: technology.nozzle_mass_scaling_exponent,
         nozzle_scope: technology.nozzle_scope,
         thrust_reversers_installed: technology.thrust_reversers_installed,
+        thrust_reverser_engine_count: technology.thrust_reverser_engine_count,
         maximum_mach,
         nacelle_diameter_m,
         maximum_fuel_capacity_kg,
@@ -417,20 +410,16 @@ pub fn evaluate_airframe_product(request: &FlopsAirframeRequest<'_>) -> FlopsAir
         nacelle_diameter_m,
     );
 
-    // The structural design gross mass is the declared override when the
-    // configuration carries one (a weight-variant declaration, or the
-    // fixed-aircraft basis `AlasConfig::at_closure_mass` writes so a mission
-    // closure cannot re-size a registered aircraft) and otherwise the
-    // takeoff-mass requirement of the case being evaluated.
+    // The design gross mass is the declared override (a weight variant, or the
+    // fixed-aircraft basis `AlasConfig::at_closure_mass` writes), else the
+    // takeoff-mass requirement of the case.
     let (design_gross_mass_kg, design_gross_source) = match technology.design_gross_mass_kg {
         Some(value) => (value, "declared"),
         None => (requirements.mtow_kg, "requirements_mtow"),
     };
-    // With no `AlasConfig` in scope, the mode-aware landing-mass limit arrives
-    // pre-resolved: `AlasConfig::analysis_mass_model` writes it into
-    // `mlw_fraction_mtow` as limit / `requirements.mtow_kg`. The fraction
-    // therefore multiplies `requirements.mtow_kg`, the mass it was derived
-    // from, not the design gross mass a declared override may have pinned.
+    // The mode-aware landing-mass limit arrives pre-resolved in `mlw_fraction_mtow`
+    // (`AlasConfig::analysis_mass_model`) as limit / `requirements.mtow_kg`, so it
+    // multiplies `requirements.mtow_kg`, not a pinned design gross mass.
     let (design_landing_mass_kg, landing_source) = match technology.design_landing_mass_kg {
         Some(value) => (value, "declared"),
         None => (
@@ -472,13 +461,7 @@ pub fn evaluate_airframe_product(request: &FlopsAirframeRequest<'_>) -> FlopsAir
                 return sort_reasons(vec![Reason::DetailedWingRequiresFlopsSystems]);
             };
             let semispan = wing.reference_span() / 2.0;
-            let engine_eta: Vec<f64> = geometry
-                .engine
-                .spanwise_positions_m
-                .iter()
-                .map(|y| y.abs() / semispan)
-                .filter(|eta| *eta > 0.0 && *eta <= 1.0)
-                .collect();
+            let engine_eta = semi_wing_pod_stations(&geometry.engine, semispan);
             let span_m = wing.reference_span();
             let aspect_ratio = span_m * span_m / wing.reference_area();
             let Some(factor) = detailed_bending_factor(
@@ -509,6 +492,18 @@ pub fn evaluate_airframe_product(request: &FlopsAirframeRequest<'_>) -> FlopsAir
     let painted_wetted_area_m2 = surface_wetted_area(wing, wing_thickness)
         + surface_wetted_area(horizontal, average_thickness(horizontal))
         + surface_wetted_area(vertical, average_thickness(vertical))
+        + plane
+            .wings
+            .iter()
+            .filter(|surface| {
+                surface.is_dorsal_fin()
+                    || surface.is_centre_pod_surface()
+                    || surface.is_ventral_fin()
+            })
+            .map(|surface| {
+                surface_wetted_area(&surface.skin_planform(), average_thickness(surface))
+            })
+            .sum::<f64>()
         + fuselage.area_wetted()
         + nacelles * std::f64::consts::PI * nacelle_diameter_m * nacelle_length_m;
 
@@ -521,11 +516,26 @@ pub fn evaluate_airframe_product(request: &FlopsAirframeRequest<'_>) -> FlopsAir
             quarter_chord_sweep_deg: wing.mean_sweep_angle(0.25),
             thickness_to_chord: wing_thickness,
             movable_surface_area_m2,
-            ultimate_load_factor: requirements.ultimate_load_factor,
+            ultimate_load_factor: wing_ultimate_load_factor(
+                requirements,
+                technology,
+                wing,
+                design_gross_mass_kg,
+            ),
             composite_utilization: technology.composite_utilization,
             aeroelastic_tailoring: technology.aeroelastic_tailoring,
             strut_bracing: technology.strut_bracing,
             wing_load_fraction: technology.wing_load_fraction,
+            bending_stress_factor: service_life_bending_factor(
+                flops.haul_class.unwrap_or_default(),
+                requirements.design_ultimate_load_factor(),
+                wing.reference_area(),
+                wing.reference_span(),
+                wing.taper_ratio(),
+                wing.mean_sweep_angle(0.25),
+                1.0 - technology.composite_utilization
+                    / alas_config::preset_flops::FCOMP_ADVANCED_COMPOSITE_WING,
+            ),
             fuselage_count: 1,
             variable_sweep_penalty,
             wing_mounted_engine_count: wing_engines,
@@ -533,14 +543,22 @@ pub fn evaluate_airframe_product(request: &FlopsAirframeRequest<'_>) -> FlopsAir
         },
         horizontal_tail_area_m2: horizontal.reference_area(),
         horizontal_tail_taper_ratio: horizontal.taper_ratio(),
-        vertical_tail_area_m2: vertical.unfolded_area() / vertical_count as f64,
+        // FLOPS `SVT` is the theoretical area: the straight-edged planform, no dorsal.
+        vertical_tail_area_m2: vertical.reference_planform().unfolded_area()
+            / vertical_count as f64,
         vertical_tail_taper_ratio: vertical.taper_ratio(),
         vertical_tail_count: vertical_count,
+        fin_mounted_tailplane_factor: fin_factor(horizontal, vertical, fuselage, vertical_count),
         fuselage_length_m: fuselage_length,
         fuselage_width_m: width,
         fuselage_depth_m: depth,
         scaled_fuselage_engines: scaling.fuselage_engines,
         military_cargo_floor: technology.military_cargo_floor,
+        main_deck_cargo_door_fraction: if *main_deck_freighter {
+            super::military_cargo::MAIN_DECK_CARGO_DOOR_FUSELAGE_FRACTION
+        } else {
+            0.0
+        },
         design_landing_mass_kg,
         main_gear_oleo_length_m: legs.main_m,
         nose_gear_oleo_length_m: legs.nose_m,
@@ -550,9 +568,8 @@ pub fn evaluate_airframe_product(request: &FlopsAirframeRequest<'_>) -> FlopsAir
         rated_thrust_per_engine_n,
         paint_area_density_kg_m2: technology.paint_area_density_kg_m2,
         painted_wetted_area_m2,
-        // FLOPS equation 69 reads a rated thrust, so a propeller installation
-        // takes the NASA GASP area-density nacelle instead. Either way the
-        // nacelle reaches the structural total once, from one method.
+        // FLOPS equation 69 reads a rated thrust, so a propeller installation takes the NASA GASP
+        // area-density nacelle instead; either way the nacelle reaches the structural total once.
         nacelle_mass_override_kg: turboprop.map(|group| group.nacelles_kg),
         pressurized_fuselage: regional_turboprop_inputs(
             mass_model,
@@ -564,7 +581,7 @@ pub fn evaluate_airframe_product(request: &FlopsAirframeRequest<'_>) -> FlopsAir
     };
     let structure = selection
         .structure
-        .then(|| estimate_flops_structure(&structure_inputs));
+        .then(|| estimate_priced_structure(&structure_inputs, requirements, technology, wing));
     let breakdown = FlopsAirframeBreakdown {
         structure,
         propulsion: selection
@@ -585,6 +602,7 @@ pub fn evaluate_airframe_product(request: &FlopsAirframeRequest<'_>) -> FlopsAir
                 "flops_equation_76"
             },
             design_gross_mass: design_gross_source,
+            gear_mass: super::military_gear::FLOPS_GEAR_SOURCE,
         },
     };
     if !(breakdown
@@ -637,6 +655,7 @@ mod tests {
     fn declared_mass_model() -> MassModelConfig {
         MassModelConfig {
             flops_transport: FlopsTransportConfig {
+                manual_cabin_inputs: false,
                 maximum_mach: Some(0.89),
                 design_range_nmi: Some(7_000.0),
                 flight_crew_count: Some(2),
@@ -652,11 +671,14 @@ mod tests {
                 fuel_tank_count: Some(6),
                 maximum_fuel_capacity_kg: Some(220_000.0),
                 apu_installed: true,
+                bleed_air_system: true,
                 containerized_cargo_kg: Some(0.0),
                 cargo_loading: Some(alas_config::CargoHoldLoading::Containerized),
                 containerized_baggage_fraction: None,
                 cabin_equipment_method: alas_config::CabinEquipmentMethod::FlopsTransportV1,
                 haul_class: None,
+                executive_cabin: None,
+                all_coach_passenger_count: None,
                 provenance: FlopsTransportProvenance {
                     mission: provenance("mission"),
                     cabin: provenance("cabin"),
@@ -684,6 +706,7 @@ mod tests {
         let requirements = DesignRequirements::default();
         let controls = ControlSurfacesConfig::default();
         evaluate_airframe_product(&FlopsAirframeRequest {
+            main_deck_freighter: false,
             plane,
             requirements: &requirements,
             geometry,
@@ -749,6 +772,7 @@ mod tests {
         assert_eq!(breakdown.sources.landing_mass, "mlw_fraction_of_mtow");
         assert_eq!(breakdown.sources.main_gear_length, "flops_equation_66");
         assert_eq!(breakdown.sources.baseline_engine_mass, "flops_equation_76");
+        assert_eq!(breakdown.sources.gear_mass, "flops_equations_63_64");
         // A large four-engine transport: the structural group is a tenth to
         // a third of its design gross mass in every published statement.
         let fraction = structure.total_kg / DesignRequirements::default().mtow_kg;
@@ -777,6 +801,7 @@ mod tests {
             Some(geometry.engine.spanwise_positions_m.len());
         let controls = ControlSurfacesConfig::default();
         let result = evaluate_airframe_product(&FlopsAirframeRequest {
+            main_deck_freighter: false,
             plane: &plane,
             requirements: &config.requirements,
             geometry: &geometry,
@@ -908,6 +933,7 @@ mod tests {
         let declared_mtow_kg = requirements.mtow_kg;
         let evaluate_with = |requirements: &DesignRequirements, mass_model: &MassModelConfig| {
             match evaluate_airframe_product(&FlopsAirframeRequest {
+                main_deck_freighter: false,
                 plane: &plane,
                 requirements,
                 geometry: &geometry,
@@ -978,6 +1004,7 @@ mod tests {
             furnishings_kg: 20_000.0,
             air_conditioning_kg: 1_500.0,
             anti_ice_kg: 200.0,
+            pneumatic_kg: 0.0,
             military_cargo_equipment_kg: 0.0,
             total_kg: 28_900.0,
         };

@@ -10,9 +10,13 @@
 
 pub mod benchmarks;
 pub mod matrix;
+/// The plausibility tier lives in `alas-plausibility` (product crate); this
+/// re-export keeps the acceptance paths.
+pub use alas_plausibility as plausibility;
 
 pub use benchmarks::{
-    format_benchmark_report, run_benchmark_suite, BenchmarkResult, BenchmarkSuiteReport,
+    check_benchmark_budget, format_benchmark_report, run_benchmark_suite, set_quick,
+    BenchmarkResult, BenchmarkSuiteReport,
 };
 pub use matrix::{
     evaluate_preset, format_matrix_json, format_matrix_report, run_acceptance_matrix,

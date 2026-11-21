@@ -54,10 +54,15 @@ pub fn assess_transport_planform(
     controls: &ControlSurfacesConfig,
     weights: &ObjectiveWeights,
 ) -> Option<TransportPlanformAssessment> {
+    // Packaging of the box and the flaps: the carried box inside the body.
+    let wing = wing.carried_box();
+    let wing: &Wing = &wing;
     let (front_spar_x_over_c, rear_spar_x_over_c) = spar_box_limits(structures)?;
-    let root = nearest_section(wing, planform.root)?;
+    // The root limits are stated on the design root chord.
+    let mut root = nearest_section(wing, planform.root)?.clone();
+    root.chord = wing.design_root().1;
     let kink = nearest_section(wing, planform.kink)?;
-    let root_metrics = wingbox_section_metrics(root, front_spar_x_over_c, rear_spar_x_over_c)?;
+    let root_metrics = wingbox_section_metrics(&root, front_spar_x_over_c, rear_spar_x_over_c)?;
     let kink_metrics = wingbox_section_metrics(kink, front_spar_x_over_c, rear_spar_x_over_c)?;
     let tankable_wingbox_volume_m3 = wingbox_volume_m3(
         wing,
@@ -103,7 +108,13 @@ pub fn assess_product_transport_planform(
     design: &DesignVector,
     config: &AlasConfig,
 ) -> Option<TransportPlanformAssessment> {
-    let planform = config.geometry.wing.transport_planform(design).ok()?;
+    // Packaging of the wing, not of its blends.
+    let planform = config
+        .geometry
+        .wing
+        .transport_planform(design)
+        .ok()?
+        .without_blends();
     let main_wing = plane.wings.first()?;
     assess_transport_planform(
         main_wing,
@@ -118,21 +129,37 @@ pub fn assess_product_transport_planform(
 /// the aft fuselage axis, degrees; `None` when the planform does not resolve.
 ///
 /// 90 degrees is an unswept edge; more is an edge running forward. The inboard
-/// end is the side-of-body section when the builder lofts one (a pinned
-/// `side_of_body_chord_ratio`, the only case the built wing has that station)
-/// and the centreline root otherwise, which is then the built inboard station.
+/// end is the side-of-body section (the exposed wing starts there) and the
+/// centreline root when the wing has no such station.
 /// It needs only the planform stations, not a built aircraft, so a pre-gate
 /// can call it on a design vector and the wing configuration.
+///
+/// The edge is read two ways and runs forward only when both say so: as the
+/// chord from the inboard station to the kink station, and, with a
+/// side-of-body station, as the wing's inboard trailing-edge line
+/// (`TransportPlanform::inboard_edge_lines`, the longest straight run of the
+/// drawn edge between the side of body and the kink). The smaller angle is
+/// returned. The two agree when the edge is one run, and the chord is the
+/// smaller one on every cranked inboard edge registered (A380-800, B787-9,
+/// C919), so those read as before. They part where the drawn edge steps at the
+/// kink: the Learjet 60's inboard flap trailing edge lies 0.08 m aft of the
+/// outboard line (PTM fig 1-2 plan view) and the kink station carries the
+/// outboard line's chord, so the chord across that step read 91.87 deg on an
+/// edge drawn running aft over its whole length (89.33 deg).
 pub fn exposed_te_angle_deg(wing: &alas_config::WingConfig, design: &DesignVector) -> Option<f64> {
-    let planform = wing.transport_planform(design).ok()?;
-    let inboard = planform
-        .side_of_body
-        .filter(|_| wing.side_of_body_chord_ratio.is_some())
-        .unwrap_or(planform.root);
+    let drawn = wing.transport_planform(design).ok()?;
+    let planform = drawn.without_blends();
+    let inboard = planform.side_of_body.unwrap_or(planform.root);
     let te_x = |s: &MainWingStation| s.leading_edge_x_m + s.chord_m;
-    let angle = (planform.kink.y_m - inboard.y_m)
+    let span_m = planform.kink.y_m - inboard.y_m;
+    let chord = span_m
         .atan2(te_x(&planform.kink) - te_x(&inboard))
         .to_degrees();
+    let line = drawn
+        .inboard_edge_lines()
+        .map(|lines| span_m.atan2(lines.trailing.slope * span_m).to_degrees())
+        .filter(|angle| angle.is_finite());
+    let angle = line.map_or(chord, |line| line.min(chord));
     angle.is_finite().then_some(angle)
 }
 
@@ -239,8 +266,20 @@ fn wingbox_volume_m3(
         }
         let inboard = wingbox_section_metrics(&pair[0], front_spar_x_over_c, rear_spar_x_over_c)?;
         let outboard = wingbox_section_metrics(&pair[1], front_spar_x_over_c, rear_spar_x_over_c)?;
-        half_volume_m3 +=
-            overlap_m * (inboard.cross_section_area_m2 + outboard.cross_section_area_m2) / 2.0;
+        // Section area is the square of a linear function of span on a
+        // linearly lofted panel (truncated pyramid, Torenbeek, Advanced
+        // Aircraft Design (2013), App. A.1, p. 393); Simpson's rule on the
+        // overlap with the interpolated square root is exact, where the
+        // average of the end areas overestimates a tapered panel.
+        let lo = segment_start_y_m.max(start_y_m);
+        let hi = segment_end_y_m.min(end_y_m);
+        let root_at = |y: f64| {
+            let t = (y - y_a) / (y_b - y_a);
+            inboard.cross_section_area_m2.sqrt()
+                + (outboard.cross_section_area_m2.sqrt() - inboard.cross_section_area_m2.sqrt()) * t
+        };
+        let (r_lo, r_mid, r_hi) = (root_at(lo), root_at(0.5 * (lo + hi)), root_at(hi));
+        half_volume_m3 += overlap_m / 6.0 * (r_lo * r_lo + 4.0 * r_mid * r_mid + r_hi * r_hi);
     }
     let symmetry_factor = if wing.symmetric { 2.0 } else { 1.0 };
     let volume_m3 = symmetry_factor * half_volume_m3;
@@ -265,16 +304,20 @@ fn flap_area_fraction(
         return None;
     }
     let span_m = tip_y_m - root_y_m;
-    let start_y_m = root_y_m + controls.flap_span_start_frac * span_m;
-    let end_y_m = root_y_m + controls.flap_span_end_frac * span_m;
     let mut half_flap_area_m2 = 0.0;
-    for pair in wing.xsecs.windows(2) {
-        let y_a = pair[0].xyz_le[1];
-        let y_b = pair[1].xyz_le[1];
-        let overlap_m = (y_a.max(y_b).min(end_y_m) - y_a.min(y_b).max(start_y_m)).max(0.0);
-        if overlap_m > 0.0 {
-            half_flap_area_m2 +=
-                overlap_m * (pair[0].chord + pair[1].chord) * controls.flap_chord_fraction / 2.0;
+    // An inboard aileron between two flaps is not flap.
+    for (start, end) in controls.flap_bands() {
+        let start_y_m = root_y_m + start * span_m;
+        let end_y_m = root_y_m + end * span_m;
+        for pair in wing.xsecs.windows(2) {
+            let y_a = pair[0].xyz_le[1];
+            let y_b = pair[1].xyz_le[1];
+            let overlap_m = (y_a.max(y_b).min(end_y_m) - y_a.min(y_b).max(start_y_m)).max(0.0);
+            if overlap_m > 0.0 {
+                half_flap_area_m2 +=
+                    overlap_m * (pair[0].chord + pair[1].chord) * controls.flap_chord_fraction
+                        / 2.0;
+            }
         }
     }
     let symmetry_factor = if wing.symmetric { 2.0 } else { 1.0 };
@@ -338,6 +381,36 @@ mod tests {
         assert!(assessment.root_bending_box_slenderness > 0.0);
     }
 
+    #[test]
+    fn the_learjet_inboard_edge_is_its_drawn_flap_line_not_the_chord_across_the_flap_end_step() {
+        // PTM fig 1-2: the inboard flap trailing edge runs 0.08 m aft of the
+        // outboard line at the flap end; the chord to the kink station read 91.87.
+        let angle = te_angle_of("LJ60");
+        assert!((angle - 89.34).abs() < 0.1, "{angle}");
+        // Every other registered wing reads as its chord to the kink did.
+        for preset in alas_config::presets::registry() {
+            if preset.name == "LJ60" {
+                continue;
+            }
+            let clean = preset
+                .geometry
+                .wing
+                .transport_planform(&preset.design_vector)
+                .expect("planform")
+                .without_blends();
+            let inboard = clean.side_of_body.unwrap_or(clean.root);
+            let te_x = |s: &MainWingStation| s.leading_edge_x_m + s.chord_m;
+            let chord = (clean.kink.y_m - inboard.y_m)
+                .atan2(te_x(&clean.kink) - te_x(&inboard))
+                .to_degrees();
+            assert!(
+                (te_angle_of(preset.name) - chord).abs() < 1e-9,
+                "{}",
+                preset.name
+            );
+        }
+    }
+
     fn te_angle_of(preset: &str) -> f64 {
         let registered = alas_config::presets::get(preset).expect("preset");
         exposed_te_angle_deg(&registered.geometry.wing, &registered.design_vector)
@@ -356,11 +429,15 @@ mod tests {
                 .wing
                 .transport_planform(&registered.design_vector)
                 .expect("planform");
-            let inboard_y = if registered.geometry.wing.side_of_body_chord_ratio.is_some() {
-                planform.side_of_body.expect("pinned station").y_m
-            } else {
-                planform.root.y_m
-            };
+            // The inboard end is the side-of-body station whenever the planform has
+            // one, pinned or derived, as `exposed_te_angle_deg` reads it: the product
+            // builder lofts a derived side of body too and puts the sections inboard
+            // of it on the inboard edge lines (carry_through.rs), so the built
+            // centreline section is not the root datum (B787-9: derived 0.10 station,
+            // rounded-kink edge station at 0.336 between it and the kink).
+            let inboard_y = planform
+                .side_of_body
+                .map_or(planform.root.y_m, |station| station.y_m);
             let at = |y: f64| {
                 plane.wings[0]
                     .xsecs

@@ -8,7 +8,7 @@
 //! bottom, and a central content pane that routes to the active
 //! [`crate::nav::Page`].
 
-mod menus;
+pub(crate) mod menus;
 mod nav_panel;
 #[cfg(test)]
 mod tests;
@@ -16,7 +16,8 @@ mod tests;
 use eframe::{App, Frame};
 use egui::{menu, CentralPanel, Context, Frame as EguiFrame, SidePanel, TopBottomPanel};
 
-use self::nav_panel::{render_nav, render_nav_rail, route_page};
+pub use self::nav_panel::go_to_page;
+use self::nav_panel::{render_nav, render_nav_rail, render_step_strip, route_page};
 use crate::layout;
 use crate::state::{AppState, LogKind};
 use crate::view_controls::{auto_zoom_factor, handle_zoom_shortcuts};
@@ -24,18 +25,25 @@ use crate::views::tour_data::TourTarget;
 use crate::views::{notices, overlays};
 
 fn tr(text: &str) -> String {
-    alas_i18n::t(Some(text), None).into_owned()
+    crate::views::tr(text)
+}
+
+fn tr_label(text: &str) -> String {
+    crate::views::tr_label(text)
 }
 
 fn tr_fields(template: &str, fields: &[(&str, String)]) -> String {
-    fields.iter().fold(tr(template), |text, (name, value)| {
-        text.replace(&format!("{{{name}}}"), value)
-    })
+    alas_i18n::fill_fields(&tr(template), fields)
 }
+
+/// How long the case may stay changed before it is autosaved.
+const AUTOSAVE_DELAY: std::time::Duration = std::time::Duration::from_secs(20);
 
 /// Main desktop application container for ALAS.
 pub struct AlasApp {
-    state: AppState,
+    state: Box<AppState>,
+    /// The opt-in performance tour (`ALAS_PERF_TOUR`); `None` in normal use.
+    tour: Option<crate::perf_tour::PerfTour>,
     #[cfg(debug_assertions)]
     layout_debug: crate::layout_debug::LayoutDebug,
 }
@@ -45,14 +53,19 @@ impl Default for AlasApp {
         // Register the embedded catalog once so form labels and help text can
         // follow the language selected by the desktop shell.
         alas_i18n::es::install();
-        let mut state = AppState::default();
+        let mut state = boxed_default_state();
         // The desktop shell owns the user-data side effects. `AppState`
         // itself stays hermetic so tests and embedders are not affected by
         // whatever this machine's installation has stored.
         state.load_persisted_custom_airports();
+        state.files.autosave_enabled = true;
+        state.reset_undo_baseline();
         alas_i18n::set_language(Some(state.language.code()));
+        // Crash copies from the previous session stay until the user decides.
+        state.protect_existing_autosaves();
         Self {
             state,
+            tour: crate::perf_tour::PerfTour::from_env(),
             #[cfg(debug_assertions)]
             layout_debug: crate::layout_debug::LayoutDebug::default(),
         }
@@ -60,7 +73,7 @@ impl Default for AlasApp {
 }
 
 impl AlasApp {
-    /// Construct the shell around explicit state for examples and UI audits.
+    /// Construct the shell around explicit state for examples and UI checks.
     pub fn from_state(state: AppState) -> Self {
         // `from_state` is also the embedding/testing constructor, so it must
         // establish the same catalog and thread-local language as `default`.
@@ -69,13 +82,14 @@ impl AlasApp {
         alas_i18n::es::install();
         alas_i18n::set_language(Some(state.language.code()));
         Self {
-            state,
+            state: Box::new(state),
+            tour: crate::perf_tour::PerfTour::from_env(),
             #[cfg(debug_assertions)]
             layout_debug: crate::layout_debug::LayoutDebug::default(),
         }
     }
 
-    /// The shell's state, for examples and UI audits that drive navigation
+    /// The shell's state, for examples and UI checks that drive navigation
     /// between frames.
     #[doc(hidden)]
     pub fn state_mut(&mut self) -> &mut AppState {
@@ -84,7 +98,41 @@ impl AlasApp {
 }
 
 impl App for AlasApp {
+    fn raw_input_hook(&mut self, _ctx: &Context, raw_input: &mut egui::RawInput) {
+        if let Some(tour) = self.tour.as_mut() {
+            tour.inject_input(raw_input);
+        }
+    }
+
     fn update(&mut self, ctx: &Context, _frame: &mut Frame) {
+        self.timed_frame(ctx);
+    }
+}
+
+impl AlasApp {
+    /// [`Self::show_frame`], measured by the performance tour when one runs.
+    fn timed_frame(&mut self, ctx: &Context) {
+        let Some(tour) = self.tour.as_mut() else {
+            return self.show_frame(ctx);
+        };
+        tour.before_frame(ctx, &mut self.state);
+        let started = std::time::Instant::now();
+        self.show_frame(ctx);
+        let elapsed = started.elapsed();
+        if let Some(tour) = self.tour.as_mut() {
+            tour.after_frame(&mut self.state, elapsed);
+        }
+    }
+
+    /// One frame of the application; `update` without the windowing frame.
+    pub(crate) fn show_frame(&mut self, ctx: &Context) {
+        self.state.begin_frame();
+        crate::views::form::publish_visibility_context(
+            &self.state.schema,
+            &self.state.config_values,
+        );
+        // "Modified" compares with the loaded preset's own values.
+        self.state.publish_form_baseline();
         #[cfg(debug_assertions)]
         {
             self.layout_debug.handle_shortcuts(ctx);
@@ -95,7 +143,18 @@ impl App for AlasApp {
         }
         self.state.poll_navdata_download();
         self.state.poll_openvsp_runtime_setup();
+        self.state.poll_tool_installer();
+        self.state.figure_jobs.attach(ctx);
+        self.state.preview_jobs.get_mut().attach(ctx);
+        if !cfg!(test) {
+            crate::sandbox::scene::build_live_models_in_background(ctx);
+        }
         self.state.poll_worker();
+        self.state.poll_figure_jobs();
+        self.state.preview_jobs.get_mut().poll();
+        if crate::sandbox::scene::poll_live_models() {
+            self.state.update_preview_scene();
+        }
         self.state.screening.poll();
         for event in self.state.cfd.poll() {
             let level = match event.severity {
@@ -110,6 +169,21 @@ impl App for AlasApp {
         }
         self.state.uav.poll();
         self.state.poll_addons();
+        if self.state.addons.is_running() {
+            ctx.request_repaint_after(std::time::Duration::from_millis(50));
+        }
+        if self
+            .state
+            .files
+            .autosave_since
+            .is_some_and(|since| since.elapsed() >= AUTOSAVE_DELAY)
+        {
+            self.state.files.autosave_since = None;
+            self.state.library_autosave();
+        }
+        if self.state.files.autosave_since.is_some() {
+            ctx.request_repaint_after(std::time::Duration::from_secs(5));
+        }
         if self.state.zoom_auto {
             let automatic_zoom = auto_zoom_factor(ctx);
             if (self.state.zoom - automatic_zoom).abs() > f32::EPSILON {
@@ -136,6 +210,9 @@ impl App for AlasApp {
             // the same 10 Hz cadence as the CFD/installer paths below.
             ctx.request_repaint_after(std::time::Duration::from_millis(100));
         }
+        if self.state.tool_installer.running {
+            ctx.request_repaint_after(std::time::Duration::from_millis(200));
+        }
         if self.state.openvsp_runtime_setup.running {
             // The installer streams stage lines from a subprocess; a modest
             // repaint cadence keeps the stage text current without spinning
@@ -150,6 +227,9 @@ impl App for AlasApp {
         // rounds its client size by a pixel during a resize.
         if (ctx.zoom_factor() - self.state.zoom).abs() > f32::EPSILON {
             ctx.set_zoom_factor(self.state.zoom);
+            // The new scale applies on the next pass: ask for it now so a zoom
+            // command shows at once instead of on the next input event.
+            ctx.request_repaint();
         }
 
         overlays::show_splash(&mut self.state, ctx);
@@ -158,7 +238,17 @@ impl App for AlasApp {
             return;
         }
 
+        // Closing the window with unsaved edits asks first.
+        if ctx.input(|input| input.viewport().close_requested()) && self.state.has_unsaved_edits() {
+            // Also while another prompt is open: the window never closes under it.
+            ctx.send_viewport_cmd(egui::ViewportCommand::CancelClose);
+            self.state.shell.pending = Some(crate::shell_confirm::Pending::Exit);
+        }
         if crate::sandbox::workspace::show_if_active(&mut self.state, ctx) {
+            // The root prompts are answered here too: closing the window with
+            // unsaved edits raised one, and My Aircraft can raise another.
+            crate::shell_confirm::show(&mut self.state, ctx);
+            crate::live_dispatch::show(&mut self.state, ctx);
             // Standalone analyses remain owned by the shared AppState even
             // while the full-window Sandbox is active.  Keep their native
             // viewport dispatch on this fast path so a CFD study opened from
@@ -174,6 +264,12 @@ impl App for AlasApp {
             crate::views::tool_intro::show_tool_intro(&mut self.state, ctx);
             return self.show_detached_view_panel(ctx);
         }
+        crate::detail::publish(ctx, self.state.shell.detail);
+        crate::views::search_overlay::handle_shortcuts(&mut self.state, ctx);
+        self.state
+            .sync_undo_gesture(ctx.input(|input| input.pointer.any_down()));
+        self.handle_undo_shortcuts(ctx);
+        crate::views::search_overlay::tick_focus(&mut self.state, ctx);
         self.state.prepare_walkthrough_step();
         self.state.clear_walkthrough_targets();
 
@@ -181,7 +277,9 @@ impl App for AlasApp {
             .frame(
                 EguiFrame::side_top_panel(ctx.style().as_ref()).inner_margin(egui::Margin {
                     left: 8.0,
-                    right: 8.0,
+                    // The unselected switch button has no frame, so its
+                    // label needs more than the logo side to look level.
+                    right: 16.0,
                     top: layout::MENU_BAR_VERTICAL_INSET,
                     bottom: layout::MENU_BAR_VERTICAL_INSET,
                 }),
@@ -193,11 +291,11 @@ impl App for AlasApp {
                     }
                     ui.separator();
                     self.render_file_menu(ui);
+                    self.render_edit_menu(ui);
                     self.render_view_menu(ctx, ui);
                     self.render_analysis_menu(ui);
-                    crate::sandbox::advanced::show_menu_action(&mut self.state, ui);
-                    crate::views::tool_intro::show_menu_action(&mut self.state, ui);
                     self.render_help_menu(ui);
+                    self.render_top_bar_controls(ui);
                 });
             });
         self.state
@@ -210,7 +308,13 @@ impl App for AlasApp {
             crate::layout_debug::RegionKind::Menu,
         );
 
-        if self.state.nav_pinned {
+        let strip = ctx.screen_rect().width() < layout::STEP_STRIP_BELOW_WIDTH;
+        if strip {
+            TopBottomPanel::top("step_strip").show(ctx, |ui| {
+                render_step_strip(&mut self.state, ui);
+            });
+        }
+        if self.state.nav_pinned && !strip {
             let nav_panel = SidePanel::left("nav_panel")
                 .resizable(true)
                 .default_width(layout::NAV_PANEL_WIDTH + layout::NAV_CONTENT_GAP)
@@ -291,8 +395,17 @@ impl App for AlasApp {
         }
 
         let dock = layout::preview_width_range(ctx.available_rect().width());
-        let dock_hidden = self.state.preview_open && dock.is_none();
-        if let Some(preview_range) = dock.filter(|_| self.state.preview_open) {
+        let dock_wanted = self.state.preview_open
+            && crate::views::page_shows_preview_dock(&self.state.active_page);
+        let dock_hidden = dock_wanted && dock.is_none();
+        // Pages that would repeat the dock's scene in a card of their own read this.
+        ctx.data_mut(|data| {
+            data.insert_temp(
+                egui::Id::new("preview_dock_shown"),
+                dock_wanted && dock.is_some(),
+            );
+        });
+        if let Some(preview_range) = dock.filter(|_| dock_wanted) {
             let preview_panel = SidePanel::right("preview_panel")
                 .resizable(true)
                 .default_width(layout::PREVIEW_DOCK_DEFAULT_WIDTH)
@@ -339,16 +452,17 @@ impl App for AlasApp {
         self.state
             .record_walkthrough_target(TourTarget::Content, content_panel.response.rect);
 
-        if !self.state.nav_pinned {
+        if !self.state.nav_pinned && !strip {
             render_nav_rail(&mut self.state, ctx, body_rect);
         }
 
+        crate::views::search_overlay::show_overlay(&mut self.state, ctx);
+        crate::shell_confirm::show(&mut self.state, ctx);
+        crate::live_dispatch::show(&mut self.state, ctx);
         overlays::show_walkthrough(&mut self.state, ctx);
-        overlays::show_advanced_guide(&mut self.state, ctx);
         overlays::show_storage_dialog(&mut self.state, ctx);
         overlays::show_about(&mut self.state, ctx);
         crate::views::tool_intro::show_tool_intro(&mut self.state, ctx);
-        crate::sandbox::advanced::show_advanced_settings_window(&mut self.state, ctx);
         crate::views::cfd_view::show_cfd_window(&mut self.state, ctx);
         crate::views::screening_window::show_screening_window(&mut self.state, ctx);
         crate::views::screening_window::show_custom_airfoil_import_window(&mut self.state, ctx);
@@ -359,4 +473,13 @@ impl App for AlasApp {
         #[cfg(debug_assertions)]
         self.layout_debug.finish_frame(ctx);
     }
+}
+
+/// Build the first-start state on the heap. `AppState` is about 90 KiB and its
+/// construction (preset load included) needs several times that in temporaries;
+/// a frame of its own returns them before the shell is assembled, which keeps
+/// the main thread within its 1 MiB default reserve.
+#[inline(never)]
+fn boxed_default_state() -> Box<AppState> {
+    Box::new(AppState::default())
 }

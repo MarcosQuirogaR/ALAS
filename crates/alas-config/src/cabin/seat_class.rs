@@ -32,7 +32,8 @@ pub struct SeatClassConfig {
         max = 100.0,
         label = "Target passenger share [%]",
         readonly_unless(field = "requirements.cabin_preset", value = "Custom"),
-        help = "Target percentage of passengers in this class. The selected preset supplies the seat geometry; the layout converts the normalized mix into rows that fit the usable, regulation-compliant cabin. Only Custom exposes this value for editing."
+        help = "Target percentage of passengers in this class [%]. The preset supplies the seat geometry; the layout fits the mix into the usable, regulation-compliant cabin.",
+        long_help = "Target percentage of passengers in this class. The selected preset supplies the seat geometry; the layout converts the normalized mix into rows that fit the usable, regulation-compliant cabin. Only Custom exposes this value for editing."
     )]
     pub share_pct: f64,
 
@@ -46,7 +47,8 @@ pub struct SeatClassConfig {
         max = 10,
         label = "Seats abreast",
         readonly_unless(field = "requirements.cabin_preset", value = "Custom"),
-        help = "Seats per row in this class; 0 fits as many as the local cabin width allows beside the regulatory aisle (at most 6 per single aisle, 12 per twin aisle: FAR/CS 25.817). A value that does not fit the cabin width is reduced to the seats that fit. Only Custom exposes this value for editing."
+        help = "Seats per row in this class; 0 fits as many as the cabin width allows beside the regulatory aisle (max 6 single-aisle, 12 twin-aisle, FAR/CS 25.817).",
+        long_help = "Seats per row in this class; 0 fits as many as the local cabin width allows beside the regulatory aisle (at most 6 per single aisle, 12 per twin aisle: FAR/CS 25.817). A value that does not fit the cabin width is reduced to the seats that fit. Only Custom exposes this value for editing."
     )]
     pub abreast: i64,
 
@@ -58,7 +60,8 @@ pub struct SeatClassConfig {
         label = "Seat pitch",
         unit = "m",
         readonly_unless(field = "requirements.cabin_preset", value = "Custom"),
-        help = "Row-to-row seat spacing in this class. 0.7112 m (28 in) is the tightest economy pitch in service; business flat-bed suites need 1.5 m or more. Only Custom exposes this value for editing."
+        help = "Row-to-row seat spacing in this class [m]. 0.7112 m (28 in) is the tightest economy pitch in service; business flat-bed suites need 1.5 m or more.",
+        long_help = "Row-to-row seat spacing in this class. 0.7112 m (28 in) is the tightest economy pitch in service; business flat-bed suites need 1.5 m or more. Only Custom exposes this value for editing."
     )]
     pub pitch_m: f64,
 
@@ -70,7 +73,8 @@ pub struct SeatClassConfig {
         label = "Seat width",
         unit = "m",
         readonly_unless(field = "requirements.cabin_preset", value = "Custom"),
-        help = "Lateral footprint of one seat including its armrest. 0.4064 m (16 in) is the narrowest economy seat; suites reach about 0.95 m. The seats abreast times this width plus the aisles must fit the cabin width. Only Custom exposes this value for editing."
+        help = "Lateral footprint of one seat including armrest [m]. 0.4064 m (16 in) is the narrowest economy seat; suites reach about 0.95 m.",
+        long_help = "Lateral footprint of one seat including its armrest. 0.4064 m (16 in) is the narrowest economy seat; suites reach about 0.95 m. The seats abreast times this width plus the aisles must fit the cabin width. Only Custom exposes this value for editing."
     )]
     pub width_m: f64,
 

@@ -16,10 +16,12 @@ pub(super) fn print_optimization_summary(result: &PipelineResult, quiet: bool) {
     else {
         return;
     };
-    println!(
-        "\n--- Design search: {} ---",
+    let scope = if summary.clean_sheet {
+        alas_pipeline::optimizer_summary::CLEAN_SHEET_SCOPE_LABEL
+    } else {
         alas_pipeline::optimizer_summary::SCOPE_LABEL
-    );
+    };
+    println!("\n--- Design search: {scope} ---");
     for (label, value) in summary.label_lines() {
         println!("  {label:<24}: {value}");
     }
@@ -79,9 +81,12 @@ pub(super) fn print_mses_summary(result: &PipelineResult, quiet: bool) {
     if let Some(ref pressure) = result.mses_pressure {
         if pressure.status.as_str() != "ok" {
             println!(
-                "  pressure distribution: {} ({:?})",
+                "  pressure distribution: {}{}",
                 pressure.status.as_str(),
-                pressure.error
+                pressure
+                    .error
+                    .as_deref()
+                    .map_or(String::new(), |error| format!(" ({error})"))
             );
         }
     }
@@ -106,8 +111,8 @@ pub(super) fn print_structural_summary(result: &PipelineResult, quiet: bool) {
     println!("\n--- Wingbox structural sizing ---");
     if let Some(ref sizing) = st.sizing {
         println!(
-            "  semi-wing mass   : {:.1} kg (Torenbeek: {:.1} kg)",
-            sizing.total_mass_kg, st.torenbeek_wing_mass_kg
+            "  wing box (one side, primary structure): {:.1} kg; mass-ledger wing (complete wing, both sides): {:.1} kg",
+            sizing.total_mass_kg, st.ledger_complete_wing_mass_kg
         );
         println!(
             "  ribs / spacing   : {} / {:.2} m installed (max {:.2} m allowable)",
@@ -152,5 +157,38 @@ pub(super) fn print_tool_failures(result: &PipelineResult, quiet: bool) {
     println!("\n--- External tool failures ---");
     for failure in &failures {
         println!("  TOOL FAILURE: {failure}");
+    }
+}
+
+/// The FLOWUnsteady polar's outcome and the wake model it ran. The
+/// quasi-steady lattice is labelled reduced fidelity so it never reads as
+/// the free vortex-particle wake result.
+pub(super) fn print_flowunsteady_summary(result: &PipelineResult, quiet: bool) {
+    if quiet {
+        return;
+    }
+    let Some(flow) = result.flowunsteady_result.as_ref() else {
+        return;
+    };
+    println!("\n--- FLOWUnsteady analysis: {} ---", flow.status.as_str());
+    if let Some(model) = flow.wake_model() {
+        let fidelity = if flow.is_reduced_fidelity() {
+            "reduced fidelity"
+        } else {
+            "full fidelity"
+        };
+        println!("  wake model       : {model} ({fidelity})");
+    }
+    if let Some(polar) = flow.polar.as_ref() {
+        println!("  points           : {}", polar.points.len());
+        if let (Some(first), Some(last)) = (polar.points.first(), polar.points.last()) {
+            println!(
+                "  alpha / CL       : {:.2} deg {:.4} .. {:.2} deg {:.4}",
+                first.alpha_deg, first.lift_coefficient, last.alpha_deg, last.lift_coefficient
+            );
+        }
+    }
+    if let Some(note) = flow.error.as_deref() {
+        println!("  note             : {note}");
     }
 }

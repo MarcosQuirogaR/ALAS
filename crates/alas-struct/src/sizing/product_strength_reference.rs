@@ -43,6 +43,7 @@ fn install(sizing: &mut WingboxSizing, station: usize, area: f64, minimum_gauge:
 
 /// Size the caps of one station. Every quantity it reads or writes belongs to
 /// that station, so stations are independent at a fixed web gauge.
+#[allow(clippy::too_many_arguments)]
 pub(super) fn size_station_caps(
     sizing: &mut WingboxSizing,
     station: usize,
@@ -51,8 +52,9 @@ pub(super) fn size_station_caps(
     skin: &MaterialSpec,
     web: &MaterialSpec,
     cap: &MaterialSpec,
-) {
-    let panel = super::super::panel::CoverPanel::new(sizing, station);
+    _hint: Option<f64>,
+) -> Option<f64> {
+    let panel = super::super::panel::CoverPanel::new(sizing, station, skin);
     let web_allowable = bending_allowable_pa(web);
     // The cap search changes only the caps: spar depths, web gauge and
     // covers, hence the non-cap stiffness and the cover lever arm, are
@@ -64,6 +66,7 @@ pub(super) fn size_station_caps(
         .iter()
         .map(|spar| spar.h[station])
         .fold(0.0_f64, f64::max);
+    let cover_height = height.max(sizing.cover_depth_at(station));
     let utilization = |section: &WingboxSizing| {
         let ei = non_cap
             + section
@@ -78,9 +81,8 @@ pub(super) fn size_station_caps(
             .map(|spar| super::super::web::clear_height(spar, station))
             .fold(0.0_f64, f64::max);
         let flange = super::super::panel::flange_area_m2(section, station);
-        let cap_cover = (cap.e_pa / panel.allowable_pa(cap, flange))
-            .max(skin.e_pa / panel.allowable_pa(skin, flange))
-            * height;
+        let cap_cover = (cap.e_pa / panel.allowable_pa(cap, flange) * height)
+            .max(skin.e_pa / panel.skin_allowable_pa(skin, flange) * cover_height);
         0.5 * curvature * cap_cover.max(web.e_pa * clear_height / web_allowable)
     };
     install(sizing, station, 0.0, cfg.t_skin_min_m);
@@ -118,6 +120,7 @@ pub(super) fn size_station_caps(
             install(sizing, station, upper, cfg.t_skin_min_m);
         }
     }
+    None
 }
 
 /// The whole-box sizing with the plain cap bisection of this oracle.

@@ -52,12 +52,14 @@ pub(super) fn show_residual_plot(result: &CfdResults, ui: &mut Ui) {
             points: initial,
             color,
             dashed: false,
+            open_markers: false,
         });
         series.push(PlotSeries {
             name: format!("{field} final"),
             points: final_residual,
             color,
             dashed: true,
+            open_markers: false,
         });
     }
     show_residual_card(ui, &series);

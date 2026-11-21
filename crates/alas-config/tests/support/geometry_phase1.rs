@@ -1,16 +1,15 @@
 // SPDX-License-Identifier: AGPL-3.0-or-later
 // Copyright (C) 2026 Marcos Quiroga Rodriguez
 
-//! Preset geometry values moved by geometry phase 1 (2026-10-10 .. 2026-10-12), re-pinned 2026-10-13.
+//! Preset geometry values moved by geometry phase 1.
 //!
-//! The owner-accepted changes are the fuselage and nacelle lofts (V2 nacelles: engine offsets,
+//! The accepted changes are the fuselage and nacelle lofts (V2 nacelles: engine offsets,
 //! inlet positions and heights), the tail planforms fitted to the manufacturer drawings (root and
 //! tip chords, offsets from the tail tip, tip leading-edge stations, fin height), the wing station
 //! fits (root and break chords, break span fractions, tip heights including the raked tips) and
 //! the A320 sharklet span including the device (35.8 m published; the planar wing proper is
-//! 34.108 m). Each value was read from the failing parity run of the integration tip after the
-//! geometry freeze (`p2-repin-2026-10-13.md` lists old and new values with units: metres unless the
-//! path says otherwise, dimensionless fractions for `*_fraction`).
+//! 34.108 m). Units: metres unless the
+//! path says otherwise, dimensionless fractions for `*_fraction`.
 //!
 //! `moved(path, base)` keeps the frozen (reference) side of an earlier ledger entry and replaces
 //! only the current-preset side, or records the pair for paths that had no entry.

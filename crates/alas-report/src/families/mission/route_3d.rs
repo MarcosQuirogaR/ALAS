@@ -12,6 +12,7 @@
 
 use alas_route::route::Route;
 
+use super::add_halo_text;
 use crate::chart_kit::draw_colorbar;
 use crate::colormap::Colormap;
 use crate::families::mission::earth::{
@@ -30,6 +31,8 @@ const MIN_WAYPOINT_LABEL_SEPARATION_PX: f64 = 64.0;
 /// Room a waypoint label needs inside the globe viewport before it would run
 /// under the colorbar or the figure footnote.
 const LABEL_EDGE_MARGIN_PX: f64 = 28.0;
+/// Upper bound of the automatic regional zoom; equals the GUI's `MAX_ROUTE_ZOOM`.
+const MAX_AUTO_ZOOM: f64 = 4.0;
 
 fn normalize(point: Point3D) -> Point3D {
     let norm = (point[0] * point[0] + point[1] * point[1] + point[2] * point[2]).sqrt();
@@ -123,6 +126,39 @@ fn sampled_route(
     sampled
 }
 
+/// Largest angular distance, rad, from the route centre direction to any waypoint.
+fn route_angular_radius(route: &Route, centre_mirrored: Point3D) -> f64 {
+    route
+        .waypoints
+        .iter()
+        .filter(|w| w.lat.is_finite() && w.lon.is_finite())
+        .map(|w| {
+            let (lat, lon) = (w.lat.to_radians(), w.lon.to_radians());
+            let p = [lat.cos() * lon.cos(), lat.cos() * lon.sin(), lat.sin()];
+            let dot =
+                p[0] * centre_mirrored[0] + p[1] * centre_mirrored[1] + p[2] * centre_mirrored[2];
+            dot.clamp(-1.0, 1.0).acos()
+        })
+        .fold(0.0, f64::max)
+}
+
+/// Zoom that fits the route into about 60 % of the globe viewport half-height, within
+/// `[1, MAX_AUTO_ZOOM]` (the GUI caps the view zoom at the same value). Long routes
+/// keep the full-globe view; short routes get a regional view.
+fn route_auto_zoom(route: &Route, centre: Point3D) -> f64 {
+    let theta = route_angular_radius(route, centre);
+    if theta < 1e-6 {
+        return MAX_AUTO_ZOOM;
+    }
+    // Globe disk radius at zoom z is z * 0.45 * min(w, h) * R / span; the route
+    // half-extent on screen is that times sin(theta).
+    let unit_radius_px =
+        VIEWPORT.2.min(VIEWPORT.3) * 0.45 * EARTH_RADIUS_KM / GLOBE_FRAMING_SPAN_KM;
+    let target_px = 0.6 * 0.5 * VIEWPORT.2.min(VIEWPORT.3);
+    (target_px / (unit_radius_px * theta.min(std::f64::consts::FRAC_PI_2).sin()))
+        .clamp(1.0, MAX_AUTO_ZOOM)
+}
+
 /// Center an initial globe view on the route instead of an arbitrary global
 /// longitude. Orbit and named camera controls remain relative to this view.
 pub fn route_focused_camera(route: &Route) -> Camera3D {
@@ -148,7 +184,15 @@ pub fn route_focused_camera(route: &Route) -> Camera3D {
     Camera3D {
         elev_deg: latitude.to_degrees(),
         azim_deg: 90.0 - longitude.to_degrees(),
-        zoom: 1.0,
+        // Geographic (unmirrored) unit vector of the route centre.
+        zoom: route_auto_zoom(
+            route,
+            [
+                latitude.cos() * longitude.cos(),
+                -latitude.cos() * longitude.sin(),
+                latitude.sin(),
+            ],
+        ),
     }
 }
 
@@ -225,7 +269,7 @@ pub fn figure_mission_route_3d(
     if let Some((minimum, maximum)) = mass_range {
         draw_colorbar(
             &mut scene,
-            (770.0, 90.0, 12.0, 330.0),
+            (786.0, 90.0, 12.0, 330.0),
             Colormap::Jet,
             minimum / 1_000.0,
             maximum / 1_000.0,
@@ -235,6 +279,11 @@ pub fn figure_mission_route_3d(
     }
 
     let waypoint_xyz = route_to_globe_xyz(route, altitude_profile.unwrap_or(&[]));
+    let waypoint_mass: Option<Vec<f64>> = mass_profile
+        .filter(|values| {
+            values.len() == route.waypoints.len() && values.iter().all(|value| value.is_finite())
+        })
+        .map(<[f64]>::to_vec);
     let mut last_label_position: Option<[f64; 2]> = None;
     for (index, (waypoint, xyz)) in route.waypoints.iter().zip(waypoint_xyz).enumerate() {
         if camera.view_depth(xyz, center) < 0.0 {
@@ -248,17 +297,22 @@ pub fn figure_mission_route_3d(
             continue;
         }
         let marker = if index == 0 {
-            "#2ecc71"
+            Color::from_hex("#2ecc71")
         } else if index + 1 == route.waypoints.len() {
-            "#e74c3c"
+            Color::from_hex("#e74c3c")
+        } else if let (Some(mass), Some((minimum, maximum))) =
+            (waypoint_mass.as_ref().map(|m| m[index]), mass_range)
+        {
+            // Intermediate markers carry the same mass ramp as the route line.
+            Colormap::Jet.sample((mass - minimum) / (maximum - minimum).max(f64::EPSILON))
         } else {
-            "#d0d0d0"
+            Color::from_hex("#d0d0d0")
         };
         scene.add(SceneElement::Circle {
             center: projected,
             radius: 3.4,
-            fill: Some(Fill::new(Color::from_hex(marker))),
-            stroke: Some(Stroke::new(Color::from_hex(palette.spine), 0.8)),
+            fill: Some(Fill::new(marker)),
+            stroke: Some(Stroke::new(Color::from_hex("#f4f6fa"), 0.9)),
         });
         let is_endpoint = index == 0 || index + 1 == route.waypoints.len();
         let separated = last_label_position.is_none_or(|previous| {
@@ -277,16 +331,14 @@ pub fn figure_mission_route_3d(
         );
         if !waypoint.ident.is_empty() && label_fits && (is_endpoint || separated) {
             let vertical_offset = if index % 2 == 0 { -7.0 } else { 8.0 };
-            scene.add(SceneElement::Text {
-                text: waypoint.ident.clone(),
-                pos: [projected[0] + 5.0, projected[1] + vertical_offset],
-                font_size: 9.0,
-                color: Color::from_hex(palette.tick),
-                align: TextAlign::Left,
-                baseline: TextBaseline::Bottom,
-                angle_deg: 0.0,
-                bold: false,
-            });
+            add_halo_text(
+                &mut scene,
+                &waypoint.ident,
+                [projected[0] + 5.0, projected[1] + vertical_offset],
+                9.0,
+                TextAlign::Left,
+                TextBaseline::Bottom,
+            );
             last_label_position = Some(projected);
         }
     }
@@ -494,6 +546,30 @@ mod tests {
     /// The GUI's maximized-view cap, kept here so the figure is exercised at
     /// the closest zoom a user can reach.
     const MAX_ROUTE_ZOOM_UNDER_TEST: f64 = 4.0;
+
+    #[test]
+    fn short_routes_open_zoomed_and_long_routes_keep_the_whole_globe() {
+        let short = Route::new(
+            vec![
+                Waypoint::named(40.47, -3.56, "LEMD"),
+                Waypoint::named(39.55, 2.74, "LEPA"),
+            ],
+            RouteSource::GreatCircle,
+        );
+        let long = Route::new(
+            vec![
+                Waypoint::named(51.4700, -0.4543, "EGLL"),
+                Waypoint::named(-33.9, 151.2, "YSSY"),
+            ],
+            RouteSource::GreatCircle,
+        );
+        let (zs, zl) = (
+            route_focused_camera(&short).zoom,
+            route_focused_camera(&long).zoom,
+        );
+        assert!((zs - MAX_AUTO_ZOOM).abs() < 1e-9, "{zs}");
+        assert!((zl - 1.0).abs() < 1e-9, "{zl}");
+    }
 
     #[test]
     fn initial_camera_centers_the_visible_hemisphere_on_the_route() {

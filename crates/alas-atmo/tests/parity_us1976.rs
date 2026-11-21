@@ -7,7 +7,10 @@
 //! The fixture walks a spread of geometric altitudes covering every segment
 //! and both clamped extremes; see `golden/generators/gen_atmo_us1976.py` for
 //! why the altitudes are geometric rather than landing exactly on the
-//! table's own geopotential breaks. Compared at the `closed` tier: both
+//! table's own geopotential breaks. The reference implementation converts
+//! them to geopotential altitude with the mean Earth radius 6 371 000 m;
+//! this crate's model takes geopotential altitude, so the test applies that
+//! same conversion to the fixture's input. Compared at the `closed` tier: both
 //! implementations evaluate the same closed-form segment formula in the same
 //! order, so any difference has to be a handful of ulps of accumulated
 //! rounding, not a translation error.
@@ -39,6 +42,10 @@ struct Fixture {
     cases: Vec<Case>,
 }
 
+/// Mean Earth radius of the reference implementation's geometric to
+/// geopotential conversion, m (its `Earth.mean_radius`).
+const REFERENCE_MEAN_RADIUS_M: f64 = 6.371e6;
+
 #[test]
 fn every_quantity_matches_suave_us1976() {
     let fixture: Fixture = alas_testkit::load("atmo", "us1976");
@@ -46,7 +53,9 @@ fn every_quantity_matches_suave_us1976() {
 
     let mut comparison = Comparison::new("alas-atmo::us1976", Tier::Closed);
     for case in &fixture.cases {
-        let values = us1976_compute_values(case.altitude_m, case.temperature_deviation_k);
+        let geopotential_altitude_m =
+            case.altitude_m / (1.0 + case.altitude_m / REFERENCE_MEAN_RADIUS_M);
+        let values = us1976_compute_values(geopotential_altitude_m, case.temperature_deviation_k);
         let label = format!(
             "altitude={} temperature_deviation={}",
             case.altitude_m, case.temperature_deviation_k

@@ -31,14 +31,14 @@ mod figure_contract_tests;
 mod label_rows;
 mod scalars;
 #[cfg(test)]
-mod test_support;
+pub(in crate::families) mod test_support;
 
 pub mod control_surfaces;
 pub mod dynamic_modes;
 pub mod metrics;
 pub mod side_view;
 
-pub use control_surfaces::figure_control_surfaces;
+pub use control_surfaces::{figure_control_surfaces, figure_control_surfaces_sized};
 pub use dynamic_modes::figure_dynamic_modes;
 pub use metrics::figure_stability_metrics;
 pub use side_view::figure_stability_side_view;

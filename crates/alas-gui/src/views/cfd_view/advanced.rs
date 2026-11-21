@@ -79,7 +79,7 @@ fn show_setup_card(config: &mut CfdStudyConfig, ui: &mut Ui) {
                 ui.add_space(4.0);
                 ui.colored_label(
                     crate::theme::success_color(ui.visuals()),
-                    tr("Boundary-layer prisms are generated; qualify wall resolution with the solved y+ statistics in Results."),
+                    tr("Prisms on: check y+ in Results."),
                 )
                 .on_hover_text(tr(
                     "Boundary-layer prisms are generated. Treat the configured target as sizing input; use the solved y+ statistics in Results to qualify wall resolution.",
@@ -93,10 +93,11 @@ fn mesh_resolution_group(ui: &mut Ui, config: &mut CfdStudyConfig) {
     let mesh = &mut config.mesh;
     Grid::new("airfoil_cfd_mesh_resolution_grid")
         .num_columns(2)
-        .spacing([10.0, 5.0])
+        .spacing(crate::theme::space::GRID_SPACING)
         .show(ui, |ui| {
             ui.label(tr("Mesh preset"));
             ComboBox::from_id_salt("airfoil_cfd_mesh_preset")
+                .icon(crate::combo_icon::down_arrow)
                 .width(FIELD_WIDTH)
                 .selected_text(match mesh.preset {
                     MeshPreset::Coarse => tr("Coarse"),
@@ -124,7 +125,7 @@ fn domain_extent_group(ui: &mut Ui, config: &mut CfdStudyConfig) {
     let mesh = &mut config.mesh;
     Grid::new("airfoil_cfd_mesh_domain_grid")
         .num_columns(2)
-        .spacing([10.0, 5.0])
+        .spacing(crate::theme::space::GRID_SPACING)
         .show(ui, |ui| {
             ui.label(tr("Upstream extent [c]"));
             field(
@@ -155,10 +156,10 @@ fn domain_extent_group(ui: &mut Ui, config: &mut CfdStudyConfig) {
 
 fn prism_layer_group(ui: &mut Ui, config: &mut CfdStudyConfig) {
     let mesh = &mut config.mesh;
-    ui.checkbox(&mut mesh.boundary_layers, tr("Enable boundary layers"));
+    crate::checkbox::checkbox(ui, &mut mesh.boundary_layers, tr("Enable boundary layers"));
     Grid::new("airfoil_cfd_mesh_prism_grid")
         .num_columns(2)
-        .spacing([10.0, 5.0])
+        .spacing(crate::theme::space::GRID_SPACING)
         .show(ui, |ui| {
             ui.label(tr("Prism layers"));
             field_enabled(
@@ -179,8 +180,8 @@ fn prism_layer_group(ui: &mut Ui, config: &mut CfdStudyConfig) {
             field(
                 ui,
                 DragValue::new(&mut mesh.target_y_plus)
-                    .speed(1.0)
-                    .range(1.0..=300.0),
+                    .speed(0.05)
+                    .range(0.05..=300.0),
             );
             ui.end_row();
         });
@@ -194,7 +195,7 @@ fn solver_safeguard_group(ui: &mut Ui, config: &mut CfdStudyConfig) {
     let resolved = solver.effective_pressure_relative_tolerance(preset);
     Grid::new("airfoil_cfd_solver_safeguard_grid")
         .num_columns(2)
-        .spacing([10.0, 5.0])
+        .spacing(crate::theme::space::GRID_SPACING)
         .show(ui, |ui| {
             ui.label(tr("Residual tolerance"));
             scientific_field(
@@ -246,8 +247,7 @@ fn show_pressure_relative_tolerance(
     let mut automatic = solver.pressure_relative_tolerance.is_none();
     ui.label(tr("Pressure relative tolerance"))
         .on_hover_text(tr("Relative tolerance of the inner pressure solve. Leave automatic to take the measured per-preset value; an explicit override is always kept, including one loaded from an older study."));
-    if ui
-        .checkbox(&mut automatic, tr("Automatic"))
+    if crate::checkbox::checkbox(ui, &mut automatic, tr("Automatic"))
         .on_hover_text(tr("Automatic resolves per mesh preset from the values measured at all three shipped presets. Switching preset then changes the effective value; an explicit override does not follow the preset."))
         .changed()
     {
@@ -267,7 +267,7 @@ fn show_pressure_relative_tolerance(
             ui.monospace(physical_value(resolved))
                 .on_hover_text(tr_fields(
                     "Automatic for the {preset} preset.",
-                    &[("preset", format!("{preset:?}"))],
+                    &[("preset", mesh_preset_label(preset))],
                 ));
         }
     }
@@ -278,7 +278,7 @@ fn solver_limit_group(ui: &mut Ui, config: &mut CfdStudyConfig) {
     let solver = &mut config.solver;
     Grid::new("airfoil_cfd_solver_limit_grid")
         .num_columns(2)
-        .spacing([10.0, 5.0])
+        .spacing(crate::theme::space::GRID_SPACING)
         .show(ui, |ui| {
             ui.label(tr("Maximum SIMPLE iterations"));
             field(
@@ -306,6 +306,7 @@ fn solver_scheme_group(ui: &mut Ui, config: &mut CfdStudyConfig) {
     // The scheme name is long, so it gets its own full-column row: pairing it
     // with a label would push the editor past a narrow column.
     ComboBox::from_id_salt("airfoil_cfd_convection_scheme")
+        .icon(crate::combo_icon::down_arrow)
         .width((ui.available_width() - 8.0).clamp(140.0, 280.0))
         .selected_text(tr(solver.convection_scheme.as_str()))
         .show_ui(ui, |ui| {
@@ -318,7 +319,7 @@ fn solver_scheme_group(ui: &mut Ui, config: &mut CfdStudyConfig) {
         });
     Grid::new("airfoil_cfd_solver_scheme_grid")
         .num_columns(2)
-        .spacing([10.0, 5.0])
+        .spacing(crate::theme::space::GRID_SPACING)
         .show(ui, |ui| {
             ui.label(tr("Upwind startup iterations"));
             field_enabled(
@@ -328,4 +329,13 @@ fn solver_scheme_group(ui: &mut Ui, config: &mut CfdStudyConfig) {
             );
             ui.end_row();
         });
+}
+
+/// Translated name of a mesh preset.
+pub(super) fn mesh_preset_label(preset: MeshPreset) -> String {
+    match preset {
+        MeshPreset::Coarse => tr("Coarse"),
+        MeshPreset::Medium => tr("Medium"),
+        MeshPreset::Fine => tr("Fine"),
+    }
 }

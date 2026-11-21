@@ -39,6 +39,34 @@ impl Mses {
 
         let mut outcome = SweepOutcome::default();
         let mut recovery = RequestedPolarRecovery::new(alphas);
+        let run = self.sweep_points(
+            dir,
+            alphas,
+            reynolds,
+            mach,
+            cancel,
+            &mut outcome,
+            &mut recovery,
+        );
+        Ok(conclude_sweep(run, alphas, recovery, outcome))
+    }
+
+    /// The point loop of [`Self::solve_sweep`]: solves the requested angles
+    /// in order into `outcome` and `recovery`. An error is a solver tool
+    /// failure at the angle `recovery.visited_count` last reached; the points
+    /// converged before it stay in `recovery`.
+    #[allow(clippy::too_many_arguments)]
+    fn sweep_points(
+        &self,
+        dir: &Path,
+        alphas: &[f64],
+        reynolds: f64,
+        mach: f64,
+        cancel: Option<&AtomicBool>,
+        outcome: &mut SweepOutcome,
+        recovery: &mut RequestedPolarRecovery,
+    ) -> Result<(), MsesFailure> {
+        let first = alphas[0];
         // Bounded per-point retry flags. Never initialize retry at an arbitrary
         // 0 deg or center angle; retry only from clean target-angle initialization
         // or short bounded continuation from the last known converged state.
@@ -217,7 +245,7 @@ impl Mses {
                             mach,
                             cancel,
                             &mut outcome.solver_attempts,
-                            Some(&mut recovery),
+                            Some(&mut *recovery),
                         )? {
                             BridgeOutcome::Reached(reached) if reached == last_alpha => {
                                 next_initialization = format!(
@@ -257,7 +285,7 @@ impl Mses {
                             mach,
                             cancel,
                             &mut outcome.solver_attempts,
-                            Some(&mut recovery),
+                            Some(&mut *recovery),
                         )? {
                             BridgeOutcome::Reached(reached) if reached == last_alpha => {
                                 next_initialization = format!(
@@ -341,7 +369,7 @@ impl Mses {
                     mach,
                     cancel,
                     &mut outcome.solver_attempts,
-                    Some(&mut recovery),
+                    Some(&mut *recovery),
                 )? {
                     BridgeOutcome::Reached(reached) if reached == alpha => {
                         next_initialization = format!(
@@ -372,10 +400,30 @@ impl Mses {
             }
             index += 1;
         }
-
-        recovery.finish(&mut outcome);
-        Ok(outcome)
+        Ok(())
     }
+}
+
+/// The sweep's outcome from its point loop: on a solver tool failure (a
+/// timeout, a failed launch, an unreadable output) the points converged
+/// before it are kept and the stop is recorded, where and why, instead of
+/// discarding the sweep; one late failure no longer voids the earlier angles.
+fn conclude_sweep(
+    run: Result<(), MsesFailure>,
+    alphas: &[f64],
+    recovery: RequestedPolarRecovery,
+    mut outcome: SweepOutcome,
+) -> SweepOutcome {
+    if let Err(failure) = run {
+        let at = recovery.visited_count.saturating_sub(1);
+        outcome.stopped = Some(MsesSweepStop {
+            alpha_deg: alphas.get(at).copied().unwrap_or(f64::NAN),
+            status: failure.status,
+            message: failure.message,
+        });
+    }
+    recovery.finish(&mut outcome);
+    outcome
 }
 
 #[cfg(test)]

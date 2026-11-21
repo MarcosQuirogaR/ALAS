@@ -8,9 +8,11 @@
 //! root/break/tip loft. With a profile, every station gets a loft section of
 //! its own whose leading-edge x, chord and twist lie on the straight planform
 //! panels (linear in span between the existing sections), whose height is the
-//! dihedral polyline and whose section is the root-kink-tip blend scaled to
-//! the thickness profile.
+//! dihedral polyline and whose section is the root-kink-tip blend (or the
+//! section law's section, where the wing names sections) scaled to the
+//! thickness profile.
 
+use super::section_law::Sections;
 use super::{AircraftBuilder, BuildError};
 use crate::aircraft::airfoil::Airfoil;
 use crate::aircraft::wing::WingXSec;
@@ -21,9 +23,9 @@ use alas_config::{TransportPlanform, WingHeights};
 const SAME_STATION: f64 = 5.0e-4; // equals `alas_config::STATION_SPAN_TOLERANCE`
 
 impl AircraftBuilder {
-    /// The loft section at the start of a swept-back tip rake: leading edge,
-    /// chord and height from the planform, twist linear from the kink to the
-    /// tip and the root-kink-tip section blend.
+    /// The loft section at an outboard station (a tip-rake start, a trailing-edge
+    /// break, an edge station): leading edge, chord and height from the planform,
+    /// twist linear from the kink to the tip and the root-kink-tip section blend.
     pub(super) fn tip_rake_section(
         &self,
         dv: &alas_config::DesignVector,
@@ -54,26 +56,32 @@ impl AircraftBuilder {
         ))
     }
 
-    /// Apply the thickness profile to the defining sections and insert the
-    /// profile stations. A no-op when both profiles are empty.
+    /// Give the defining sections the section law's sections (when the wing
+    /// names sections), apply the thickness profile to them and insert the
+    /// profile and section stations. A no-op when all three lists are empty.
     pub(super) fn apply_wing_profiles(
         &self,
         planform: &TransportPlanform,
         heights: &WingHeights,
-        root_section: &Airfoil,
-        tip_airfoil: &Airfoil,
+        (root_section, tip_airfoil, law): Sections<'_>,
         xsecs: &mut Vec<WingXSec>,
     ) -> Result<(), BuildError> {
         let wing = &self.geometry.wing;
-        if wing.dihedral_stations.is_empty() && wing.thickness_stations.is_empty() {
+        if law.is_none() && wing.dihedral_stations.is_empty() && wing.thickness_stations.is_empty()
+        {
             return Ok(());
         }
         let kink_fraction = planform.kink.span_fraction;
         wing.validate_profiles(kink_fraction)?;
+        if let Some(law) = law {
+            law.apply(planform.tip.y_m, xsecs);
+        }
         let tip_y_m = planform.tip.y_m;
         let thickness_active = !wing.thickness_stations.is_empty();
         let base_at = |eta: f64| -> Result<Airfoil, BuildError> {
-            let base = if eta <= kink_fraction + SAME_STATION {
+            let base = if let Some(law) = law {
+                law.at(eta)
+            } else if eta <= kink_fraction + SAME_STATION {
                 root_section.clone()
             } else {
                 let blend = (eta - kink_fraction) / (1.0 - kink_fraction);
@@ -209,7 +217,15 @@ mod tests {
             .expect("profiled wing builds");
         let root_ratio = max_thickness(&thick.wings[0].xsecs[0].airfoil)
             / max_thickness(&plain.wings[0].xsecs[0].airfoil);
-        assert!((root_ratio - 1.15).abs() < 5e-3, "{root_ratio}");
+        // The centreline section copies the side-of-body section, so it
+        // carries the thickness scale of the side-of-body station: the 1.15 root and 0.85 kink
+        // scales interpolated at the side-of-body span fraction.
+        let eta = GeometryConfig::default()
+            .wing
+            .side_of_body_span_fraction
+            .expect("side of body");
+        let at_side_of_body = 1.15 + (0.85 - 1.15) * eta / 0.37;
+        assert!((root_ratio - at_side_of_body).abs() < 5e-3, "{root_ratio}");
         let kink_y = GeometryConfig::default()
             .wing
             .transport_planform(&design)
@@ -336,10 +352,19 @@ mod tests {
                 .build(Some(&preset.design_vector), false)
                 .unwrap_or_else(|error| panic!("{}: {error}", preset.name));
             let wing = &airplane.wings[0];
-            let semispan = wing.xsecs.last().expect("tip").xyz_le[1];
+            // The extents the mesh allocator uses (lofted length of each section), against the
+            // allocator's own floor: the same constant is the single source of truth.
+            let extent = |pair: &[crate::aircraft::wing::WingXSec]| {
+                (pair[1].xyz_le[1] - pair[0].xyz_le[1]).hypot(pair[1].xyz_le[2] - pair[0].xyz_le[2])
+            };
+            let total: f64 = wing.xsecs.windows(2).map(extent).sum();
             for pair in wing.xsecs.windows(2) {
-                let gap = (pair[1].xyz_le[1] - pair[0].xyz_le[1]) / semispan;
-                assert!(gap > 0.005, "{}: panel of {gap} semispans", preset.name);
+                let gap = extent(pair) / total;
+                assert!(
+                    gap > crate::aircraft::spanwise::MIN_PANEL_EXTENT_FRACTION - 1.0e-9,
+                    "{}: panel of {gap} of the lofted extent",
+                    preset.name
+                );
             }
         }
     }

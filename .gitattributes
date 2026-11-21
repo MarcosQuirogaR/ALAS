@@ -1,3 +1,18 @@
+# Text files are stored with LF endings and checked out with LF on every
+# platform, so a hash, an include_str! comparison or a split on "\n" behaves
+# the same on the Windows gate and on Linux. Paths that must stay byte-for-byte
+# are marked -text below (later rules win). Existing files are not renormalised
+# by this rule.
+* text=auto eol=lf
+
+# Private working material never enters a source archive made with
+# `git archive` (including the archives GitHub generates for tags).
+docs/research export-ignore
+docs/research/** export-ignore
+
+# Indexed with CRLF endings; keep the bytes as stored.
+docs/flops-mass-sources.json -text
+
 # The Selig airfoil corpus stores each entry's bytes verbatim, including the
 # archive's own CRLF line endings, behind plain-LF `@stem` delimiter lines.
 # Line-ending normalization on checkin/checkout (core.autocrlf) would rewrite
@@ -13,3 +28,7 @@ crates/alas-aero/tests/fixtures/perf_aero/*.txt -text
 # their digests match the upstream Recherche Data Gouv files (docs/data/cado).
 docs/data/cado/*.csv -text
 docs/data/cado/DATABASE_LICENSE.txt -text
+
+# The NASTRAN-95 patch is applied with `git apply` on Linux; keep its bytes verbatim.
+tools/nastran95/*.patch -text
+tools/nastran95/*.sh -text

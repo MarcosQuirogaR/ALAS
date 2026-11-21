@@ -77,6 +77,7 @@ fn gradient_table() {
             mach,
             departure.elevation_m,
             departure.isa_deviation_c,
+            crate::mdo::drag_table::high_lift_lift_shift(perf.cl_max_to, perf.cl_max_clean),
         );
         let k = (cd - cd0) / (cl * cl);
         let ar = outcome.plane.b_ref * outcome.plane.b_ref / s_ref;
@@ -175,6 +176,11 @@ fn preset_terms(preset: &str) -> (GradientInputs, f64, f64) {
             s_ref_m2: s_ref,
             drag: &outcome.sized.fuel_artifacts.drag,
             installed_tw_sls: installed_tw,
+            aspect_ratio: super::net_path::climb_out_aspect_ratio(
+                &resolved,
+                outcome.plane.b_ref,
+                outcome.plane.s_ref,
+            ),
         },
     );
     let perf = &resolved.performance;
@@ -188,9 +194,6 @@ fn preset_terms(preset: &str) -> (GradientInputs, f64, f64) {
         perf,
     );
     let drag = &outcome.sized.fuel_artifacts.drag;
-    let atmosphere =
-        alas_atmo::us1976_compute_values(departure.elevation_m, departure.isa_deviation_c);
-    let mach = speeds.v2_ms / atmosphere.speed_of_sound_m_s;
     let model = EngineOutModel::new(
         &resolved,
         Some(YawAirframe {
@@ -206,13 +209,19 @@ fn preset_terms(preset: &str) -> (GradientInputs, f64, f64) {
         drag.cd_at_atmosphere(0.0, m, h, d)
     });
     let cl = oei_cl_at_v2(perf.cl_max_to, evidence.condition.v2_over_vstall).unwrap();
-    let cd0 = drag.cd_at_atmosphere(0.0, mach, departure.elevation_m, departure.isa_deviation_c);
-    let cd = drag.cd_airport_base_at_atmosphere(
-        cl,
-        mach,
-        departure.elevation_m,
-        departure.isa_deviation_c,
+    // The V2 climb-out locus: one drag coefficient that contains the flaps and,
+    // for these wing-mounted twins, the asymmetry of the failed engine; its
+    // windmilling drag stays a separate term.
+    let polar = super::net_path::V2ClimbOutPolar::of(
+        &resolved,
+        super::net_path::climb_out_aspect_ratio(
+            &resolved,
+            outcome.plane.b_ref,
+            outcome.plane.s_ref,
+        ),
     );
+    let cd = polar.cd(cl, perf.cl_max_to, true).unwrap();
+    let condition = polar.engine_out_condition(evidence.condition);
     let installed_tw =
         outcome.n_engines as f64 * outcome.static_thrust_kn * 1_000.0 / (mass * 9.806_65);
     let rows =
@@ -226,13 +235,13 @@ fn preset_terms(preset: &str) -> (GradientInputs, f64, f64) {
         GradientInputs {
             n_engines: outcome.n_engines,
             installed_tw_sls: installed_tw,
-            thrust_ratio: evidence.condition.condition_to_sls_thrust_ratio.unwrap(),
+            thrust_ratio: condition.condition_to_sls_thrust_ratio.unwrap(),
             cl,
-            cd0_clean: cd0,
-            induced_factor: (cd - cd0) / (cl * cl),
-            flap_delta_cd: perf.oei_climb_delta_cd,
-            windmilling_cd: evidence.condition.windmilling_cd.unwrap(),
-            trim_cd: evidence.condition.asymmetric_trim_cd.unwrap(),
+            cd0_clean: cd,
+            induced_factor: 0.0,
+            flap_delta_cd: 0.0,
+            windmilling_cd: condition.windmilling_cd.unwrap(),
+            trim_cd: condition.asymmetric_trim_cd.unwrap(),
         },
         required_sls,
         far25_oei_gradient(outcome.n_engines).unwrap(),
@@ -368,6 +377,11 @@ fn improved_climb_table() {
                 s_ref_m2: s_ref,
                 drag: &outcome.sized.fuel_artifacts.drag,
                 installed_tw_sls: installed_tw,
+                aspect_ratio: super::net_path::climb_out_aspect_ratio(
+                    &resolved,
+                    outcome.plane.b_ref,
+                    outcome.plane.s_ref,
+                ),
             },
         );
         let sea_level = Airport::custom("ISA sea level", 0.0, 10_000.0, 10_000.0, 0.0, 0.0, 0.0);
@@ -452,7 +466,7 @@ fn toc_probe() {
 
 /// Improved climb on the B787-9 candidate with an installed T/W that the best-climb
 /// speed can reach (0.265, between the 0.2583 required at the best speed and the 0.2721 at
-/// the 1.13 VSR schedule; re-pinned by lane field lengths, 2026-10-17, by probe: the
+/// the 1.13 VSR schedule: the
 /// CS 25.107 schedule and the capped BPR 8 take-off chart move both): the lowest
 /// meeting speed is resolved into the configuration, raises V2 and charges the jet
 /// field length by the square of the speed ratio.
@@ -484,12 +498,29 @@ fn an_attainable_gradient_resolves_the_lowest_speed_and_charges_the_field() {
         s_ref_m2: s_ref,
         drag: &outcome.sized.fuel_artifacts.drag,
         installed_tw_sls,
+        aspect_ratio: super::net_path::climb_out_aspect_ratio(
+            &resolved,
+            outcome.plane.b_ref,
+            outcome.plane.s_ref,
+        ),
     };
-    // 0.2650 is reachable only above the schedule speed.
-    let (improved, selection) = resolve_improved_climb(&resolved, &inputs(0.2650));
+    // The installed T/W is the midpoint of the requirement at the schedule speed and at
+    // the best-climb speed (read from the model itself, so a drag-model change moves the
+    // pin with it): reachable only above the schedule speed.
+    let at_schedule = resolve_improved_climb(&resolved, &inputs(10.0))
+        .1
+        .unwrap()
+        .required_at_schedule;
+    let best = resolve_improved_climb(&resolved, &inputs(0.01))
+        .1
+        .unwrap()
+        .required;
+    assert!(best < at_schedule, "{best} {at_schedule}");
+    let attainable = 0.5 * (best + at_schedule);
+    let (improved, selection) = resolve_improved_climb(&resolved, &inputs(attainable));
     let selection = selection.unwrap();
     assert!(selection.improved && selection.meets, "{selection:?}");
-    assert!(selection.required <= 0.2650 && selection.required > 0.2649);
+    assert!(selection.required <= attainable && selection.required > attainable - 1e-4);
     let x = selection.v2_over_vsr;
     let schedule = selection.schedule_v2_over_vsr;
     assert!((schedule - 1.13).abs() < 1e-12, "{schedule}");
@@ -524,10 +555,14 @@ fn an_attainable_gradient_resolves_the_lowest_speed_and_charges_the_field() {
     assert!(kept.performance.improved_climb_v2_over_vsr.is_none());
     let mut off = resolved.clone().into_owned();
     off.performance.improved_climb_v2 = false;
-    let (same, selection) = resolve_improved_climb(&off, &inputs(0.2650));
+    let (same, selection) = resolve_improved_climb(&off, &inputs(attainable));
     assert!(selection.is_none() && same.performance.improved_climb_v2_over_vsr.is_none());
-    let (missed, selection) = resolve_improved_climb(&resolved, &inputs(0.2350));
+    let (missed, selection) = resolve_improved_climb(&resolved, &inputs(0.5 * best));
     let selection = selection.unwrap();
     assert!(selection.improved && !selection.meets);
-    assert!(missed.performance.improved_climb_v2_over_vsr.is_none());
+    // The best-climb speed is flown and charged, continuous with the meeting case.
+    assert_eq!(
+        missed.performance.improved_climb_v2_over_vsr,
+        Some(selection.v2_over_vsr)
+    );
 }

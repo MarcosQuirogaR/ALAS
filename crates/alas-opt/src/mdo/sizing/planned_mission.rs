@@ -97,6 +97,38 @@ pub fn solve_planned_dispatch(
     max_iterations: usize,
     tolerance_kg: f64,
 ) -> Result<DispatchSolution, FreezeError> {
+    solve_planned_dispatch_with_plan(
+        model,
+        zero_fuel_mass_kg,
+        initial_guess_kg,
+        range_m,
+        policy,
+        limits,
+        max_iterations,
+        tolerance_kg,
+    )
+    .map(|(solution, _)| solution)
+}
+
+/// [`solve_planned_dispatch`], also returning the model the returned solution was flown on: the
+/// model carrying the plan frozen at the dispatch's last planning mass (the closed mass to within
+/// `tolerance_kg`), or the model as given where no plan was made. A caller that prices more trips
+/// on the same plan (the declared-level check) takes this model instead of freezing a second plan.
+///
+/// # Errors
+///
+/// As [`solve_planned_dispatch`].
+#[allow(clippy::too_many_arguments)] // the dispatch solver's own inputs
+pub fn solve_planned_dispatch_with_plan(
+    model: &SegmentMissionModel,
+    zero_fuel_mass_kg: f64,
+    initial_guess_kg: f64,
+    range_m: f64,
+    policy: &FuelPolicyConfig,
+    limits: &DispatchLimits,
+    max_iterations: usize,
+    tolerance_kg: f64,
+) -> Result<(DispatchSolution, SegmentMissionModel), FreezeError> {
     let carried = covers(model, range_m);
     let altitude_policy = model.profile.cruise_altitude_policy;
     let mut planning_mass_kg = initial_guess_kg;
@@ -115,8 +147,8 @@ pub fn solve_planned_dispatch(
                 tolerance_kg,
             )
         };
-        let solution = if carried {
-            solve(model, planning_mass_kg)
+        let (solution, flown) = if carried {
+            (solve(model, planning_mass_kg), model.clone())
         } else {
             match model.solve_on_descending_plans(
                 planning_mass_kg,
@@ -125,17 +157,17 @@ pub fn solve_planned_dispatch(
                 &altitude_policy,
                 solve,
             ) {
-                Ok((_, solution, planned_at_kg)) => {
+                Ok((planned, solution, planned_at_kg)) => {
                     // The plan is the one made at `planned_at_kg`, lighter than
                     // the planning mass when no plan can be made there.
                     planning_mass_kg = planned_at_kg;
-                    solution
+                    (solution, planned)
                 }
                 Err(
                     error @ (FreezeError::StepUnconverged { .. }
                     | FreezeError::Fuel(FuelModelError::Cancelled)),
                 ) => return Err(error),
-                Err(FreezeError::Fuel(_)) => solve(model, planning_mass_kg),
+                Err(FreezeError::Fuel(_)) => (solve(model, planning_mass_kg), model.clone()),
             }
         };
         let settled = matches!(
@@ -149,7 +181,7 @@ pub fn solve_planned_dispatch(
             || pass >= PLANNED_DISPATCH_PASSES
             || (solution.takeoff_mass_kg - planning_mass_kg).abs() <= tolerance_kg
         {
-            return Ok(solution);
+            return Ok((solution, flown));
         }
         planning_mass_kg = solution.takeoff_mass_kg;
     }
@@ -259,7 +291,7 @@ mod tests {
             design_mission.takeoff_mass_kg,
             sized.dispatch.takeoff_mass_kg
         );
-        // Geometry round 2 (wing lane) lowered the A340 cruise drag (CD0 0.0200 to 0.0189 at
+        // Geometry round 2 (wing) lowered the A340 cruise drag (CD0 0.0200 to 0.0189 at
         // the same lift), so the optimum-step plan first climbs in steps at twice the
         // design range (no step at 1.5 to 1.9 times it).
         let range_m = 2.0 * sized.design_range_m;

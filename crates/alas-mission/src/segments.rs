@@ -32,8 +32,8 @@
 //! `Cruise.Constant_Speed_Constant_Altitude` and
 //! `Descent.Constant_Speed_Constant_Rate`, over the `Unknown_Throttle` process
 //! chain the first and third share and the second reproduces almost exactly.
-//! The one structural difference between them, beyond which `initialize`
-//! runs, is that a cruise segment's iterate chain omits `update_acceleration`.
+//! A cruise segment's iterate chain omits `update_acceleration` unless it is a level
+//! speed change (which has a `speed_profile`).
 //! The frozen compatibility path also retains the historical horizontal-force
 //! magnitude residual, while product missions use the signed longitudinal
 //! component so the root finder can distinguish thrust surplus from deficit.
@@ -42,15 +42,16 @@
 //! battery behind a turbofan), `Weights.update_weights`' additional-fuel
 //! branch (a turbofan network reports no additional fuel rate),
 //! `Noise.compute_noise` (no noise analysis is attached, so it returns
-//! immediately), `aero_derivatives` (`mission analysis model.Methods.skip`) and
-//! `update_stability` (it runs, and reports nothing this mission reads).
+//! immediately), `aero_derivatives` (skipped) and `update_stability` (reports nothing read).
 
 pub mod analyses;
+pub mod blend;
 pub mod common;
 pub mod conditions;
 pub mod drag;
 pub mod error;
 pub mod frames;
+mod initial;
 
 pub use analyses::{AeroSolution, LegacyTurbofanCompatibility, MissionAnalyses};
 pub use conditions::{Conditions, Initials, Matrix3, Vector3};
@@ -59,6 +60,18 @@ pub use error::SegmentError;
 
 use crate::numerics::Numerics;
 use alas_config::mission::{SpeedCaps, SpeedReference};
+pub use blend::{
+    acceleration_climb_altitude_gain_m, along_path_speed, energy_share_factor, profile_mean_speed,
+    profile_speed, ramp_speed, toward_exit_speed, PathEnds,
+};
+use initial::{INITIAL_CLIMB_BODY_ANGLE_RAD, INITIAL_CRUISE_BODY_ANGLE_RAD, INITIAL_THROTTLE};
+
+/// Smallest vertical rate a rating-limited climb is evaluated at, m/s (about 20 ft/min): the
+/// solver's trial rate is held above it so the climb keeps a finite, well-conditioned duration
+/// (`dt/dtau = dz / v_z`; a rate of zero is a level leg). A numerical floor, not a performance
+/// limit: it sits below the 100 ft/min residual climb of a service ceiling, so a point held on it
+/// is a point past the ceiling for the caller whatever its value.
+pub(crate) const MIN_RATED_CLIMB_RATE_M_S: f64 = 0.1;
 
 /// Which of the three trajectories a segment flies.
 #[derive(Debug, Clone, Copy, PartialEq)]
@@ -132,6 +145,35 @@ pub struct SegmentSpec {
     pub temperature_deviation_k: f64,
     /// How many control points the segment is discretized on. Sixteen.
     pub number_control_points: usize,
+    /// `false` is the product envelope: the command is a fraction of the maximum-climb force and
+    /// its ceiling is 1. `true` marks a take-off-rated leg: its command is a share of the take-off
+    /// rating's force at each point (1 is `Rating(TakeoffGoAround)`), force and fuel are the deck's
+    /// at that share, and its ceiling is 1 too (see `common::update_thrust`).
+    pub takeoff_rated: bool,
+    /// A [`SegmentKind::Climb`] flown at the maximum-climb rating: the command is 1 at every
+    /// point and the vertical rate at each point is settled on it (`solve::converge_root`), so
+    /// the rate comes out of the specific excess power `(T - D) V / W` at the scheduled speed
+    /// (the total-energy climb of BADA practice) instead of being demanded. `climb_rate_m_s` is
+    /// then only the starting guess and the mean rate the leg is planned with. `false` elsewhere.
+    pub rating_limited: bool,
+    /// Drag coefficient added to the clean-configuration total on the
+    /// reference area for a leg flown with flaps, slats or gear extended
+    /// (take-off and approach). Zero for a clean leg, the default of every
+    /// recorded parity fixture.
+    pub configuration_delta_cd: f64,
+    /// Sustained load factor: lift is this times the weight (1 on a straight leg;
+    /// defined on a level leg only, any other leg is refused).
+    pub load_factor: f64,
+    /// Speed, m/s, a climb or descent starts at (zero: its own schedule), reaching
+    /// the schedule along its path by the total-energy model (see [`blend`]).
+    pub entry_speed_m_s: f64,
+    /// Speed, m/s, a climb or descent ends at (zero: its own schedule), the same
+    /// energy relation read backwards from the end.
+    pub exit_speed_m_s: f64,
+    /// A level speed change: rows `[fraction of the duration, speed m/s]` from 0
+    /// to 1 (empty: one speed, `air_speed_m_s`); the duration follows from the
+    /// distance and the profile's mean.
+    pub speed_profile: Vec<[f64; 2]>,
 }
 
 /// One mission leg: its schedule, its discretization and its state.
@@ -152,19 +194,11 @@ pub struct Segment {
     /// The two force residuals at each control point, as
     /// `[horizontal, vertical]`.
     pub residuals: Vec<[f64; 2]>,
+    /// The vertical rate at each control point of a rating-limited climb, m/s, positive up
+    /// (empty on any other leg): what `solve::converge_root` settles so that the command is
+    /// the rating at every point.
+    pub rate_profile_m_s: Vec<f64>,
 }
-
-/// The throttle every segment's unknowns start at, `ones_row(1) * 0.5`.
-const INITIAL_THROTTLE: f64 = 0.5;
-
-/// The body angle a climb or descent segment's unknowns start at, radians:
-/// `ones_row(1) * 3.0 * Units.degrees`.
-const INITIAL_CLIMB_BODY_ANGLE_RAD: f64 = 3.0 * std::f64::consts::PI / 180.0;
-
-/// The body angle a cruise segment's unknowns start at, radians:
-/// `ones_row(1) * 1.0 * Units.deg`. A different number from the climb's, and
-/// the starting point is what MINPACK's whole path is a function of.
-const INITIAL_CRUISE_BODY_ANGLE_RAD: f64 = std::f64::consts::PI / 180.0;
 
 impl Segment {
     /// Build a segment and run its `initialize` process.
@@ -178,8 +212,10 @@ impl Segment {
     /// # Errors
     ///
     /// [`SegmentError::Discretization`] if the operators could not be built,
-    /// and [`SegmentError::NoStartingAltitude`] if the segment defers its
-    /// starting altitude to a predecessor it does not have.
+    /// [`SegmentError::NoStartingAltitude`] if the segment defers its starting
+    /// altitude to a predecessor it does not have, and
+    /// [`SegmentError::InvalidLoadFactor`] for a load factor that is not at
+    /// least 1 or is not on a level leg.
     pub fn new(spec: SegmentSpec, initials: Option<Initials>) -> Result<Self, SegmentError> {
         let points = spec.number_control_points;
         let mut numerics = Numerics {
@@ -187,19 +223,32 @@ impl Segment {
             ..Numerics::default()
         };
         numerics.initialize_differentials_dimensionless()?;
+        error::check_spec_load_factor(&spec)?;
 
         let initial_body_angle = match spec.kind {
             SegmentKind::Cruise { .. } => INITIAL_CRUISE_BODY_ANGLE_RAD,
             _ => INITIAL_CLIMB_BODY_ANGLE_RAD,
         };
 
+        let (throttle, body_angle) = if spec.takeoff_rated {
+            common::TAKEOFF_RATED_START
+        } else {
+            (INITIAL_THROTTLE, initial_body_angle)
+        };
+        let rate_profile_m_s = match spec.kind {
+            SegmentKind::Climb { climb_rate_m_s, .. } if spec.rating_limited => {
+                vec![climb_rate_m_s; points]
+            }
+            _ => Vec::new(),
+        };
         let mut segment = Self {
+            rate_profile_m_s,
             spec,
             numerics,
             conditions: Conditions::expanded(points),
             initials,
-            throttle: vec![INITIAL_THROTTLE; points],
-            body_angle_rad: vec![initial_body_angle; points],
+            throttle: vec![throttle; points],
+            body_angle_rad: vec![body_angle; points],
             residuals: vec![[0.0; 2]; points],
         };
         segment.initialize_conditions()?;
@@ -234,7 +283,10 @@ impl Segment {
                 let start = self.starting_altitude(altitude_start_m)?;
                 // z points down, so a *climb* rate is a negative z velocity.
                 self.lay_down_ramp(&nodes, start, altitude_end_m, air_speed, -climb_rate_m_s)?;
-                self.update_differentials_altitude();
+                common::update_differentials_altitude(
+                    &mut self.conditions,
+                    &self.numerics.dimensionless,
+                );
             }
             SegmentKind::Descent {
                 altitude_start_m,
@@ -244,7 +296,10 @@ impl Segment {
                 error::check_vertical_rate(&self.spec.tag, "descent", descent_rate_m_s)?;
                 let start = self.starting_altitude(altitude_start_m)?;
                 self.lay_down_ramp(&nodes, start, altitude_end_m, air_speed, descent_rate_m_s)?;
-                self.update_differentials_altitude();
+                common::update_differentials_altitude(
+                    &mut self.conditions,
+                    &self.numerics.dimensionless,
+                );
             }
             SegmentKind::Cruise {
                 altitude_m,
@@ -255,11 +310,20 @@ impl Segment {
                 // altitude, so it sets its own time here and has no
                 // `update_differentials_altitude` step.
                 let initial_time = self.conditions.time_s[0];
-                let final_time = distance_m / air_speed + initial_time;
+                let profile = self.spec.speed_profile.clone();
+                let row = &self.numerics.dimensionless.integrate[nodes.len() - 1];
+                let mean_speed = blend::profile_mean_speed(&profile, &nodes, row, air_speed);
+                // A leg with a speed profile differentiates its velocity in
+                // time, so it needs a positive span; a constant-speed leg of
+                // zero distance is a leg of zero duration.
+                let differentiated = !profile.is_empty();
+                error::check_cruise_span(&self.spec.tag, distance_m, mean_speed, differentiated)?;
+                let final_time = distance_m / mean_speed + initial_time;
                 for (point, &node) in nodes.iter().enumerate() {
                     self.conditions.altitude_m[point] = altitude;
                     self.conditions.position_vector_m[point][2] = -altitude;
-                    self.conditions.velocity_vector_m_s[point][0] = air_speed;
+                    self.conditions.velocity_vector_m_s[point][0] =
+                        blend::profile_speed(&profile, node, air_speed);
                     self.conditions.time_s[point] =
                         node * (final_time - initial_time) + initial_time;
                 }
@@ -273,18 +337,12 @@ impl Segment {
     /// The horizontal velocity is what is left of the airspeed once the
     /// vertical component is taken out of it, so a steeper climb at the same
     /// airspeed covers less ground.
-    ///
-    /// In [`SpeedReference::CalibratedAirspeed`] mode, `air_speed_m_s` is
-    /// resolved to a true airspeed independently *at each control point's own
-    /// altitude*, against the real ambient pressure and temperature there
-    /// ([`alas_atmo::us1976_compute_values`] at this segment's own ISA
-    /// deviation), so the true airspeed, and with it the horizontal
-    /// velocity and, through [`crate::segments::frames::update_acceleration`]
-    /// downstream, the along-track acceleration the residual solve sees,
-    /// varies continuously along the ramp instead of being one constant
-    /// value for the whole segment. This is the genuine per-live-altitude
-    /// resolution the mission-scope integration calls for, not a
-    /// several-constant-sub-segment approximation of it.
+    /// In [`SpeedReference::CalibratedAirspeed`] mode, `air_speed_m_s` is resolved
+    /// to a true airspeed *at each control point's own altitude* (real ambient
+    /// pressure and temperature, this segment's ISA deviation), so the true
+    /// airspeed, the horizontal velocity and the along-track acceleration the
+    /// residual solve sees vary continuously along the ramp.
+    /// An `entry_speed_m_s` is changed along the path (see [`blend`]).
     fn lay_down_ramp(
         &mut self,
         nodes: &[f64],
@@ -296,29 +354,39 @@ impl Segment {
         let reference = self.spec.air_speed_reference;
         let temperature_deviation_k = self.spec.temperature_deviation_k;
         let tag = self.spec.tag.clone();
-        for (point, &node) in nodes.iter().enumerate() {
-            let altitude = node * (end_altitude_m - start_altitude_m) + start_altitude_m;
-            let true_air_speed_m_s = if reference == SpeedReference::TrueAirspeed
+        let nominal_speed = |altitude: f64, point: usize| -> Result<f64, SegmentError> {
+            if reference == SpeedReference::TrueAirspeed
                 && self.spec.speed_caps == SpeedCaps::default()
             {
-                air_speed_m_s
-            } else {
-                let atmosphere =
-                    alas_atmo::us1976_compute_values(altitude, temperature_deviation_k);
-                self.spec
-                    .speed_caps
-                    .true_airspeed_m_s(
-                        reference,
-                        air_speed_m_s,
-                        atmosphere.pressure_pa,
-                        atmosphere.temperature_k,
-                    )
-                    .map_err(|source| SegmentError::InvalidCalibratedAirspeed {
-                        tag: tag.clone(),
-                        point,
-                        source,
-                    })?
-            };
+                return Ok(air_speed_m_s);
+            }
+            let atmosphere = alas_atmo::us1976_compute_values(altitude, temperature_deviation_k);
+            self.spec
+                .speed_caps
+                .true_airspeed_m_s(
+                    reference,
+                    air_speed_m_s,
+                    atmosphere.pressure_pa,
+                    atmosphere.temperature_k,
+                )
+                .map_err(|source| SegmentError::InvalidCalibratedAirspeed {
+                    tag: self.spec.tag.clone(),
+                    point,
+                    source,
+                })
+        };
+        let ends = blend::PathEnds::new(
+            [self.spec.entry_speed_m_s, self.spec.exit_speed_m_s],
+            [start_altitude_m, end_altitude_m],
+            [
+                nominal_speed(start_altitude_m, 0)?,
+                nominal_speed(end_altitude_m, nodes.len() - 1)?,
+            ],
+        );
+        for (point, &node) in nodes.iter().enumerate() {
+            let altitude = node * (end_altitude_m - start_altitude_m) + start_altitude_m;
+            let nominal_m_s = nominal_speed(altitude, point)?;
+            let true_air_speed_m_s = blend::ramp_speed(&ends, altitude, nominal_m_s);
             let horizontal_sq = true_air_speed_m_s * true_air_speed_m_s
                 - vertical_velocity_m_s * vertical_velocity_m_s;
             if !horizontal_sq.is_finite() || horizontal_sq <= 0.0 {
@@ -337,38 +405,59 @@ impl Segment {
         Ok(())
     }
 
-    /// `update_differentials_altitude`: how long a ramp discretized in
-    /// altitude takes.
-    ///
-    /// The overall time is the dimensionless integration operator's last row,
-    /// scaled by the altitude change, contracted against the reciprocal of the
-    /// vertical velocity (a quadrature of `dz / vz`) and the node grid is
-    /// then that time. Written exactly as upstream contracts it, because the
-    /// factor `dz` is folded into the operator row before the contraction
-    /// rather than after.
-    fn update_differentials_altitude(&mut self) {
-        let points = self.conditions.len();
-        if points == 0 {
-            return;
-        }
-        let dz = self.conditions.position_vector_m[points - 1][2]
-            - self.conditions.position_vector_m[0][2];
-        let last_row = &self.numerics.dimensionless.integrate[points - 1];
-        let span: f64 = last_row
-            .iter()
-            .zip(&self.conditions.velocity_vector_m_s)
-            .map(|(&weight, velocity)| (weight * dz) * (1.0 / velocity[2]))
-            .sum();
+    /// Whether this is a climb flown at the maximum-climb rating (see
+    /// [`SegmentSpec::rating_limited`]): its vertical rate is settled on the rating.
+    #[must_use]
+    pub fn is_rating_limited(&self) -> bool {
+        self.spec.rating_limited && matches!(self.spec.kind, SegmentKind::Climb { .. })
+    }
 
-        let initial_time = self.conditions.time_s[0];
-        for (time, &node) in self
-            .conditions
-            .time_s
-            .iter_mut()
-            .zip(&self.numerics.dimensionless.control_points)
-        {
-            *time = initial_time + node * span;
-        }
+    /// The vertical rate at each control point, m/s, positive up.
+    #[must_use]
+    pub fn vertical_rates_m_s(&self) -> Vec<f64> {
+        self.conditions
+            .velocity_vector_m_s
+            .iter()
+            .map(|velocity| -velocity[2])
+            .collect()
+    }
+
+    /// The energy share of each control point: the fraction of the specific excess power that
+    /// goes into climbing, `f = [1 + (V/g) dV/dh]^-1` (BADA 3.8 User Manual, Sec. 3.2,
+    /// eq. 3.2-5). One where the speed is constant or the ratio is not defined.
+    #[must_use]
+    pub fn energy_shares(&self) -> Vec<f64> {
+        let conditions = &self.conditions;
+        let speeds = &conditions.velocity_m_s;
+        let altitudes = &conditions.altitude_m;
+        self.numerics
+            .dimensionless
+            .differentiate
+            .iter()
+            .enumerate()
+            .map(|(point, row)| {
+                let dv: f64 = row.iter().zip(speeds).map(|(d, v)| d * v).sum();
+                let dh: f64 = row.iter().zip(altitudes).map(|(d, h)| d * h).sum();
+                let gain = 1.0 + speeds[point] / conditions.gravity_m_s2[point] * dv / dh;
+                if gain.is_finite() && gain > 0.0 {
+                    1.0 / gain
+                } else {
+                    1.0
+                }
+            })
+            .collect()
+    }
+
+    /// The specific excess power at each control point, m/s: the vertical rate over the energy
+    /// share, the rate the aircraft would climb at holding its speed. A service ceiling is where
+    /// this falls to the residual climb, whether or not the leg also accelerates.
+    #[must_use]
+    pub fn specific_excess_power_m_s(&self) -> Vec<f64> {
+        self.vertical_rates_m_s()
+            .iter()
+            .zip(self.energy_shares())
+            .map(|(rate, share)| rate / share)
+            .collect()
     }
 
     /// Run one pass of the iterate chain and leave the residuals behind.
@@ -376,8 +465,10 @@ impl Segment {
     /// The order is `Unknown_Throttle.__defaults__`'s, and it is load-bearing:
     /// the mass is integrated *after* the fuel flow that burns it and *before*
     /// the forces that weigh it, and the orientations are formed before the
-    /// thrust that is rotated through them.
-    pub fn iterate(&mut self, analyses: &MissionAnalyses) {
+    /// thrust that is rotated through them. `memo` answers a thrust or
+    /// aerodynamics request it already had ([`crate::PointMemo`]).
+    pub fn iterate_with(&mut self, memo: &mut crate::PointMemo<'_>) {
+        let analyses = memo.analyses();
         // initials
         frames::initialize_time(&mut self.conditions, self.initials.as_ref());
         common::initialize_weights(
@@ -389,16 +480,75 @@ impl Segment {
         frames::initialize_planet_position(&mut self.conditions, self.initials.as_ref());
 
         // unknowns
+        let rating_limited = self.is_rating_limited();
         for point in 0..self.conditions.len() {
+            if rating_limited {
+                // The vertical rate at the point is the profile's (`solve` settles it on the
+                // rating), taken out of the scheduled airspeed as `lay_down_ramp` does (z down).
+                let velocity = self.conditions.velocity_vector_m_s[point];
+                let speed = velocity[0].hypot(velocity[2]);
+                let rate =
+                    self.rate_profile_m_s[point].clamp(MIN_RATED_CLIMB_RATE_M_S, 0.99 * speed);
+                self.conditions.velocity_vector_m_s[point][0] =
+                    (speed * speed - rate * rate).sqrt();
+                self.conditions.velocity_vector_m_s[point][2] = -rate;
+            }
             self.conditions.throttle[point] = self.throttle[point];
             self.conditions.body_inertial_rotations_rad[point][1] = self.body_angle_rad[point];
+        }
+        if rating_limited {
+            // The time at each point follows from the rates just set: `t_i = t_0 + sum_j
+            // I_ij dz / v_z,j` over the dimensionless integration operator (the constant-rate
+            // `update_differentials_altitude` spreads one span linearly, which a varying rate
+            // does not).
+            let conditions = &mut self.conditions;
+            let points = conditions.len();
+            let dz =
+                conditions.position_vector_m[points - 1][2] - conditions.position_vector_m[0][2];
+            let initial_time = conditions.time_s[0];
+            for point in 0..points {
+                let elapsed: f64 = self.numerics.dimensionless.integrate[point]
+                    .iter()
+                    .zip(&conditions.velocity_vector_m_s)
+                    .map(|(&weight, velocity)| weight * dz / velocity[2])
+                    .sum();
+                conditions.time_s[point] = initial_time + elapsed;
+            }
         }
 
         // conditions
         self.numerics
             .update_differentials_time(&self.conditions.time_s);
-        if !matches!(self.spec.kind, SegmentKind::Cruise { .. }) {
-            frames::update_acceleration(&mut self.conditions, &self.numerics.time.differentiate);
+        if rating_limited {
+            // Altitude is linear in the node and time is not, so the time operators follow the
+            // chain rule: `dt/dtau = dz / v_z` at each point, `d/dt = (d/dtau) / (dt/dtau)` row
+            // by row and `int dt = int (dt/dtau) dtau` column by column.
+            let conditions = &self.conditions;
+            let points = conditions.len();
+            let dz =
+                conditions.position_vector_m[points - 1][2] - conditions.position_vector_m[0][2];
+            let dt_dtau: Vec<f64> = conditions
+                .velocity_vector_m_s
+                .iter()
+                .map(|velocity| dz / velocity[2])
+                .collect();
+            let dimensionless = &self.numerics.dimensionless;
+            for row in 0..points {
+                for column in 0..points {
+                    self.numerics.time.differentiate[row][column] =
+                        dimensionless.differentiate[row][column] / dt_dtau[row];
+                    self.numerics.time.integrate[row][column] =
+                        dimensionless.integrate[row][column] * dt_dtau[column];
+                }
+            }
+        }
+        let differentiate = &self.numerics.time.differentiate;
+        if rating_limited {
+            frames::update_tangential_acceleration(&mut self.conditions, differentiate);
+        } else if !matches!(self.spec.kind, SegmentKind::Cruise { .. })
+            || !self.spec.speed_profile.is_empty()
+        {
+            frames::update_acceleration(&mut self.conditions, differentiate);
         }
         common::update_altitude(&mut self.conditions);
         let atmosphere = common::update_atmosphere(
@@ -409,10 +559,15 @@ impl Segment {
         common::update_gravity(&mut self.conditions);
         common::update_freestream(&mut self.conditions);
         frames::update_orientations(&mut self.conditions);
-        common::update_thrust(&mut self.conditions, analyses, &atmosphere);
-        common::update_aerodynamics(&mut self.conditions, analyses);
+        common::update_thrust(
+            &mut self.conditions,
+            memo,
+            &atmosphere,
+            self.spec.takeoff_rated,
+        );
+        common::update_aerodynamics(&mut self.conditions, memo, self.spec.configuration_delta_cd);
         common::update_weights(&mut self.conditions, &self.numerics.time.integrate);
-        frames::update_forces(&mut self.conditions);
+        frames::update_forces(&mut self.conditions, self.spec.load_factor);
         frames::update_planet_position(
             &mut self.conditions,
             &self.numerics.time.integrate,
@@ -425,10 +580,11 @@ impl Segment {
     /// The force that did not balance, per unit mass.
     ///
     /// A climb or descent compares the `x` and `z` forces against the
-    /// accelerations the trajectory implies. A cruise has no acceleration term:
-    /// its chain never computed one. Product analyses use the signed `x`
-    /// component; the frozen compatibility path retains the historical
-    /// horizontal-force magnitude residual.
+    /// accelerations the trajectory implies. A cruise has no acceleration term
+    /// (its chain never computed one) unless it is a level speed change, whose
+    /// acceleration enters the signed residual on every path. Product analyses
+    /// use the signed `x` component; the frozen compatibility path retains the
+    /// historical horizontal-force magnitude residual for steady cruise.
     fn update_residuals(&mut self, signed_cruise_force_residual: bool) {
         for point in 0..self.conditions.len() {
             let force = self.conditions.total_force_vector_n[point];
@@ -437,7 +593,7 @@ impl Segment {
 
             self.residuals[point] = match self.spec.kind {
                 SegmentKind::Cruise { .. } => [
-                    if signed_cruise_force_residual {
+                    if signed_cruise_force_residual || !self.spec.speed_profile.is_empty() {
                         force[0] / mass - acceleration[0]
                     } else {
                         (force[0] * force[0] + force[1] * force[1]).sqrt() / mass
@@ -463,6 +619,51 @@ impl Segment {
             &self.numerics.time.integrate,
             self.spec.true_course_rad,
         );
+    }
+
+    /// The propulsion deck's own statement, at each control point of the
+    /// published trajectory, of whether it answered inside its evidence
+    /// domain.
+    ///
+    /// The demand is the one [`common::update_thrust`] evaluates at the
+    /// point: the published command as a normalized force, or as a share of
+    /// the take-off rating on a take-off-rated leg. Nothing of the segment is
+    /// changed: this reads the deck again at the flown points.
+    pub fn propulsion_validity(
+        &self,
+        analyses: &MissionAnalyses,
+    ) -> Vec<Result<alas_prop::system::ValidityStatus, alas_prop::system::PropulsionError>> {
+        use alas_prop::system::{PropulsionDemand, PropulsionRating};
+        let conditions = &self.conditions;
+        let takeoff_rated = analyses.enforce_throttle_envelope && self.spec.takeoff_rated;
+        (0..conditions.len())
+            .map(|point| {
+                let altitude_m = conditions.altitude_m[point];
+                let atmosphere = analyses.atmosphere(altitude_m, self.spec.temperature_deviation_k);
+                let commanded = conditions.throttle[point];
+                let evaluated = if analyses.enforce_throttle_envelope {
+                    commanded.clamp(0.0, 1.0)
+                } else {
+                    commanded
+                };
+                let demand = if takeoff_rated {
+                    PropulsionDemand::RatedFraction {
+                        rating: PropulsionRating::TakeoffGoAround,
+                        fraction: evaluated,
+                    }
+                } else {
+                    PropulsionDemand::NormalizedForce(evaluated)
+                };
+                analyses.propulsion_validity(
+                    &atmosphere,
+                    altitude_m,
+                    conditions.velocity_m_s[point],
+                    conditions.mach[point],
+                    conditions.gravity_m_s2[point],
+                    demand,
+                )
+            })
+            .collect()
     }
 
     /// The unknowns as the vector the root finder searches over.
@@ -537,6 +738,13 @@ mod tests {
             true_course_rad: 0.0,
             temperature_deviation_k: 0.0,
             number_control_points: 16,
+            takeoff_rated: false,
+            rating_limited: false,
+            configuration_delta_cd: 0.0,
+            load_factor: 1.0,
+            entry_speed_m_s: 0.0,
+            exit_speed_m_s: 0.0,
+            speed_profile: Vec::new(),
         }
     }
 
@@ -572,6 +780,26 @@ mod tests {
         let segment = Segment::new(climb_spec(), None).expect("a declared start altitude");
         let span = segment.conditions.time_s[15] - segment.conditions.time_s[0];
         assert!((span - 400.0).abs() < 1e-9, "span was {span}");
+    }
+
+    #[test]
+    fn a_constant_speed_cruise_of_zero_distance_has_zero_duration() {
+        let spec = SegmentSpec {
+            tag: "test_cruise".to_owned(),
+            kind: SegmentKind::Cruise {
+                altitude_m: Some(11_000.0),
+                distance_m: 0.0,
+            },
+            air_speed_m_s: 250.0,
+            ..climb_spec()
+        };
+        let segment = Segment::new(spec, None).expect("a declared altitude");
+        assert!(segment.conditions.time_s.iter().all(|&time| time == 0.0));
+        assert!(segment
+            .conditions
+            .velocity_vector_m_s
+            .iter()
+            .all(|velocity| velocity[0] == 250.0));
     }
 
     #[test]
@@ -684,6 +912,99 @@ mod tests {
         assert_ne!(climb.body_angle_rad[0], cruise.body_angle_rad[0]);
     }
 
+    // A level speed change follows its profile table: the duration is the
+    // distance over the mean speed of the table and the node speeds interpolate it.
+    #[test]
+    fn a_cruise_with_a_speed_profile_follows_the_table() {
+        let spec = SegmentSpec {
+            kind: SegmentKind::Cruise {
+                altitude_m: Some(3_000.0),
+                distance_m: 21_000.0,
+            },
+            air_speed_m_s: 80.0,
+            // Fast at first, then settling onto 130 m/s: mean 115 m/s.
+            speed_profile: vec![[0.0, 80.0], [0.5, 125.0], [1.0, 130.0]],
+            ..climb_spec()
+        };
+        let segment = Segment::new(spec, None).expect("a declared altitude");
+        let c = &segment.conditions;
+        let last = c.len() - 1;
+        assert!((c.velocity_vector_m_s[0][0] - 80.0).abs() < 1.0e-12);
+        assert!((c.velocity_vector_m_s[last][0] - 130.0).abs() < 1.0e-12);
+        // The duration is the one in which the segment's own quadrature of the
+        // table flies the distance (close to the analytic mean of 115 m/s).
+        let duration = c.time_s[last] - c.time_s[0];
+        assert!((duration - 21_000.0 / 115.0).abs() < 0.01 * duration);
+        let row = &segment.numerics.dimensionless.integrate[last];
+        let flown: f64 = row
+            .iter()
+            .zip(&c.velocity_vector_m_s)
+            .map(|(weight, velocity)| weight * velocity[0] * duration)
+            .sum();
+        assert!((flown - 21_000.0).abs() < 1.0e-6);
+        for point in 0..c.len() {
+            let fraction = (c.time_s[point] - c.time_s[0]) / duration;
+            let expected =
+                blend::profile_speed(&[[0.0, 80.0], [0.5, 125.0], [1.0, 130.0]], fraction, 0.0);
+            assert!((c.velocity_vector_m_s[point][0] - expected).abs() < 1.0e-9);
+        }
+    }
+
+    // Speed changes along a climb or descent follow BADA 3.8 eq. 3.2-6 with the
+    // energy share factor: d(V^2/2)/dh = g (1 - f) / f.
+    #[test]
+    fn an_entry_speed_changes_along_the_path_by_the_energy_share_factor() {
+        // Accelerating in a descent (f = 1.7) from 120 m/s towards 150 m/s.
+        let spec = SegmentSpec {
+            kind: SegmentKind::Descent {
+                altitude_start_m: Some(6_000.0),
+                altitude_end_m: 1_000.0,
+                descent_rate_m_s: 8.0,
+            },
+            air_speed_m_s: 150.0,
+            entry_speed_m_s: 120.0,
+            ..climb_spec()
+        };
+        let segment = Segment::new(spec, None).expect("a declared start");
+        let c = &segment.conditions;
+        let speed = |i: usize| c.velocity_vector_m_s[i][0].hypot(c.velocity_vector_m_s[i][2]);
+        let last = c.len() - 1;
+        assert!(
+            (speed(0) - 120.0).abs() < 1.0e-9,
+            "starts at the entry speed"
+        );
+        assert!(
+            (speed(last) - 150.0).abs() < 1.0e-9,
+            "ends on its own schedule"
+        );
+        let g = alas_atmo::STANDARD_GRAVITY;
+        for point in 0..=last {
+            let along = (120.0_f64.powi(2)
+                + 2.0 * g * (1.0 - 1.7) / 1.7 * (c.altitude_m[point] - 6_000.0))
+                .sqrt();
+            assert!(
+                (speed(point) - along.min(150.0)).abs() < 1.0e-9,
+                "point {point}"
+            );
+        }
+        // Decelerating in a descent uses f = 0.3: much less altitude per m/s.
+        let spec = SegmentSpec {
+            kind: SegmentKind::Descent {
+                altitude_start_m: Some(6_000.0),
+                altitude_end_m: 1_000.0,
+                descent_rate_m_s: 8.0,
+            },
+            air_speed_m_s: 120.0,
+            entry_speed_m_s: 150.0,
+            ..climb_spec()
+        };
+        let segment = Segment::new(spec, None).expect("a declared start");
+        let c = &segment.conditions;
+        let speed = |i: usize| c.velocity_vector_m_s[i][0].hypot(c.velocity_vector_m_s[i][2]);
+        assert!((speed(0) - 150.0).abs() < 1.0e-9);
+        assert!((speed(c.len() - 1) - 120.0).abs() < 1.0e-9);
+    }
+
     #[test]
     fn product_cruise_residual_preserves_the_sign_of_a_thrust_deficit() {
         let spec = SegmentSpec {
@@ -698,6 +1019,13 @@ mod tests {
             true_course_rad: 0.0,
             temperature_deviation_k: 0.0,
             number_control_points: 2,
+            takeoff_rated: false,
+            rating_limited: false,
+            configuration_delta_cd: 0.0,
+            load_factor: 1.0,
+            entry_speed_m_s: 0.0,
+            exit_speed_m_s: 0.0,
+            speed_profile: Vec::new(),
         };
         let mut segment = Segment::new(spec, None).expect("declared cruise altitude");
         segment.conditions.total_force_vector_n[0] = [-100.0, 0.0, 0.0];
@@ -730,6 +1058,13 @@ mod tests {
             true_course_rad: 0.0,
             temperature_deviation_k: 0.0,
             number_control_points: 16,
+            takeoff_rated: false,
+            rating_limited: false,
+            configuration_delta_cd: 0.0,
+            load_factor: 1.0,
+            entry_speed_m_s: 0.0,
+            exit_speed_m_s: 0.0,
+            speed_profile: Vec::new(),
         }
     }
 

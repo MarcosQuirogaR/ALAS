@@ -6,7 +6,7 @@
 //!
 //! One segment vocabulary serves the four supported competition families
 //! (ACC, XtraChallenge, SAE Aero Design, AIAA DBF). Hand launch is not
-//! simulated in v1 (decision D2) but `SegmentKind::Launch` keeps the interface
+//! simulated in v1 but `SegmentKind::Launch` keeps the interface
 //! so it can be added without a schema change.
 
 use std::collections::BTreeMap;

@@ -1,7 +1,7 @@
 // SPDX-License-Identifier: AGPL-3.0-or-later
 // Copyright (C) 2026 Marcos Quiroga Rodriguez
 
-//! Per-aircraft FLOPS wing `FCOMP` from construction facts (fix lane E1, D5).
+//! Per-aircraft FLOPS wing `FCOMP` from construction facts (composite wing credit).
 //!
 //! ## What `FCOMP` is
 //!
@@ -34,13 +34,13 @@
 //!   Advanced composites, Wing: multiplier 0.85-0.90, midpoint 0.875, i.e. a
 //!   12.5 % wing-mass saving (10-15 %). The FLOPS terms at FCOMP = 1 remove
 //!   about 30 % of the wing (Eq. 33 x0.6, Eq. 35 x0.83, Eq. 36 x0.7; measured
-//!   30.2 % B787-9 and 28.1 % A220-300 at the 725ebf92 geometry). The scale is
+//!   30.2 % B787-9 and 28.1 % A220-300 at the registered geometries). The scale is
 //!   one global constant: 0.125 / 0.30 = 0.4167 (Raymer band 0.85..0.90 maps to
 //!   0.50..0.33). It is not tuned per aircraft or to any OEW.
 //!
 //! Before this rule FCOMP = 1.0 was applied (about 30 % saving, 2.4x Raymer's),
 //! which moved the B787-9 and A220 OEW by -6.4 % and -3.5 % against the
-//! published values (validation correction 1, 2026-10-16).
+//! published values.
 
 /// Raymer 6th ed. Table 15.4: advanced-composite wing multiplier midpoint
 /// (band 0.85-0.90).
@@ -49,7 +49,7 @@ pub(super) const RAYMER_COMPOSITE_WING_MULTIPLIER: f64 = 0.875;
 /// loads (NASA/TM-2017-219627 Eq. 33, 35, 36; measured 28-30 %).
 pub(super) const FLOPS_WING_SAVING_AT_FCOMP_1: f64 = 0.30;
 /// FLOPS FCOMP that reproduces the Raymer advanced-composite wing credit.
-pub(super) const FCOMP_ADVANCED_COMPOSITE_WING: f64 =
+pub const FCOMP_ADVANCED_COMPOSITE_WING: f64 =
     (1.0 - RAYMER_COMPOSITE_WING_MULTIPLIER) / FLOPS_WING_SAVING_AT_FCOMP_1;
 
 /// FLOPS wing `FCOMP` for a registered aircraft, 0..1: the declared composite
@@ -67,12 +67,14 @@ pub(super) fn declared_composite_utilization(name: &str) -> f64 {
 ///   p. 3: composite airframe, about 50 % by weight, with composite wing and
 ///   fuselage. The ALAS structures preset already declares CFRP skins and
 ///   webs for it (`preset_structures`).
+/// * **A350-900: 1.0.** Carbon-fibre wing and fuselage; mapped as the B787-9.
+///   No Airbus composite-content page is on file: flagged as a declaration.
 /// * **A220-300: 1.0.** Airbus A220 airframe features (July 2025) and FAST
 ///   63 (2019): carbon-fibre composite wing (resin-transfer-infused box).
 ///   The fuselage is aluminium-lithium, so no fuselage credit follows.
 /// * **AVE: 1.0.** Notional 777X-class twin whose wing is declared at the
 ///   777-9 drawing; the 777-9 wing is a carbon-fibre composite wing (Boeing
-///   777X product statements). This statement was not re-read in this lane;
+///   777X product statements). This statement was not re-read here;
 ///   it is the weakest of the three composite values and is flagged as such.
 /// * **A380-800: 0.25, partial.** The A380 wing covers and spars are
 ///   aluminium; carbon-fibre composite is used in the centre wing box, rear
@@ -88,7 +90,7 @@ pub(super) fn declared_composite_utilization(name: &str) -> f64 {
 ///   established by a retained source, so the metallic endpoint is kept.
 fn declared_wing_composite_fraction(name: &str) -> f64 {
     match name {
-        "B787-9" | "A220-300" | "AVE" => 1.0,
+        "A350-900" | "B787-9" | "A220-300" | "AVE" => 1.0,
         "A380-800" => 0.25,
         _ => 0.0,
     }

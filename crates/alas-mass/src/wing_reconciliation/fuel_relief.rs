@@ -53,12 +53,19 @@ pub struct DeclaredWingFuelCase {
     /// The design gross mass the structural case is applied at, kg, the same
     /// mass [`alas_struct::loads::load_cases`] reads.
     pub design_gross_mass_kg: f64,
-    /// The declared maximum zero-fuel mass the bound was taken against, kg.
+    /// The declared maximum zero-fuel mass the bound was taken against, kg:
+    /// [`alas_config::presets::published_mzfw_kg`], the limit the requirements
+    /// state for the variant flown, else the registered aircraft's own.
     ///
-    /// `None` when the configuration names no registered aircraft, or the
-    /// registered aircraft publishes no zero-fuel limit. The case is then the
-    /// full capacity, which is an **assumption about the loading** and not a
-    /// bounded load case; a caller that reports the sized box has to say so.
+    /// `None` when neither the requirements nor the registered variant declare
+    /// a zero-fuel limit (a clean-sheet configuration, the notional `AVE`, or a
+    /// file that turns a preset into another variant without stating its
+    /// limit). The case is then the full capacity, which is an **assumption
+    /// about the loading** and not a bounded load case; a caller that reports
+    /// the sized box has to say so. There is no modelled substitute:
+    /// `requirements.max_structural_payload_kg` is `MZFW - OEW`, and recovering
+    /// `MZFW` from it would need the operating empty mass this very sizing pass
+    /// is an input to.
     pub max_zero_fuel_mass_kg: Option<f64>,
 }
 
@@ -193,7 +200,9 @@ pub fn declared_wing_fuel_case(
     }
 
     let design_gross_mass_kg = requirements.mtow_kg;
-    let max_zero_fuel_mass_kg = declared_max_zero_fuel_mass_kg(config);
+    // The limit of the variant flown: a freighter stated on a passenger preset
+    // is bounded by its own zero-fuel limit, not by the passenger aircraft's.
+    let max_zero_fuel_mass_kg = alas_config::presets::published_mzfw_kg(config);
     let design_case_kg = alas_struct::loads::design_case_wing_fuel_kg(
         capacity_kg,
         design_gross_mass_kg,
@@ -216,24 +225,6 @@ pub fn declared_wing_fuel_case(
         design_gross_mass_kg,
         max_zero_fuel_mass_kg,
     })
-}
-
-/// The maximum zero-fuel mass this configuration's aircraft is certificated to,
-/// kg, from the registered preset's primary-source reference record.
-///
-/// `None` for a configuration that names no registered aircraft, or one whose
-/// registered aircraft publishes no zero-fuel limit (the notional `AVE`). There
-/// is no modelled substitute: `requirements.max_structural_payload_kg` is
-/// `MZFW - OEW` and recovering `MZFW` from it would need the operating empty
-/// mass this very sizing pass is an input to.
-fn declared_max_zero_fuel_mass_kg(config: &AlasConfig) -> Option<f64> {
-    if config.preset.is_empty() {
-        return None;
-    }
-    alas_config::presets::get(&config.preset)
-        .ok()?
-        .reference
-        .mzfw_kg
 }
 
 /// Trapezoidal integral of `values` over `stations`.
@@ -259,10 +250,15 @@ mod tests {
     );
 
     fn case(preset: &str) -> Case {
-        let config = AlasConfig::from_value(&serde_json::json!({ "preset": preset }))
-            .unwrap_or_else(|error| panic!("{error}"));
+        case_of(&serde_json::json!({ "preset": preset }))
+    }
+
+    /// The case of a configuration file, which may restate the requirements of
+    /// the preset it names (a freighter on a passenger preset).
+    fn case_of(file: &serde_json::Value) -> Case {
+        let config = AlasConfig::from_value(file).unwrap_or_else(|error| panic!("{error}"));
         let registered =
-            alas_config::presets::get(preset).unwrap_or_else(|error| panic!("{error}"));
+            alas_config::presets::get(&config.preset).unwrap_or_else(|error| panic!("{error}"));
         let design = registered.design_vector;
         let plane = alas_geom::builder::AircraftBuilder::new(Some(config.geometry.clone()))
             .build(Some(&design), false)
@@ -284,7 +280,12 @@ mod tests {
     }
 
     fn resolve(preset: &str) -> (DeclaredWingFuelCase, Vec<f64>) {
-        let (config, design, requirements, wsg, stations) = case(preset);
+        resolve_of(&serde_json::json!({ "preset": preset }))
+    }
+
+    fn resolve_of(file: &serde_json::Value) -> (DeclaredWingFuelCase, Vec<f64>) {
+        let (config, design, requirements, wsg, stations) = case_of(file);
+        let preset = config.preset.as_str();
         let (front, rear) = alas_struct::sizing::box_chord_band(&wsg);
         let resolved = declared_wing_fuel_case(
             &config,
@@ -377,6 +378,69 @@ mod tests {
     }
 
     #[test]
+    fn a_freighter_stated_on_a_passenger_preset_is_bounded_by_its_own_zero_fuel_limit() {
+        // Boeing 747-400F on the B747-400 preset: ACAP D6-58326-1 Rev F s.2.1.7,
+        // 875,000 lb MTOW column, MZFW 635,000 lb (288,031 kg). The wing cells
+        // are the preset's 94,972 + 33,096 + 10,008 = 138,076 L at its own
+        // 173,459 kg / 216,014 L, so they hold 110,874.87 kg. The freighter
+        // reaches 396,893 kg with 396,893 - 288,031 = 108,862 kg of fuel aboard:
+        // that, not the full tank, is the relief. Bounded by the passenger
+        // aircraft's 246,073 kg instead, the case would be the full tank
+        // (150,820 kg guaranteed aboard), 2,012.87 kg of relief the box lacks.
+        let freighter = serde_json::json!({
+            "preset": "B747-400",
+            "requirements": {
+                "aircraft_type": "cargo",
+                "mtow_kg": 396_893.0,
+                "max_structural_payload_kg": 122_944.0,
+                "mzfw_kg": 288_031.0
+            }
+        });
+        let (resolved, stations) = resolve_of(&freighter);
+        let capacity_kg = 138_076.0 * 173_459.0 / 216_014.0;
+        assert!(
+            (resolved.capacity_kg - capacity_kg).abs() / capacity_kg < 1.0e-9,
+            "{resolved:?}"
+        );
+        assert_eq!(resolved.max_zero_fuel_mass_kg, Some(288_031.0));
+        assert!(
+            (resolved.design_case_kg - 108_862.0).abs() < 1.0e-6,
+            "{resolved:?}"
+        );
+        assert!(resolved.zero_fuel_limited() && !resolved.assumes_full_tanks());
+        let semi_kg = trapezoid(&resolved.running_mass_kg_m, &stations);
+        assert!(
+            (semi_kg - 54_431.0).abs() / 54_431.0 < 1.0e-9,
+            "{semi_kg} kg"
+        );
+
+        // The passenger aircraft on its own limit cannot avoid its wings.
+        let (passenger, _) = resolve("B747-400");
+        assert_eq!(passenger.max_zero_fuel_mass_kg, Some(246_073.0));
+        assert_eq!(passenger.design_case_kg, passenger.capacity_kg);
+    }
+
+    #[test]
+    fn a_converted_variant_with_no_stated_limit_assumes_full_tanks_and_says_so() {
+        // The same preset turned into a freighter carrying more structural
+        // payload than the registered passenger aircraft, with no zero-fuel
+        // limit stated: the passenger aircraft's 246,073 kg was never certified
+        // for it, so no bound is taken and the case is the full tank.
+        let converted = serde_json::json!({
+            "preset": "B747-400",
+            "requirements": { "aircraft_type": "cargo", "max_structural_payload_kg": 111_605.0 }
+        });
+        let (resolved, _) = resolve_of(&converted);
+        assert_eq!(resolved.max_zero_fuel_mass_kg, None);
+        assert!(resolved.assumes_full_tanks() && !resolved.zero_fuel_limited());
+        let capacity_kg = 138_076.0 * 173_459.0 / 216_014.0;
+        assert!(
+            (resolved.design_case_kg - capacity_kg).abs() / capacity_kg < 1.0e-9,
+            "{resolved:?}"
+        );
+    }
+
+    #[test]
     fn every_registered_aircraft_is_relieved_only_by_fuel_its_envelope_guarantees() {
         // The bound is the bending-mass identity `DG - F = max(MZFW, DG - C)`,
         // checked on the resolved capacity of each registered aircraft rather
@@ -399,6 +463,13 @@ mod tests {
             assert!(
                 resolved.design_case_kg <= resolved.capacity_kg + 1.0e-9,
                 "{}: {resolved:?}",
+                preset.name
+            );
+            // A registered aircraft flown as registered is bounded by its own
+            // published limit, the one every other consumer reads.
+            assert_eq!(
+                resolved.max_zero_fuel_mass_kg, preset.reference.mzfw_kg,
+                "{}",
                 preset.name
             );
             match resolved.max_zero_fuel_mass_kg {
@@ -445,13 +516,18 @@ mod tests {
             let (resolved, stations) = resolve(preset);
             let (_, _, _, wsg, _) = case(preset);
             let (front, rear) = alas_struct::sizing::box_chord_band(&wsg);
-            let geometric =
-                alas_struct::tanks::integral_fuel_running_mass_kg_m(&wsg, &stations, front, rear);
+            let geometric = alas_struct::tanks::integral_fuel_running_mass_kg_m(
+                &wsg,
+                &stations,
+                front,
+                rear,
+                alas_struct::tanks::JET_FUEL_DENSITY_KG_M3,
+            );
             let declared_kg = trapezoid(&resolved.running_mass_kg_m, &stations);
             let geometric_kg = trapezoid(&geometric, &stations);
             // Geometry round 2 raised the inboard box volume (NASA CRM thickness
-            // distribution); the geometry freeze of 2026-10-12 fitted the A340 trailing
-            // edge along the whole span (geometric / declared 1.03 -> 1.155). The two
+            // distribution); the drawn A340 trailing
+            // edge was then fitted along the whole span (geometric / declared 1.03 -> 1.155). The two
             // differ and the declaration wins; the ratio stays inside the fleet band.
             let ratio = geometric_kg / declared_kg;
             assert!(

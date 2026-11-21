@@ -33,9 +33,23 @@ pub fn native_options(
     if let Some(icon) = icon_data() {
         viewport = viewport.with_icon(icon);
     }
+    let mut wgpu_options = eframe::egui_wgpu::WgpuConfiguration::default();
+    // Diagnostic for frame-pacing measurements (`ALAS_PRESENT_MODE=novsync`):
+    // with the swap wait removed, any remaining frame cost is real work.
+    // The performance tour measures with it by default (`vsync` restores the
+    // swap wait): a detached viewport presents synchronously inside
+    // `App::update`, so with vsync on every native window adds up to a
+    // refresh interval of waiting to the "cpu" time of a continuously
+    // repainting tour frame, which is not work the UI does.
+    let mode = std::env::var("ALAS_PRESENT_MODE").unwrap_or_default();
+    let tour = std::env::var_os("ALAS_PERF_TOUR").is_some_and(|path| !path.is_empty());
+    if mode == "novsync" || (tour && mode != "vsync") {
+        wgpu_options.present_mode = eframe::wgpu::PresentMode::AutoNoVsync;
+    }
     eframe::NativeOptions {
         viewport,
         renderer: eframe::Renderer::Wgpu,
+        wgpu_options,
         ..Default::default()
     }
 }

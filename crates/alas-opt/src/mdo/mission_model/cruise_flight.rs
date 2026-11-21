@@ -8,7 +8,8 @@
 use alas_prop::system::PropulsionRating;
 
 use super::cruise_levels::{
-    CruiseOutcome, CruiseState, CRUISE_EPSILON_M, RESIDUAL_CLIMB_M_S, STEP_DECISION_INTERVAL_M,
+    step_climb_due, CruiseOutcome, CruiseState, CRUISE_EPSILON_M, RESIDUAL_CLIMB_M_S,
+    STEP_DECISION_INTERVAL_M,
 };
 use super::integrate::{FlyError, Integrator};
 use super::profile::{ProfilePlan, Segment, SegmentKind};
@@ -178,15 +179,17 @@ impl Integrator<'_> {
         if scheduled {
             return true;
         }
+        // The step trigger of `cruise_levels::step_climb_due` (qualifying
+        // next level, specific-range crossover); a rejected range is no step.
         let model = self.model;
         model.level_qualifies(self.mass_kg, next_m, next_speed)
-            && matches!(
-                (
-                    model.specific_air_range_m_kg(self.mass_kg, altitude_m, speed),
-                    model.specific_air_range_m_kg(self.mass_kg, next_m, next_speed),
-                ),
-                (Ok(here), Ok(there)) if there > here
-            )
+            && match (
+                model.specific_air_range_m_kg(self.mass_kg, altitude_m, speed),
+                model.specific_air_range_m_kg(self.mass_kg, next_m, next_speed),
+            ) {
+                (Ok(here), Ok(there)) => step_climb_due(true, here, there),
+                _ => false,
+            }
     }
 
     /// Fly the cruise over `cruise_distance_m`, with step climbs when the
@@ -307,8 +310,11 @@ impl Integrator<'_> {
         }
         let (final_altitude_m, _, descent) = plan.level(level);
         let mut descent_footprint_m = 0.0;
+        let mut previous: Option<&Segment> = None;
         for segment in descent {
+            descent_footprint_m += self.decelerate_through_restriction(previous, segment)?;
             descent_footprint_m += self.fly_segment(segment)?;
+            previous = Some(segment);
         }
         Ok(CruiseOutcome {
             descent_footprint_m,

@@ -1,14 +1,14 @@
 // SPDX-License-Identifier: AGPL-3.0-or-later
 // Copyright (C) 2026 Marcos Quiroga Rodriguez
 
-//! Switches for the evaluation speed-ups of phase 2 lane L5a.
+//! Switches for the evaluation speed-ups.
 //!
 //! Each lever changes how much work one candidate evaluation repeats, not
 //! the model: results move only within the stated closure tolerances (see
-//! the internal report `p2-closure-speed-2026-10-12.md` for the equivalence
+//! the closure-speed study for the equivalence
 //! evidence). All levers are ON by default. The environment variable
 //! `ALAS_SPEEDUPS_OFF` (comma-separated lever names, or `all`) turns levers
-//! off for a whole process, which reproduces the pre-lane numbers for a
+//! off for a whole process, which reproduces the numbers before the speed-ups for a
 //! bit-diff; [`set`] overrides one lever at run time (examples and tests).
 
 use std::sync::atomic::{AtomicU8, Ordering};
@@ -26,11 +26,20 @@ pub enum Lever {
     /// A2: the closure starts from the converged mass of the registered
     /// nominal and the trip tolerance adapts to the outer-loop residual.
     WarmStart = 2,
+    /// E6: the cabin-derived fuselage length of an identical configuration and
+    /// design vector is recalled, not re-solved (bit-identical: a pure function
+    /// of an exact key, see `cabin_memo`)
+    CabinMemo = 3,
 }
 
 impl Lever {
     /// Every lever, in the order they were introduced.
-    pub const ALL: [Self; 3] = [Self::NominalKey, Self::GearReuse, Self::WarmStart];
+    pub const ALL: [Self; 4] = [
+        Self::NominalKey,
+        Self::GearReuse,
+        Self::WarmStart,
+        Self::CabinMemo,
+    ];
 
     /// The name used by `ALAS_SPEEDUPS_OFF` and in reports.
     #[must_use]
@@ -39,18 +48,24 @@ impl Lever {
             Self::NominalKey => "nominal_key",
             Self::GearReuse => "gear_reuse",
             Self::WarmStart => "warm_start",
+            Self::CabinMemo => "cabin_memo",
         }
     }
 }
 
 /// 0 = follow the environment, 1 = forced off, 2 = forced on.
-static OVERRIDES: [AtomicU8; 3] = [AtomicU8::new(0), AtomicU8::new(0), AtomicU8::new(0)];
+static OVERRIDES: [AtomicU8; 4] = [
+    AtomicU8::new(0),
+    AtomicU8::new(0),
+    AtomicU8::new(0),
+    AtomicU8::new(0),
+];
 
-fn environment_off() -> &'static [bool; 3] {
-    static OFF: OnceLock<[bool; 3]> = OnceLock::new();
+fn environment_off() -> &'static [bool; 4] {
+    static OFF: OnceLock<[bool; 4]> = OnceLock::new();
     OFF.get_or_init(|| {
         let text = std::env::var("ALAS_SPEEDUPS_OFF").unwrap_or_default();
-        let mut off = [false; 3];
+        let mut off = [false; 4];
         for token in text.split(',').map(str::trim) {
             for lever in Lever::ALL {
                 if token == "all" || token == lever.name() {

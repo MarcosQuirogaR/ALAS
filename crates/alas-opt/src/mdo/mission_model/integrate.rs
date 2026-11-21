@@ -50,7 +50,13 @@ use super::profile::{ProfilePlan, Segment, SegmentKind};
 use super::SegmentMissionModel;
 use crate::mdo::propulsion::{DeckError, DeckKind, OperatingPoint, ThrustLimit};
 
+mod climb_entry;
+mod drag;
 mod lift_off;
+mod restriction;
+mod trace;
+pub use trace::{CruiseLadder, CruiseRun, FlownStep, StepPhase};
+mod transition;
 
 pub(crate) const DEFAULT_STEPS_PER_SEGMENT: usize = 4;
 /// Service-ceiling criterion, 100 ft/min, m/s: a rating-limited climb step
@@ -58,12 +64,102 @@ pub(crate) const DEFAULT_STEPS_PER_SEGMENT: usize = 4;
 const MINIMUM_CLIMB_RATE_M_S: f64 = 100.0 * alas_units::FOOT / 60.0;
 /// Route-closure tolerance on the cruise distance, m.
 const CRUISE_DISTANCE_TOLERANCE_M: f64 = 1.0;
-/// Fixed-point passes on the flown descent footprint. With step climbs the
-/// footprint moves with the cruise distance (the steps scale with it), and
-/// the iteration contracts by about 0.2 per pass (measured on the A320-200
-/// at 2,968 nmi), so twelve passes close a 30 km first-pass error to the
-/// 1 m tolerance.
+/// Passes on the flown descent footprint. With step climbs the footprint
+/// moves with the cruise distance (the steps scale with it). The plain
+/// fixed point contracts by about 0.2 per pass on the A320-200 at 2,968 nmi,
+/// but a footprint that moves against the estimate as fast as the estimate
+/// moves (slope near -1) makes it cycle; the passes solve the route closure
+/// by bracketed secant instead (see [`DescentFootprint`]), which closes
+/// either case in a few passes.
 const DESCENT_FOOTPRINT_PASSES: usize = 12;
+/// Largest ratio of successive route-closure residuals at which the plain
+/// fixed-point step is still taken: the secant replaces it only on a pass that
+/// did not halve the residual.
+const MINIMUM_CONTRACTION: f64 = 0.5;
+
+/// Root finder for the descent-footprint estimate `x`.
+///
+/// A pass flown with the estimate `x` returns the footprint `g(x)`; the route
+/// closure residual is `r(x) = g(x) - x`, the distance flown past the route
+/// (flown = climb + cruise + descent = range - x + g(x)). The first update is
+/// the plain fixed-point step `x = g(x)`, which later passes keep while it
+/// contracts; otherwise they are secant steps on
+/// `r`, kept inside the bracket of the last estimates of opposite residual
+/// sign and replaced by the Illinois-modified regula falsi step when they
+/// fall outside it (Dowell and Jarratt, BIT 11 (1971) 168-174). The
+/// tolerance and the pass budget are the fixed point's.
+#[derive(Debug, Default)]
+struct DescentFootprint {
+    /// Last estimate and its residual.
+    last: Option<(f64, f64)>,
+    /// Estimate and residual of the bracket end with a positive residual.
+    above: Option<(f64, f64)>,
+    /// Estimate and residual of the bracket end with a negative residual.
+    below: Option<(f64, f64)>,
+    /// Which bracket end the previous update kept (Illinois side memory).
+    kept_above: Option<bool>,
+    /// Largest estimate a pass can fly, m: the whole route after the climb
+    /// (no cruise left). An unbracketed secant step past it falls back to
+    /// the fixed-point step.
+    largest_m: f64,
+}
+
+impl DescentFootprint {
+    /// The next estimate after the pass flown at `estimate_m` returned
+    /// `footprint_m`.
+    fn next(&mut self, estimate_m: f64, footprint_m: f64) -> f64 {
+        let residual_m = footprint_m - estimate_m;
+        let previous = self.last.replace((estimate_m, residual_m));
+        let positive = residual_m > 0.0;
+        if positive {
+            self.above = Some((estimate_m, residual_m));
+        } else {
+            self.below = Some((estimate_m, residual_m));
+        }
+        let Some((previous_m, previous_residual_m)) = previous else {
+            return footprint_m;
+        };
+        // A contracting fixed point is kept as it is: the secant takes over
+        // only where the residual fails to halve from one pass to the next.
+        if residual_m.abs() <= MINIMUM_CONTRACTION * previous_residual_m.abs() {
+            self.kept_above = None;
+            return footprint_m;
+        }
+        let secant = {
+            let slope = (residual_m - previous_residual_m) / (estimate_m - previous_m);
+            estimate_m - residual_m / slope
+        };
+        let (Some((above_m, above_r)), Some((below_m, below_r))) = (self.above, self.below) else {
+            self.kept_above = None;
+            let inside = secant.is_finite() && secant >= 0.0 && secant <= self.largest_m;
+            return if inside { secant } else { footprint_m };
+        };
+        let (low, high) = (above_m.min(below_m), above_m.max(below_m));
+        if secant.is_finite() && secant > low && secant < high {
+            self.kept_above = None;
+            return secant;
+        }
+        // Illinois: a bracket end kept twice in a row has its residual halved.
+        let (mut above_r, mut below_r) = (above_r, below_r);
+        match self.kept_above {
+            Some(true) if !positive => above_r *= 0.5,
+            Some(false) if positive => below_r *= 0.5,
+            _ => {}
+        }
+        if !positive {
+            self.above = Some((above_m, above_r));
+        } else {
+            self.below = Some((below_m, below_r));
+        }
+        self.kept_above = Some(!positive);
+        let falsi = (above_m * below_r - below_m * above_r) / (below_r - above_r);
+        if falsi.is_finite() {
+            falsi
+        } else {
+            0.5 * (low + high)
+        }
+    }
+}
 /// Largest kinetic-energy budget that may remain open at the end of a leg,
 /// as a fraction of the leg's propulsive work.
 const UNREALIZED_KINETIC_FRACTION: f64 = 1.0e-3;
@@ -130,6 +226,11 @@ pub struct FlownLeg {
     pub flown_distance_m: f64,
     /// Energy accounting.
     pub ledger: EnergyLedger,
+    /// Every integration step, in flight order.
+    pub steps: Vec<FlownStep>,
+    /// Tops of the climb bands (take-off, initial, step one, ladder), m: the
+    /// altitudes at which the climb rungs change schedule (`climb_bands`).
+    pub climb_bands: [f64; 4],
 }
 
 /// Why a plan could not be flown as laid out.
@@ -185,6 +286,8 @@ pub(super) struct Integrator<'a> {
     pub(super) deck_memo: DeckMemo,
     /// Start state of every level cruise segment flown.
     pub(super) cruise_states: Vec<CruiseState>,
+    /// Every step flown so far.
+    pub(super) trace: Vec<FlownStep>,
 }
 
 /// Rating/idle points already solved in this flight; see `Integrator::deck_memo`.
@@ -237,20 +340,37 @@ impl Integrator<'_> {
         mass_kg: f64,
     ) -> Result<f64, FlyError> {
         let limits = &self.model.phase_limits;
-        let (cl_limit, delta_cd, clean) = match kind {
-            SegmentKind::Takeoff => (limits.takeoff_cl_max, limits.high_lift_delta_cd, false),
-            SegmentKind::Landing => (limits.landing_cl_max, limits.landing_delta_cd, false),
+        let (cl_limit, delta_cd, high_lift) = match kind {
+            SegmentKind::Takeoff => (
+                limits.takeoff_cl_max,
+                limits.high_lift_delta_cd,
+                Some(limits.takeoff_lift_shift()),
+            ),
+            SegmentKind::Landing => (
+                limits.landing_cl_max,
+                limits.landing_delta_cd,
+                Some(limits.landing_lift_shift()),
+            ),
             SegmentKind::Climb | SegmentKind::Cruise | SegmentKind::Descent => {
-                (limits.clean_cl_max, 0.0, true)
+                (limits.clean_cl_max, 0.0, None)
             }
         };
+        let clean = high_lift.is_none();
         let (cl, drag_n) = self
             .model
-            .drag_components_n(flight, mass_kg, delta_cd, !clean)?;
+            .drag_components_n(flight, mass_kg, delta_cd, high_lift)?;
         if cl > cl_limit {
             return Err(FuelModelError::NotConverged(format!(
-                "polar validity: {kind:?} lift coefficient {cl:.3} exceeds the {cl_limit:.3} limit at {:.0} m and {:.1} m/s",
-                flight.altitude_m, flight.velocity_m_s
+                "polar validity: {kind:?} lift coefficient {cl:.3} at {mass_kg:.0} kg exceeds the {cl_limit:.3} limit at {:.0} m and {:.1} m/s; raise the wing area or the phase's lift limit ({}), or lower the mass",
+                flight.altitude_m,
+                flight.velocity_m_s,
+                match kind {
+                    SegmentKind::Takeoff => "performance.cl_max_to",
+                    SegmentKind::Landing => "performance.cl_max_land",
+                    SegmentKind::Climb | SegmentKind::Cruise | SegmentKind::Descent => {
+                        "performance.cl_max_clean"
+                    }
+                }
             ))
             .into());
         }
@@ -464,76 +584,21 @@ impl Integrator<'_> {
             self.minimum_descent_rate_m_s =
                 self.minimum_descent_rate_m_s.min(-solved.vertical_rate_m_s);
         }
+        let before = (self.time_s, self.distance_m);
         self.fuel_kg += burn_kg;
         self.mass_kg = start_mass_kg - burn_kg;
         self.time_s += solved.dt_s;
         let horizontal_m =
             (v * v - solved.vertical_rate_m_s * solved.vertical_rate_m_s).sqrt() * solved.dt_s;
         self.distance_m += horizontal_m;
+        self.record_step(
+            &step,
+            &flight,
+            &solved,
+            before,
+            [start_mass_kg, mid_mass_kg, self.mass_kg],
+        );
         Ok(horizontal_m)
-    }
-
-    /// Open the kinetic budget for a transition to `tas_m_s`.
-    ///
-    /// A boundary is an instantaneous profile change in this reduced model.
-    /// A material unpaid budget may continue while the same target is split
-    /// across segments, but it must close before a distinct target is opened.
-    /// Otherwise the schedule could report an intermediate speed as flown
-    /// even though the aircraft never attained it.
-    pub(super) fn transition_tolerance_j(&self, previous: f64, target: f64) -> f64 {
-        let speed_scale = previous.abs().max(target.abs());
-        let kinetic_scale = 0.5 * self.mass_kg * speed_scale * speed_scale;
-        BOUNDARY_KE_ABSOLUTE_TOLERANCE_J.max(BOUNDARY_KE_RELATIVE_TOLERANCE * kinetic_scale)
-    }
-
-    pub(super) fn target_is_distinct(&self, previous: f64, target: f64) -> bool {
-        let tolerance_j = self.transition_tolerance_j(previous, target);
-        (target - previous).abs() > (2.0 * tolerance_j / self.mass_kg.max(f64::MIN_POSITIVE)).sqrt()
-    }
-
-    fn open_transition(&mut self, tas_m_s: f64) -> Result<(), FlyError> {
-        if let Some(previous) = self.previous_tas_m_s {
-            let tolerance_j = self.transition_tolerance_j(previous, tas_m_s);
-            let previous_pending_j = self.pending_kinetic_j;
-            let target_is_distinct = self.target_is_distinct(previous, tas_m_s);
-            if previous_pending_j.abs() > tolerance_j && target_is_distinct {
-                return Err(FuelModelError::NotConverged(format!(
-                    "speed schedule not attained before next distinct transition from {previous:.3} to {tas_m_s:.3} m/s: {pending:.3} J of kinetic energy remained unpaid (boundary tolerance {tolerance_j:.3} J)",
-                    pending = previous_pending_j,
-                ))
-                .into());
-            }
-            let previous_kinetic_j = 0.5 * self.mass_kg * previous * previous;
-            // `pending_kinetic_j` is target KE minus the KE the deck has
-            // actually delivered. Reconstruct that delivered state before
-            // changing targets; adding the new target delta to the old
-            // budget would let two target changes cancel without ever
-            // reaching the intermediate speed.
-            let actual_kinetic_j = if previous_pending_j.abs() <= tolerance_j {
-                previous_kinetic_j
-            } else {
-                previous_kinetic_j - previous_pending_j
-            };
-            if !actual_kinetic_j.is_finite() || actual_kinetic_j < -tolerance_j {
-                return Err(FuelModelError::NotConverged(format!(
-                    "nonphysical kinetic state before transition from {previous:.3} m/s: {actual_kinetic_j:.3} J"
-                ))
-                .into());
-            }
-            let actual_kinetic_j = actual_kinetic_j.max(0.0);
-            let target_kinetic_j = 0.5 * self.mass_kg * tas_m_s * tas_m_s;
-            let target_pending_j = target_kinetic_j - actual_kinetic_j;
-            // Drop only a round-off residue. A material same-direction
-            // budget must remain open so later steps can pay it; clearing it
-            // here would recreate the boundary-energy cancellation bug.
-            self.pending_kinetic_j = if target_pending_j.abs() <= tolerance_j {
-                0.0
-            } else {
-                target_pending_j
-            };
-        }
-        self.previous_tas_m_s = Some(tas_m_s);
-        Ok(())
     }
 
     /// Fly one planned segment; returns its horizontal distance.
@@ -566,49 +631,6 @@ impl Integrator<'_> {
 }
 
 impl SegmentMissionModel {
-    /// Lift coefficient and installed drag at `flight` for `mass_kg`:
-    /// `CD = CD0 + k CL^2 + CD_wave(M) + delta_cd`.
-    pub(super) fn drag_components_n(
-        &self,
-        flight: &FlightCondition,
-        mass_kg: f64,
-        delta_cd: f64,
-        high_lift: bool,
-    ) -> Result<(f64, f64), FuelModelError> {
-        let speed = flight.velocity_m_s;
-        let dynamic_pressure_pa = 0.5 * flight.density_kg_m3 * speed * speed;
-        if !dynamic_pressure_pa.is_finite() || dynamic_pressure_pa <= 0.0 {
-            return Err(FuelModelError::InvalidModel(format!(
-                "profile dynamic pressure is unusable at {} m and {speed} m/s",
-                flight.altitude_m
-            )));
-        }
-        let cl = mass_kg * self.gravity_at(flight.altitude_m)
-            / (dynamic_pressure_pa * self.wing_area_m2);
-        let base_cd = if high_lift {
-            self.high_lift_base_cd(cl, flight.mach, flight.altitude_m)
-        } else {
-            self.clean_cd(cl, flight.mach, flight.altitude_m)
-        };
-        let cd = base_cd + delta_cd;
-        if !cl.is_finite() || !cd.is_finite() || cd <= 0.0 {
-            return Err(FuelModelError::NotConverged(format!(
-                "invalid drag state CL={cl}, CD={cd}"
-            )));
-        }
-        Ok((cl, dynamic_pressure_pa * self.wing_area_m2 * cd))
-    }
-
-    /// Clean installed drag at `flight` for `mass_kg`.
-    pub(super) fn drag_n(
-        &self,
-        flight: &FlightCondition,
-        mass_kg: f64,
-    ) -> Result<f64, FuelModelError> {
-        self.drag_components_n(flight, mass_kg, 0.0, false)
-            .map(|(_, drag_n)| drag_n)
-    }
-
     /// Fly `plan` from `start_mass_kg`, taking step climbs at the frozen
     /// cruise-distance fractions `frozen_steps` when given, otherwise where
     /// the cruise-level rule qualifies them (see `cruise_levels`).
@@ -629,25 +651,20 @@ impl SegmentMissionModel {
             }
             .into());
         }
-        let (mut climbed, mut climb_footprint_m) =
+        let (mut climbed, takeoff_footprint_m, takeoff_end_m, takeoff_tas_m_s) =
             Integrator::at_lift_off(self, plan, start_mass_kg)?;
-        let mut previous: Option<&Segment> = None;
-        for segment in &plan.climb {
-            // An unpaid speed change belongs to the rung that held it.
-            let owner = previous
-                .filter(|_| climbed.carries_unpaid_change_to(segment.tas_m_s))
-                .unwrap_or(segment);
-            climb_footprint_m += climbed
-                .fly_segment(segment)
-                .map_err(|error| plan.tag_climb_failure(owner, error))?;
-            previous = Some(segment);
-        }
+        let climb_footprint_m =
+            takeoff_footprint_m + climbed.fly_climb_ladder(plan, takeoff_end_m, takeoff_tas_m_s)?;
         let (climb_time_s, climb_fuel_kg) = (climbed.time_s, climbed.fuel_kg);
         let mut descent_estimate_m = plan.descent_footprint_m();
         let mut flown: Option<(Integrator<'_>, CruiseOutcome)> = None;
         // Step climbs decided in the first pass are kept for the later
         // passes, so the descent fixed point closes on one level sequence.
         let mut steps = frozen_steps.map(<[f64]>::to_vec);
+        let mut closure = DescentFootprint {
+            largest_m: plan.range_m - climb_footprint_m,
+            ..DescentFootprint::default()
+        };
         for _ in 0..DESCENT_FOOTPRINT_PASSES {
             self.check_cancelled()?;
             let cruise_distance_m = plan.range_m - climb_footprint_m - descent_estimate_m;
@@ -669,13 +686,18 @@ impl SegmentMissionModel {
                         _ => error,
                     },
                 )?;
-            steps.get_or_insert_with(|| cruise.step_positions.clone());
+            let kept = steps.get_or_insert_with(|| cruise.step_positions.clone());
+            // A kept step the cruise had no room for this pass was not flown. Its
+            // shorter descent gives the next pass the distance to fly it again, and
+            // its longer descent takes that distance away: no distance closes both.
+            // The route has no room for the step, so it leaves the sequence.
+            kept.truncate(cruise.step_positions.len());
             // A step climb that ran past its planned cruise distance is
             // closed like extra descent footprint.
             let footprint_m =
                 cruise.descent_footprint_m + cruise.cruise_flown_m - cruise_distance_m.max(0.0);
             let mismatch_m = footprint_m - descent_estimate_m;
-            descent_estimate_m = footprint_m;
+            descent_estimate_m = closure.next(descent_estimate_m, footprint_m);
             flown = Some((integrator, cruise));
             if mismatch_m.abs() <= CRUISE_DISTANCE_TOLERANCE_M {
                 break;
@@ -688,8 +710,8 @@ impl SegmentMissionModel {
         };
         if (integrator.distance_m - plan.range_m).abs() > 10.0 * CRUISE_DISTANCE_TOLERANCE_M {
             return Err(FuelModelError::NotConverged(format!(
-                "route closure: flew {:.1} m of a {:.1} m route after {DESCENT_FOOTPRINT_PASSES} descent passes",
-                integrator.distance_m, plan.range_m
+                "route closure: flew {:.1} m of a {:.1} m route after {DESCENT_FOOTPRINT_PASSES} descent passes (climb {climb_footprint_m:.0} m, cruise flown {:.0} m, descent {:.0} m, next descent estimate {descent_estimate_m:.0} m)",
+                integrator.distance_m, plan.range_m, cruise.cruise_flown_m, cruise.descent_footprint_m
             ))
             .into());
         }
@@ -733,7 +755,25 @@ impl SegmentMissionModel {
                 unrealized_kinetic_j: unrealized_j,
                 ..integrator.ledger
             },
+            steps: integrator.trace,
+            climb_bands: trace::bands_of(plan),
         })
+    }
+
+    /// Fuel burned from brake release at `start_mass_kg` to the top of the
+    /// climb ladder of the trip `plan`, kg: the take-off ground roll plus the
+    /// climb exactly as [`Self::fly`] integrates it (the `climb_fuel_kg` of
+    /// the flown trip), without flying the cruise and descent.
+    pub(super) fn climb_fuel_kg(
+        &self,
+        start_mass_kg: f64,
+        plan: &ProfilePlan,
+    ) -> Result<f64, FlyError> {
+        let roll = self.takeoff_roll(start_mass_kg)?;
+        let (mut climbed, _, takeoff_end_m, takeoff_tas_m_s) =
+            Integrator::at_lift_off(self, plan, start_mass_kg - roll.fuel_kg)?;
+        climbed.fly_climb_ladder(plan, takeoff_end_m, takeoff_tas_m_s)?;
+        Ok(roll.fuel_kg + climbed.fuel_kg)
     }
 }
 
@@ -748,6 +788,65 @@ mod tests {
     use crate::mdo::propulsion::max_climb_rate_ft_min;
     use alas_config::design_variables::DesignVector;
     use alas_config::AlasConfig;
+
+    /// Passes the descent-footprint root finder takes to close `footprint`
+    /// from `start_m` to the route tolerance, or `None` within the budget.
+    fn footprint_passes(footprint: impl Fn(f64) -> f64, start_m: f64) -> Option<(usize, f64)> {
+        let mut closure = DescentFootprint {
+            largest_m: 1.0e6,
+            ..DescentFootprint::default()
+        };
+        let mut estimate_m = start_m;
+        for pass in 1..=DESCENT_FOOTPRINT_PASSES {
+            let footprint_m = footprint(estimate_m);
+            if (footprint_m - estimate_m).abs() <= CRUISE_DISTANCE_TOLERANCE_M {
+                return Some((pass, estimate_m));
+            }
+            estimate_m = closure.next(estimate_m, footprint_m);
+        }
+        None
+    }
+
+    #[test]
+    fn a_descent_footprint_that_moves_against_its_estimate_closes_instead_of_cycling() {
+        // Slope near -1: the plain fixed point x = g(x) cycles between two
+        // estimates about 85 m apart, as the ATR 72 route closure did.
+        let footprint = |x: f64| 70_000.0 - 0.99 * (x - 70_000.0) + 1.0e-6 * (x - 70_000.0).powi(2);
+        let (passes, closed_m) = footprint_passes(footprint, 69_957.5).expect("closes");
+        assert!(passes <= 6, "{passes} passes");
+        assert!((footprint(closed_m) - closed_m).abs() <= CRUISE_DISTANCE_TOLERANCE_M);
+    }
+
+    #[test]
+    fn a_contracting_descent_footprint_closes_in_no_more_passes_than_the_fixed_point() {
+        // Contraction 0.2 per pass (the A320-200 at 2,968 nmi) from a 30 km
+        // first-pass error, curved so the secant is not exact.
+        let footprint =
+            |x: f64| 100_000.0 + 0.2 * (x - 100_000.0) + 1.0e-7 * (x - 100_000.0).powi(2);
+        let (passes, closed_m) = footprint_passes(footprint, 130_000.0).expect("closes");
+        // The plain fixed point x = g(x), pass by pass, is what the root finder keeps.
+        let mut estimate_m = 130_000.0;
+        let mut plain = 0;
+        while (footprint(estimate_m) - estimate_m).abs() > CRUISE_DISTANCE_TOLERANCE_M {
+            estimate_m = footprint(estimate_m);
+            plain += 1;
+        }
+        assert_eq!(
+            passes,
+            plain + 1,
+            "{passes} passes against {plain} of the fixed point"
+        );
+        assert!((closed_m - estimate_m).abs() < 1.0e-9);
+    }
+
+    #[test]
+    fn a_descent_footprint_with_a_jump_at_the_root_brackets_down_to_the_jump() {
+        // A step that is flown on one side of the root and not on the other:
+        // the residual jumps by less than the tolerance at the root.
+        let footprint =
+            |x: f64| if x < 50_000.0 { 50_000.4 } else { 49_999.6 } + 0.5 * (50_000.0 - x);
+        assert!(footprint_passes(footprint, 40_000.0).is_some());
+    }
 
     fn test_model() -> SegmentMissionModel {
         let (config, _, plane) =
@@ -800,7 +899,47 @@ mod tests {
             allow_route_transition_deficit: false,
             deck_memo: DeckMemo::default(),
             cruise_states: Vec::new(),
+            trace: Vec::new(),
         }
+    }
+
+    /// Where flight idle does not retard the aeroplane at the restriction (a light aeroplane at
+    /// low speed: idle thrust exceeds drag), the level deceleration is not flown: the caller
+    /// charges nothing, leaves the integrator's state as it was, and the speed change stays in the
+    /// kinetic budget of the descent rung that follows.
+    #[test]
+    fn a_restriction_deceleration_idle_cannot_fly_is_left_to_the_descent_rung() {
+        let model = test_model();
+        let limit_m = alas_config::mission::SPEED_RESTRICTION_ALTITUDE_M;
+        let mass_kg = 1.0 * model.wing_area_m2;
+        assert!(
+            model
+                .level_deceleration(mass_kg, limit_m, 60.0, 45.0)
+                .unwrap()
+                .is_none(),
+            "the fixture must be a case idle cannot retard"
+        );
+        let descent = |start_m: f64, end_m: f64, tas_m_s: f64| {
+            Segment::vertical(SegmentKind::Descent, start_m, end_m, tas_m_s, 5.0)
+                .unwrap()
+                .unwrap()
+        };
+        let previous = descent(limit_m + 600.0, limit_m, 60.0);
+        let next = descent(limit_m, limit_m - 600.0, 45.0);
+        let mut flight = integrator(&model);
+        flight.mass_kg = mass_kg;
+        flight.previous_tas_m_s = Some(60.0);
+        flight.pending_kinetic_j = 1.0e5;
+        let distance_m = flight
+            .decelerate_through_restriction(Some(&previous), &next)
+            .unwrap();
+        assert_eq!(distance_m, 0.0);
+        assert!(flight.trace.is_empty());
+        assert_eq!(flight.mass_kg, mass_kg);
+        assert_eq!(flight.fuel_kg, 0.0);
+        assert_eq!(flight.time_s, 0.0);
+        assert_eq!(flight.previous_tas_m_s, Some(60.0));
+        assert_eq!(flight.pending_kinetic_j, 1.0e5);
     }
 
     fn level(tas_m_s: f64, distance_m: f64) -> Segment {

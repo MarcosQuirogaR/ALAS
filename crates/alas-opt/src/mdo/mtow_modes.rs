@@ -14,10 +14,23 @@
 
 use alas_config::{AlasConfig, DesignPayloadSource, MassSizingBasis, MtowPlan, StructuralBasis};
 use alas_mass::dispatch::{DispatchSolution, DispatchStatus};
+use alas_mass::fuel_plan::FuelBurnModel;
+use alas_mass::payload_range::{max_range_with_reserves, RangeStatus};
 use alas_units::NAUTICAL_MILE;
 
 use super::mission_model::SegmentMissionModel;
+use super::sizing::planned_mission::PlannedTrips;
 use super::types::CandidateFailure;
+
+/// Failure label of a payload-defined design mission whose range the model
+/// cannot solve at the certified takeoff mass: the fuel left after the empty
+/// mass and the design payload does not cover the reserves, or the burn model
+/// failed.
+pub(crate) const DESIGN_RANGE_UNSOLVED: &str = "design_range_unsolved";
+
+/// Bisection tolerance of the payload-defined design range, m. Over it the
+/// trip fuel moves by a fraction of a kilogram, below the sizing tolerance.
+const DESIGN_RANGE_TOLERANCE_M: f64 = 50.0;
 
 /// What the takeoff-mass sizing plan adds to a closed candidate.
 #[derive(Debug, Clone, PartialEq)]
@@ -39,8 +52,14 @@ pub struct MtowPlanOutcome {
 pub(crate) struct ClosureMission {
     /// Mission model at the sizing cruise altitude.
     pub model: SegmentMissionModel,
-    /// Still-air range, m.
+    /// Still-air range, m. Zero when [`Self::range_at_mass_kg`] is set: that
+    /// range is the closure's output, solved on every pass.
     pub range_m: f64,
+    /// The takeoff mass, kg, at which the closure solves the range itself
+    /// ([`range_at_certified_mass`]) for a payload-defined design mission
+    /// (`DesignRange::AtCertifiedMtow`); `None` when the range is declared or
+    /// the route's.
+    pub range_at_mass_kg: Option<f64>,
     /// Payload flown instead of the laid-out load case, kg, when the plan
     /// declares one.
     pub payload_kg: Option<f64>,
@@ -57,7 +76,8 @@ pub(crate) struct ClosureMission {
 /// great-circle distance between the selected aerodromes (zero when it is
 /// not known), used when no design range is declared.
 ///
-/// A charted design payload is flown as that mass.
+/// A charted design payload is flown as that mass; a configured payload
+/// limited to the charted one as the laid-out load case, capped there.
 ///
 /// A planning-seat design payload is taken as the laid-out payload
 /// `laid_out_payload_kg` with its `seated` passengers replaced by the
@@ -85,28 +105,110 @@ pub(crate) fn closure_mission(
             laid_out_payload_kg + (seats - seated) as f64 * config.requirements.passenger_mass_kg,
         ),
         DesignPayloadSource::ChartedPoint => mission.payload_kg,
+        DesignPayloadSource::ConfiguredWithinChart => mission
+            .payload_kg
+            .map(|charted_kg| laid_out_payload_kg.min(charted_kg)),
         _ => None,
     };
     let declared_m = mission.range.declared_nmi().map(|nmi| nmi * NAUTICAL_MILE);
-    let invalid = |_| CandidateFailure {
-        reason: "trim_solve",
-    };
+    let range_at_mass_kg = mission
+        .range
+        .is_model_defined()
+        .then_some(plan.declared_mtow_kg);
+    let invalid = |_| CandidateFailure::new("trim_solve");
     let mut model = route_model.clone();
     let altitude_m = config.requirements.cruise_altitude_m;
     model.cruise_altitude_m = altitude_m;
     model.design_cruise_altitude_m = altitude_m;
     // M a(T) from the US Standard Atmosphere 1976 on the flown day, as the
-    // route model derives it (audit MIS-03, MIS-04).
+    // route model derives it.
     model.cruise_tas_m_s = model
         .cruise_true_airspeed_m_s(altitude_m)
         .map_err(invalid)?;
+    // The profile's cruise speeds are true airspeeds declared at the level
+    // the model references (`cruise_tas_at` reads them as a Mach there).
+    // Where they are the requirement's Mach, the route model derived them at
+    // the route's level (`route_mission_model`); moving the reference to the
+    // design altitude derives them again there, by the same rule. Kept
+    // literal, the A220-300's FL250 speed read at FL370 flew its design
+    // mission at Mach 0.819 against the 0.78 requirement (A320-200, FL280:
+    // 0.808), lowering every level the mission plans.
+    if config.cruise_profile_follows_requirement() {
+        let tas_m_s = config.requirements.cruise_mach
+            * alas_atmo::us1976_compute_values(altitude_m, 0.0).speed_of_sound_m_s;
+        let profile = &mut model.profile;
+        profile.cruise_1_air_speed_m_s = tas_m_s;
+        profile.cruise_2_air_speed_m_s = tas_m_s;
+        profile.cruise_3_air_speed_m_s = tas_m_s;
+    }
     model.validate().map_err(invalid)?;
     Ok(Some(ClosureMission {
         model,
-        range_m: declared_m.unwrap_or(route_distance_m),
+        range_m: if range_at_mass_kg.is_some() {
+            0.0
+        } else {
+            declared_m.unwrap_or(route_distance_m)
+        },
+        range_at_mass_kg,
         payload_kg,
-        distance_known: declared_m.is_some() || route_distance_m > 0.0,
+        distance_known: declared_m.is_some()
+            || range_at_mass_kg.is_some()
+            || route_distance_m > 0.0,
     }))
+}
+
+/// The still-air range of a payload-defined design mission, m: the largest
+/// range whose full reserve fuel plan (`policy`) fits the fuel the aircraft
+/// carries at `takeoff_mass_kg`.
+///
+/// The fuel is `takeoff_mass_kg` less `zero_fuel_mass_kg` (the closure pass's
+/// operating empty mass plus the design payload), capped by the usable tank
+/// capacity less the taxi fuel, which is loaded but burned before brake
+/// release (the cap the dispatch applies). Every probed trip is flown on the
+/// plan frozen for its own mass and range ([`PlannedTrips`]).
+///
+/// # Errors
+///
+/// [`DESIGN_RANGE_UNSOLVED`] when no fuel is left for the mission, the taxi
+/// fuel flow is unavailable, or the reserves alone exceed the fuel.
+pub(crate) fn range_at_certified_mass(
+    model: &SegmentMissionModel,
+    policy: &alas_config::FuelPolicyConfig,
+    takeoff_mass_kg: f64,
+    zero_fuel_mass_kg: f64,
+    usable_capacity_kg: Option<f64>,
+) -> Result<f64, CandidateFailure> {
+    let unsolved = |detail: String| CandidateFailure::with_detail(DESIGN_RANGE_UNSOLVED, detail);
+    let taxi_kg = model
+        .taxi_fuel_flow_kg_s()
+        .map_err(|error| unsolved(format!("taxi fuel flow is unavailable: {error}")))?
+        * policy.taxi_time_min
+        * 60.0;
+    let mut fuel_kg = takeoff_mass_kg - zero_fuel_mass_kg;
+    if let Some(capacity_kg) = usable_capacity_kg {
+        fuel_kg = fuel_kg.min(capacity_kg - taxi_kg);
+    }
+    if !fuel_kg.is_finite() || fuel_kg <= 0.0 {
+        return Err(unsolved(format!(
+            "no fuel is left for the mission: {takeoff_mass_kg:.1} kg takeoff mass against a {zero_fuel_mass_kg:.1} kg zero-fuel mass"
+        )));
+    }
+    let corner = max_range_with_reserves(
+        zero_fuel_mass_kg + fuel_kg,
+        fuel_kg,
+        policy,
+        &PlannedTrips(model),
+        DESIGN_RANGE_TOLERANCE_M,
+    );
+    match corner.status {
+        RangeStatus::Solved if corner.range_m.is_finite() && corner.range_m > 0.0 => {
+            Ok(corner.range_m)
+        }
+        RangeStatus::ModelFailed(reason) => Err(unsolved(reason)),
+        _ => Err(unsolved(format!(
+            "{fuel_kg:.1} kg of fuel does not cover the reserves and a flyable trip"
+        ))),
+    }
 }
 
 /// The landing mass a sizing closure has to be able to land at, kg, or
@@ -117,7 +219,7 @@ pub(crate) fn closure_mission(
 /// field the `landing_mass` residual compares and the one the report's
 /// design-mission arrival check reads, so a limit that the floor sets is met
 /// exactly instead of being exceeded by the dispatch's settling residual (3 g
-/// on the 150-seat clean-sheet brief of 2026-10-15). A dispatch that did not
+/// on a 150-seat clean-sheet brief). A dispatch that did not
 /// settle (MTOW- or tank-limited, not converged) has a plan at a clamped mass,
 /// so the floor stays the mass the mission has to land at: the zero-fuel mass
 /// plus every fuel the plan carries past the destination (contingency,
@@ -193,8 +295,7 @@ pub(crate) fn design_weights(
         MassSizingBasis::Coupled => {
             // The component ledger is closed on this candidate's own
             // dispatched mass, which is what "coupled" means. The landing
-            // mass is one quantity for the three places that read it (audit
-            // SIZ-03): the gear is designed at it
+            // mass is one quantity for the three places that read it: the gear is designed at it
             // (`at_sized_closure_mass_with_landing_floor`), the dispatch
             // limits the landing mass to it (`mda::converge`) and the
             // `landing_mass` residual compares the mission with it. It is

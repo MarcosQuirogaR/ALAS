@@ -20,28 +20,32 @@ pub struct DownstreamConfig {
     /// Whether to export the optimized geometry to OpenVSP.
     #[config(
         label = "OpenVSP geometry export",
-        help = "Write the optimized aircraft as an inspectable OpenVSP script and, when OpenVSP is configured, materialize its .vsp3 project and CAD preview. This export is required before VSPAERO can run."
+        help = "Write the optimized aircraft as an inspectable OpenVSP script and, if OpenVSP is configured, its .vsp3 project and CAD preview.",
+        long_help = "Write the optimized aircraft as an inspectable OpenVSP script and, when OpenVSP is configured, materialize its .vsp3 project and CAD preview. This export is required before VSPAERO can run."
     )]
     pub openvsp: bool,
 
     /// Whether to run VSPAERO from the OpenVSP geometry.
     #[config(
         label = "VSPAERO analysis",
-        help = "Run OpenVSP's VSPAERO vortex-lattice comparison on the exported optimized geometry. Requires OpenVSP geometry export and a configured VSPAERO executable; a missing installation is reported without changing the native aerodynamic result."
+        help = "Run OpenVSP's VSPAERO vortex-lattice comparison on the exported geometry.",
+        long_help = "Run OpenVSP's VSPAERO vortex-lattice comparison on the exported optimized geometry. Requires OpenVSP geometry export and a configured VSPAERO executable; a missing installation is reported without changing the native aerodynamic result."
     )]
     pub vspaero: bool,
 
     /// Whether to run the independent AVL comparison.
     #[config(
         label = "AVL comparison",
-        help = "Run Athena Vortex Lattice's independent take-off comparison and retain its inspectable SI deck. The Aerodynamic results selector must include AVL for the external solver to be requested."
+        help = "Run Athena Vortex Lattice's independent take-off comparison and keep its SI deck. The Aerodynamic results selector must include AVL.",
+        long_help = "Run Athena Vortex Lattice's independent take-off comparison and retain its inspectable SI deck. The Aerodynamic results selector must include AVL for the external solver to be requested."
     )]
     pub avl: bool,
 
     /// Whether to run the FLOWUnsteady adapter.
     #[config(
         label = "FLOWUnsteady analysis",
-        help = "Run the FLOWUnsteady adapter on the optimized aircraft and retain its request, result and solver logs. Set ALAS_FLOWUNSTEADY_EXE to a compatible executable before enabling a real solve."
+        help = "Run the FLOWUnsteady adapter on the optimized aircraft and keep its request, result and solver logs. Set ALAS_FLOWUNSTEADY_EXE to a compatible executable first.",
+        long_help = "Run the FLOWUnsteady adapter on the optimized aircraft and retain its request, result and solver logs. Set ALAS_FLOWUNSTEADY_EXE to a compatible executable before enabling a real solve."
     )]
     pub flowunsteady: bool,
 }
@@ -50,7 +54,10 @@ impl Default for DownstreamConfig {
     fn default() -> Self {
         Self {
             openvsp: true,
-            vspaero: true,
+            // Off by default: the comparison is downstream evidence only (the
+            // native result never reads it) and it is the critical path of a
+            // default run, A320 on 3 threads about 635 s with it, 320 s without.
+            vspaero: false,
             avl: true,
             flowunsteady: true,
         }

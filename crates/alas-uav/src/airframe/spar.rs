@@ -1,8 +1,7 @@
 // SPDX-License-Identifier: AGPL-3.0-or-later
 // Copyright (C) 2026 Marcos Quiroga Rodriguez
 
-//! Wing spar sizing as a beam with CLT caps and a web (UAV-PLAN M4, owner
-//! decision D9: beam/CLT structures, no finite elements in v1).
+//! Wing spar sizing as a beam with CLT caps and a web.
 //!
 //! Geometry: two identical caps at `z = +/- d(y)` (`d` = half the centroid
 //! spacing, linear root to tip) with cap width `w(y)` and a web of depth

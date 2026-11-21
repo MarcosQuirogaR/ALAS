@@ -49,18 +49,12 @@
 //! (including dihedral); all lengths are metres and angles are radians
 //! internally (degrees only at the configuration boundary).
 //!
-//! Twist is **not** applied to the FEM cross-sections. The aerodynamic wing
-//! carries `root_twist_deg`/`break_twist_deg`/`tip_twist_deg` as jig rotations
-//! of each section about its own leading edge (nose-up positive), which the
-//! box does not reproduce: a rib section here is the untwisted airfoil in the
-//! plane of the leading-edge-normal cut. Rotating the ribs would move the spar
-//! nodes off the rib plane the rib-length and spar-intersection algebra
-//! assumes, so it cannot be added inside this builder without redefining
-//! that geometry. For a few degrees of washout the effect on the box is
-//! second order (depth changes by `1 - cos(twist)`, about 0.14 % at 3 degrees,
-//! and the elastic-axis shift is a torsion, not a bending, quantity), but
-//! the FE model does not carry aerodynamic-twist loads or torsional
-//! coupling.
+//! Twist is applied to the FEM cross-sections: each rib section is the airfoil
+//! rotated nose-up about its own leading edge by the built wing's jig twist
+//! (`root_twist_deg`, `break_twist_deg`, design-vector tip twist, linear between
+//! them), inside the rib plane, so the spar nodes stay on the rib. The sizing
+//! section properties use the untwisted depth (a `1 - cos` effect, 0.14 % at
+//! 3 degrees), and the FE span load is not changed by twist.
 //!
 //! Ribs are cut perpendicular to the local leading edge (streamwise at the
 //! root: the root rib is the clamped wall and must be a clean streamwise
@@ -89,7 +83,7 @@ use crate::aircraft::airfoil::Airfoil;
 use support::airfoil_surfaces;
 use types::SparReferenceLine;
 
-pub use types::{RibStation, WingStructureError};
+pub use types::{RibStation, SpanLoadShape, WingStructureError};
 
 /// Computes generic rib/spar FEM geometry for one main-wing design.
 ///
@@ -135,6 +129,14 @@ pub struct WingStructureGeometry {
     /// Whether each spar in [`WingStructureGeometry::spar_fracs`] runs the
     /// full span (`true`) or stops at the break station (`false`).
     pub spar_full_span: Vec<bool>,
+    /// Jig twist (nose-up positive, about each section's own leading edge) at the root,
+    /// the break and the tip, degrees: the built wing's section rotations.
+    pub twist_deg: [f64; 3],
+    /// Spanwise lift shape of the main wing, set by the product entry points
+    /// (the vortex-lattice basic and additional loading, or Schrenk's
+    /// approximation when no solve is possible). `None`, the default: consumers
+    /// use the half-ellipse, which the frozen reference law keeps.
+    pub span_load: Option<SpanLoadShape>,
 
     root_xu: Vec<f64>,
     root_zu: Vec<f64>,
@@ -280,6 +282,12 @@ impl WingStructureGeometry {
             z_tip,
             spar_fracs,
             spar_full_span,
+            twist_deg: [
+                wing_cfg.root_twist_deg,
+                wing_cfg.break_twist_deg,
+                dv.tip_twist_deg,
+            ],
+            span_load: None,
             root_xu,
             root_zu,
             root_xl,

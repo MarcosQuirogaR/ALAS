@@ -167,6 +167,33 @@ fn translated(lang: &str, text: &str) -> Option<String> {
     registry().read().ok()?.get(lang)?.get(text).cloned()
 }
 
+/// Substitute `{name}` placeholders in `template` in one pass over the
+/// template, so a value that itself contains `{other}` is never expanded
+/// again. Placeholders without a field are left as written.
+pub fn fill_fields(template: &str, fields: &[(&str, String)]) -> String {
+    let mut out = String::with_capacity(template.len());
+    let mut rest = template;
+    while let Some(open) = rest.find('{') {
+        out.push_str(&rest[..open]);
+        let tail = &rest[open + 1..];
+        let filled = tail.find('}').and_then(|close| {
+            fields
+                .iter()
+                .find(|(name, _)| *name == &tail[..close])
+                .map(|(_, value)| (value, close))
+        });
+        if let Some((value, close)) = filled {
+            out.push_str(value);
+            rest = &tail[close + 1..];
+        } else {
+            out.push('{');
+            rest = tail;
+        }
+    }
+    out.push_str(rest);
+    out
+}
+
 /// Translate `text` into the active (or given) language.
 ///
 /// `text` absent or empty returns empty without a lookup, matching Python's
@@ -220,6 +247,15 @@ pub fn t<'a>(text: Option<&'a str>, lang: Option<&str>) -> Cow<'a, str> {
 
 #[cfg(test)]
 mod tests {
+    #[test]
+    fn fill_fields_substitutes_in_one_pass() {
+        let fields = [("name", "a{count}b".to_owned()), ("count", "3".to_owned())];
+        assert_eq!(
+            fill_fields("{name}: {count} items {x}", &fields),
+            "a{count}b: 3 items {x}"
+        );
+    }
+
     use super::*;
 
     #[test]

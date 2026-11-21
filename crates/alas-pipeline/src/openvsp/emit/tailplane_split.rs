@@ -164,6 +164,11 @@ fn clip_root(wing: &Wing, clearance: f64) -> Wing {
         xsecs,
         symmetric: false,
         reference: wing.reference,
+        planform_datum: wing.planform_datum,
+        dynamic_pressure_ratio: wing.dynamic_pressure_ratio,
+        reference_xsecs: None,
+        tip_te_flare_m: wing.tip_te_flare_m,
+        twist_about_pitch_axis: wing.twist_about_pitch_axis,
     }
 }
 

@@ -280,7 +280,7 @@ pub(crate) fn climb_variants() -> Vec<ClimbVariant> {
                 profile.step_climb_2_air_speed_m_s = 290.0 * KNOT;
                 profile.step_climb_2_rate_m_s = 800.0 * FT_MIN;
                 let cruise_tas = config.requirements.cruise_mach
-                    * alas_atmo::Atmosphere::isa(config.requirements.cruise_altitude_m).speed_of_sound();
+                    * alas_atmo::Atmosphere::new(config.requirements.cruise_altitude_m).speed_of_sound();
                 profile.cruise_1_air_speed_m_s = cruise_tas;
                 profile.cruise_2_air_speed_m_s = cruise_tas;
                 profile.cruise_3_air_speed_m_s = cruise_tas;

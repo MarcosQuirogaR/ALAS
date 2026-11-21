@@ -235,15 +235,12 @@ fn python_geometry_preview_id_dispatches_to_the_three_view_scene() {
     let state = AppState::default();
     let scene = build_page_preview(&state, "geometry").expect("geometry preview");
 
-    assert_eq!(scene.title.as_deref(), Some("Three-View Drawing"));
+    assert_eq!(scene.title.as_deref(), Some("Three-view drawing"));
 }
 
 #[test]
 fn aerodynamics_menu_uses_the_python_drag_preview_registry_id() {
-    let page = nav::NAV
-        .iter()
-        .flat_map(|group| group.subgroups)
-        .flat_map(|subgroup| subgroup.pages)
+    let page = nav::all_pages()
         .find(|page| page.group == Some("drag_model"))
         .expect("aerodynamics page over the drag model");
 
@@ -487,12 +484,13 @@ fn theme_application_configures_context_visuals() {
 }
 
 #[test]
-fn desktop_shell_defaults_to_hover_navigation_and_a_readable_run_log() {
+fn desktop_shell_defaults_to_a_readable_run_log() {
+    // The rail starts collapsed unless the user pinned it in a previous session (a marker file in the
+    // data folder), so `nav_pinned` depends on the machine and is not pinned here.
     let state = AppState::default();
 
-    assert!(!state.nav_pinned);
     assert!(!state.reduced_animations);
-    assert_eq!(state.run_log_height, 220.0);
+    assert_eq!(state.run_log_height, 150.0);
     assert!(!state.logs.is_empty());
 }
 

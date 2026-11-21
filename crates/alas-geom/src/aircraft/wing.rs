@@ -72,8 +72,11 @@ mod reference;
 mod tests;
 mod theoretical_mac;
 
-pub use device::{WINGTIP_DEVICE_GEOMETRY_ONLY_NAME, WINGTIP_DEVICE_NAME};
-pub use reference::WingReference;
+pub use device::{
+    CENTRE_POD_STRUT_NAME, DORSAL_FIN_NAME, DORSAL_FIN_OUTSIDE_LATTICE_NAME, FIN_AFT_FAIRING_NAME,
+    VENTRAL_FIN_NAME, WINGTIP_DEVICE_GEOMETRY_ONLY_NAME, WINGTIP_DEVICE_NAME,
+};
+pub use reference::{PlanformDatum, WingReference};
 
 use std::f64::consts::PI;
 
@@ -91,7 +94,7 @@ pub(super) const SUBDIVIDE_BLEND_N_POINTS_PER_SIDE: usize = 100;
 /// A wing cross-section: leading-edge position, chord, twist and airfoil:
 /// `WingXSec`, scoped to the fields this program uses (no control surfaces,
 /// no analysis-specific options; see the module doc).
-#[derive(Debug, Clone, PartialEq)]
+#[derive(serde::Serialize, serde::Deserialize, Debug, Clone, PartialEq)]
 pub struct WingXSec {
     /// Leading-edge coordinates, in geometry axes.
     pub xyz_le: [f64; 3],
@@ -103,6 +106,12 @@ pub struct WingXSec {
     pub twist: f64,
     /// The airfoil section at this cross-section.
     pub airfoil: Airfoil,
+    /// The spanwise axis of this cross-section's frame, a unit vector in the YZ
+    /// plane, when the section keeps a given plane instead of the one
+    /// [`Wing::frame_of_xsec`] derives from the adjacent segments; `None` (every
+    /// section [`WingXSec::new`] builds) derives it. A wingtip device's root and
+    /// path stations keep the wing-tip section's axis.
+    pub span_axis: Option<[f64; 3]>,
 }
 
 impl WingXSec {
@@ -114,6 +123,7 @@ impl WingXSec {
             chord,
             twist,
             airfoil,
+            span_axis: None,
         }
     }
 
@@ -126,10 +136,39 @@ impl WingXSec {
     }
 }
 
+/// The [`WingXSec::span_axis`] of a cross-section interpolated at `a_weight`
+/// between `a` and `b`: `a`'s own at `a_weight == 1`, the normalized blend
+/// when both ends keep a given plane (the loft between two sections in one
+/// plane stays in it), and `None` otherwise, where the derived frame of the
+/// segment applies.
+///
+/// Without this, a section inserted between the in-plane stations of a
+/// wingtip device took the frame of its leading-edge line, whose dihedral on a
+/// short tip edge is far from the wing-tip plane; its camber offsets then
+/// leaned sideways and folded the vortex-lattice panels behind it.
+pub(crate) fn interpolated_span_axis(
+    a: &WingXSec,
+    b: &WingXSec,
+    a_weight: f64,
+) -> Option<[f64; 3]> {
+    if a_weight == 1.0 {
+        return a.span_axis;
+    }
+    match (a.span_axis, b.span_axis) {
+        (Some(axis_a), Some(axis_b)) if axis_a == axis_b => Some(axis_a),
+        (Some(axis_a), Some(axis_b)) => {
+            let blend = blend3(axis_a, axis_b, a_weight, 1.0 - a_weight);
+            let length = norm3(blend);
+            (length > 0.0).then(|| scale3(blend, 1.0 / length))
+        }
+        _ => None,
+    }
+}
+
 /// A wing: a name, an ordered list of cross-sections, and whether it is
 /// mirrored about the XZ plane, `Wing`, scoped to the fields and methods
 /// this program uses (see the module doc).
-#[derive(Clone, PartialEq)]
+#[derive(serde::Serialize, serde::Deserialize, Clone, PartialEq)]
 pub struct Wing {
     /// The wing's name, e.g. `"Main Wing"`.
     pub name: String,
@@ -143,6 +182,39 @@ pub struct Wing {
     /// quoted for, if it is not the drawn planform. `None` (every wing
     /// [`Wing::new`] builds) keeps the drawn planform as the reference.
     pub reference: Option<WingReference>,
+    /// The design planform of a wing whose sections inside the body are the
+    /// physical wing on its edge lines to the centreline rather than the design root; `None`
+    /// (every wing [`Wing::new`] builds) when the sections are the design planform.
+    pub planform_datum: Option<PlanformDatum>,
+    /// The ratio of the dynamic pressure this wing sees to the free stream
+    /// (`1.0` for every wing [`Wing::new`] builds). A vortex-lattice solve
+    /// scales the surface's circulation by its square root and its force by
+    /// the ratio itself, so the surface carries `ratio` of the load the
+    /// free stream would give it at the same angle: the horizontal tail's
+    /// effectiveness in the wing wake and the fuselage flow.
+    pub dynamic_pressure_ratio: f64,
+    /// The straight-edged reference planform of a surface whose
+    /// [`Self::xsecs`] are not straight-edged: a tail surface with rounded or
+    /// sloped edges, as root and tip sections. `None` for every wing
+    /// [`Wing::new`] builds, where the sections are their own reference.
+    ///
+    /// [`Self::xsecs`] are the one built surface: the lattice, the exports, the
+    /// renders and the wetted area read them. [`Self::reference_planform`] is
+    /// the theoretical tail planform that tail areas, volume coefficients and
+    /// the handbook correlations are defined on.
+    pub reference_xsecs: Option<Vec<WingXSec>>,
+    /// How much of the last section's chord is a wingtip device's trailing-edge flare,
+    /// m, on a wing with no [`Self::planform_datum`] to state the straight-edge tip: 0
+    /// otherwise. The flare belongs to the built surface, not to the taper and sweep.
+    pub tip_te_flare_m: f64,
+    /// Whether the sections twist about the body pitch (Y) axis rather than
+    /// their own dihedral-inclined spanwise axis: `false` for every wing
+    /// [`Wing::new`] builds. A trimmable stabilizer's incidence is an angle
+    /// in the plane of symmetry, so a set incidence keeps each chord in its
+    /// `xz` plane. About the dihedral axis, a twisted root chord would move
+    /// its trailing edge sideways by `c sin(twist) sin(dihedral)` and carry
+    /// the two halves through each other.
+    pub twist_about_pitch_axis: bool,
 }
 
 /// Which spacing function [`Wing::subdivide_sections`] uses to place the new

@@ -197,6 +197,17 @@ fn meta_json(meta: &ItemMeta) -> serde_json::Value {
         ItemMeta::OverheadBin(bin) => {
             serde_json::json!({ "bin_type": bin.bin_type.as_str() })
         }
+        ItemMeta::Declared(declared) => serde_json::json!({
+            "id": declared.id,
+            "category": match declared.category {
+                alas_config::MassCategory::Payload => "payload",
+                alas_config::MassCategory::Equipment => "equipment",
+            },
+            "zone_kind": declared.zone_kind,
+            "releasable": declared.releasable,
+            "drag_area_m2": declared.drag_area_m2,
+            "inertia_kgm2": declared.inertia_kgm2,
+        }),
         ItemMeta::BulkBag => {
             let mut value = serde_json::json!({ "loading": "loose_bulk" });
             if let Some(uld) = uld("BLK") {
@@ -226,6 +237,7 @@ fn merge_contour_metadata(value: &mut serde_json::Value, uld: &UldType) {
                 ContourFidelity::Authoritative => "authoritative",
                 ContourFidelity::ConservativeEnvelope => "conservative_envelope",
                 ContourFidelity::VisualizationOnly => "visualization_only",
+                ContourFidelity::PublishedStandard => "published_standard",
             }
             .to_owned(),
         ),
@@ -247,12 +259,31 @@ fn summary_json(summary: &LayoutSummary) -> serde_json::Value {
             "n_main_deck": summary.n_main_deck, "n_lower_deck": summary.n_lower_deck,
             "n_slots": summary.n_slots, "capacity_t": summary.capacity_t,
             "fill_pct": summary.fill_pct, "volume_m3": summary.volume_m3,
+            "installed": capacity_json(&summary.installed),
             "lower_uld": summary.lower_uld,
             "target_cg_pct_mac": summary.target_cg_pct_mac,
             "achieved_cg_pct_mac": summary.achieved_cg_pct_mac,
             "strategy": summary.strategy,
         }),
     }
+}
+
+/// The installed capacity of the holds and decks, independent of the load.
+fn capacity_json(capacity: &alas_payload::cargo::CargoCapacity) -> serde_json::Value {
+    serde_json::json!({
+        "uld_positions": capacity.uld_positions,
+        "main_deck_uld_positions": capacity.main_deck_uld_positions,
+        "lower_deck_uld_positions": capacity.lower_deck_uld_positions,
+        "lower_deck_container_capable_positions": capacity.lower_deck_container_capable_positions,
+        "bulk_positions": capacity.bulk_positions,
+        "container_internal_volume_m3": capacity.container_internal_volume_m3,
+        "container_usable_volume_m3": capacity.container_usable_volume_m3,
+        "bulk_usable_volume_m3": capacity.bulk_usable_volume_m3,
+        "usable_volume_m3": capacity.usable_volume_m3(),
+        "hold_volume_m3": capacity.hold_volume_m3,
+        "net_capacity_kg": capacity.net_capacity_kg,
+        "structural_limit_kg": capacity.structural_limit_kg,
+    })
 }
 
 fn passenger_summary_json(summary: &PassengerSummary) -> serde_json::Value {
@@ -273,6 +304,7 @@ fn passenger_summary_json(summary: &PassengerSummary) -> serde_json::Value {
         "bag_mass_t": summary.bag_mass_t, "belly_cargo_t": summary.belly_cargo_t,
         "hold_capacity_t": summary.hold_capacity_t, "hold_used_t": summary.hold_used_t,
         "hold_ulds": summary.hold_ulds, "aisle_width_m": summary.aisle_width_m,
+        "hold_capacity": capacity_json(&summary.hold_capacity),
         "max_abreast": summary.max_abreast, "n_aisles": summary.n_aisles,
         "deck_utilization": summary.deck_utilization, "cg_pct_mac": summary.cg_pct_mac,
         "double_deck": summary.double_deck,
@@ -311,6 +343,8 @@ mod tests {
             total_mass: 1_200.0,
             cg_x: 14.0,
             cg_y: -0.8,
+            balance: None,
+            all_coach_capacity: None,
             summary: LayoutSummary::Cargo(Box::new(CargoSummary {
                 payload_t: 1.2,
                 requested_net_payload_t: 1.12,
@@ -323,10 +357,12 @@ mod tests {
                 capacity_t: 1.5,
                 fill_pct: 75.0,
                 volume_m3: 4.3,
+                installed: alas_payload::cargo::CargoCapacity::default(),
                 lower_uld: "AKE",
                 target_cg_pct_mac: 25.0,
                 achieved_cg_pct_mac: 25.1,
                 strategy: "balanced".to_owned(),
+                held_to_structural_limit_kg: None,
             })),
         };
         let artifact = PayloadLayoutArtifact::from_run(
@@ -342,14 +378,17 @@ mod tests {
         assert_eq!(decoded.layout.items[0].meta["net_load_kg"], 1_120.0);
         assert_eq!(
             decoded.layout.items[0].meta["contour_fidelity"],
-            "visualization_only"
+            // The AKE is the LD3, whose contour is `PublishedStandard` (FAST 39 p.23 dimensions): the
+            // label is the documented one, not visualization-only.
+            "published_standard"
         );
         assert_eq!(
+            // The LD3 published contour has seven profile vertices (cabin_3d test).
             decoded.layout.items[0].meta["normalized_contour_yz"]
                 .as_array()
                 .expect("ULD contour is serialized")
                 .len(),
-            8
+            7
         );
         assert_eq!(decoded.layout.items[0].geometry_m.center_y, -0.8);
         assert!(decoded

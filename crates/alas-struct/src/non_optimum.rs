@@ -51,7 +51,7 @@ use crate::sizing::WingboxSizing;
 pub const ITEM_COUNT: usize = 8;
 
 /// Standard gravity used to turn Torenbeek's newton constants into kilograms.
-const STANDARD_GRAVITY_M_S2: f64 = 9.806_65;
+const STANDARD_GRAVITY_M_S2: f64 = alas_atmo::STANDARD_GRAVITY;
 
 /// Smeared thickness increment of a built-up (fastened) box, m (Eq. 11.55).
 const DELTA_NID_BUILT_UP_M: f64 = 1.0e-3;
@@ -247,6 +247,29 @@ pub struct NonOptimumItem {
     pub relative_uncertainty: f64,
 }
 
+/// Torenbeek 2013, Eq. 11.62 (book p. 344): the aeroelastic (flutter, aileron
+/// reversal) stiffness weight of an Al-alloy wing, kg,
+/// `W_ref/g (q_D/q_ref) (b cos L0/b_ref)^3 (t/c)^-2 (1 - sin L0.5) [1 - (M_D cos L0.5)^2]^-1/2`
+/// with `W_ref = 200 N`, `q_ref = 30 kPa`, `b_ref = 50 m`. Angles in radians,
+/// `q_D` in Pa, `t/c` the aileron-root thickness ratio.
+pub fn torsional_stiffness_mass_kg(
+    span_m: f64,
+    le_sweep_rad: f64,
+    mid_chord_sweep_rad: f64,
+    dive_dynamic_pressure_pa: f64,
+    dive_mach: f64,
+    thickness_ratio: f64,
+) -> f64 {
+    let mach_n = (dive_mach * mid_chord_sweep_rad.cos()).clamp(0.0, MAX_NORMAL_MACH);
+    let span_term = positive(span_m) * le_sweep_rad.cos() / STIFFNESS_REFERENCE_SPAN_M;
+    STIFFNESS_REFERENCE_FORCE_N / STANDARD_GRAVITY_M_S2 * positive(dive_dynamic_pressure_pa)
+        / STIFFNESS_REFERENCE_DYNAMIC_PRESSURE_PA
+        * span_term.powi(3)
+        / positive(thickness_ratio).max(1.0e-3).powi(2)
+        * (1.0 - mid_chord_sweep_rad.sin()).max(0.0)
+        / (1.0 - mach_n * mach_n).sqrt()
+}
+
 fn positive(value: f64) -> f64 {
     if value.is_finite() && value > 0.0 {
         value
@@ -306,19 +329,14 @@ pub fn evaluate(inputs: &NonOptimumInputs) -> [NonOptimumItem; ITEM_COUNT] {
     let stiffness = if inputs.composite {
         0.0
     } else {
-        let mach_n =
-            (inputs.dive_mach * inputs.mid_chord_sweep_rad.cos()).clamp(0.0, MAX_NORMAL_MACH);
-        let span_term =
-            positive(inputs.span_m) * inputs.le_sweep_rad.cos() / STIFFNESS_REFERENCE_SPAN_M;
-        STIFFNESS_REFERENCE_FORCE_N / STANDARD_GRAVITY_M_S2
-            * positive(inputs.dive_dynamic_pressure_pa)
-            / STIFFNESS_REFERENCE_DYNAMIC_PRESSURE_PA
-            * span_term.powi(3)
-            / positive(inputs.aileron_root_thickness_ratio)
-                .max(1.0e-3)
-                .powi(2)
-            * (1.0 - inputs.mid_chord_sweep_rad.sin()).max(0.0)
-            / (1.0 - mach_n * mach_n).sqrt()
+        torsional_stiffness_mass_kg(
+            inputs.span_m,
+            inputs.le_sweep_rad,
+            inputs.mid_chord_sweep_rad,
+            inputs.dive_dynamic_pressure_pa,
+            inputs.dive_mach,
+            inputs.aileron_root_thickness_ratio,
+        )
     };
 
     // 11.6.7.

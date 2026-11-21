@@ -39,6 +39,17 @@ pub(super) fn declared_architecture(name: &str) -> Option<DeclaredArchitecture> 
         // E: the LTH civil-transport relations are fitted on passenger turbofan
         // transports (and are zero at zero seats); this military cargo aircraft
         // keeps FLOPS equation 110 and the FLOPS operating items.
+        // The standard equipment Jane's All the World's Aircraft 2008-09 lists
+        // on pp297-298 (cargo winch, four life rafts, eight stretchers, two
+        // lavatories, crew rest bunks) is not added as items: Beltramo et al.,
+        // NASA CR-151970 (1977), Table 5.25 p5-100, books each of them inside
+        // the furnishings and equipment group (litters and supports, crew bunks,
+        // lavatory installation, emergency equipment, and cargo and aerial
+        // delivery, whose footnote names the winch), the scope equation 110
+        // prices. Equation 110 gives 6,712 lb here, above the whole group of the
+        // C-130E (4,770 lb), C-133B (4,549 lb) and C-141A (4,362 lb) in that
+        // table, so an item on top would count it twice. The removable
+        // refuelling probe is outside that group and has no published mass.
         cabin_equipment_method: CabinEquipmentMethod::FlopsTransportV1,
         haul_class: declared_haul_class(name),
         mission: Evidence {
@@ -79,6 +90,22 @@ pub(super) fn adjust_structure(name: &str, structure: &mut FlopsStructureConfig)
     structure.design_landing_mass_kg = Some(123_000.0);
     // E: FLOPS CARGF 1.0, the military cargo floor.
     structure.military_cargo_floor = 1.0;
+    // S: Jane's All the World's Aircraft 2008-09, A400M entry, LANDING GEAR,
+    // printed p296: "Multidisc carbon brakes on mainwheels".
+    structure.main_gear_carbon_brakes = true;
+    // S: low-pressure main tyres, the NASA CR-151970 p. 5-29 increment of the
+    // military gear class (military_gear.rs). K. Wieland (A400M Chief Engineer,
+    // Airbus Deutschland), DGLR/HAW Hamburg lecture, 29 Nov 2001, slide 18:
+    // operation from semi-prepared fields is met with "Niederdruckreifen"
+    // (low-pressure tyres, large tyre volume). Jane's 2008-09 p.296: main tyres
+    // 43x15.5-17 at 8.83 bar (128 psi), CBR4.
+    structure.main_gear_low_pressure_tyres = true;
+    // S: kneeling main gear, Raymer K_mp on the main-gear share of the military
+    // gear class (military_gear/kneeling.rs). Jane's All the World's Aircraft
+    // 2008-09, A400M entry, LANDING GEAR, printed p296: "Mainwheels can 'kneel'
+    // for loading and unloading of large tracked and wheeled vehicles"; a
+    // kneeling nose gear is not stated, so none is declared.
+    structure.main_gear_kneeling = true;
     // E: CFRP wing skins are mentioned only by a secondary article (S1).
     structure.composite_utilization = 0.3;
     // E: the LTH box-beam pylon relation was fitted on turbofans; the nacelles

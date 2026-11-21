@@ -32,15 +32,21 @@ use alas_config::{CertifiedExitLayout, PassengerCabinConfig, SeatClassConfig};
 
 mod block;
 
-use self::block::{BlockPlan, STRETCH_BACKOFF_ITERATIONS};
+use self::block::{BlockPlan, ROW_FIT_EPS_M, STRETCH_BACKOFF_ITERATIONS};
 use super::door_seating::place_declared_deck;
 use super::{
-    abreast, cabin_deck_segments, ceil_div, effective_pair_capacity, largest_pair_rating,
+    abreast, ceil_div, effective_pair_capacity, largest_pair_rating,
     max_certifiable_capacity_reference_compatibility, max_certifiable_capacity_with_source_layout,
     min_exit_pairs, seat_blocks, select_exit_type, Bay, DeckCapacities, MIN_PITCH, MIN_SEAT_WIDTH,
-    MONUMENT_LEN, SEAT_BOX_H,
+    MONUMENT_LEN, SEAT_BACK_TOP_M, SEAT_BOX_H,
 };
-use crate::geometry::CabinGeometry;
+use crate::geometry::{
+    carry_on_mass_kg, occupant_row_cg_above_floor_m, CabinGeometry, SEAT_PAN_ABOVE_FLOOR_M,
+};
+
+/// Least height of a seat row's occupied envelope above the seat pan, m: a row
+/// under a headroom lower than the pan has none, and the pan plane stays level.
+const MIN_ROW_ENVELOPE_H_M: f64 = 0.0;
 use crate::layout::{DeckItem, ItemKind, ItemMeta, SeatMeta};
 
 /// One class of the cabin, and how much of it is left to place.
@@ -151,7 +157,7 @@ pub(super) fn place_seats(
         max_certifiable_capacity_reference_compatibility(g, pax)
     };
     let deck_caps = geometric_deck_caps.with_source_cap_for(g, source_capacity_cap);
-    let segments = super::layout_order(g, cabin_deck_segments(g));
+    let segments = super::layout_order(g, super::seating_segments(g));
     let mut source_left =
         super::RemainingSourceCap::new(g, &geometric_deck_caps, &deck_caps, source_capacity_cap);
     let exit_spec = select_exit_type(g.diameter_m);
@@ -367,16 +373,41 @@ pub(super) fn seat_row_item(
     (abreast, aisles): (i64, i64),
     aisle_w: f64,
 ) -> DeckItem {
+    // The box is as tall as the headroom allows anywhere under the row, so a
+    // row in a tapering nose or tail does not stand through the crown.
+    let box_h = if g.enforces_physical_envelope() {
+        [x0, x0 + 0.5 * pitch, x0 + pitch]
+            .iter()
+            .map(|&x| g.clamp_height(deck, x, SEAT_BACK_TOP_M))
+            .fold(f64::INFINITY, f64::min)
+    } else {
+        g.clamp_height(deck, x0, SEAT_BOX_H)
+    };
+    // The occupied envelope starts at the seat pan, where the row is as wide as
+    // its armrests; the base below it stands on the floor tracks.
+    let base = if g.enforces_physical_envelope() {
+        SEAT_PAN_ABOVE_FLOOR_M
+    } else {
+        0.0
+    };
+    let envelope_h = (box_h - base).max(MIN_ROW_ENVELOPE_H_M);
     DeckItem {
         kind: ItemKind::SeatRow,
         deck: deck.name,
         x: x0 + pitch / 2.0,
         y: 0.0,
-        z: g.item_z(deck, x0, SEAT_BOX_H),
+        z: g.floor_z(deck, x0) + base + envelope_h / 2.0,
         length: pitch,
-        width: g.usable_width(deck, x0),
+        // What the row occupies (its seats and aisles), not the whole floor
+        // chord: the box is the row's envelope. The frozen frame keeps the
+        // floor width its fixture records.
+        width: if g.enforces_physical_envelope() {
+            abreast as f64 * class.config.width_m.max(MIN_SEAT_WIDTH) + aisles as f64 * aisle_w
+        } else {
+            g.usable_width(deck, x0)
+        },
         mass: seats as f64 * class.config.mass_per_pax_kg,
-        height: g.clamp_height(deck, x0, SEAT_BOX_H),
+        height: envelope_h,
         label: class.name.to_owned(),
         meta: ItemMeta::Seat(SeatMeta {
             cls: class.name,
@@ -387,6 +418,16 @@ pub(super) fn seat_row_item(
             blocks: seat_blocks(abreast, aisles),
             seat_w: class.config.width_m.max(MIN_SEAT_WIDTH),
             aisle_w,
+            cg_z: g.floor_z(deck, x0)
+                + if g.enforces_physical_envelope() {
+                    occupant_row_cg_above_floor_m(
+                        class.config.mass_per_pax_kg,
+                        carry_on_mass_kg(class.name),
+                    )
+                } else {
+                    0.5 * box_h
+                },
+            floor_z: g.floor_z(deck, x0),
         }),
     }
 }
@@ -432,6 +473,9 @@ fn simulate_segment(
         let row = abreast(class, deck, g, aisle_w, x);
         let seats = row.min(remaining[ci]).min(deck_cap - seated);
         let pitch = class.pitch_m.max(MIN_PITCH);
+        if g.enforces_physical_envelope() && x + pitch > x1 - MONUMENT_LEN + ROW_FIT_EPS_M {
+            break;
+        }
         length += pitch;
         remaining[ci] -= seats;
         seated += seats;

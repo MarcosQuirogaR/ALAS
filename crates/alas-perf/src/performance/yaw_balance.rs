@@ -4,7 +4,7 @@
 //! One-engine-inoperative yaw balance: the trim state, the minimum control
 //! speed and the crosswind rudder demand.
 //!
-//! Sources (read from the owner-supplied handbooks, SOURCES-R2 Sec. 4):
+//! Sources (read from the handbooks, Sec. 4 of the source list):
 //!
 //! - Torenbeek, *Synthesis of Subsonic Airplane Design* (1982), Sec. 9.6.1,
 //!   Eqs. (9-52) to (9-60): the thrust asymmetry `N_e = dT_e y_e`, the side
@@ -35,27 +35,38 @@
 //! # Model and its limits
 //!
 //! Quasi-steady moment and side-force balance with linear fin aerodynamics.
-//! The roll balance and the aileron (Roskam Eq. 2.11), the side force and
-//! induced drag of the fuselage and nacelles in sideslip, the propeller
-//! slipstream over the fin, the pedal force (hinge moment) and the
-//! transient overshoot are not modelled. The rudder effectiveness is
-//! interpolated from the published curve points of Sadraey Fig. 12.12 (see
-//! `rudder::RUDDER_TAU_POINTS`), not measured on the fin. The fin effective aspect
-//! ratio is the geometric one unless the caller supplies a larger value.
+//! The side force of the airframe without fin enters the side-force
+//! balance (`YawControlGeometry::side_force_without_fin_per_rad`); the
+//! roll balance and the aileron (Roskam Eq. 2.11), the nacelles' side force,
+//! the induced drag in sideslip, the propeller slipstream over the fin, the pedal force (hinge moment) and the
+//! transient overshoot are not modelled. The rudder side force follows
+//! Roskam, *Airplane Design* Part VI, Eq. (10.123a), p. 461: the section
+//! effectiveness interpolated from the published curve points of Sadraey
+//! Fig. 12.12 (see `rudder::RUDDER_TAU_POINTS`), times the three-dimensional
+//! ratio of Roskam Fig. 8.53 at the fin's effective aspect ratio, the
+//! flap-span factor `K_b` of Fig. 8.52 on the fin panel from the body
+//! centreline, and the DATCOM large-deflection factor `k'` (Fig.
+//! 6.1.1.1-40, Roskam Fig. 8.13) applied to the deflection. The fin
+//! effective aspect ratio is the geometric one unless the caller supplies a
+//! larger value.
 
 use std::f64::consts::PI;
 
 use super::failed_engine_drag::YawBalanceGeometry;
 
+mod ground_run;
 mod rudder;
-pub use rudder::rudder_effectiveness;
+pub use ground_run::{
+    dry_runway_side_force_coefficient, GroundRunGeometry, GroundRunThrust, VMCG_LATERAL_LIMIT_M,
+    VMCG_PILOT_REACTION_S, VMCG_RUDDER_RATE_RAD_S, VMCG_THRUST_DECAY_S,
+};
+pub use rudder::{
+    large_deflection_effectiveness_factor, rudder_effectiveness, rudder_large_deflection_factor,
+    span_factor, three_dimensional_effectiveness_ratio,
+};
 
 /// CS 25.149(b): the maximum angle of bank toward the live engine, rad.
 pub const BANK_LIMIT_RAD: f64 = 5.0 * PI / 180.0;
-/// Limit on the sideslip magnitude of the trim state, rad (5 deg): Roskam VII
-/// Sec. 2.3 acceptability limit for drag (the fin-stall limit is 12 deg) and
-/// the range of Torenbeek Fig. 9-22.
-pub const SIDESLIP_LIMIT_RAD: f64 = 5.0 * PI / 180.0;
 /// CS 25.149(c): `VMC` may not exceed 1.13 `VSR`.
 pub const VMC_CEILING_OVER_VSR: f64 = 1.13;
 /// Fin dynamic-pressure ratio `eta_v = (V_v / V)^2`, Torenbeek Eq. (9-60).
@@ -96,6 +107,11 @@ pub struct YawControlGeometry {
     pub fin_taper_ratio: f64,
     /// Rudder chord over local fin chord.
     pub rudder_chord_ratio: f64,
+    /// Flap-span factor `K_b` of the rudder on the fin panel measured from
+    /// the fuselage centreline ([`span_factor`], Roskam Part VI Fig. 8.52):
+    /// the share of the panel's lift a full-chord rudder deflection over the
+    /// rudder span produces. 1 for a rudder over the whole panel.
+    pub rudder_span_factor: f64,
     /// Largest rudder deflection, rad.
     pub rudder_max_deflection_rad: f64,
     /// Wing reference area, m^2.
@@ -105,6 +121,61 @@ pub struct YawControlGeometry {
     /// Yaw-moment slope of the airframe without the fin, per rad (negative
     /// when destabilizing), referred to `S b`.
     pub cn_beta_without_fin_per_rad: f64,
+    /// Side-force slope of the airframe without the fin, `C_Y_beta` per rad
+    /// referred to `S` (negative), Roskam, *Airplane Design* Part VI,
+    /// Eqs. (10.25) to (10.27), pp. 383-385: the wing's dihedral term and the
+    /// body's `-2 K_i S_0 / S`. It carries part of the bank's weight
+    /// component in the engine-out side-force balance.
+    pub side_force_without_fin_per_rad: f64,
+    /// Sidewash factor `d beta_v / d beta` at the fin: the fin angle of
+    /// attack per unit airframe sideslip ([`fin_sidewash_factor`]), times
+    /// the DATCOM body factor `k(b_v / 2 r_1)` where a body carries the
+    /// fin. It multiplies the sideslip only; the rudder angle reaches the
+    /// fin unchanged.
+    pub fin_sidewash_factor: f64,
+}
+
+/// Sidewash factor `d beta_v / d beta` at the fin from the empirical relation
+/// for the product `(d beta_v / d beta) eta_v` (USAF DATCOM, as reproduced by
+/// Raymer, *Aircraft Design: A Conceptual Approach*, 6th ed., Eq. (16.51),
+/// p. 619): `0.724 + 3.06 (S'_v / S_w) / (1 + cos L) - 0.4 Z_wf / D_f +
+/// 0.009 A_w`, divided by [`FIN_DYNAMIC_PRESSURE_RATIO`]. `S'_v` is the fin
+/// area extended to the fuselage centreline, `S_w`, `L` and `A_w` the wing
+/// reference area, quarter-chord sweep and aspect ratio, `Z_wf` the height of
+/// the wing root quarter chord above the fuselage centreline and `D_f` the
+/// fuselage depth there. A low wing (`Z_wf < 0`) raises it. `None` for
+/// invalid inputs or a non-positive result.
+pub fn fin_sidewash_factor(
+    fin_area_to_centreline_m2: f64,
+    wing_area_m2: f64,
+    wing_quarter_chord_sweep_rad: f64,
+    wing_aspect_ratio: f64,
+    wing_height_above_centreline_m: f64,
+    fuselage_depth_m: f64,
+) -> Option<f64> {
+    let inputs = [
+        fin_area_to_centreline_m2,
+        wing_area_m2,
+        wing_quarter_chord_sweep_rad,
+        wing_aspect_ratio,
+        wing_height_above_centreline_m,
+        fuselage_depth_m,
+    ];
+    if !(inputs.iter().all(|v| v.is_finite())
+        && fin_area_to_centreline_m2 > 0.0
+        && wing_area_m2 > 0.0
+        && wing_aspect_ratio > 0.0
+        && fuselage_depth_m > 0.0)
+    {
+        return None;
+    }
+    let product = 0.724
+        + 3.06 * (fin_area_to_centreline_m2 / wing_area_m2)
+            / (1.0 + wing_quarter_chord_sweep_rad.cos())
+        - 0.4 * wing_height_above_centreline_m / fuselage_depth_m
+        + 0.009 * wing_aspect_ratio;
+    let factor = product / FIN_DYNAMIC_PRESSURE_RATIO;
+    (factor > 0.0).then_some(factor)
 }
 
 /// What the pilot (or the autopilot) holds while balancing the asymmetry.
@@ -143,8 +214,6 @@ pub struct YawTrim {
 pub enum ControlLimit {
     /// The rudder reaches its maximum deflection.
     Rudder,
-    /// The sideslip reaches the fin-stall limit.
-    Sideslip,
 }
 
 /// Minimum control speed and the trim state at it.
@@ -156,6 +225,30 @@ pub struct MinimumControlSpeed {
     pub trim: YawTrim,
     /// What limits control there.
     pub limit: ControlLimit,
+}
+
+/// Why a minimum-control-speed search returned no speed.
+#[derive(Debug, Clone, Copy, PartialEq)]
+pub enum MinimumControlSpeedFailure {
+    /// Density or speed of sound is not a positive finite number.
+    UnusableInputs,
+    /// The control demand is still at or above its limit at the top of the
+    /// search range: the asymmetry cannot be held at any searched speed.
+    AboveSearchRange {
+        /// Top of the search range, true airspeed, m/s.
+        tas_m_s: f64,
+    },
+    /// The control demand is already below its limit at the bottom of the
+    /// search range: the asymmetry sets no minimum control speed there.
+    BelowSearchRange {
+        /// Bottom of the search range, true airspeed, m/s.
+        tas_m_s: f64,
+    },
+    /// The yaw trim could not be evaluated at a probed speed.
+    TrimUnavailable {
+        /// Probed true airspeed, m/s.
+        tas_m_s: f64,
+    },
 }
 
 /// Fuselage data of the yaw-moment slope, Torenbeek Fig. 9-25.
@@ -249,7 +342,12 @@ struct FinAuthority {
     /// `S_v eta_v C_L,alpha`: side force per unit dynamic pressure per rad
     /// of fin angle of attack, m^2.
     area_slope_m2: f64,
-    /// Rudder effectiveness.
+    /// Rudder effectiveness on the fin panel at small deflection, Roskam
+    /// Part VI Eq. (10.123a): the section value (Sadraey Fig. 12.12) times
+    /// the three-dimensional ratio of Fig. 8.53 at the fin's effective
+    /// aspect ratio and the flap-span factor `K_b`. The large-deflection
+    /// factor `k'` is applied to the deflection itself
+    /// ([`YawControlGeometry::rudder_angle_rad`]).
     tau: f64,
 }
 
@@ -262,7 +360,9 @@ impl YawControlGeometry {
             self.fin_taper_ratio,
             mach,
         )?;
-        let tau = rudder_effectiveness(self.rudder_chord_ratio)?;
+        let section = rudder_effectiveness(self.rudder_chord_ratio)?;
+        let three_d = three_dimensional_effectiveness_ratio(g.fin_effective_aspect_ratio, section)?;
+        let tau = section * three_d * self.rudder_span_factor;
         Some(FinAuthority {
             area_slope_m2: g.fin_area_m2 * FIN_DYNAMIC_PRESSURE_RATIO * slope,
             tau,
@@ -278,17 +378,59 @@ impl YawControlGeometry {
             self.wing_area_m2,
             self.wing_span_m,
             self.rudder_max_deflection_rad,
+            self.rudder_span_factor,
         ]
         .iter()
         .all(|v| v.is_finite() && *v > 0.0)
             && self.cn_beta_without_fin_per_rad.is_finite()
+            && self.side_force_without_fin_per_rad.is_finite()
+            && self.side_force_without_fin_per_rad <= 0.0
+            && self.fin_sidewash_factor.is_finite()
+            && self.fin_sidewash_factor > 0.0
+    }
+
+    /// The rudder deflection whose fin force equals that of the linear
+    /// deflection `linear_rad`: the root of `delta k'(delta) = linear` with
+    /// the measured transport-fin large-deflection factor `k'`
+    /// ([`rudder_large_deflection_factor`]). `delta k'(delta)` rises
+    /// monotonically, and `k' > 0.7`, so the root lies below
+    /// `|linear| / 0.5`. Sign follows `linear_rad`.
+    pub fn rudder_angle_rad(&self, linear_rad: f64) -> f64 {
+        if !linear_rad.is_finite() {
+            return linear_rad;
+        }
+        let target = linear_rad.abs();
+        let effective = |delta: f64| {
+            delta * rudder_large_deflection_factor(delta.to_degrees(), self.rudder_chord_ratio)
+        };
+        let (mut low, mut high) = (0.0_f64, target / 0.5);
+        for _ in 0..60 {
+            let mid = 0.5 * (low + high);
+            if effective(mid) < target {
+                low = mid;
+            } else {
+                high = mid;
+            }
+        }
+        0.5 * (low + high) * linear_rad.signum()
     }
 
     /// Yaw-moment slope of the whole airframe per rad of sideslip, `Cn_beta`
     /// of Torenbeek Eq. (9-62) (jet: no sidewash term). Positive is stable.
     pub fn cn_beta_total_per_rad(&self, mach: f64) -> Option<f64> {
         let authority = self.fin_authority(mach)?;
-        Some(self.cn_beta_without_fin_per_rad + self.fin_moment_slope(&authority))
+        Some(
+            self.cn_beta_without_fin_per_rad
+                + self.fin_sidewash_factor * self.fin_moment_slope(&authority),
+        )
+    }
+
+    /// Small-deflection rudder yaw-moment derivative `-Cn_delta_r` per rad on
+    /// `S b` (positive here): the fin moment slope times the rudder
+    /// effectiveness, before the large-deflection factor.
+    pub fn cn_delta_r_per_rad(&self, mach: f64) -> Option<f64> {
+        let authority = self.fin_authority(mach)?;
+        Some(self.fin_moment_slope(&authority) * authority.tau)
     }
 
     /// `S_v eta_v C_L,alpha l_v / (S b)`: the fin's own contribution to
@@ -326,7 +468,7 @@ impl YawControlGeometry {
         let zero_sideslip = |bank_rad: f64| YawTrim {
             bank_rad,
             sideslip_rad: 0.0,
-            rudder_rad: fin_force_zero_sideslip / (k_n * authority.tau),
+            rudder_rad: self.rudder_angle_rad(fin_force_zero_sideslip / (k_n * authority.tau)),
             fin_force_n: fin_force_zero_sideslip,
             bank_limited: false,
         };
@@ -337,75 +479,60 @@ impl YawControlGeometry {
         let Some(weight) = weight else {
             return (mode == YawTrimMode::MinimumDrag).then(|| zero_sideslip(f64::NAN));
         };
-        let capacity_n = weight * BANK_LIMIT_RAD.sin();
-        // Side-force balance: weight component = fin force (the airframe
-        // side force is neglected). Moment balance fixes the sideslip.
-        let denominator =
+        // Side force and yaw moment at a given bank (Roskam Part VII Eqs.
+        // 2.10 and 2.12, Torenbeek Eqs. 9-53 to 9-58, aileron and roll left
+        // out): with the fin force `F` (toward the failed side) and the
+        // sideslip `beta` as unknowns,
+        //   F + Y_b beta = W sin(phi)      (side force)
+        //   l_v F + N_b beta = N_e          (yaw moment)
+        // where `Y_b = -q S C_Y_beta,(A-v) >= 0` is the side force of the
+        // airframe without fin per rad of sideslip (toward the failed side
+        // for the wind from the live side) and `N_b = q S b Cn_beta,(A-v)`
+        // its yawing moment (negative when destabilizing). The sideslip is
+        // what the balance leaves, not a chosen value.
+        let side_slope_n = -q_pa * self.wing_area_m2 * self.side_force_without_fin_per_rad;
+        let moment_slope_nm =
             q_pa * self.wing_area_m2 * self.wing_span_m * self.cn_beta_without_fin_per_rad;
-        let banked = |fin_force_n: f64| -> Option<YawTrim> {
-            if denominator.abs() < 1.0e-9 {
+        let determinant = moment_slope_nm - g.fin_arm_m * side_slope_n;
+        let banked = |bank_rad: f64| -> Option<YawTrim> {
+            if determinant.abs() < 1.0e-9 {
                 return None;
             }
-            let sideslip = (moment_nm - g.fin_arm_m * fin_force_n) / denominator;
-            let rudder = (fin_force_n / k_n - sideslip) / authority.tau;
+            let side_n = weight * bank_rad.sin();
+            let fin_force_n = (side_n * moment_slope_nm - side_slope_n * moment_nm) / determinant;
+            let sideslip = (moment_nm - g.fin_arm_m * side_n) / determinant;
+            let rudder = self.rudder_angle_rad(
+                (fin_force_n / k_n - self.fin_sidewash_factor * sideslip) / authority.tau,
+            );
             Some(YawTrim {
-                bank_rad: (fin_force_n / weight).asin(),
+                bank_rad,
                 sideslip_rad: sideslip,
                 rudder_rad: rudder,
                 fin_force_n,
-                bank_limited: true,
+                bank_limited: bank_rad >= BANK_LIMIT_RAD,
             })
         };
-        let at_limit = banked(capacity_n);
         match mode {
             YawTrimMode::MinimumDrag => {
+                let capacity_n = weight * BANK_LIMIT_RAD.sin();
                 if fin_force_zero_sideslip <= capacity_n {
                     Some(zero_sideslip((fin_force_zero_sideslip / weight).asin()))
                 } else {
-                    at_limit
+                    banked(BANK_LIMIT_RAD)
                 }
             }
             YawTrimMode::LeastRudder => {
-                // Bank toward the live engine lets the fin carry more than
-                // the zero-sideslip force, at the price of sideslip with the
-                // wind from the live side, which the destabilizing airframe
-                // pays for. Between the zero-sideslip force and the bank
-                // capacity the rudder demand falls and the sideslip demand
-                // rises linearly with the fin force, so the least demand is
-                // at an end or where the two cross. Less force than the
-                // zero-sideslip value would lean on the destabilizing
-                // airframe with the wind from the failed side, which is not
-                // a state a pilot holds.
-                let low = fin_force_zero_sideslip.min(capacity_n);
-                let fraction = |trim: &YawTrim| {
-                    (
-                        trim.rudder_rad / self.rudder_max_deflection_rad,
-                        trim.sideslip_rad / SIDESLIP_LIMIT_RAD,
-                    )
-                };
-                let mut forces = vec![low, capacity_n];
-                if let (Some(a), Some(b)) = (banked(low), banked(capacity_n)) {
-                    let (ra, sa) = fraction(&a);
-                    let (rb, sb) = fraction(&b);
-                    let (ga, gb) = (ra - sa, rb - sb);
-                    if ga * gb < 0.0 {
-                        forces.push(low - ga * (capacity_n - low) / (gb - ga));
-                    }
-                }
-                let mut best = (fin_force_zero_sideslip <= capacity_n)
-                    .then(|| zero_sideslip((fin_force_zero_sideslip / weight).asin()));
-                for force in forces {
-                    let candidate = banked(force).map(|mut trim| {
-                        trim.bank_limited = force >= capacity_n;
-                        trim
-                    });
-                    if let Some(candidate) = candidate {
-                        if best.is_none_or(|b| demand(&b, self) > demand(&candidate, self)) {
-                            best = Some(candidate);
-                        }
-                    }
-                }
-                best
+                // The linear rudder demand is linear in sin(phi), so the
+                // least demand over 0 <= phi <= 5 deg lies at an end: the
+                // limit bank for an airframe that is directionally stable
+                // with its fin, wings level otherwise.
+                let level = banked(0.0)?;
+                let limit = banked(BANK_LIMIT_RAD)?;
+                Some(if limit.rudder_rad <= level.rudder_rad {
+                    limit
+                } else {
+                    level
+                })
             }
             YawTrimMode::RudderOnly => None,
         }
@@ -413,14 +540,13 @@ impl YawControlGeometry {
 
     /// Minimum control speed for the thrust asymmetry `asymmetric_force_n`:
     /// the largest true airspeed at which the rudder demand reaches its
-    /// maximum deflection or the sideslip its limit.
+    /// maximum deflection.
     ///
     /// `rho_kg_m3` and `speed_of_sound_m_s` give the dynamic pressure and
     /// the Mach number of the fin; `mode` selects the balance (use
     /// [`YawTrimMode::LeastRudder`] for the airborne `VMCA` and
-    /// [`YawTrimMode::RudderOnly`] for the ground estimate). `None` when the
-    /// aircraft is not controllable even at the top of the search range or
-    /// for unusable inputs.
+    /// [`YawTrimMode::RudderOnly`] for the ground estimate). `None` for every
+    /// cause [`Self::minimum_control_speed_outcome`] tells apart.
     pub fn minimum_control_speed(
         &self,
         asymmetric_force_n: f64,
@@ -429,25 +555,52 @@ impl YawControlGeometry {
         weight_n: Option<f64>,
         mode: YawTrimMode,
     ) -> Option<MinimumControlSpeed> {
+        self.minimum_control_speed_outcome(
+            asymmetric_force_n,
+            rho_kg_m3,
+            speed_of_sound_m_s,
+            weight_n,
+            mode,
+        )
+        .ok()
+    }
+
+    /// [`Self::minimum_control_speed`] with the cause of a missing speed:
+    /// not controllable at the top of the search range, controllable down to
+    /// its bottom (the asymmetry sets no minimum control speed), a trim that
+    /// could not be evaluated, or unusable inputs.
+    pub fn minimum_control_speed_outcome(
+        &self,
+        asymmetric_force_n: f64,
+        rho_kg_m3: f64,
+        speed_of_sound_m_s: f64,
+        weight_n: Option<f64>,
+        mode: YawTrimMode,
+    ) -> Result<MinimumControlSpeed, MinimumControlSpeedFailure> {
         if !(rho_kg_m3.is_finite() && rho_kg_m3 > 0.0 && speed_of_sound_m_s > 0.0) {
-            return None;
+            return Err(MinimumControlSpeedFailure::UnusableInputs);
         }
-        let state = |v: f64| -> Option<(YawTrim, f64)> {
+        let state = |v: f64| -> Result<(YawTrim, f64), MinimumControlSpeedFailure> {
             let q = 0.5 * rho_kg_m3 * v * v;
-            let trim = self.trim(
-                asymmetric_force_n,
-                q,
-                v / speed_of_sound_m_s,
-                weight_n,
-                mode,
-            )?;
-            Some((trim, demand(&trim, self)))
+            let trim = self
+                .trim(
+                    asymmetric_force_n,
+                    q,
+                    v / speed_of_sound_m_s,
+                    weight_n,
+                    mode,
+                )
+                .ok_or(MinimumControlSpeedFailure::TrimUnavailable { tas_m_s: v })?;
+            Ok((trim, demand(&trim, self)))
         };
         let (mut low, mut high) = SEARCH_SPEED_RANGE_M_S;
         // Demand falls with speed: at `high` it must be below one, at `low`
         // at least one.
-        if state(high)?.1 >= 1.0 || state(low)?.1 < 1.0 {
-            return None;
+        if state(high)?.1 >= 1.0 {
+            return Err(MinimumControlSpeedFailure::AboveSearchRange { tas_m_s: high });
+        }
+        if state(low)?.1 < 1.0 {
+            return Err(MinimumControlSpeedFailure::BelowSearchRange { tas_m_s: low });
         }
         for _ in 0..80 {
             let mid = 0.5 * (low + high);
@@ -458,17 +611,10 @@ impl YawControlGeometry {
             }
         }
         let (trim, _) = state(low)?;
-        let limit = if trim.rudder_rad.abs() / self.rudder_max_deflection_rad
-            >= trim.sideslip_rad.abs() / SIDESLIP_LIMIT_RAD
-        {
-            ControlLimit::Rudder
-        } else {
-            ControlLimit::Sideslip
-        };
-        Some(MinimumControlSpeed {
+        Ok(MinimumControlSpeed {
             tas_m_s: low,
             trim,
-            limit,
+            limit: ControlLimit::Rudder,
         })
     }
 
@@ -484,17 +630,19 @@ impl YawControlGeometry {
         }
         let authority = self.fin_authority(mach)?;
         let fin_slope = self.fin_moment_slope(&authority);
-        let net =
-            (self.cn_beta_without_fin_per_rad + fin_slope).max(NET_DIRECTIONAL_STABILITY_FLOOR);
-        Some(net * sideslip_rad / (fin_slope * authority.tau))
+        let net = (self.cn_beta_without_fin_per_rad + self.fin_sidewash_factor * fin_slope)
+            .max(NET_DIRECTIONAL_STABILITY_FLOOR);
+        Some(self.rudder_angle_rad(net * sideslip_rad / (fin_slope * authority.tau)))
     }
 }
 
-/// Control demand of a trim state: the larger of the rudder and sideslip
-/// fractions of their limits; at or above one the aircraft is at its limit.
+/// Control demand of a trim state: the rudder deflection over its stop; at
+/// or above one the aircraft is at its limit. CS 25.149 bounds the bank,
+/// not the sideslip, and Roskam Part VII Sec. 2.3.3 (step 6, p. 28) limits
+/// the sideslip of the state through its drag in the climb requirement, not
+/// through a fixed angle, so the sideslip is an output of the balance.
 fn demand(trim: &YawTrim, geometry: &YawControlGeometry) -> f64 {
-    (trim.rudder_rad.max(0.0) / geometry.rudder_max_deflection_rad)
-        .max(trim.sideslip_rad.abs() / SIDESLIP_LIMIT_RAD)
+    trim.rudder_rad.max(0.0) / geometry.rudder_max_deflection_rad
 }
 
 #[cfg(test)]

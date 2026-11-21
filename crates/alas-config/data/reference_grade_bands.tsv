@@ -1,0 +1,8 @@
+# Accepted band of a model value against a reference value, by reference grade.
+# The repository's definition of the bands, read by the acceptance matrix (alas-config
+# presets::design_range): A/B references +-10 %, C references +-15 %,
+# CG limits +-2 %MAC (A/B) and +-3 %MAC (C), absolute. Acceptance criteria, not physics.
+# grade<TAB>relative_half_width<TAB>cg_half_width_pct_mac
+A	0.10	2.0
+B	0.10	2.0
+C	0.15	3.0

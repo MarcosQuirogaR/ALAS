@@ -13,9 +13,9 @@
 //! |---|---|---|---|
 //! | `LockedGeometry` | `preset` identity; `geometry/*` except the engine model fields below; the engine installation (`spanwise_positions_m`, `z_m`, `inlet_x_offset_m`) | no | no |
 //! | `OptimizerEnvelope` | the 16 design variables (`span_m` ... `bump_lower_rear`); their initial point is the preset's design vector | no (initial point held at the preset) | yes, inside `x_ref +- 0.10 |x_ref|` for lengths and scales (angles, shifts and bumps use the configured absolute windows), intersected with the preset limits; variables listed in `reference_fixed_variables` stay at the reference |
-//! | `Operational` | `requirements/*`, `departure_airport`, `arrival_airport`, `mission/*`, `cabin/*`, `fuel_policy/*` | yes | no |
+//! | `Operational` | `requirements/*`, `departure_airport`, `arrival_airport`, `toda_override_m`, `mission/*`, `cabin/*`, `fuel_policy/*` | yes | no |
 //! | `Derived` | quantities computed from the classes above (reference area, span loading, mean aerodynamic chord, aspect ratio, masses, capacities); never stored as independent inputs | no | no |
-//! | `AdvancedModel` | `geometry/engine` model fields (engine name and its catalogue-derived cycle values), `optimizer/*`, `analysis/*`, `drag_model/*`, `performance/*`, `mass_model/*`, `landing_gear/*`, `mses/*`, `control_surfaces/*`, `propulsion_cycle/*`, `structures/*`, `fuel_tanks/*` | yes, in Advanced Settings | no |
+//! | `AdvancedModel` | `geometry/engine` model fields (engine name and its catalogue-derived cycle values), `optimizer/*`, `analysis/*`, `drag_model/*`, `performance/*`, `mass_model/*`, `landing_gear/*`, `mses/*`, `control_surfaces/*`, `propulsion_cycle/*`, `structures/*`, `fuel_tanks/*` | yes, at the Advanced level | no |
 //!
 //! The locked set is the one the guided workspace restores after every
 //! mutation; this module makes the same rule available to configuration
@@ -49,7 +49,7 @@ pub enum PresetFieldClass {
     Operational,
     /// A quantity computed from other classes, not an independent input.
     Derived,
-    /// A model assumption editable in Advanced Settings.
+    /// A model assumption editable at the Advanced level.
     AdvancedModel,
 }
 
@@ -75,6 +75,10 @@ impl PresetFieldClass {
 /// model, and are therefore locked with the rest of the geometry.
 pub const LOCKED_ENGINE_FIELDS: [&str; 3] = ["spanwise_positions_m", "z_m", "inlet_x_offset_m"];
 
+/// The wing field that selects the drag-divergence relation: it sits with
+/// the wing inputs but describes the analysis, so it stays editable.
+pub const WING_DIVERGENCE_LAW_FIELD: &str = "drag_divergence_law";
+
 /// Classify a configuration path such as `geometry/wing/span_m` or
 /// `/requirements/mtow_kg` (leading slash optional, `/`-separated keys).
 pub fn classify_path(path: &str) -> PresetFieldClass {
@@ -92,11 +96,15 @@ pub fn classify_path(path: &str) -> PresetFieldClass {
                 Some(_) => PresetFieldClass::AdvancedModel,
                 None => PresetFieldClass::LockedGeometry,
             },
+            // The drag-divergence relation is a model choice, not a shape.
+            Some("wing") if parts.next() == Some(WING_DIVERGENCE_LAW_FIELD) => {
+                PresetFieldClass::AdvancedModel
+            }
             _ => PresetFieldClass::LockedGeometry,
         },
         Some(
-            "requirements" | "departure_airport" | "arrival_airport" | "mission" | "cabin"
-            | "fuel_policy",
+            "requirements" | "departure_airport" | "arrival_airport" | "toda_override_m"
+            | "mission" | "cabin" | "fuel_policy",
         ) => PresetFieldClass::Operational,
         Some(_) | None => PresetFieldClass::AdvancedModel,
     }
@@ -131,14 +139,19 @@ pub fn reference_geometry(preset: &AircraftPreset) -> GeometryConfig {
 
 /// The protected geometry: `reference` with `current`'s unprotected engine
 /// model fields carried over, so changing the engine model is allowed while
-/// the installation stays where the registry puts it.
+/// the installation stays where the registry puts it, and with `current`'s
+/// drag-divergence law, which is a model choice.
 pub fn protected_geometry(reference: &GeometryConfig, current: &GeometryConfig) -> GeometryConfig {
     let mut protected = reference.clone();
+    protected.wing.drag_divergence_law = current.wing.drag_divergence_law;
     let mut engine = current.engine.clone();
     engine.spanwise_positions_m = reference.engine.spanwise_positions_m.clone();
     engine.z_m = reference.engine.z_m;
     engine.z_per_engine_m = reference.engine.z_per_engine_m.clone();
     engine.inlet_x_offset_m = reference.engine.inlet_x_offset_m;
+    engine.inlet_x_per_engine_m = reference.engine.inlet_x_per_engine_m.clone();
+    engine.aft_fuselage = reference.engine.aft_fuselage.clone();
+    engine.centre_engine = reference.engine.centre_engine.clone();
     protected.engine = engine;
     protected
 }
@@ -286,7 +299,7 @@ pub fn bounds_violations(
     let envelope = config
         .optimizer
         .design_space
-        .envelope(&preset.design_vector);
+        .envelope_for(&preset.design_vector, preset.class);
     // The MTOW band mode searches the takeoff mass as one coordinate more; its
     // pair must lie inside the band, and the sixteen geometric pairs are held
     // to the envelope as always.
@@ -418,6 +431,19 @@ mod tests {
     }
 
     #[test]
+    fn the_centre_engine_pod_is_protected_with_the_installation() {
+        let reference = reference_geometry(presets::get("DC-10").unwrap());
+        assert!(reference.engine.centre_engine.is_some());
+        let mut current = reference.clone();
+        current.engine.centre_engine = None;
+        let protected = protected_geometry(&reference, &current);
+        assert_eq!(
+            protected.engine.centre_engine,
+            reference.engine.centre_engine
+        );
+    }
+
+    #[test]
     fn a_freshly_loaded_preset_carries_no_violation_in_either_reference_mode() {
         for name in ["AVE", "A320-200", "ATR72-600", "A380-800"] {
             for mode in [DesignMode::ReferenceAdaptation, DesignMode::BaselineSandbox] {
@@ -503,6 +529,28 @@ mod tests {
     }
 
     #[test]
+    fn the_drag_divergence_law_is_a_model_choice_a_preset_keeps_editable() {
+        assert_eq!(
+            classify_path("geometry/wing/drag_divergence_law"),
+            PresetFieldClass::AdvancedModel
+        );
+        assert_eq!(
+            classify_path("/geometry/wing/root_z_m"),
+            PresetFieldClass::LockedGeometry
+        );
+        let reference = GeometryConfig::default();
+        let mut current = reference.clone();
+        current.wing.drag_divergence_law = crate::DragDivergenceLaw::Korn;
+        current.wing.root_z_m += 1.0;
+        let protected = protected_geometry(&reference, &current);
+        assert_eq!(
+            protected.wing.drag_divergence_law,
+            crate::DragDivergenceLaw::Korn
+        );
+        assert_eq!(protected.wing.root_z_m, reference.wing.root_z_m);
+    }
+
+    #[test]
     fn outside_preset_mode_nothing_is_enforced() {
         let mut config = preset_config("A320-200", DesignMode::CleanSheet);
         config.geometry.wing.root_z_m += 0.5;
@@ -552,6 +600,10 @@ mod tests {
         );
         assert_eq!(
             classify_path("departure_airport"),
+            PresetFieldClass::Operational
+        );
+        assert_eq!(
+            classify_path("toda_override_m"),
             PresetFieldClass::Operational
         );
         assert_eq!(

@@ -76,8 +76,8 @@ pub fn assess_candidate(
         || requirements.mtow_kg <= 0.0
         || !requirements.gravity_m_s2.is_finite()
         || requirements.gravity_m_s2 <= 0.0
-        || !requirements.ultimate_load_factor.is_finite()
-        || requirements.ultimate_load_factor <= 1.0
+        || !requirements.design_ultimate_load_factor().is_finite()
+        || requirements.design_ultimate_load_factor() <= 1.0
         || !requirements.limit_load_factor_neg.is_finite()
         || requirements.limit_load_factor_neg >= 0.0
         || !cfg.additional_safety_factor.is_finite()
@@ -89,7 +89,7 @@ pub fn assess_candidate(
     let root = wing.xsecs.first().ok_or("structural_geometry")?;
     let tip = wing.xsecs.last().ok_or("structural_geometry")?;
     let (fractions, full_span) = cfg.resolved_spars();
-    let geometry = WingStructureGeometry::new(
+    let mut geometry = WingStructureGeometry::new(
         dv,
         &config.geometry.wing,
         &root.airfoil,
@@ -98,6 +98,7 @@ pub fn assess_candidate(
         Some(&full_span),
     )
     .map_err(|_| "structural_geometry")?;
+    alas_struct::span_load::attach_design_span_load(&mut geometry, plane, &requirements);
     let skin =
         alas_config::materials::get(&cfg.skin_material).map_err(|_| "structural_material")?;
     let web =
@@ -107,6 +108,8 @@ pub fn assess_candidate(
     let rib = alas_config::materials::get(&cfg.rib_material).map_err(|_| "structural_material")?;
     let stations = alas_struct::sizing::sizing_stations(&geometry, cfg);
     let (front, rear) = alas_struct::sizing::box_chord_band(&geometry);
+    // One fuel density: the one the tank inventory is priced at.
+    let fuel_density_kg_m3 = alas_mass::tanks::inventory_density_kg_m3(config);
     let declared = alas_mass::wing_reconciliation::declared_wing_fuel_case(
         config,
         dv,
@@ -120,7 +123,13 @@ pub fn assess_candidate(
         .as_ref()
         .map(|case| case.running_mass_kg_m.clone())
         .unwrap_or_else(|| {
-            alas_struct::tanks::integral_fuel_running_mass_kg_m(&geometry, &stations, front, rear)
+            alas_struct::tanks::integral_fuel_running_mass_kg_m(
+                &geometry,
+                &stations,
+                front,
+                rear,
+                fuel_density_kg_m3,
+            )
         });
     let wing_mounted = alas_struct::scope::wing_mounted_relief(
         &config.geometry.engine,
@@ -166,6 +175,7 @@ pub fn assess_candidate(
         cap,
         rib,
         &fuel_scope,
+        fuel_density_kg_m3,
         &wing_mounted,
     );
     if !scoped.scope.relief_convergence.is_settled() {

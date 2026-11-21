@@ -6,15 +6,15 @@
 //! returned on the response as `cursor_canvas` for a caller to display.
 
 use alas_report::scene::{Point2D, Scene};
-use std::collections::hash_map::DefaultHasher;
-use std::hash::{Hash, Hasher};
+use std::hash::Hash;
 
-use egui::{
-    pos2, vec2, Color32, Id, Rect, Response, Sense, Stroke, TextureHandle, Ui, Vec2, Widget,
+use egui::{pos2, vec2, Color32, Id, Rect, Response, Sense, Stroke, Ui, Vec2, Widget};
+
+use crate::render::{to_egui_color, ViewportTransform};
+use crate::view_cache::{
+    background_scene_texture, cached_scene_texture, overlay_shapes, scene_color_image,
+    textures_color_image,
 };
-
-use crate::raster::{render_scene_rgba_scaled, render_scene_textures_rgba_scaled};
-use crate::render::{render_scene_to_shapes_with_context, to_egui_color, ViewportTransform};
 
 /// Interactive scene viewport state for persistent pan and zoom.
 #[derive(Debug, Clone, PartialEq)]
@@ -102,6 +102,7 @@ pub struct SceneView<'a> {
     cache_id: Option<Id>,
     cache_revision: Option<u64>,
     vector_overlay: bool,
+    background_label: Option<String>,
 }
 
 impl<'a> SceneView<'a> {
@@ -118,6 +119,7 @@ impl<'a> SceneView<'a> {
             cache_id: None,
             cache_revision: None,
             vector_overlay: false,
+            background_label: None,
         }
     }
 
@@ -133,6 +135,20 @@ impl<'a> SceneView<'a> {
     /// labels and colorbar are painted directly.
     pub fn vector_overlay(mut self, enabled: bool) -> Self {
         self.vector_overlay = enabled;
+        self
+    }
+
+    /// With `Some(placeholder)`, rasterize the scene on the background pool
+    /// instead of inside the frame.
+    ///
+    /// A scene whose texture is not cached yet shows `placeholder` (centered in
+    /// the viewport) until the pool finishes, then the view repaints; a scene
+    /// that changed keeps showing the previous texture meanwhile. The first
+    /// frame of a page of figures then costs the layout, not every figure's
+    /// SVG round-trip (measured: 17-100 ms per figure, 0.2-0.6 s for the cards
+    /// of one Results tab).
+    pub fn background_raster(mut self, placeholder: Option<String>) -> Self {
+        self.background_label = placeholder;
         self
     }
 
@@ -215,9 +231,9 @@ impl<'a> SceneView<'a> {
             && (response.dragged_by(egui::PointerButton::Primary)
                 || response.dragged_by(egui::PointerButton::Middle))
         {
-            // `drag_motion` is the per-frame motion.  Applying a drag total
+            // `drag_delta` is the per-frame cursor motion in points (not raw device counts).  Applying a drag total
             // on every frame makes the same gesture grow quadratically.
-            self.state.pan += response.drag_motion();
+            self.state.pan += response.drag_delta();
             self.state.auto_fit = false;
         }
 
@@ -295,21 +311,48 @@ impl<'a> SceneView<'a> {
             ) {
                 clipped_painter.image(texture.id(), image_rect, full_uv, Color32::WHITE);
             }
-            let overlay = vector_overlay_scene(self.scene);
-            clipped_painter.extend(render_scene_to_shapes_with_context(
-                &overlay,
+            clipped_painter.extend(overlay_shapes(
+                self.scene,
                 &base_transform,
                 ui.ctx(),
+                self.cache_id,
+                self.cache_revision,
             ));
-        } else if let Some(texture) = cached_scene_texture(
-            self.scene,
-            ui,
-            self.raster_scale,
-            self.cache_id,
-            self.cache_revision,
-            scene_color_image,
-        ) {
-            clipped_painter.image(texture.id(), image_rect, full_uv, Color32::WHITE);
+        } else {
+            let texture = if self.background_label.is_some() {
+                background_scene_texture(
+                    self.scene,
+                    ui,
+                    self.raster_scale,
+                    self.cache_id,
+                    self.cache_revision,
+                    scene_color_image,
+                )
+            } else {
+                cached_scene_texture(
+                    self.scene,
+                    ui,
+                    self.raster_scale,
+                    self.cache_id,
+                    self.cache_revision,
+                    scene_color_image,
+                )
+            };
+            match (texture, &self.background_label) {
+                (Some(texture), _) => {
+                    clipped_painter.image(texture.id(), image_rect, full_uv, Color32::WHITE);
+                }
+                (None, Some(label)) => {
+                    clipped_painter.text(
+                        rect.center(),
+                        egui::Align2::CENTER_CENTER,
+                        label,
+                        egui::FontId::proportional(14.0),
+                        Color32::from_gray(140),
+                    );
+                }
+                (None, None) => {}
+            }
         }
 
         // Render border
@@ -361,100 +404,113 @@ impl<'a> SceneView<'a> {
     }
 }
 
-#[derive(Clone)]
-struct CachedSceneTexture {
-    scene_hash: u64,
-    texture: TextureHandle,
-}
-
-/// One cached GPU texture per view, refreshed through `render` whenever the
-/// scene revision changes. `render` returning `None` means the scene has
-/// nothing to rasterize on this path, and no texture is created.
-fn cached_scene_texture(
-    scene: &Scene,
-    ui: &Ui,
-    raster_scale: f64,
-    cache_id: Option<Id>,
-    cache_revision: Option<u64>,
-    render: fn(&Scene, f64) -> Option<egui::ColorImage>,
-) -> Option<TextureHandle> {
-    let scene_hash = cache_revision.unwrap_or_else(|| {
-        let mut hasher = DefaultHasher::new();
-        format!("{scene:?}").hash(&mut hasher);
-        hasher.finish()
-    });
-    let id = cache_id.unwrap_or_else(|| Id::new(("alas_scene_png", scene_hash)));
-    if let Some(mut cached) = ui
-        .ctx()
-        .data(|data| data.get_temp::<CachedSceneTexture>(id))
-    {
-        if cached.scene_hash == scene_hash {
-            return Some(cached.texture);
-        }
-        let image = render(scene, raster_scale)?;
-        cached.texture.set(image, egui::TextureOptions::LINEAR);
-        cached.scene_hash = scene_hash;
-        let texture = cached.texture.clone();
-        ui.ctx().data_mut(|data| data.insert_temp(id, cached));
-        return Some(texture);
-    }
-    // Result cards are commonly displayed larger than the authored scene;
-    // supersampling here keeps labels and one-pixel plot strokes legible.
-    let image = render(scene, raster_scale)?;
-    let texture = ui.ctx().load_texture(
-        format!("alas-scene-png-{scene_hash}"),
-        image,
-        egui::TextureOptions::LINEAR,
-    );
-    ui.ctx().data_mut(|data| {
-        data.insert_temp(
-            id,
-            CachedSceneTexture {
-                scene_hash,
-                texture: texture.clone(),
-            },
-        )
-    });
-    Some(texture)
-}
-
-fn scene_color_image(scene: &Scene, raster_scale: f64) -> Option<egui::ColorImage> {
-    let (width, height, rgba) = render_scene_rgba_scaled(scene, raster_scale).ok()?;
-    Some(egui::ColorImage::from_rgba_premultiplied(
-        [width as usize, height as usize],
-        &rgba,
-    ))
-}
-
-/// The textured elements alone, on a transparent canvas; `None` when the
-/// scene has none.
-fn textures_color_image(scene: &Scene, raster_scale: f64) -> Option<egui::ColorImage> {
-    let (width, height, rgba) = render_scene_textures_rgba_scaled(scene, raster_scale)?.ok()?;
-    Some(egui::ColorImage::from_rgba_premultiplied(
-        [width as usize, height as usize],
-        &rgba,
-    ))
-}
-
-/// The scene without its textured elements, and with its opaque background
-/// paint suppressed: what the shape renderer draws on top of the texture
-/// layer in the vector-overlay path. `background` itself stays set so
-/// `visual_title`'s contrast decision still sees the true theme color.
-fn vector_overlay_scene(scene: &Scene) -> Scene {
-    let mut overlay = scene.clone();
-    overlay.hide_background_paint();
-    overlay.elements.retain(|element| {
-        !matches!(
-            element,
-            alas_report::scene::SceneElement::Image { .. }
-                | alas_report::scene::SceneElement::SphericalImage { .. }
-        )
-    });
-    overlay
-}
-
 impl<'a> Widget for SceneView<'a> {
     fn ui(self, ui: &mut Ui) -> Response {
         self.show(ui)
+    }
+}
+
+#[cfg(test)]
+mod baked_overlay_tests {
+    use super::*;
+    use alas_report::scene::{Color, Fill, SceneElement};
+
+    fn triangle_scene() -> Scene {
+        let mut scene = Scene::new(100.0, 100.0, None);
+        scene.elements.push(SceneElement::Polygon {
+            points: vec![[10.0, 10.0], [90.0, 10.0], [50.0, 80.0]],
+            fill: Some(Fill::new(Color::rgb(200, 30, 30))),
+            stroke: None,
+        });
+        scene
+    }
+
+    #[test]
+    fn a_keyed_overlay_is_baked_into_meshes_and_reused_for_the_same_revision() {
+        let ctx = egui::Context::default();
+        let _ = ctx.run(egui::RawInput::default(), |_| {});
+        let scene = triangle_scene();
+        let transform = ViewportTransform::fit(
+            100.0,
+            100.0,
+            Rect::from_min_size(pos2(0.0, 0.0), vec2(200.0, 200.0)),
+        );
+        let id = Id::new("baked_test");
+        let first = overlay_shapes(&scene, &transform, &ctx, Some(id), Some(7));
+        assert!(first
+            .iter()
+            .all(|shape| matches!(shape, egui::Shape::Mesh(_))));
+        assert!(!first.is_empty());
+        let again = overlay_shapes(&scene, &transform, &ctx, Some(id), Some(7));
+        assert_eq!(first.len(), again.len());
+        // A new revision on an empty scene rebuilds instead of replaying.
+        let empty = Scene::new(100.0, 100.0, None);
+        assert!(overlay_shapes(&empty, &transform, &ctx, Some(id), Some(8)).is_empty());
+    }
+
+    fn shape_summary(shape: &egui::Shape, text: &mut Vec<String>, textured: &mut bool) {
+        match shape {
+            egui::Shape::Text(text_shape) => text.push(text_shape.galley.text().to_owned()),
+            egui::Shape::Mesh(mesh) => {
+                *textured |= mesh.texture_id != egui::TextureId::default();
+            }
+            egui::Shape::Vec(shapes) => {
+                for shape in shapes {
+                    shape_summary(shape, text, textured);
+                }
+            }
+            _ => {}
+        }
+    }
+
+    #[test]
+    fn a_background_raster_shows_its_placeholder_then_the_texture() {
+        let ctx = egui::Context::default();
+        let scene = triangle_scene();
+        let mut view = SceneViewState::default();
+        let mut frame = || {
+            let output = ctx.run(egui::RawInput::default(), |ctx| {
+                egui::CentralPanel::default().show(ctx, |ui| {
+                    ui.add(
+                        SceneView::new(&scene, &mut view)
+                            .cache_key("background-test")
+                            .cache_revision(1)
+                            .show_toolbar(false)
+                            .background_raster(Some("waiting".to_owned()))
+                            .desired_size(vec2(100.0, 100.0)),
+                    );
+                });
+            });
+            let (mut text, mut textured) = (Vec::new(), false);
+            for clipped in &output.shapes {
+                shape_summary(&clipped.shape, &mut text, &mut textured);
+            }
+            (text, textured)
+        };
+        let (text, textured) = frame();
+        assert!(text.iter().any(|line| line == "waiting"));
+        assert!(!textured);
+        let started = std::time::Instant::now();
+        while crate::pending_background_rasters() > 0 && started.elapsed().as_secs() < 60 {
+            std::thread::sleep(std::time::Duration::from_millis(5));
+        }
+        let (text, textured) = frame();
+        assert!(textured, "the finished raster is drawn");
+        assert!(!text.iter().any(|line| line == "waiting"));
+    }
+
+    #[test]
+    fn an_unkeyed_overlay_stays_plain_shapes() {
+        let ctx = egui::Context::default();
+        let _ = ctx.run(egui::RawInput::default(), |_| {});
+        let transform = ViewportTransform::fit(
+            100.0,
+            100.0,
+            Rect::from_min_size(pos2(0.0, 0.0), vec2(200.0, 200.0)),
+        );
+        let shapes = overlay_shapes(&triangle_scene(), &transform, &ctx, None, None);
+        assert!(shapes
+            .iter()
+            .all(|shape| matches!(shape, egui::Shape::Path(_))));
     }
 }

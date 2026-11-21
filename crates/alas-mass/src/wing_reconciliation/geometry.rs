@@ -12,7 +12,7 @@ use crate::torenbeek::WingSecondaryMassBreakdown;
 use crate::wing_inventory::FixedNonBoxStructure;
 
 use super::design_gross_mass_kg;
-use super::WingReconciliationError;
+use super::{StructuralSizingCause, WingReconciliationError};
 
 /// FLOPS Eqs. 33-38 inputs read off the built wing.
 ///
@@ -29,15 +29,45 @@ pub(super) fn flops_wing_inputs(config: &AlasConfig, wing: &Wing) -> FlopsWingIn
         quarter_chord_sweep_deg: wing.mean_sweep_angle(0.25),
         thickness_to_chord: chord_weighted_thickness_to_chord(wing),
         movable_surface_area_m2: 0.0,
-        ultimate_load_factor: config.requirements.ultimate_load_factor,
+        ultimate_load_factor: config.requirements.design_ultimate_load_factor(),
         composite_utilization: 0.0,
         aeroelastic_tailoring: 0.0,
         strut_bracing: 0.0,
         wing_load_fraction: 1.0,
+        bending_stress_factor: crate::flops_transport::structure::service_life_bending_factor(
+            config
+                .mass_model
+                .flops_transport
+                .haul_class
+                .unwrap_or_default(),
+            config.requirements.design_ultimate_load_factor(),
+            wing.reference_area(),
+            wing.reference_span(),
+            wing.taper_ratio(),
+            wing.mean_sweep_angle(0.25),
+            1.0,
+        ),
         fuselage_count: 1,
         variable_sweep_penalty: 0.0,
-        wing_mounted_engine_count: config.geometry.engine.spanwise_positions_m.len(),
+        wing_mounted_engine_count: wing_mounted_engine_count(config),
         bending: WingBendingFactor::Simplified,
+    }
+}
+
+/// FLOPS `NEW`, the engines on the wing: the declared transport split where it
+/// accounts for every built engine, as the transport build-up reads it; else
+/// none for a rear-fuselage mount and every engine not on the fuselage centreline otherwise.
+fn wing_mounted_engine_count(config: &AlasConfig) -> usize {
+    let engine = &config.geometry.engine;
+    let built = engine.spanwise_positions_m.len();
+    let flops = &config.mass_model.flops_transport;
+    match (
+        flops.wing_mounted_engine_count,
+        flops.fuselage_mounted_engine_count,
+    ) {
+        (Some(wing), Some(body)) if wing + body == built => wing,
+        _ if engine.rear_fuselage_mount().is_some() => 0,
+        _ => built - engine.installed_fuselage_engine_count(),
     }
 }
 
@@ -118,7 +148,12 @@ pub(super) fn validate_secondary_breakdown(
     {
         Ok(())
     } else {
-        Err(WingReconciliationError::StructuralSizing)
+        Err(StructuralSizingCause::SecondaryBreakdown {
+            high_lift_devices_kg: breakdown.high_lift_devices_kg,
+            spoilers_and_speedbrakes_kg: breakdown.spoilers_and_speedbrakes_kg,
+            total_kg: breakdown.total_kg,
+        }
+        .into())
     }
 }
 

@@ -30,16 +30,15 @@
 //!
 //! The cruise rule reproduces the reference's own two lines rather than calling the V-n diagram
 //! builder, for the reason upstream gives: that builder additionally needs a fully constructed
-//! aeroplane for its stall terms, which is far too expensive to build on every validation tick. It
-//! evaluates the atmosphere through the closed-form ISA where upstream uses native aerodynamic
-//! model's fitted default; the two agree to about 1e-11 and every number the rule prints is rounded
-//! to the nearest whole metre per second.
+//! aeroplane for its stall terms, which is far too expensive to build on every validation tick.
+//! Every number the rule prints is rounded to the nearest whole metre per second.
 
 use serde::{Deserialize, Serialize};
 
 mod cabin_inputs;
 mod fuel_scheme;
 mod input_bounds;
+mod mass_inputs;
 mod mass_model;
 mod mtow_sizing;
 mod wave_drag;
@@ -56,9 +55,6 @@ pub use input_bounds::{MAX_SOLVER_WORKERS, NUM_RIBS_OVERRIDE_RANGE};
 /// rather than read from the atmosphere model because it is the definition of
 /// the airspeed reference and not a property of today's air.
 const SEA_LEVEL_DENSITY_KG_M3: f64 = 1.225;
-
-/// The margin CS-25.335(b) requires between the design cruise and dive speeds.
-const DIVE_TO_CRUISE_SPEED_RATIO: f64 = 1.25;
 
 /// Whether an issue blocks the run or only marks the field.
 #[derive(Debug, Clone, Copy, PartialEq, Eq, Serialize, Deserialize)]
@@ -93,7 +89,7 @@ pub fn validate(config: &AlasConfig) -> Vec<ValidationIssue> {
     issues.extend(atmosphere_domain_is_physical(config));
     issues.extend(wave_drag::rise_is_physical(config));
     issues.extend(cabin_inputs::passenger_and_bag_masses_are_physical(config));
-    issues.extend(cabin_inputs::declared_abreast_fits_the_fuselage(config));
+    issues.extend(cabin_inputs::cabin_inputs_fit_the_fuselage(config));
     issues.extend(fuel_properties_are_physical(config));
     issues.extend(landing_gear_inputs_are_physical(config));
     issues.extend(empennage_tapers_toward_its_tips(config));
@@ -106,10 +102,29 @@ pub fn validate(config: &AlasConfig) -> Vec<ValidationIssue> {
     issues.extend(passenger_and_mass_inputs_are_coherent(config));
     issues.extend(custom_geometry_is_physical(config));
     issues.extend(vlm_mesh_is_solvable(config));
-    issues.extend(input_bounds::fuel_policy_and_tank_layout_are_valid(config));
+    issues.extend(config.cabin.payload_items.issue());
+    // A custom payload with nothing placed has nothing to size: stop here
+    // rather than size an aircraft that carries nothing.
+    let occupant_kg = (config.requirements.passenger_mass_kg
+        - config.cabin.passenger.checked_bag_mass_kg)
+        .max(0.0);
+    if config.cabin.payload_items.custom_only
+        && config.cabin.payload_items.payload_mass_kg(occupant_kg) <= 0.0
+    {
+        issues.push(ValidationIssue {
+            field_path: "cabin.payload_items".to_owned(),
+            message: "The custom payload is empty: place zone occupants or point masses on the Payload page before sizing.".to_owned(),
+            severity: Severity::Error,
+        });
+    }
+    issues.extend(input_bounds::fuel_and_plan_inputs_are_valid(config));
+    issues.extend(mass_inputs::input_masses_are_physical(config));
     issues.extend(input_bounds::solver_workers_are_in_range(config));
     issues.extend(input_bounds::rib_count_override_is_in_range(config));
     issues.extend(input_bounds::preset_is_registered(config));
+    issues.extend(input_bounds::centre_engine_surfaces_can_be_built(config));
+    issues.extend(input_bounds::aft_fuselage_mount_is_valid(config));
+    issues.extend(input_bounds::reverser_count_fits_the_engines(config));
     if config.structures.nastran_memory_mb <= 0 {
         issues.push(ValidationIssue {
             severity: Severity::Error,
@@ -260,12 +275,32 @@ fn passenger_and_mass_inputs_are_coherent(config: &AlasConfig) -> Vec<Validation
         ),
     ] {
         let declared_i64 = declared.and_then(|value| i64::try_from(value).ok());
-        if declared_i64 != Some(expected_count) && (declared.is_none() || report_split_mismatch) {
+        if declared_i64 != Some(expected_count)
+            && (declared.is_none() || report_split_mismatch)
+            && !config.mass_model.flops_transport.manual_cabin_inputs
+        {
             let actual = declared.map_or_else(|| "missing".to_owned(), |value| value.to_string());
             issues.push(ValidationIssue {
                 field_path: field_path.to_owned(),
                 message: format!(
                     "FLOPS {label} passenger count is {actual}; the canonical cabin resolver will use {expected_count} for this case. The value is normalizable before the mass pass."
+                ),
+                severity: Severity::Warning,
+            });
+        }
+    }
+    if config.mass_model.flops_transport.manual_cabin_inputs {
+        let seats = resolved.total().max(0);
+        let minimum = i64::try_from(crate::systems_mass::minimum_cabin_crew(
+            usize::try_from(seats).unwrap_or(0),
+        ))
+        .unwrap_or(0);
+        let declared = config.mass_model.flops_transport.flight_attendant_count;
+        if declared.is_some_and(|n| i64::try_from(n).unwrap_or(i64::MAX) < minimum) {
+            issues.push(ValidationIssue {
+                field_path: "mass_model.flops_transport.flight_attendant_count".to_owned(),
+                message: format!(
+                    "Flight attendants below the regulatory minimum of {minimum} for {seats} seats (one per 50 seats, EASA ORO.CC.100, 14 CFR 121.391)."
                 ),
                 severity: Severity::Warning,
             });
@@ -385,6 +420,7 @@ fn wing_section_path(error: &crate::WingSectionError) -> String {
         | crate::WingSectionError::NonPositiveChord { index, .. }
         | crate::WingSectionError::SpanOutOfRange { index, .. }
         | crate::WingSectionError::InvalidOrder { index, .. }
+        | crate::WingSectionError::AtOrInboardOfSideOfBody { index, .. }
         | crate::WingSectionError::EmptyAirfoil(index) => Some(*index),
         crate::WingSectionError::DuplicatePlanformStation { .. }
         | crate::WingSectionError::NonMonotoneChord { .. } => None,
@@ -550,7 +586,8 @@ fn cruise_point_inside_the_flight_envelope(config: &AlasConfig) -> Vec<Validatio
         * (atmosphere.density() / SEA_LEVEL_DENSITY_KG_M3).sqrt();
 
     let dive_speed = requirements.dive_speed_m_s;
-    let design_cruise_speed = dive_speed / DIVE_TO_CRUISE_SPEED_RATIO;
+    // VC of CS 25.335(b) for this VD (`crate::design_speeds`).
+    let design_cruise_speed = requirements.design_cruise_speed_eas_m_s();
 
     if cruise_eas_m_s > dive_speed {
         return vec![ValidationIssue {
@@ -571,7 +608,7 @@ fn cruise_point_inside_the_flight_envelope(config: &AlasConfig) -> Vec<Validatio
             field_path: "requirements.dive_speed_m_s".to_owned(),
             message: format!(
                 "Cruise design point ({cruise_eas_m_s:.0} m/s EAS) is above VC \
-                 ({design_cruise_speed:.0} m/s EAS = VD/1.25): the aircraft \
+                 ({design_cruise_speed:.0} m/s EAS, CS 25.335(b) from VD): the aircraft \
                  cruises in the V-n diagram's caution band, not normal \
                  operation."
             ),
@@ -581,34 +618,62 @@ fn cruise_point_inside_the_flight_envelope(config: &AlasConfig) -> Vec<Validatio
     Vec::new()
 }
 
+/// The tip chord of a built tail surface at unit tail scale: the straight-edge
+/// chord, moved by the edge offsets of a station on the tip itself.
+fn built_tip_chord_m(tip_chord_m: f64, stations: &[crate::TailEdgeStation]) -> f64 {
+    stations
+        .last()
+        .filter(|last| last.span_fraction >= 1.0)
+        .map_or(tip_chord_m, |last| {
+            tip_chord_m + last.te_offset_m - last.le_offset_m
+        })
+}
+
 /// Both stabilizers must be narrower at the tip than at the root.
 ///
 /// The canonical "is this a shape at all" check. An inverted taper is almost
 /// always a transposed pair of numbers, and it produces a surface the geometry
 /// builder will happily loft and every downstream area and volume coefficient
-/// will then be computed from.
+/// will then be computed from. It tests the reference planform, which those read,
+/// and the built surface, whose tip the edge stations can move.
 fn empennage_tapers_toward_its_tips(config: &AlasConfig) -> Vec<ValidationIssue> {
     let empennage = &config.geometry.empennage;
     let mut issues = Vec::new();
 
-    if empennage.hstab_tip_chord_m >= empennage.hstab_root_chord_m {
+    let hstab_tip = built_tip_chord_m(empennage.hstab_tip_chord_m, &empennage.hstab_edge_stations)
+        .max(empennage.hstab_tip_chord_m);
+    if hstab_tip >= empennage.hstab_root_chord_m {
         issues.push(ValidationIssue {
             field_path: "geometry.empennage.hstab_tip_chord_m".to_owned(),
             message: format!(
-                "H-stab tip chord ({:.2} m) must be smaller than its root \
+                "H-stab tip chord ({hstab_tip:.2} m) must be smaller than its root \
                  chord ({:.2} m).",
-                empennage.hstab_tip_chord_m, empennage.hstab_root_chord_m
+                empennage.hstab_root_chord_m
             ),
             severity: Severity::Error,
         });
     }
-    if empennage.vstab_tip_chord_m >= empennage.vstab_root_chord_m {
+    let vstab_tip = built_tip_chord_m(empennage.vstab_tip_chord_m, &empennage.vstab_edge_stations)
+        .max(empennage.vstab_tip_chord_m);
+    if vstab_tip >= empennage.vstab_root_chord_m {
         issues.push(ValidationIssue {
             field_path: "geometry.empennage.vstab_tip_chord_m".to_owned(),
             message: format!(
-                "V-stab tip chord ({:.2} m) must be smaller than its root \
+                "V-stab tip chord ({vstab_tip:.2} m) must be smaller than its root \
                  chord ({:.2} m).",
-                empennage.vstab_tip_chord_m, empennage.vstab_root_chord_m
+                empennage.vstab_root_chord_m
+            ),
+            severity: Severity::Error,
+        });
+    }
+    if let Some(end) = empennage
+        .vstab_reference_end_fraction
+        .filter(|end| !(*end > 0.0 && *end <= 1.0))
+    {
+        issues.push(ValidationIssue {
+            field_path: "geometry.empennage.vstab_reference_end_fraction".to_owned(),
+            message: format!(
+                "The fin's reference end ({end}) must be a fraction above 0, at most 1."
             ),
             severity: Severity::Error,
         });
@@ -641,7 +706,7 @@ const MIN_SPANWISE_PANELS: i64 = 4;
 /// enough that the near-field induced-drag integration stops converging.
 ///
 /// Measured on the registered presets in an internal VLM
-/// resolution-sensitivity study (2026-09-11): at a multiplier of 3 the
+/// resolution-sensitivity study: at a multiplier of 3 the
 /// swept presets over-predict the induced-drag factor by 4-50 %, at 6 the
 /// A320 trim solve diverges outright, and at 10 (AeroSandbox's own default,
 /// and so a value a user may reasonably type) the influence matrix is
@@ -725,7 +790,7 @@ fn vlm_mesh_is_solvable(config: &AlasConfig) -> Vec<ValidationIssue> {
             issues.push(ValidationIssue {
                 field_path: field.to_owned(),
                 message: format!(
-                    "Spanwise panel count ({value}) must be at least                      {MIN_SPANWISE_PANELS}. This is an absolute number of                      panels across the surface, not a count per section;                      below it the lattice cannot resolve a lifting surface."
+                    "Spanwise panel count ({value}) must be at least {MIN_SPANWISE_PANELS}. This is an absolute number of panels across the surface, not a count per section; below it the lattice cannot resolve a lifting surface."
                 ),
                 severity: Severity::Error,
             });

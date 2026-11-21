@@ -186,7 +186,9 @@ fn the_tlar_values_are_painted_inside_the_clip_rectangle_on_a_narrow_window() {
     // all. AVE's defaults are Mach 0.84, 11887 m and 358670 kg. The MTOW
     // editor sits on the card after the requirements, so the window is
     // tall enough to hold both.
-    let output = render_inputs((NARROW.0, 1400.0), None);
+    // 1600 points: the TLAR card has since gained aircraft-type, cabin-preset
+    // and payload rows, so 1400 no longer reaches the MTOW editor.
+    let output = render_inputs((NARROW.0, 1600.0), None);
     let mut painted = Vec::new();
     fn walk(shape: &Shape, clip: Rect, painted: &mut Vec<String>) {
         match shape {

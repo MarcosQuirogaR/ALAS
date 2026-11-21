@@ -7,10 +7,15 @@
 //! installation roots, user data directories, and external tools.
 //!
 //! [`cli`] parses command-line arguments and dispatches the headless workflow.
+//!
+//! [`server`] serves the same workflow to an automation client as Model
+//! Context Protocol tools over stdin and stdout (`--mcp`).
 
 pub mod cli;
 pub mod config_load;
+mod custom_airports;
 pub mod paths;
+pub mod server;
 
 pub use cli::{load_config, parse_args, run_cli, CliArgs};
 pub use paths::{

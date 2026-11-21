@@ -18,6 +18,27 @@ fn seats_of_row<'a>(scene: &'a CabinScene, row: &'a SeatRow, floor_z_m: f64) -> 
         })
         .collect();
     seats.sort_by(|a, b| a.y_m.total_cmp(&b.y_m));
+    // The exported grouping puts three seats at each window of an eight-abreast
+    // twin-aisle row; the drawn grouping follows the abreast and aisle counts
+    // (2-4-2). Only the lateral positions change, never the seat count.
+    let blocks = display_blocks(row.abreast, &row.blocks);
+    if blocks != row.blocks && blocks.iter().sum::<i64>() as usize == seats.len() {
+        let seat_w = seats.first().map_or(0.0, |seat| seat.width_m);
+        let total =
+            seats.len() as f64 * seat_w + blocks.len().saturating_sub(1) as f64 * row.aisle_width_m;
+        let mut y = -0.5 * total + 0.5 * seat_w;
+        let mut index = 0;
+        for (block_index, count) in blocks.iter().enumerate() {
+            for _ in 0..*count {
+                seats[index].y_m = y;
+                y += seat_w;
+                index += 1;
+            }
+            if block_index + 1 < blocks.len() {
+                y += row.aisle_width_m;
+            }
+        }
+    }
     seats
 }
 

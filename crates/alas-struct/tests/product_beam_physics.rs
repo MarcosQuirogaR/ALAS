@@ -88,7 +88,13 @@ fn transport_presets_conserve_the_declared_box_material_volumes() {
         let rib = materials::get(&cfg.rib_material).unwrap();
         let stations = sizing_stations(&geometry, cfg);
         let (front, rear) = box_chord_band(&geometry);
-        let fuel = tanks::integral_fuel_running_mass_kg_m(&geometry, &stations, front, rear);
+        let fuel = tanks::integral_fuel_running_mass_kg_m(
+            &geometry,
+            &stations,
+            front,
+            rear,
+            tanks::JET_FUEL_DENSITY_KG_M3,
+        );
         let mounted = engine_point_loads_n(&config.geometry.engine, &config.mass_model, req);
         let initial = size_wingbox_with_wing_carried_mass(
             &geometry,
@@ -289,6 +295,7 @@ fn axial_laminate_cap_reaches_the_declared_strain_limit_in_a_strength_critical_b
             running_mass_kg_m: &dry,
             design_case: WingFuelDesignCase::declared(0.0, config.requirements.mtow_kg, None),
         },
+        alas_struct::tanks::JET_FUEL_DENSITY_KG_M3,
         &WingMountedRelief {
             point_masses_kg: Vec::new(),
             omitted: Vec::new(),
@@ -371,4 +378,31 @@ fn axial_laminate_cap_reaches_the_declared_strain_limit_in_a_strength_critical_b
             .map(|spar| (spar.h[0], spar.a_cap[0], spar.t_cap[0], spar.t_web[0]))
             .collect::<Vec<_>>()
     );
+}
+
+#[test]
+fn the_cover_fibre_follows_the_contour_and_flanges_not_webs_carry_it() {
+    // The cover's extreme fibre is half the deepest airfoil depth between the
+    // spars, mid-bay, not half the spar height. The cap search must see that
+    // fibre, or the only lever left for the cover stress is the web gauge: the
+    // A320 box then sized 3.2 t of webs against 0.4 t of caps.
+    let config = AlasConfig::from_value(&serde_json::json!({"preset":"A320-200"})).unwrap();
+    let design = presets::get("A320-200").unwrap().design_vector;
+    let sizing = dry_strength_size(&config, &design);
+    for station in 0..sizing.y_stations.len() {
+        let spar = sizing
+            .spars
+            .iter()
+            .map(|spar| spar.h[station])
+            .fold(0.0_f64, f64::max);
+        if spar > 0.0 {
+            let depth = sizing.cover_depth_at(station);
+            assert!(
+                depth > spar && depth < 1.2 * spar,
+                "station {station}: {depth} vs {spar}"
+            );
+        }
+    }
+    let mass = &sizing.mass_breakdown_kg;
+    assert!(mass.spar_webs < mass.spar_caps, "{mass:?}");
 }

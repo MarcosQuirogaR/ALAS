@@ -40,7 +40,7 @@ pub(super) fn build_ledger(
     methods: LedgerMethods,
 ) -> Result<MassLedger, LedgerError> {
     let mut ledger = MassLedger::new();
-    push_structure(&mut ledger, masses, stations, methods);
+    push_structure(&mut ledger, masses, stations, flops, methods);
     push_gear(&mut ledger, masses, stations, flops_gear_split_kg, methods);
     push_propulsion(&mut ledger, masses, stations, methods);
     match flops {
@@ -50,6 +50,7 @@ pub(super) fn build_ledger(
             stations,
             flops,
             &unusable_fuel_items,
+            seat_centroids(stations, payload_items),
         )?,
         None => push_lumped_systems_and_furnishings(&mut ledger, masses, stations),
     }
@@ -112,9 +113,14 @@ fn push_structure(
     ledger: &mut MassLedger,
     masses: &MassBreakdown,
     stations: &ComponentStations,
+    flops: Option<&FlopsTransportBreakdown>,
     methods: LedgerMethods,
 ) {
     let method = methods.structure;
+    // A main-deck freighter's doors and freight floor leave the fuselage item
+    // for their own stations; the group total is unchanged.
+    let fuselage_kg = masses.fuselage
+        - super::freight_items::push_freighter_structure(ledger, stations, flops, method);
     ledger.push(MassItem {
         id: "wing".to_owned(),
         group: MassGroup::WingStructure,
@@ -158,10 +164,10 @@ fn push_structure(
         id: "fuselage".to_owned(),
         group: MassGroup::Fuselage,
         role: MassRole::Fixed,
-        mass_kg: masses.fuselage,
+        mass_kg: fuselage_kg,
         position_m: stations.fuselage.position_m,
         local_inertia: thin_cylinder_shell_x(
-            masses.fuselage,
+            fuselage_kg,
             stations.fuselage.extent_m[1] / 2.0,
             stations.fuselage.extent_m[0],
         ),
@@ -303,6 +309,30 @@ pub(super) fn push_furnishings_item(
         ),
         method,
     });
+}
+
+/// Seat centroids of the cabin layout at the furnishings station's height:
+/// `[first, business, tourist]` then all classes, each weighted by occupied
+/// seats (one seat, one seat mass within a class); `None` where no seat row.
+pub(super) type SeatCentroids = ([Option<[f64; 3]>; 3], Option<[f64; 3]>);
+
+/// The [`SeatCentroids`] of `payload_items`.
+fn seat_centroids(
+    stations: &ComponentStations,
+    payload_items: &[PayloadItemSummary],
+) -> SeatCentroids {
+    let mut sums = [(0.0, 0.0); 4];
+    for item in payload_items {
+        if let Some((class, seats)) = item.seats {
+            for index in [class.index(), 3] {
+                sums[index].0 += seats as f64;
+                sums[index].1 += seats as f64 * item.position_m[0];
+            }
+        }
+    }
+    let z = stations.furnishings.position_m[2];
+    let at = |(seats, moment): (f64, f64)| (seats > 0.0).then(|| [moment / seats, 0.0, z]);
+    ([at(sums[0]), at(sums[1]), at(sums[2])], at(sums[3]))
 }
 
 /// Payload: one item per [`PayloadItemSummary`], or the lumped fallback at

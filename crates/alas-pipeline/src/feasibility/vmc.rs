@@ -61,7 +61,20 @@ pub(super) fn append(outcome: &VmcOutcome, findings: &mut Vec<PhysicalFinding>) 
             None,
             "VMC/VSR",
         )),
-        _ => {}
+        // An asymmetry that sets no minimum control speed is not a finding.
+        (None, Err(VmcFailure::NotLimiting { .. })) | (None, Ok(_)) | (Some(_), _) => {}
+    }
+    if let Some(assessment) = ceiling.filter(|assessment| !assessment.thrust_iteration_converged) {
+        findings.push(warning(
+            FindingCode::MinimumControlSpeedNotConverged,
+            format!(
+                "the take-off thrust at the minimum control speed did not close on the speed within its iteration limit: VMCA {:.1} m/s ({:.3} VSR) is the last iterate, not a converged value",
+                assessment.vmca_m_s, assessment.vmc_over_vsr,
+            ),
+            Some(assessment.vmc_over_vsr),
+            None,
+            "VMC/VSR",
+        ));
     }
     if let Some(check) = outcome.crosswind {
         if check.cn_beta_per_rad.is_finite()
@@ -114,6 +127,7 @@ mod tests {
             limit: ControlLimit::Rudder,
             asymmetric_force_n: 1.0e5,
             fin_area_ratio_for_ceiling: Some(1.3),
+            thrust_iteration_converged: true,
         }
     }
 
@@ -173,6 +187,32 @@ mod tests {
         assert_eq!(
             findings[0].code,
             FindingCode::MinimumControlSpeedUnavailable
+        );
+        assert_eq!(findings[0].severity, FindingSeverity::Warning);
+    }
+
+    #[test]
+    fn an_asymmetry_that_sets_no_minimum_control_speed_is_not_a_finding() {
+        let mut findings = Vec::new();
+        append(
+            &outcome(Err(VmcFailure::NotLimiting { below_m_s: 5.0 }), None, false),
+            &mut findings,
+        );
+        assert!(findings.is_empty(), "{findings:?}");
+    }
+
+    #[test]
+    fn an_unconverged_thrust_iteration_is_a_warning_beside_the_value() {
+        let unconverged = VmcAssessment {
+            thrust_iteration_converged: false,
+            ..assessment(1.0)
+        };
+        let mut findings = Vec::new();
+        append(&outcome(Ok(unconverged), None, false), &mut findings);
+        assert_eq!(findings.len(), 1);
+        assert_eq!(
+            findings[0].code,
+            FindingCode::MinimumControlSpeedNotConverged
         );
         assert_eq!(findings[0].severity, FindingSeverity::Warning);
     }

@@ -100,7 +100,8 @@ pub struct FlopsTurbopropConfig {
         advanced,
         label = "Engine dry mass",
         unit = "kg",
-        help = "Certificated dry mass of one engine, which for the PW100 family includes the reduction gearbox (EASA TCDS IM.E.041 section III.2). Blank uses the NASA GASP turboshaft/turboprop specific weight of 0.5 lb per shaft horsepower (CR-152303 Vol. V equation V.1.3) instead, which is a general-aviation regression rather than certification evidence."
+        help = "Certificated dry mass of one engine [kg]; for the PW100 family it includes the reduction gearbox.",
+        long_help = "Certificated dry mass of one engine, which for the PW100 family includes the reduction gearbox (EASA TCDS IM.E.041 section III.2). Blank uses the NASA GASP turboshaft/turboprop specific weight of 0.5 lb per shaft horsepower (CR-152303 Vol. V equation V.1.3) instead, which is a general-aviation regression rather than certification evidence."
     )]
     pub engine_dry_mass_kg: Option<f64>,
 
@@ -109,7 +110,8 @@ pub struct FlopsTurbopropConfig {
         advanced,
         label = "Baseline engine shaft power",
         unit = "kW",
-        help = "Take-off shaft power of the engine the declared dry mass was measured at. Blank uses the installed engine's own take-off rating, so the scaling ratio is one and the certificated mass is used unchanged."
+        help = "Take-off shaft power of the engine the declared dry mass was measured at [kW].",
+        long_help = "Take-off shaft power of the engine the declared dry mass was measured at. Blank uses the installed engine's own take-off rating, so the scaling ratio is one and the certificated mass is used unchanged."
     )]
     pub baseline_shaft_power_kw: Option<f64>,
 
@@ -117,7 +119,8 @@ pub struct FlopsTurbopropConfig {
     #[config(
         advanced,
         label = "Engine mass scaling exponent",
-        help = "Exponent on the shaft-power ratio when a declared engine dry mass is scaled to a different rating. An exponent of 1 reproduces the linear NASA GASP specific-weight relation (CR-152303 Vol. V equation V.1.4); the mass is unchanged at the baseline rating whatever the exponent."
+        help = "Exponent on the shaft-power ratio when scaling a declared engine dry mass to another rating (dimensionless). 1 gives the linear NASA GASP relation.",
+        long_help = "Exponent on the shaft-power ratio when a declared engine dry mass is scaled to a different rating. An exponent of 1 reproduces the linear NASA GASP specific-weight relation (CR-152303 Vol. V equation V.1.4); the mass is unchanged at the baseline rating whatever the exponent."
     )]
     pub engine_mass_scaling_exponent: f64,
 
@@ -125,7 +128,8 @@ pub struct FlopsTurbopropConfig {
     #[config(
         advanced,
         label = "Gearbox inside engine mass",
-        help = "The certificated PW100 dry weight covers the turbomachine and the reduction gearbox together (EASA TCDS IM.E.041 section III.2), so a separately estimated gearbox would be counted twice. Disable only for an engine whose quoted dry mass excludes its gearbox, in which case the NASA TM-83458 torque relation is evaluated and reported on its own line."
+        help = "The certificated PW100 dry weight already includes the gearbox, so a separate gearbox estimate would be counted twice.",
+        long_help = "The certificated PW100 dry weight covers the turbomachine and the reduction gearbox together (EASA TCDS IM.E.041 section III.2), so a separately estimated gearbox would be counted twice. Disable only for an engine whose quoted dry mass excludes its gearbox, in which case the NASA TM-83458 torque relation is evaluated and reported on its own line."
     )]
     pub gearbox_inside_engine_mass: bool,
 
@@ -150,7 +154,8 @@ pub struct FlopsTurbopropConfig {
         advanced,
         options = PropellerConstruction,
         label = "Propeller construction",
-        help = "Blade material and pitch-change hardware. This selects the Hamilton Standard regression constants of NASA TM-83458 p. 5 and whether the counterweight term of equation V.1.29 applies."
+        help = "Blade material and pitch-change hardware.",
+        long_help = "Blade material and pitch-change hardware. This selects the Hamilton Standard regression constants of NASA TM-83458 p. 5 and whether the counterweight term of equation V.1.29 applies."
     )]
     pub propeller_construction: PropellerConstruction,
 
@@ -158,7 +163,8 @@ pub struct FlopsTurbopropConfig {
     #[config(
         advanced,
         label = "Propeller weight coefficient",
-        help = "Hamilton Standard K_w. Blank uses the published constant for the selected construction (355 double-acting aluminium, 220 single-acting aluminium). A composite propeller has no single published value: NASA TM-83458 p. 5 sanctions the band 160 to 180, and the point inside it must be declared with its own evidence."
+        help = "Hamilton Standard K_w (dimensionless). Blank uses the published constant (355 double-acting aluminium, 220 single-acting).",
+        long_help = "Hamilton Standard K_w. Blank uses the published constant for the selected construction (355 double-acting aluminium, 220 single-acting aluminium). A composite propeller has no single published value: NASA TM-83458 p. 5 sanctions the band 160 to 180, and the point inside it must be declared with its own evidence."
     )]
     pub propeller_weight_coefficient: Option<f64>,
 
@@ -167,7 +173,8 @@ pub struct FlopsTurbopropConfig {
         advanced,
         label = "Propeller accessory mass",
         unit = "kg",
-        help = "Spinner, blade de-icing and governor mass for one propeller. NASA CR-152303 Vol. V p. V-1.11 states verbatim that the regression's propeller weight excludes these, so an aircraft with electrically de-iced blades carries them here rather than inside the regression."
+        help = "Spinner, blade de-icing and governor mass for one propeller [kg].",
+        long_help = "Spinner, blade de-icing and governor mass for one propeller. NASA CR-152303 Vol. V p. V-1.11 states verbatim that the regression's propeller weight excludes these, so an aircraft with electrically de-iced blades carries them here rather than inside the regression."
     )]
     pub propeller_accessory_mass_kg: f64,
 
@@ -178,7 +185,8 @@ pub struct FlopsTurbopropConfig {
         advanced,
         label = "Propeller assembly mass",
         unit = "kg",
-        help = "Optional source-backed mass of one propeller item. When present it replaces the generic Hamilton Standard regression for that installation; the regression inputs remain the documented fallback for configurations without a source statement. Declare the accessory-scope control separately when the source defines it; an unknown scope forbids a separate accessory allowance. Update or clear this fixed declaration when changing the propeller design."
+        help = "Optional source-backed mass of one propeller item. When present it replaces the generic Hamilton Standard regression; clear it when changing the propeller design.",
+        long_help = "Optional source-backed mass of one propeller item. When present it replaces the generic Hamilton Standard regression for that installation; the regression inputs remain the documented fallback for configurations without a source statement. Declare the accessory-scope control separately when the source defines it; an unknown scope forbids a separate accessory allowance. Update or clear this fixed declaration when changing the propeller design."
     )]
     pub propeller_assembly_mass_kg: Option<f64>,
 
@@ -187,7 +195,8 @@ pub struct FlopsTurbopropConfig {
     #[config(
         advanced,
         label = "Assembly includes accessories",
-        help = "Scope control for a declared propeller assembly mass. Blank means the source scope is unknown and forbids a separate accessory allowance; false means the source explicitly excludes accessories; true means it includes them and the separate accessory mass must remain zero."
+        help = "Scope of a declared propeller assembly mass.",
+        long_help = "Scope control for a declared propeller assembly mass. Blank means the source scope is unknown and forbids a separate accessory allowance; false means the source explicitly excludes accessories; true means it includes them and the separate accessory mass must remain zero."
     )]
     pub propeller_assembly_accessories_included: Option<bool>,
 
@@ -196,7 +205,8 @@ pub struct FlopsTurbopropConfig {
         advanced,
         label = "Nacelle area density",
         unit = "kg/m^2",
-        help = "NASA GASP UW_NAC of CR-152303 Vol. V equation V.1.6: an empirical nacelle component area coefficient, not a material density. There is no published shaft-power-based turboprop nacelle relation, so this remains a declared model input. A reference component mass and area, when supplied, override this scalar. Zero blocks the nacelle mass instead of assuming a value."
+        help = "NASA GASP UW_NAC (CR-152303 eq. V.1.6): an empirical nacelle component area coefficient, not a material density; a declared model input.",
+        long_help = "NASA GASP UW_NAC of CR-152303 Vol. V equation V.1.6: an empirical nacelle component area coefficient, not a material density. There is no published shaft-power-based turboprop nacelle relation, so this remains a declared model input. A reference component mass and area, when supplied, override this scalar. Zero blocks the nacelle mass instead of assuming a value."
     )]
     pub nacelle_area_density_kg_m2: f64,
 
@@ -205,7 +215,8 @@ pub struct FlopsTurbopropConfig {
         advanced,
         label = "Nacelle reference component mass",
         unit = "kg",
-        help = "Optional source-backed mass of one nacelle component used with the reference area below. When both reference fields are present, the evaluator resolves the area density as reference mass divided by reference area and applies it to the built nacelle area."
+        help = "Optional source-backed mass of one nacelle component [kg], used with the reference area below.",
+        long_help = "Optional source-backed mass of one nacelle component used with the reference area below. When both reference fields are present, the evaluator resolves the area density as reference mass divided by reference area and applies it to the built nacelle area."
     )]
     pub nacelle_reference_mass_kg: Option<f64>,
 
@@ -214,7 +225,8 @@ pub struct FlopsTurbopropConfig {
         advanced,
         label = "Nacelle reference area",
         unit = "m^2",
-        help = "Optional reference wetted area of one nacelle corresponding to the reference component mass. This keeps a calibrated component anchor explicit when the runtime uses the built nacelle wetted area; it is not an independently measured material density."
+        help = "Optional reference wetted area of one nacelle matching the reference component mass [m^2].",
+        long_help = "Optional reference wetted area of one nacelle corresponding to the reference component mass. This keeps a calibrated component anchor explicit when the runtime uses the built nacelle wetted area; it is not an independently measured material density."
     )]
     pub nacelle_reference_area_m2: Option<f64>,
 
@@ -222,7 +234,8 @@ pub struct FlopsTurbopropConfig {
     #[config(
         advanced,
         label = "Pylon coefficient",
-        help = "NASA GASP F_PYL of CR-152303 Vol. V equation V.1.7, W_PYLON = F_PYL (W_ENG + W_NAC)^0.736, applied for a multi-engine installation. Zero charges no pylon mass, which is the FLOPS transport boundary; a wing-mounted turboprop nacelle that is faired into the wing rather than pylon-mounted is the physical case for zero."
+        help = "NASA GASP F_PYL (CR-152303 eq. V.1.7): W_PYLON = F_PYL (W_ENG + W_NAC)^0.736 for multi-engine installations.",
+        long_help = "NASA GASP F_PYL of CR-152303 Vol. V equation V.1.7, W_PYLON = F_PYL (W_ENG + W_NAC)^0.736, applied for a multi-engine installation. Zero charges no pylon mass, which is the FLOPS transport boundary; a wing-mounted turboprop nacelle that is faired into the wing rather than pylon-mounted is the physical case for zero."
     )]
     pub pylon_coefficient: f64,
 
@@ -231,7 +244,8 @@ pub struct FlopsTurbopropConfig {
         advanced,
         label = "Engine installation mass",
         unit = "kg",
-        help = "Engine controls, starters, mounts, fire protection and installation accessories for every installed engine together. FLOPS equations 87 and 89 estimate the same scope from rated thrust and have no shaft-power form, and no published turboprop equation for it was found, so this is a declared input. Zero declares that the installation mass is genuinely absent, which is visible in the ledger rather than hidden."
+        help = "Engine controls, starters, mounts, fire protection and installation accessories for all engines together [kg].",
+        long_help = "Engine controls, starters, mounts, fire protection and installation accessories for every installed engine together. FLOPS equations 87 and 89 estimate the same scope from rated thrust and have no shaft-power form, and no published turboprop equation for it was found, so this is a declared input. Zero declares that the installation mass is genuinely absent, which is visible in the ledger rather than hidden."
     )]
     pub engine_installation_mass_kg: f64,
 
@@ -240,7 +254,8 @@ pub struct FlopsTurbopropConfig {
         advanced,
         label = "Engine oil mass",
         unit = "kg",
-        help = "Engine oil for every installed engine together. FLOPS equation 123 estimates it from rated thrust and has no shaft-power form, and the same document's thrust-free alternate equation 162 as printed returns ten times equation 123 for the same aircraft, so it is not usable. Zero leaves the oil visibly absent from the ledger rather than filling it with a wrong value."
+        help = "Engine oil for all installed engines together [kg]. FLOPS eq. 123 uses rated thrust and eq. 162 is unusable as printed, so this is declared.",
+        long_help = "Engine oil for every installed engine together. FLOPS equation 123 estimates it from rated thrust and has no shaft-power form, and the same document's thrust-free alternate equation 162 as printed returns ten times equation 123 for the same aircraft, so it is not usable. Zero leaves the oil visibly absent from the ledger rather than filling it with a wrong value."
     )]
     pub engine_oil_mass_kg: f64,
 }

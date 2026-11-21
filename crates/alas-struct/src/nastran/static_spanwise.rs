@@ -9,7 +9,7 @@
 use std::collections::{BTreeMap, HashSet};
 
 use crate::loads::LoadCase;
-use crate::mesh::{Deck, MeshNodeIndex, LOAD_INTRODUCTION_LAYERS};
+use crate::mesh::{Deck, MeshNodeIndex, LOAD_INTRODUCTION_DEPTHS};
 use crate::op2::Op2;
 
 use super::{read_static, LabelledValues, ResultStatus};
@@ -40,6 +40,9 @@ pub struct StaticResult {
     pub spanwise: Option<StaticSpanwiseResponse>,
     /// Attributed product shell stresses, when that solver adapter supports it.
     pub shell_stress: Option<super::StaticShellStressResponse>,
+    /// Wing-box cover panel stress along the stringers per rib bay, when the
+    /// deck has cover panels and the solver adapter supports it.
+    pub cover_panel_stress: Option<super::StaticCoverPanelStressResponse>,
 }
 
 /// Provenance of the assignment of output tables to requested load cases.
@@ -202,6 +205,7 @@ pub fn read_static_product(
 ) -> StaticResult {
     let mut result = read_static(op2, index, cases);
     attach_assessed_stress(&mut result, op2, deck, index, cases);
+    attach_cover_panel_stress(&mut result, op2, deck, cases);
     let response = if !op2.duplicate_static_subcases.is_empty() {
         StaticSpanwiseResponse::invalid(format!(
             "duplicate OP2 static subcase tables: {:?}",
@@ -245,7 +249,7 @@ fn attach_assessed_stress(
     index: &MeshNodeIndex,
     cases: &[LoadCase],
 ) {
-    let excluded = deck.load_introduction_elements(&index.engine_nids, LOAD_INTRODUCTION_LAYERS);
+    let excluded = deck.load_introduction_elements_within(index, LOAD_INTRODUCTION_DEPTHS);
     for (position, case) in cases.iter().enumerate() {
         let Some(table) = op2
             .cquad4_stress
@@ -268,6 +272,74 @@ fn attach_assessed_stress(
             result.assessed_von_mises_max_pa.push(case.name, peak);
         }
     }
+}
+
+/// Fill [`StaticResult::cover_panel_stress`] from the OP2 CQUAD4 and CTRIA3
+/// centroid rows (mid-surface tensor = mean of the two fibers, MSC element
+/// axes) and the CBAR axial stresses.
+fn attach_cover_panel_stress(
+    result: &mut StaticResult,
+    op2: &Op2,
+    deck: &Deck,
+    cases: &[LoadCase],
+) {
+    let panels = deck.cover_panels();
+    if panels.is_empty() {
+        return;
+    }
+    let mut response = super::StaticCoverPanelStressResponse::default();
+    for (position, case) in cases.iter().enumerate() {
+        let sid = position as i64 + 1;
+        let mut membrane: BTreeMap<i64, ([f64; 3], u32)> = BTreeMap::new();
+        for table in [op2.cquad4_stress.get(&sid), op2.ctria3_stress.get(&sid)]
+            .into_iter()
+            .flatten()
+        {
+            for ((element, node), row) in table
+                .element_ids
+                .iter()
+                .zip(&table.node_ids)
+                .zip(&table.data)
+            {
+                if *node != 0 {
+                    continue;
+                }
+                let entry = membrane.entry(*element).or_insert(([0.0; 3], 0));
+                entry.0[0] += row[1];
+                entry.0[1] += row[2];
+                entry.0[2] += row[3];
+                entry.1 += 1;
+            }
+        }
+        let axial: BTreeMap<i64, f64> = op2
+            .cbar_axial_stress
+            .get(&sid)
+            .into_iter()
+            .flatten()
+            .copied()
+            .collect();
+        match super::cover_panel_case(
+            &panels,
+            crate::mesh::ShellStressAxes::MscNastran,
+            sid,
+            case.name,
+            |eid| {
+                membrane
+                    .get(&eid)
+                    .filter(|(_, fibers)| *fibers == 2)
+                    .map(|(sum, _)| sum.map(|v| v / 2.0))
+            },
+            |eid| axial.get(&eid).copied(),
+        ) {
+            Ok(panels) => response.cases.push(panels),
+            Err(error) => {
+                response.cases.clear();
+                response.error = Some(error);
+                break;
+            }
+        }
+    }
+    result.cover_panel_stress = Some(response);
 }
 
 pub(crate) fn attach(result: &mut StaticResult, response: StaticSpanwiseResponse) {

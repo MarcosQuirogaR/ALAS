@@ -6,8 +6,8 @@
 //! `alas-mass` cannot depend on `alas-opt`, so the spar-box cross-section
 //! integration `alas_opt::transport_planform::wingbox_section_metrics` and
 //! `wingbox_volume_m3` perform is reimplemented here rather than shared,
-//! kept to the same per-panel trapezoid treatment so a design assessed by
-//! both crates gets the same tankable volume from either one. What is added
+//! kept to the same per-panel exact (truncated-pyramid) treatment so a design
+//! assessed by both crates gets the same tankable volume from either one. What is added
 //! here and has no counterpart there is the first moment needed for a
 //! centroid, and a section's mid-thickness height for the z coordinate.
 
@@ -151,17 +151,54 @@ impl WingBoxIntegral {
     }
 }
 
+/// Exact spanwise integral of a lofted panel's box cross-section.
+///
+/// A panel's chord varies linearly with span, so its section area varies as
+/// the square of a linear function (a truncated pyramid of similar
+/// sections: Torenbeek, Advanced Aircraft Design (2013), App. A.1, p. 393).
+/// The square root of the area is interpolated linearly and the product with
+/// a linearly varying quantity (a centroid coordinate) is cubic in span, so
+/// Simpson's rule on the overlap interval is exact; averaging the two end
+/// areas, as a trapezoid does, overestimates a strongly tapered panel by
+/// about delta^2 * 2/3 with delta the half taper difference over the mean.
+struct PanelQuadrature {
+    y_a: f64,
+    y_b: f64,
+    root_a: f64,
+    root_b: f64,
+}
+
+impl PanelQuadrature {
+    fn new(a: &WingXSec, b: &WingXSec, box_a: &SectionBox, box_b: &SectionBox) -> Self {
+        Self {
+            y_a: a.xyz_le[1],
+            y_b: b.xyz_le[1],
+            root_a: box_a.area_m2.sqrt(),
+            root_b: box_b.area_m2.sqrt(),
+        }
+    }
+
+    /// Integral over `[lo, hi]` (inside the panel) of area(y) * g(t), with t
+    /// the panel parameter 0 at the first section and 1 at the second.
+    fn integrate(&self, lo: f64, hi: f64, g: impl Fn(f64) -> f64) -> f64 {
+        let at = |y: f64| {
+            let t = (y - self.y_a) / (self.y_b - self.y_a);
+            let root = self.root_a + (self.root_b - self.root_a) * t;
+            root * root * g(t)
+        };
+        let mid = 0.5 * (lo + hi);
+        (hi - lo) / 6.0 * (at(lo) + 4.0 * at(mid) + at(hi))
+    }
+}
+
 /// Integrate the spar-box volume and first moment of `wing` between
 /// `start_y_m` and `end_y_m`, on the one side the wing's own cross-sections
 /// describe.
 ///
-/// Each panel's contribution is its overlap with `[start_y_m, end_y_m]`
-/// times the average of its two endpoint sections: the same treatment
-/// `alas_opt::transport_planform::wingbox_volume_m3` gives the volume term,
-/// extended here to the moment terms by the same averaging. This
-/// under-resolves a boundary that falls strictly inside a panel rather than
-/// on one of the wing's own stations; a wing lofted with enough stations
-/// that no configured tank boundary crosses one keeps that error small.
+/// Each panel's contribution is [`PanelQuadrature`] over its overlap with
+/// `[start_y_m, end_y_m]`: exact for a linearly lofted panel, including a
+/// boundary that falls strictly inside it. `alas_opt::transport_planform`'s
+/// `wingbox_volume_m3` applies the same rule to the volume term.
 pub(super) fn integrate_wing_box(
     wing: &Wing,
     front: f64,
@@ -181,14 +218,16 @@ pub(super) fn integrate_wing_box(
         }
         let inboard = section_box(&pair[0], front, rear)?;
         let outboard = section_box(&pair[1], front, rear)?;
-        integral.volume_m3 += overlap * (inboard.area_m2 + outboard.area_m2) / 2.0;
-        integral.x_moment_m4 += overlap
-            * (inboard.area_m2 * inboard.x_mid_m + outboard.area_m2 * outboard.x_mid_m)
-            / 2.0;
-        integral.y_moment_m4 += overlap * (inboard.area_m2 * y_a + outboard.area_m2 * y_b) / 2.0;
-        integral.z_moment_m4 += overlap
-            * (inboard.area_m2 * inboard.z_mid_m + outboard.area_m2 * outboard.z_mid_m)
-            / 2.0;
+        let panel = PanelQuadrature::new(&pair[0], &pair[1], &inboard, &outboard);
+        let (lo, hi) = (segment_start.max(start_y_m), segment_end.min(end_y_m));
+        integral.volume_m3 += panel.integrate(lo, hi, |_| 1.0);
+        integral.x_moment_m4 += panel.integrate(lo, hi, |t| {
+            inboard.x_mid_m + (outboard.x_mid_m - inboard.x_mid_m) * t
+        });
+        integral.y_moment_m4 += panel.integrate(lo, hi, |t| y_a + (y_b - y_a) * t);
+        integral.z_moment_m4 += panel.integrate(lo, hi, |t| {
+            inboard.z_mid_m + (outboard.z_mid_m - inboard.z_mid_m) * t
+        });
         integral.width_weighted_m2 += overlap * (inboard.width_m + outboard.width_m) / 2.0;
         integral.depth_weighted_m2 += overlap * (inboard.depth_m + outboard.depth_m) / 2.0;
         integral.overlap_total_m += overlap;
@@ -290,4 +329,29 @@ pub(super) fn fuselage_station(fuselage: &Fuselage, x_fraction: f64) -> Option<[
         return Some(xyz);
     }
     Some(last.xyz_c)
+}
+
+#[cfg(test)]
+mod quadrature_tests {
+    use super::PanelQuadrature;
+
+    #[test]
+    fn a_tapered_panel_integrates_as_a_truncated_pyramid() {
+        // Similar sections with chords 3 and 1 m over 4 m of span: area
+        // scales as chord squared, a frustum of volume h/3 (A1 + A2 + sqrt(A1 A2)).
+        let (a1, a2) = (9.0_f64, 1.0_f64);
+        let panel = PanelQuadrature {
+            y_a: 0.0,
+            y_b: 4.0,
+            root_a: a1.sqrt(),
+            root_b: a2.sqrt(),
+        };
+        let frustum = 4.0 / 3.0 * (a1 + a2 + (a1 * a2).sqrt());
+        assert!((panel.integrate(0.0, 4.0, |_| 1.0) - frustum).abs() < 1.0e-12);
+        // Split at an interior station: the parts sum to the whole.
+        let split = panel.integrate(0.0, 1.5, |_| 1.0) + panel.integrate(1.5, 4.0, |_| 1.0);
+        assert!((split - frustum).abs() < 1.0e-12);
+        // The trapezoid of the end areas overestimates it.
+        assert!(4.0 * (a1 + a2) / 2.0 > frustum);
+    }
 }

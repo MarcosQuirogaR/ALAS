@@ -173,7 +173,7 @@ fn w62_lto_matches_the_reference_intermediates_in_renderer_order() {
     let mut config = AlasConfig::default();
     config.performance.legacy_field_correlations = true;
     // The frozen reference approach factor; the product default is the
-    // CS 25.125 floor 1.23 (lane A1).
+    // CS 25.125 floor 1.23.
     config.performance.vapp_vstall_land_factor = 1.30;
 
     assert_eq!(root.config.departure_airport, config.departure_airport);

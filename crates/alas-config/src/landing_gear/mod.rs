@@ -3,23 +3,18 @@
 
 // Ported from alas/config/landing_gear_config.py
 
-//! Wheel, tire and strut sizing assumptions.
-//!
-//! These drive a real wheel-and-tire sizing pass rather than a fraction of
-//! takeoff weight: the number of wheels and their rated load are what produce
-//! the gear load limits, which in turn produce the strength boundaries of the
-//! centre-of-gravity envelope. The distinction matters because the envelope
-//! then reflects gear the aircraft could actually be built with, rather than
-//! an assumption about gear nobody sized.
-//!
-//! Every count here accepts zero, meaning "size it": a wheel count is a
-//! discrete choice made from the load, and asking a user to pick one before
-//! the load is known has the causality backwards. A non-zero value overrides
-//! the sizing, which is what makes an existing aircraft's gear reproducible.
+//! Wheel, tire and strut sizing assumptions. These drive a real sizing pass
+//! rather than a fraction of takeoff weight: the wheel count and rated load
+//! produce the gear load limits and so the strength boundaries of the CG
+//! envelope. Every count accepts zero, meaning "size it"; a non-zero value
+//! overrides the sizing and reproduces an existing aircraft's gear.
 
 use serde::{Deserialize, Serialize};
 
 use crate::ConfigNode;
+
+mod rotation_basis;
+pub use rotation_basis::RotationAngleBasis;
 
 /// Tunable landing-gear sizing assumptions.
 #[derive(Debug, Clone, PartialEq, Serialize, Deserialize, ConfigNode)]
@@ -36,7 +31,8 @@ pub struct LandingGearConfig {
     /// Margin left in the rated tire load after the static reaction.
     #[config(
         label = "Tire load safety factor",
-        help = "Margin applied to the static reaction load when selecting/verifying tire count: real gear is sized so the rated tire load is never fully consumed by static load alone, leaving margin for dynamic (braking, turning, rough-field) loads. Raymer: ~1.07 typical for a preliminary sizing pass."
+        help = "Margin applied to the static reaction load when selecting tire count (dimensionless), so rated tire load is never fully used by static load alone.",
+        long_help = "Margin applied to the static reaction load when selecting/verifying tire count: real gear is sized so the rated tire load is never fully consumed by static load alone, leaving margin for dynamic (braking, turning, rough-field) loads. Raymer: ~1.07 typical for a preliminary sizing pass."
     )]
     pub tire_safety_factor: f64,
 
@@ -58,7 +54,8 @@ pub struct LandingGearConfig {
     /// Main-gear legs, left and right combined, or zero to size them.
     #[config(
         label = "Main-gear strut count (0 = auto)",
-        help = "Number of main-gear legs (each with its own wheel bogie), left+right combined. 0 = auto: 2 (one per side) below mlg_body_gear_mtow_kg, 4 (adds centreline body gear, e.g. A380/747-class) above it: real widebodies above roughly 300 t add body gear because a two-leg bogie would need an impractically large tire count/track width to carry the load within tire-pressure limits."
+        help = "Number of main-gear legs, left and right combined. 0 is auto: 2 below mlg_body_gear_mtow_kg, 4 (adds centreline body gear, A380/747 class) above it.",
+        long_help = "Number of main-gear legs (each with its own wheel bogie), left+right combined. 0 = auto: 2 (one per side) below mlg_body_gear_mtow_kg, 4 (adds centreline body gear, e.g. A380/747-class) above it: real widebodies above roughly 300 t add body gear because a two-leg bogie would need an impractically large tire count/track width to carry the load within tire-pressure limits."
     )]
     pub n_mlg_struts: i64,
 
@@ -80,7 +77,8 @@ pub struct LandingGearConfig {
     /// Main-gear track as a multiple of fuselage diameter.
     #[config(
         label = "Main-gear track / fuselage-diameter factor",
-        help = "Main-gear lateral track width, as a multiple of fuselage diameter. Real transports with wing-root-mounted main gear run track/diameter ~1.75-2.0 (777-300ER 2.03, 787-9 1.90, A340-300 1.91, A380-800 2.00, A320-200 1.92, DC-10-30 1.77): 1.85 is the fleet-average calibration. An earlier default (1.15) understated real track width by roughly a factor of 1.6, which fed directly into the lateral-turnover check (physics.landing_gear) reading artificially safe."
+        help = "Main-gear lateral track as a multiple of fuselage diameter (dimensionless).",
+        long_help = "Main-gear lateral track width, as a multiple of fuselage diameter. Real transports with wing-root-mounted main gear run track/diameter ~1.75-2.0 (777-300ER 2.03, 787-9 1.90, A340-300 1.91, A380-800 2.00, A320-200 1.92, DC-10-30 1.77): 1.85 is the fleet-average calibration. An earlier default (1.15) understated real track width by roughly a factor of 1.6, which fed directly into the lateral-turnover check (physics.landing_gear) reading artificially safe."
     )]
     pub track_diameter_factor: f64,
 
@@ -93,7 +91,8 @@ pub struct LandingGearConfig {
     #[config(
         label = "Reference landing-gear wheelbase",
         unit = "m",
-        help = "Published nose-gear to primary main-gear wheelbase retained for reference comparison. It does not define a station by itself; a complete normalized source anchor set is required to scale source stations with active geometry. Leave unset for a clean-sheet or optimized aircraft."
+        help = "Published nose-gear to primary main-gear wheelbase, kept for comparison [m].",
+        long_help = "Published nose-gear to primary main-gear wheelbase retained for reference comparison. It does not define a station by itself; a complete normalized source anchor set is required to scale source stations with active geometry. Leave unset for a clean-sheet or optimized aircraft."
     )]
     #[serde(default)]
     pub reference_wheelbase_m: Option<f64>,
@@ -134,7 +133,8 @@ pub struct LandingGearConfig {
     #[config(
         label = "Reference body-gear wheelbase",
         unit = "m",
-        help = "Published nose-gear to body-main-gear wheelbase retained for a distinct source comparison. It is metadata; the active model uses normalized group stations when those are registered."
+        help = "Published nose-gear to body-main-gear wheelbase kept for a distinct source comparison [m].",
+        long_help = "Published nose-gear to body-main-gear wheelbase retained for a distinct source comparison. It is metadata; the active model uses normalized group stations when those are registered."
     )]
     #[serde(default)]
     pub reference_body_wheelbase_m: Option<f64>,
@@ -150,7 +150,8 @@ pub struct LandingGearConfig {
     #[config(
         label = "Reference main-gear track",
         unit = "m",
-        help = "Published main-gear track used as a source baseline when its definition matches the layout, such as wing-gear centreline spacing. The active design scales it with fuselage diameter and track_diameter_factor; leave unset to retain automatic sizing."
+        help = "Published main-gear track used as a source baseline when its definition matches the layout [m].",
+        long_help = "Published main-gear track used as a source baseline when its definition matches the layout, such as wing-gear centreline spacing. The active design scales it with fuselage diameter and track_diameter_factor; leave unset to retain automatic sizing."
     )]
     #[serde(default)]
     pub reference_track_m: Option<f64>,
@@ -163,7 +164,8 @@ pub struct LandingGearConfig {
     /// control for uniform and automatic designs.
     #[config(
         label = "Main-gear wheels by strut",
-        help = "Optional per-strut bogie counts in layout order: left wing, right wing, then centreline/body gear. Use standard even counts (2, 4 or 6) and provide one entry per configured main-gear strut. Leave unset for automatic or uniform sizing."
+        help = "Optional bogie counts per strut in layout order: left wing, right wing, then centreline/body gear. Use even counts (2, 4 or 6), one per main-gear strut.",
+        long_help = "Optional per-strut bogie counts in layout order: left wing, right wing, then centreline/body gear. Use standard even counts (2, 4 or 6) and provide one entry per configured main-gear strut. Leave unset for automatic or uniform sizing."
     )]
     #[serde(default)]
     pub mlg_strut_bogie_wheels: Option<Vec<i64>>,
@@ -172,15 +174,34 @@ pub struct LandingGearConfig {
     #[config(
         options = TireClass,
         label = "Tire class",
-        help = "Which reference tire (see physics.landing_gear.TIRE_DATABASE) to size with: 'auto' picks the smallest class whose rated load, combined with a realistic wheel count (<=6/strut), covers the aircraft's static gear loads. Options: auto, light, narrowbody, widebody, heavy."
+        help = "Which reference tire class to size with: 'auto' picks the smallest class whose rated load, with at most 6 wheels per strut, covers the static gear loads.",
+        long_help = "Which reference tire (see physics.landing_gear.TIRE_DATABASE) to size with: 'auto' picks the smallest class whose rated load, combined with a realistic wheel count (<=6/strut), covers the aircraft's static gear loads. Options: auto, light, narrowbody, widebody, heavy."
     )]
     pub tire_class: String,
-
+    /// Certified tire for the main gear; "auto" follows `tire_class`.
+    #[config(
+        options = CertifiedTire,
+        label = "Main-gear tire",
+        help = "Certified main-gear tire designation as printed in the aircraft documents (for example H49x19.0-22/32PR). 'auto' sizes from the tire class.",
+        long_help = "Certified tire for the main gear: the designation the aircraft's documents print (for example H49x19.0-22/32PR), with its rated load from the manufacturers' tire data books, or a lower bound where no book rates the exact ply rating. \"auto\" sizes the main gear from the tire class instead."
+    )]
+    #[serde(default = "default_auto", skip_serializing_if = "is_auto")]
+    pub mlg_tire: String,
+    /// Certified tire for the nose gear; "auto" follows `tire_class`.
+    #[config(
+        options = CertifiedTire,
+        label = "Nose-gear tire",
+        help = "Certified nose-gear tire designation as printed in the aircraft documents (for example 49x17/32PR). 'auto' sizes from the tire class.",
+        long_help = "Certified tire for the nose gear: the designation the aircraft's documents print (for example 49x17/32PR), with its rated load from the manufacturers' tire data books, or a lower bound where no book rates the exact ply rating. \"auto\" sizes the nose gear from the tire class instead."
+    )]
+    #[serde(default = "default_auto", skip_serializing_if = "is_auto")]
+    pub nlg_tire: String,
     /// What the strut is made of.
     #[config(
         options = StrutMaterial,
         label = "Strut material",
-        help = "Landing-gear strut/piston material, shown on the planform diagram and in the design report. 'auto' selects by MTOW class (see physics.landing_gear.STRUT_MATERIALS): high-strength steel (300M-class) for larger transports, an aluminium/steel combination for light aircraft. Informational/labelling only; this preliminary-design tool does not run a structural (FEA) stress analysis of the strut itself."
+        help = "Landing-gear strut material, shown on the planform diagram and report. 'auto' selects by MTOW class (300M-class steel for larger transports).",
+        long_help = "Landing-gear strut/piston material, shown on the planform diagram and in the design report. 'auto' selects by MTOW class (see physics.landing_gear.STRUT_MATERIALS): high-strength steel (300M-class) for larger transports, an aluminium/steel combination for light aircraft. Informational/labelling only; this preliminary-design tool does not run a structural (FEA) stress analysis of the strut itself."
     )]
     pub strut_material: String,
 
@@ -188,7 +209,8 @@ pub struct LandingGearConfig {
     #[config(
         label = "Max lateral turnover angle",
         unit = "deg",
-        help = "Lateral tip-over (overturn) criterion, Raymer Ch.11 / Currey convention: the angle from the vertical whose tangent is CG height over the CG's perpendicular distance to the nose-gear-to-main-gear ground line must not exceed this (evaluated at the forward CG limit, the worst case), or the aircraft risks tipping over in a tight turn. 63 deg is the standard transport-category limit; a higher CG, narrower track, or more forward CG all push the angle up toward it."
+        help = "Maximum lateral tip-over angle from vertical at the forward CG limit [deg] (Raymer Ch. 11 / Currey). 63 deg is the transport-category limit.",
+        long_help = "Lateral tip-over (overturn) criterion, Raymer Ch.11 / Currey convention: the angle from the vertical whose tangent is CG height over the CG's perpendicular distance to the nose-gear-to-main-gear ground line must not exceed this (evaluated at the forward CG limit, the worst case), or the aircraft risks tipping over in a tight turn. 63 deg is the standard transport-category limit; a higher CG, narrower track, or more forward CG all push the angle up toward it."
     )]
     pub turnover_angle_limit_deg: f64,
 
@@ -197,7 +219,8 @@ pub struct LandingGearConfig {
     #[config(
         label = "Nose-gear dynamic braking deceleration",
         unit = "fraction of g",
-        help = "Deceleration used for the nose-gear dynamic braking reaction (14 CFR 25.733(b)(2); CS-25 substantively identical; Raymer Sec. 11.2): N_dyn = W (l_m + decel_g * h_cg) / wheelbase. Retrieved rule text (14 CFR 25.733(b)(2)): the braking case combines 1.0g down with 0.31g forward, up to maximum landing weight; the load must not exceed 1.5x the tire's static rating (see tire_dynamic_rating_factor). 0.31 replaces an older '10 ft/s^2' phrasing (which is 0.31 g almost exactly: 3.048/9.80665 = 0.3109) recalled but not confirmed in the current rule text."
+        help = "Deceleration for the nose-gear dynamic braking reaction, in g. 14 CFR 25.733(b)(2): 1.0 g down with 0.31 g forward; load must not exceed 1.5x the static rating.",
+        long_help = "Deceleration used for the nose-gear dynamic braking reaction (14 CFR 25.733(b)(2); CS-25 substantively identical; Raymer Sec. 11.2): N_dyn = W (l_m + decel_g * h_cg) / wheelbase. Retrieved rule text (14 CFR 25.733(b)(2)): the braking case combines 1.0g down with 0.31g forward, up to maximum landing weight; the load must not exceed 1.5x the tire's static rating (see tire_dynamic_rating_factor). 0.31 replaces an older '10 ft/s^2' phrasing (which is 0.31 g almost exactly: 3.048/9.80665 = 0.3109) recalled but not confirmed in the current rule text."
     )]
     pub nlg_dynamic_braking_decel_g: f64,
 
@@ -205,7 +228,8 @@ pub struct LandingGearConfig {
     #[serde(default = "default_tire_dynamic_rating_factor")]
     #[config(
         label = "Tire dynamic-rating factor",
-        help = "A tire's dynamic (braking) rated load, as a multiple of its static rated load: 14 CFR 25.733(b)(2)/(b)(3) cap the nose-gear dynamic-braking load at 1.5x the tire's static rating, and the retrieved Goodyear Aircraft Tire Data Book entry for the A320 main tire (46x17.0R20: 46,000 lb rated, 69,000 lb max braking) is exactly this 1.5x ratio. The nose tire is sized to cover its dynamic braking reaction divided by this factor, in addition to the margined static reaction."
+        help = "A tire's dynamic (braking) rated load as a multiple of its static rating (dimensionless). 14 CFR 25.733(b) caps nose-gear braking load at 1.5x.",
+        long_help = "A tire's dynamic (braking) rated load, as a multiple of its static rated load: 14 CFR 25.733(b)(2)/(b)(3) cap the nose-gear dynamic-braking load at 1.5x the tire's static rating, and the retrieved Goodyear Aircraft Tire Data Book entry for the A320 main tire (46x17.0R20: 46,000 lb rated, 69,000 lb max braking) is exactly this 1.5x ratio. The nose tire is sized to cover its dynamic braking reaction divided by this factor, in addition to the margined static reaction."
     )]
     pub tire_dynamic_rating_factor: f64,
 
@@ -214,7 +238,8 @@ pub struct LandingGearConfig {
     #[config(
         label = "Minimum tip-back angle floor",
         unit = "deg",
-        help = "Optional extra floor on the longitudinal tip-back (tip-over) angle, the angle from vertical at the most-aft main-gear axle and the most-aft design centre of gravity, atan((x_mlg_aft - x_cg_aft)/h_cg). The tip-back angle must always clear the aircraft's own tail-down (tail-scrape) angle at the main gear (Torenbeek, Synthesis of Subsonic Airplane Design, ch. 10), so the aircraft cannot sit back onto its tail before the tail touches. The default 0 applies that criterion alone; 15 deg reproduces the Raymer/Roskam rule of thumb, which a high-wing turboprop on short sponson gear does not meet."
+        help = "Optional extra floor on the longitudinal tip-back angle at the most-aft main axle and most-aft CG [deg]. It must always clear the tail-scrape angle.",
+        long_help = "Optional extra floor on the longitudinal tip-back (tip-over) angle, the angle from vertical at the most-aft main-gear axle and the most-aft design centre of gravity, atan((x_mlg_aft - x_cg_aft)/h_cg). The tip-back angle must always clear the aircraft's own tail-down (tail-scrape) angle at the main gear (Torenbeek, Synthesis of Subsonic Airplane Design, ch. 10), so the aircraft cannot sit back onto its tail before the tail touches. The default 0 applies that criterion alone; 15 deg reproduces the Raymer/Roskam rule of thumb, which a high-wing turboprop on short sponson gear does not meet."
     )]
     pub min_tip_back_deg: f64,
 
@@ -223,9 +248,20 @@ pub struct LandingGearConfig {
     #[config(
         label = "Required rotation angle at lift-off",
         unit = "deg",
-        help = "Pitch attitude the aircraft must be able to reach at rotation (VR) without the tail or any other aft lower-fuselage point scraping the runway: the tail-scrape angle computed from the fuselage lower contour must be at least this large. 10 deg is a representative transport-category rotation attitude; the exact figure is aircraft- and flap-setting-specific and this default should be treated as a documented assumption, not a certified value."
+        help = "Pitch attitude reachable at rotation (VR) without tail scrape [deg]: the tail-scrape angle must be at least this. 10 deg is typical of transports, an assumption.",
+        long_help = "Pitch attitude the aircraft must be able to reach at rotation (VR) without the tail or any other aft lower-fuselage point scraping the runway: the tail-scrape angle computed from the fuselage lower contour must be at least this large. 10 deg is a representative transport-category rotation attitude."
     )]
     pub required_rotation_angle_deg: f64,
+
+    /// What `required_rotation_angle_deg` rests on: its source and gear state.
+    #[serde(default, skip_serializing_if = "RotationAngleBasis::is_assumed")]
+    #[config(
+        options = RotationAngleBasis,
+        label = "Rotation angle basis",
+        help = "Source and gear state of the required rotation angle: assumed (a miss warns), published static or gear-extended (a miss rejects), or published with the gear state unstated (a miss warns).",
+        long_help = "What the required rotation angle rests on. assumed: no published value, a design-practice assumption; a miss is a warning. published_static: a published tail-strike attitude with the main-gear struts compressed, compared with the model's static attitude; a miss rejects the design. published_gear_extended: published with the struts extended (wheels on the runway at lift-off), compared with the model attitude on the ground plane lowered by the lift-off oleo extension (alas-opt envelope::liftoff_oleo_extension_m); a miss rejects the design. published_state_unspecified: published without a gear state, compared with the gear-extended model attitude; a miss is a warning, since the states may not match."
+    )]
+    pub required_rotation_basis: RotationAngleBasis,
 
     /// Explicit belly-to-ground clearance, overriding the 0.25 x fuselage
     /// diameter rule of thumb.
@@ -233,7 +269,8 @@ pub struct LandingGearConfig {
     #[config(
         label = "Fuselage-to-ground clearance",
         unit = "m",
-        help = "Static strut length (belly clearance) from the fuselage lower surface to the ground line. Leave unset to keep the conceptual-design default of 0.25 x fuselage diameter (alas-mass::stations::gear_vertical_datum); set explicitly once a real strut/tire stack height is known."
+        help = "Static strut length (belly clearance) from the fuselage lower surface to the ground line [m].",
+        long_help = "Static strut length (belly clearance) from the fuselage lower surface to the ground line. Leave unset to keep the conceptual-design default of 0.25 x fuselage diameter (alas-mass::stations::gear_vertical_datum); set explicitly once a real strut/tire stack height is known."
     )]
     pub fuselage_ground_clearance_m: Option<f64>,
 
@@ -244,7 +281,8 @@ pub struct LandingGearConfig {
     #[config(
         label = "Rotation pitch angular acceleration",
         unit = "deg/s^2",
-        help = "Optional override of the required pitch angular acceleration at rotation (V_R) in the forward-CG nose-wheel-liftoff moment balance. Leave unset to use the class value (5 deg/s^2, the midpoint of Sadraey's 4-6 deg/s^2 transport range for a 3-5 s takeoff rotation, Aircraft Design: A Systems Engineering Approach, 2012, sec. 12.3); a conceptual-design requirement, not a certified or measured value for any specific aircraft."
+        help = "Optional override of the required pitch angular acceleration at rotation in the forward-CG nose-wheel-liftoff balance [deg/s^2].",
+        long_help = "Optional override of the required pitch angular acceleration at rotation (V_R) in the forward-CG nose-wheel-liftoff moment balance. Leave unset to use the class value (5 deg/s^2, the midpoint of Sadraey's 4-6 deg/s^2 transport range for a 3-5 s takeoff rotation, Aircraft Design: A Systems Engineering Approach, 2012, sec. 12.3)."
     )]
     pub rotation_pitch_acceleration_deg_s2: Option<f64>,
 
@@ -253,21 +291,45 @@ pub struct LandingGearConfig {
     #[serde(default)]
     #[config(
         label = "Pitch radius of gyration (fraction of MAC)",
-        help = "Optional override of the pitch radius of gyration r_y, as a fraction of MAC, in the nose-wheel-liftoff balance's pitch-inertia term. Leave unset to derive it from the mass ledger's takeoff pitch inertia (Raymer's jet-transport radius when no ledger exists); Torenbeek/Roskam give roughly 0.25-0.35 for transports."
+        help = "Optional override of the pitch radius of gyration r_y, as a fraction of MAC, in the nose-wheel-liftoff balance.",
+        long_help = "Optional override of the pitch radius of gyration r_y, as a fraction of MAC, in the nose-wheel-liftoff balance's pitch-inertia term. Leave unset to derive it from the mass ledger's takeoff pitch inertia (Raymer's jet-transport radius when no ledger exists); Torenbeek/Roskam give roughly 0.25-0.35 for transports."
     )]
     pub pitch_radius_of_gyration_frac_mac: Option<f64>,
 
-    /// Nose-up setting of a trimmable horizontal stabiliser available at
-    /// takeoff, deg (leading edge down, against the fuselage reference
-    /// line); `None` for a fixed stabiliser, whose built incidence then
-    /// holds at rotation.
+    /// Whether the horizontal stabiliser is trimmable in flight (a trimmable
+    /// horizontal stabiliser, THS). When set, the takeoff setting is derived
+    /// from the trim balance at V2 for the CG tested, unless
+    /// `takeoff_stabilizer_nose_up_deg` fixes it.
+    #[serde(default, skip_serializing_if = "is_false")]
+    #[config(
+        label = "Trimmable stabiliser",
+        help = "Whether the horizontal stabiliser is trimmable (a THS, as on jet transports), set before takeoff for the takeoff CG.",
+        long_help = "Whether the horizontal stabiliser is trimmable (a THS, as on jet transports). The crew sets it before takeoff for the takeoff centre of gravity, further nose-up the further forward the CG, so the forward-CG nose-wheel-liftoff balance derives the setting from the trim balance at V2 (elevator neutral, take-off flaps) for each CG it tests. Leave off for a fixed stabiliser (for example a turboprop with elevator trim tabs): the built incidence then holds at rotation."
+    )]
+    pub trimmable_stabilizer: bool,
+
+    /// Nose-up takeoff setting of the trimmable stabiliser, deg (leading edge
+    /// down, against the fuselage reference line), overriding the derived
+    /// one; `None` derives it.
     #[serde(default)]
     #[config(
         label = "Takeoff stabiliser nose-up setting",
         unit = "deg",
-        help = "Nose-up (leading-edge-down) setting of a trimmable horizontal stabiliser available at takeoff, measured against the fuselage reference line. The crew sets the stabiliser for the takeoff centre of gravity, further nose-up the further forward the CG, so the forward-CG nose-wheel-liftoff balance uses this setting in place of the built tail incidence whenever it gives more tail download. Leave unset for a fixed stabiliser (for example a turboprop with elevator trim tabs): the built incidence then holds at rotation."
+        help = "Nose-up takeoff setting of a trimmable stabiliser against the fuselage reference line [deg].",
+        long_help = "Nose-up (leading-edge-down) takeoff setting of a trimmable horizontal stabiliser, measured against the fuselage reference line. Set it from the aircraft's own take-off trim table to replace the setting derived from the trim balance at V2; the forward-CG nose-wheel-liftoff balance uses it in place of the built tail incidence whenever it gives more tail download. Leave unset to derive it for each CG tested."
     )]
     pub takeoff_stabilizer_nose_up_deg: Option<f64>,
+
+    /// Mechanical nose-up travel of the trimmable stabiliser, deg; the derived
+    /// takeoff setting is limited to it. `None` takes the class value (12 deg).
+    #[serde(default)]
+    #[config(
+        label = "Stabiliser nose-up travel",
+        unit = "deg",
+        help = "Largest nose-up setting of the trimmable stabiliser from the flight-control data (FCOM or AMM) [deg].",
+        long_help = "Largest nose-up setting of the trimmable horizontal stabiliser, deg, from the aircraft's flight-control data (FCOM or AMM). The derived takeoff setting is limited to it. Leave unset when the travel is not published: the derived setting is then limited to the class value, 12 deg (Sadraey, Aircraft Design: A Systems Engineering Approach, Wiley, 2013, sec. 6.7.1, p. 306 and Table 6.5, p. 307)."
+    )]
+    pub stabilizer_nose_up_travel_deg: Option<f64>,
 
     /// Trailing-edge-up elevator travel at rotation, deg; `None` takes the
     /// class value (25 deg).
@@ -275,9 +337,63 @@ pub struct LandingGearConfig {
     #[config(
         label = "Elevator up travel at rotation",
         unit = "deg",
-        help = "Trailing-edge-up elevator travel available at takeoff rotation, deg (positive), used by the forward-CG nose-wheel-liftoff balance with the DATCOM large-deflection correction. Leave unset to use the class value, 25 deg (Sadraey, Aircraft Design: A Systems Engineering Approach, 2012, sec. 12.6, typical transport maximum up-elevator); set it from the aircraft's own flight-control travel when one is published."
+        help = "Trailing-edge-up elevator travel at takeoff rotation [deg, positive], used by the forward-CG nose-wheel-liftoff balance.",
+        long_help = "Trailing-edge-up elevator travel available at takeoff rotation, deg (positive), used by the forward-CG nose-wheel-liftoff balance with the DATCOM large-deflection correction. Leave unset to use the class value, 25 deg (Sadraey, Aircraft Design: A Systems Engineering Approach, 2012, sec. 12.6, typical transport maximum up-elevator); set it from the aircraft's own flight-control travel when one is published."
     )]
     pub elevator_up_travel_deg: Option<f64>,
+
+    /// Published maximum static nose-gear load, kg: the nose-gear reaction at
+    /// the most forward centre of gravity that the airport-planning document
+    /// prints with its pavement loads (gross weight less the main-gear load
+    /// at the most forward CG). The nose-gear structure is designed to it, so
+    /// above the weight where it is lower than the class handling share
+    /// `mass_model.pct_load_nlg_max_handling` it bounds the forward ground
+    /// limit: `x_mlg - (load / weight) x wheelbase`. `None`: the class share
+    /// alone.
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    #[config(skip)]
+    pub nose_gear_max_static_load_kg: Option<f64>,
+
+    /// Nose-up travel of the elevator trim tab, deg (trailing edge down,
+    /// positive), of a reversible (unpowered, cable-driven) elevator. `Some`
+    /// declares the elevator reversible: the forward-CG rotation and landing
+    /// balances then hold the elevator only as far as the pilot's force
+    /// limit (CS 25.143(d)) and this tab allow
+    /// (`alas_opt::envelope::elevator_force`). `None`: a powered elevator,
+    /// limited by its travel alone.
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    #[config(skip)]
+    pub elevator_trim_tab_nose_up_deg: Option<f64>,
+
+    /// Geared balance tab of a reversible elevator: tab deflection per unit
+    /// elevator deflection with the elevator trailing edge up (dimensionless,
+    /// negative: the tab moves trailing edge down). `None`: no balance tab.
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    #[config(skip)]
+    pub elevator_balance_tab_gearing: Option<f64>,
+
+    /// Computed airborne minimum control speed at sea level, ISA, at the
+    /// maximum take-off weight, m/s, which the forward-CG rotation balance
+    /// floors its rotation speed with (`V_R >= vr_vmc_factor V_MC`, CS
+    /// 25.107(e)(1)(ii)). Set by the feasibility pipeline from its own
+    /// one-engine-inoperative yaw balance on the copy the CG gate reads; never
+    /// a preset input. `None`: the stall branch alone (the declared
+    /// `vmc_vstall_factor` is the CS 25.149 ceiling, not this aircraft's speed).
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    #[config(skip)]
+    pub rotation_minimum_control_speed_m_s: Option<f64>,
+
+    /// The type's published sea-level airborne minimum control speed `VMCA`,
+    /// calibrated airspeed, m/s, from its flight manual or a near-primary copy
+    /// of it. The forward-CG rotation balance applies the computed `VMCA`
+    /// floor only where the computed value validates against this one
+    /// (within `VMCA_VALIDATION_TOLERANCE` of the feasibility pipeline).
+    /// `None`: no published value, so no computed floor. A validation gate
+    /// only: it never enters a computed speed, force or limit (pinned by
+    /// `the_published_vmca_is_a_validation_gate_and_never_feeds_the_computed_speed`).
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    #[config(skip)]
+    pub published_vmca_m_s: Option<f64>,
 
     /// Wing-body lift coefficient at the ground (pre-rotation) attitude,
     /// as a fraction of `CL_max,TO`, for the same rotation criterion's
@@ -285,7 +401,8 @@ pub struct LandingGearConfig {
     #[serde(default = "default_cl_ground_attitude_frac_of_cl_max_to")]
     #[config(
         label = "Ground-attitude CL (fraction of CLmax_TO)",
-        help = "Wing-body lift coefficient at the ground (pre-rotation) pitch attitude at V_R, as a fraction of the takeoff maximum lift coefficient (CLmax_TO): before rotation the aircraft flies at a low, gear-limited angle of attack well below CLmax_TO. Used by the forward-CG nose-wheel-liftoff moment balance's wing-lift term. Torenbeek order-of-magnitude estimate; not a measured value."
+        help = "Wing-body lift coefficient at the ground attitude at V_R, as a fraction of CLmax_TO [0-1]: before rotation the angle of attack is low and gear-limited.",
+        long_help = "Wing-body lift coefficient at the ground (pre-rotation) pitch attitude at V_R, as a fraction of the takeoff maximum lift coefficient (CLmax_TO). The forward-CG nose-wheel-liftoff and takeoff-trim balances compute that lift from the built wing (the takeoff-flap lift at zero fuselage angle of attack) and use this fraction only when the wing gives no finite value. Torenbeek order-of-magnitude estimate; not a measured value."
     )]
     pub cl_ground_attitude_frac_of_cl_max_to: f64,
 
@@ -294,197 +411,35 @@ pub struct LandingGearConfig {
     #[serde(default = "default_rotation_rolling_friction_coefficient")]
     #[config(
         label = "Rolling friction coefficient at rotation",
-        help = "Tire rolling-friction coefficient on a dry paved runway during the takeoff roll, used by the forward-CG nose-wheel-liftoff moment balance: the friction force mu*(W - L) acts at the ground and reduces the forward acceleration, so its inertial reaction at the center of gravity is a nose-down moment. 0.02 is the usual conceptual-design value for a dry hard runway; it is an engineering estimate, not a measured value for any specific aircraft."
+        help = "Tire rolling-friction coefficient on a dry paved runway during the takeoff roll (dimensionless). 0.02 is the usual conceptual value; an estimate.",
+        long_help = "Tire rolling-friction coefficient on a dry paved runway during the takeoff roll, used by the forward-CG nose-wheel-liftoff moment balance: the friction force mu*(W - L) acts at the ground and reduces the forward acceleration, so its inertial reaction at the center of gravity is a nose-down moment. 0.02 is the usual conceptual-design value for a dry hard runway; it is an engineering estimate, not a measured value for any specific aircraft."
     )]
     pub rotation_rolling_friction_coefficient: f64,
 }
 
 mod defaults;
-pub use defaults::TRANSPORT_THS_TAKEOFF_NOSE_UP_DEG;
+pub use defaults::CERTIFIED_TIRE_CODES;
 use defaults::{
-    default_cl_ground_attitude_frac_of_cl_max_to, default_min_tip_back_deg,
+    default_auto, default_cl_ground_attitude_frac_of_cl_max_to, default_min_tip_back_deg,
     default_nlg_dynamic_braking_decel_g, default_required_rotation_angle_deg,
-    default_rotation_rolling_friction_coefficient, default_tire_dynamic_rating_factor,
+    default_rotation_rolling_friction_coefficient, default_tire_dynamic_rating_factor, is_auto,
 };
 
-impl Default for LandingGearConfig {
-    fn default() -> Self {
-        Self {
-            derived_main_gear: None,
-            tire_safety_factor: 1.07,
-            n_nlg_wheels: 0,
-            nlg_dual_wheel_mtow_kg: 15_000.0,
-            n_mlg_struts: 0,
-            mlg_body_gear_mtow_kg: 300_000.0,
-            wheels_per_mlg_strut: 0,
-            track_diameter_factor: 1.85,
-            reference_wheelbase_m: None,
-            reference_station_frame: None,
-            reference_station_fuselage_length_m: None,
-            reference_nlg_x_fraction: None,
-            reference_mlg_x_fractions: None,
-            reference_body_wheelbase_m: None,
-            reference_track_m: None,
-            mlg_strut_bogie_wheels: None,
-            tire_class: "auto".to_owned(),
-            strut_material: "auto".to_owned(),
-            turnover_angle_limit_deg: 63.0,
-            nlg_dynamic_braking_decel_g: default_nlg_dynamic_braking_decel_g(),
-            tire_dynamic_rating_factor: default_tire_dynamic_rating_factor(),
-            min_tip_back_deg: default_min_tip_back_deg(),
-            required_rotation_angle_deg: default_required_rotation_angle_deg(),
-            fuselage_ground_clearance_m: None,
-            rotation_pitch_acceleration_deg_s2: None,
-            pitch_radius_of_gyration_frac_mac: None,
-            takeoff_stabilizer_nose_up_deg: None,
-            elevator_up_travel_deg: None,
-            cl_ground_attitude_frac_of_cl_max_to: default_cl_ground_attitude_frac_of_cl_max_to(),
-            rotation_rolling_friction_coefficient: default_rotation_rolling_friction_coefficient(),
-        }
-    }
+fn is_false(value: &bool) -> bool {
+    !*value
 }
 
 mod validation;
 
-impl LandingGearConfig {
-    /// Resolve the longitudinal landing-gear stations in the active geometry
-    /// frame, **without** checking that the caller's main-gear fallback is
-    /// inside its stated domain.
-    ///
-    /// A complete source anchor set is expressed as nose-tip drawing
-    /// fractions and scales with the active fuselage length.  This preserves
-    /// the geometry design space during shrink/optimization while making a
-    /// source-backed preset reproducible.  If the source anchor is absent or
-    /// malformed, the caller's existing model-derived fallback stations are
-    /// retained.  Source stations are geometric evidence; they do not use
-    /// mass, CG, or reaction loads to calibrate a position.
-    ///
-    /// # When this entry point is the wrong one
-    ///
-    /// `fallback_x_mlg_m` is, for every caller in this workspace, the
-    /// wing-mounted rule `mac_le + mlg_x_fraction_mac * MAC`, which only
-    /// stands where a wing-root gear bay exists (see
-    /// [`WingMountedGearDomain`]). This method cannot tell whether it does,
-    /// so it returns whatever fallback it was handed.
-    ///
-    /// It is retained for the one caller that applies the domain gate itself
-    /// before calling - `alas_mass::stations::main_gear_station`, which owns
-    /// the geometric comparison and raises its own typed missing-datum error.
-    /// **Every other consumer must use
-    /// [`Self::resolved_station_positions_checked`]**, so that a layout
-    /// outside the fallback's domain is refused once, here, rather than being
-    /// re-derived independently at each export, figure and diagnostic.
-    pub fn resolved_station_positions(
-        &self,
-        fallback_x_nlg_m: f64,
-        fallback_x_mlg_m: f64,
-        fuselage_start_x_m: f64,
-        fuselage_length_m: f64,
-    ) -> LandingGearStationPositions {
-        let source = self
-            .reference_station_fuselage_length_m
-            .filter(|length| length.is_finite() && *length > 0.0)
-            .zip(self.reference_nlg_x_fraction)
-            .zip(self.reference_mlg_x_fractions.as_deref())
-            .filter(|((_, nlg), mlg)| {
-                fuselage_start_x_m.is_finite()
-                    && nlg.is_finite()
-                    && (0.0..=1.0).contains(nlg)
-                    && !mlg.is_empty()
-                    && mlg
-                        .iter()
-                        .all(|fraction| fraction.is_finite() && (0.0..=1.0).contains(fraction))
-                    && fuselage_length_m.is_finite()
-                    && fuselage_length_m > 0.0
-            });
-        if let Some(((_, nlg_fraction), mlg_fractions)) = source {
-            let x_nlg_m = fuselage_start_x_m + fuselage_length_m * nlg_fraction;
-            let main_gear_x_m: Vec<f64> = mlg_fractions
-                .iter()
-                .map(|fraction| fuselage_start_x_m + fuselage_length_m * fraction)
-                .collect();
-            let effective =
-                effective_main_gear_station(&main_gear_x_m, self.mlg_strut_bogie_wheels.as_deref());
-            return self.apply_derived_main_gear(LandingGearStationPositions {
-                x_nlg_m,
-                x_mlg_m: effective.primary_station_ignoring_rejection(),
-                main_gear_x_m,
-                source_scaled: true,
-                derived: false,
-                resolution: effective,
-            });
-        }
-
-        self.apply_derived_main_gear(LandingGearStationPositions {
-            x_nlg_m: fallback_x_nlg_m,
-            x_mlg_m: fallback_x_mlg_m,
-            main_gear_x_m: vec![fallback_x_mlg_m],
-            source_scaled: false,
-            derived: false,
-            resolution: effective_main_gear_station(&[fallback_x_mlg_m], None),
-        })
-    }
-
-    /// [`Self::resolved_station_positions`], refusing the caller's
-    /// wing-mounted main-gear fallback when the layout is outside the rule's
-    /// stated domain.
-    ///
-    /// The order matters and mirrors the mass model's: a complete source
-    /// anchor is a published station scaled onto the active fuselage and is
-    /// admissible on any layout, so `domain` is never consulted when the
-    /// positions come out `source_scaled`. It is consulted exactly when the
-    /// answer would otherwise be the wing-mounted fallback, which is why it
-    /// is taken as a closure - a caller whose domain query costs something
-    /// (a station resolution, a geometry pass) pays for it only on the
-    /// aircraft where it decides the outcome.
-    ///
-    /// # Errors
-    ///
-    /// [`MainGearFallbackRefusal`] when the fallback would be used and
-    /// `domain` reports [`WingMountedGearDomain::WingRootAboveFuselageCrown`].
-    /// The refusal carries the two heights that decided it, in the geometry
-    /// frame (z up, m), so a consumer reports the missing datum rather than a
-    /// number it did not measure.
-    pub fn resolved_station_positions_checked<F>(
-        &self,
-        fallback_x_nlg_m: f64,
-        fallback_x_mlg_m: f64,
-        fuselage_start_x_m: f64,
-        fuselage_length_m: f64,
-        domain: F,
-    ) -> Result<LandingGearStationPositions, MainGearFallbackRefusal>
-    where
-        F: FnOnce() -> WingMountedGearDomain,
-    {
-        let positions = self.resolved_station_positions(
-            fallback_x_nlg_m,
-            fallback_x_mlg_m,
-            fuselage_start_x_m,
-            fuselage_length_m,
-        );
-        if positions.source_scaled {
-            return Ok(positions);
-        }
-        match domain() {
-            WingMountedGearDomain::Applicable => Ok(positions),
-            WingMountedGearDomain::WingRootAboveFuselageCrown {
-                wing_root_z_m,
-                fuselage_crown_z_m,
-            } => Err(MainGearFallbackRefusal {
-                wing_root_z_m,
-                fuselage_crown_z_m,
-            }),
-        }
-    }
-}
+mod resolution;
 
 mod derived;
 mod station;
 pub use derived::DerivedMainGearStation;
 pub use station::{
-    effective_main_gear_station, EffectiveGearStationExt, EffectiveMainGearStation,
-    GearStationRejection, LandingGearStationPositions, MainGearFallbackRefusal, ValidGearStation,
-    WingMountedGearDomain,
+    effective_main_gear_station, rotation_pivot_station, EffectiveGearStationExt,
+    EffectiveMainGearStation, GearStationRejection, LandingGearStationPositions,
+    MainGearFallbackRefusal, ValidGearStation, WingMountedGearDomain,
 };
 
 // A test asserts on values it constructed here directly, so a failed unwrap

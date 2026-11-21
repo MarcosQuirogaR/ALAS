@@ -1,7 +1,7 @@
 // SPDX-License-Identifier: AGPL-3.0-or-later
 // Copyright (C) 2026 Marcos Quiroga Rodriguez
 
-//! Spar material sets for the design evaluation (UAV-PLAN M4, owner decision D9).
+//! Spar material sets for the design evaluation.
 //!
 //! Two selectable sources:
 //!

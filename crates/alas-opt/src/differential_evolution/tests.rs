@@ -7,8 +7,8 @@ use alas_config::design_variables::DesignVector;
 use alas_config::AlasConfig;
 
 use super::{
-    scored_point_at, DelegatedObjective, DesignObjective, DesignOptimizer, OptimizationError,
-    SearchObjective,
+    scored_point_at, DelegatedObjective, DesignObjective, DesignOptimizer, NoFeasibleDesign,
+    OptimizationError, SearchObjective,
 };
 use crate::evaluator::ObjectiveEvaluation;
 use crate::history::OptimizationHistory;
@@ -63,7 +63,14 @@ fn a_candidate_that_exhausts_its_work_cap_ranks_as_not_closed() {
     let mut objective = DesignObjective::new(AlasConfig::default());
     let uncapped = crate::mdo::evaluate_mission_sized(&mut objective, &values);
     let sized = scored_point_at(&values, uncapped, &objective.history, 0);
-    assert_ne!(sized.tier, Tier::NotClosed);
+    // The reference must be a closed candidate; name what stopped it if not.
+    assert_ne!(
+        sized.tier,
+        Tier::NotClosed,
+        "uncapped default design did not close: reject {:?}, hard violation {}",
+        objective.history.reject_reason[0],
+        objective.history.hard_violation[0]
+    );
     assert!(objective.history.trip_flights[0] > 1);
     objective.sizing_controls.budget = Some(SizingBudget {
         max_trip_flights: 1,
@@ -143,12 +150,21 @@ fn default_de_reports_no_feasible_design_instead_of_returning_an_invalid_one() {
         ObjectiveEvaluation::rejected(-1_000.0, "static_margin+cg_envelope")
     };
 
-    let error = optimizer
+    let flagged = optimizer
         .run_with_evaluator(None, None, &mut evaluator, None)
-        .expect_err("an all-invalid population must not produce a design");
-    let OptimizationError::NoFeasibleDesign(summary) = error else {
-        panic!("expected NoFeasibleDesign, got {error:?}");
-    };
+        .expect("an all-invalid population is flagged, not aborted");
+    assert!(!flagged.best_valid);
+    assert!(!flagged.is_delivered_feasible());
+    assert_eq!(flagged.termination, "no_feasible_design");
+    let line = flagged
+        .infeasibility_summary()
+        .expect("a flagged search explains itself");
+    assert!(line.starts_with("No feasible design: "), "{line}");
+    for id in ["static_margin", "cg_envelope"] {
+        assert!(line.contains(id), "{id} missing from {line}");
+    }
+    assert!(line.contains(" candidates)"), "{line}");
+    let summary = NoFeasibleDesign::from_history(&flagged.history);
     assert!(summary.evaluated_candidates > 0);
     assert_eq!(
         summary.rejection_reason_counts["static_margin"],
@@ -189,12 +205,12 @@ fn failed_native_search_diagnostics_preserve_the_strict_rejection_and_candidate(
         .into_iter()
         .map(|value| (value, value))
         .collect();
-    let strict_error = DesignOptimizer::new(config.clone())
+    let flagged = DesignOptimizer::new(config.clone())
         .run(Some(&bounds), Some(&nominal), None)
-        .expect_err("the impossible passenger requirement cannot be accepted");
-    let OptimizationError::NoFeasibleDesign(rejection) = strict_error else {
-        panic!("expected an evaluated rejection, got {strict_error:?}");
-    };
+        .expect("the impossible passenger requirement is flagged, not aborted");
+    assert!(!flagged.best_valid);
+    assert_eq!(flagged.termination, "no_feasible_design");
+    let rejection = NoFeasibleDesign::from_history(&flagged.history);
     let diagnostic = DesignOptimizer::new(config)
         .run_diagnostics(Some(&bounds), Some(&nominal), None)
         .expect("failed searches retain evidence for review");
@@ -265,12 +281,11 @@ fn configured_methods_and_seeds_keep_boundary_results_typed_and_feasible() {
             let mut evaluator = |_design: &DesignVector| {
                 ObjectiveEvaluation::rejected(-1_000.0, "static_margin+cg_envelope")
             };
-            let error = optimizer
+            let flagged = optimizer
                 .run_with_evaluator(Some(&exact_bounds), Some(&nominal), &mut evaluator, None)
-                .expect_err("an all-invalid configured method must not publish a design");
-            let OptimizationError::NoFeasibleDesign(summary) = error else {
-                panic!("method={method} seed={seed} returned {error:?}");
-            };
+                .expect("an all-invalid configured method is flagged, not aborted");
+            assert!(!flagged.best_valid, "method={method} seed={seed}");
+            let summary = NoFeasibleDesign::from_history(&flagged.history);
             assert!(
                 summary.evaluated_candidates > 0,
                 "method={method} seed={seed}"
@@ -330,7 +345,7 @@ fn delegated_objective_keeps_the_optimizer_history_contract() {
 }
 
 #[test]
-fn a_fully_fixed_design_costs_one_analysis_and_never_claims_search_convergence() {
+fn a_fully_fixed_design_costs_one_analysis_and_is_a_completed_search() {
     let mut config = AlasConfig::default();
     config.optimizer.solver.method = alas_config::optimizer::PRODUCT_DE_METHOD.to_owned();
     config.optimizer.solver.refinement.max_evaluations = 808;
@@ -366,7 +381,13 @@ fn a_fully_fixed_design_costs_one_analysis_and_never_claims_search_convergence()
     let diagnostics = result.search_diagnostics.expect("product diagnostics");
     assert_eq!(diagnostics.screening_evaluations, 0);
     assert_eq!(diagnostics.poll_iterations, 0);
-    assert!(!diagnostics.converged);
+    // This used to assert the opposite. With no free variable the one
+    // analysis is the whole design space, so the search is complete; calling
+    // it unconverged made the delivery verdict refuse a completed
+    // fixed-design evaluation with "run: did not converge (search
+    // termination: fixed_bounds)". The termination label still says no
+    // search took place.
+    assert!(diagnostics.converged);
 }
 
 #[test]
@@ -633,6 +654,45 @@ fn a_cancelled_run_is_never_feasible_even_when_its_winner_scored_valid() {
 }
 
 #[test]
+fn the_infeasibility_summary_names_the_worst_constraint_with_value_limit_and_unit() {
+    let mut optimizer = DesignOptimizer::new(cancellable_de_config(24));
+    let mut evaluator = |_design: &DesignVector| {
+        ObjectiveEvaluation::rejected(-1_000.0, "oei_approach_climb+buffet_margin")
+    };
+    let mut result = optimizer
+        .run_with_evaluator(None, None, &mut evaluator, None)
+        .expect("an infeasible search is flagged");
+    let evaluated = result.history.n_evaluations();
+    result.record_delivered_acceptance(crate::DeliveredAcceptance {
+        verified: false,
+        finalist_rejected_by: Vec::new(),
+        delivered_rejected_by: Vec::new(),
+        rejection_messages: Vec::new(),
+        candidates_evaluated: 1,
+        delivered_is_search_finalist: true,
+        wall_time_s: 0.0,
+        analyses: 1,
+        baseline: None,
+        worst_violation: Some(crate::ViolatedConstraint {
+            id: "oei_approach_climb".to_owned(),
+            actual: 2.1,
+            limit: 2.7,
+            unit: "%".to_owned(),
+            normalized_violation: 0.22,
+        }),
+        phases: Vec::new(),
+    });
+    let line = result.infeasibility_summary().expect("no valid candidate");
+    assert!(
+        line.starts_with(&format!(
+            "No feasible design: oei_approach_climb 2.1000 % against 2.7000 % ({evaluated}/{evaluated} candidates)"
+        )),
+        "{line}"
+    );
+    assert!(line.contains("buffet_margin"), "{line}");
+}
+
+#[test]
 fn a_reporting_fidelity_rejection_also_refuses_the_delivered_feasibility_verdict() {
     let mut optimizer = DesignOptimizer::new(cancellable_de_config(48));
     let mut result = optimizer
@@ -658,6 +718,8 @@ fn a_reporting_fidelity_rejection_also_refuses_the_delivered_feasibility_verdict
         wall_time_s: 0.0,
         analyses: 1,
         baseline: None,
+        worst_violation: None,
+        phases: Vec::new(),
     });
 
     assert_eq!(result.termination, crate::REPORTING_FIDELITY_REJECTED);

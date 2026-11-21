@@ -18,7 +18,8 @@ impl WingConfig {
         &self,
         design: &DesignVector,
     ) -> Result<InboardAerodynamicStation, TransportPlanformError> {
-        let planform = self.transport_planform(design)?;
+        // The wing, not its blends.
+        let planform = self.transport_planform(design)?.without_blends();
         if let Some(side_of_body) = planform.side_of_body {
             let root_to_kink_fraction = side_of_body.y_m / planform.kink.y_m;
             return Ok(InboardAerodynamicStation {

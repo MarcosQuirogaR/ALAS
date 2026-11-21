@@ -171,8 +171,11 @@ pub(super) fn mass_limit_hierarchy_findings(
 
 /// The V-n diagram of the analysed aircraft: the built reference area at the
 /// structural design mass of [`design_vn_mass_kg`], the mass the wing-box loads
-/// are sized for.
+/// are sized for, with the clean maximum lift coefficient the candidate was
+/// sized with (`crate::report_config::config_with_geometry_clmax`, the
+/// declared one on a registered design), as the search's V-n rows read it.
 pub fn design_vn_diagram(config: &AlasConfig, report: &AnalysisReport) -> VnDiagramData {
+    let config = &crate::report_config::config_with_geometry_clmax(config, report);
     let design = design_mass_config(config, report);
     let mut requirements = design.requirements.clone();
     requirements.mtow_kg = design_vn_mass_kg(config, report);
@@ -229,7 +232,7 @@ mod tests {
 
     #[test]
     fn a_design_mission_on_its_own_limit_passes_and_a_longer_route_is_a_warning() {
-        // 2026-10-15 150-seat brief: the design mission lands on its limit
+        // A 150-seat brief: the design mission lands on its limit
         // exactly, the 3,048 nmi route 10.4 kg above it.
         let limit = 58_749.194_106_56;
         assert!(severities(Some(limit), None, limit).is_empty());

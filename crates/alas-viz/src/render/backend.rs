@@ -7,8 +7,40 @@ use alas_report::scene::{
     text_line_center_offsets, Color, Fill, Point2D, Scene, SceneElement, Stroke, TextAlign,
     TextBaseline, CSS_PIXELS_PER_POINT, TEXT_LINE_HEIGHT_EM,
 };
+use alas_units::notation::{has_notation, parse, Placement};
+use egui::epaint::text::{LayoutJob, TextFormat};
 use egui::epaint::{CircleShape, PathShape, RectShape, Rounding, TextShape};
-use egui::{pos2, vec2, Color32, FontFamily, FontId, Pos2, Rect, Shape, Stroke as EguiStroke};
+use egui::{
+    pos2, vec2, Align, Color32, FontFamily, FontId, Pos2, Rect, Shape, Stroke as EguiStroke,
+};
+
+/// Size of a sub- or superscript run, as the SVG writer's `font-size="70%"`.
+const SCRIPT_SCALE: f32 = 0.7;
+
+/// `text` as a layout job wrapped at `wrap` points, with the sub- and
+/// superscript runs of its engineering notation (`V_H`, `m^2`) drawn
+/// smaller and lowered or raised, as the SVG writer draws them.
+fn notation_job(text: &str, font: &FontId, color: Color32, wrap: f32) -> LayoutJob {
+    let mut job = LayoutJob::default();
+    for span in parse(text) {
+        let (size, valign) = match span.placement {
+            Placement::Normal => (font.size, Align::BOTTOM),
+            Placement::Sub => (font.size * SCRIPT_SCALE, Align::BOTTOM),
+            Placement::Sup => (font.size * SCRIPT_SCALE, Align::TOP),
+        };
+        let format = TextFormat {
+            font_id: FontId::new(size, font.family.clone()),
+            color,
+            valign,
+            line_height: (span.placement == Placement::Sub)
+                .then_some(font.size * alas_units::notation::SUB_LINE_HEIGHT_EM),
+            ..TextFormat::default()
+        };
+        job.append(&span.text, 0.0, format);
+    }
+    job.wrap.max_width = wrap;
+    job
+}
 
 use super::polygon::*;
 use super::transform::*;
@@ -36,10 +68,19 @@ impl<'a> EguiBackend<'a> {
         transform: &'a ViewportTransform,
         context: egui::Context,
     ) -> Self {
+        Self::with_capacity(transform, context, scene.elements.len() + 1)
+    }
+
+    /// A backend with room for `capacity` shapes.
+    pub(super) fn with_capacity(
+        transform: &'a ViewportTransform,
+        context: egui::Context,
+        capacity: usize,
+    ) -> Self {
         Self {
             transform,
             context,
-            shapes: Vec::with_capacity(scene.elements.len() + 1),
+            shapes: Vec::with_capacity(capacity),
         }
     }
 
@@ -232,9 +273,13 @@ impl<'a> EguiBackend<'a> {
             FontFamily::Proportional,
         );
         let wrap_width = (width.max(0.0) as f32 * self.transform.scale).max(1.0);
-        let galley = self
-            .context
-            .fonts(|fonts| fonts.layout(text.to_owned(), font_id.clone(), color, wrap_width));
+        let galley = self.context.fonts(|fonts| {
+            if has_notation(text) {
+                fonts.layout_job(notation_job(text, &font_id, color, wrap_width))
+            } else {
+                fonts.layout(text.to_owned(), font_id.clone(), color, wrap_width)
+            }
+        });
         let text_shape = TextShape::new(self.transform.to_screen(pos), galley, color);
         self.shapes.push(Shape::Text(text_shape.clone()));
         if bold {
@@ -253,7 +298,11 @@ impl<'a> EguiBackend<'a> {
         let font_id = FontId::new(style.font_size as f32, FontFamily::Proportional);
         for (line, center) in lines.iter().zip(centers) {
             let galley = self.context.fonts(|fonts| {
-                fonts.layout_no_wrap((*line).to_owned(), font_id.clone(), style.color)
+                if has_notation(line) {
+                    fonts.layout_job(notation_job(line, &font_id, style.color, f32::INFINITY))
+                } else {
+                    fonts.layout_no_wrap((*line).to_owned(), font_id.clone(), style.color)
+                }
             });
             let horizontal = match style.align {
                 TextAlign::Left => 0.0,

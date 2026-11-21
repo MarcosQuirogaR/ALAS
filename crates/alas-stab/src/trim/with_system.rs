@@ -20,8 +20,9 @@ use alas_math::linalg;
 use std::sync::{Arc, Mutex};
 
 use super::{
-    fuselage_cm_alpha_with_reference_mode, hstab, main_wing_ac_x, probe, refine_trim,
-    with_hstab_twist, StabilityTrimResult, TrimAssembly, DEGENERACY_FLOOR,
+    fuselage_cm_alpha_with_reference_mode, hstab, is_at_hstab_incidence, main_wing_ac_x, probe,
+    refine_trim, with_hstab_incidence, with_hstab_twist, with_product_tail, StabilityTrimResult,
+    TrimAssembly, DEGENERACY_FLOOR,
 };
 
 /// [`super::neutral_point`], reusing an already-assembled VLM system instead
@@ -46,7 +47,8 @@ pub fn neutral_point_with_system(
 
 /// [`super::neutral_point_reference_compatibility`], reusing an
 /// already-assembled VLM system; see [`neutral_point_with_system`] for the
-/// reuse contract.
+/// reuse contract, with `system` from
+/// [`VlmSystem::assemble_reference_compatibility`].
 ///
 /// # Errors
 ///
@@ -78,7 +80,9 @@ fn neutral_point_with_reference_mode(
     let d_cm = r_hi.cm_pitch - r_lo.cm_pitch;
     let d_alpha =
         (analysis.autobalance_alpha_high_deg - analysis.autobalance_alpha_low_deg).to_radians();
-    let c_ref = airplane.c_ref.max(0.1);
+    let c_ref = airplane
+        .c_ref
+        .max(crate::reference_dimensions::REFERENCE_CHORD_FLOOR_M);
     let x_cg = airplane.xyz_ref[0];
 
     if d_cl.abs() < DEGENERACY_FLOOR || d_alpha.abs() < DEGENERACY_FLOOR {
@@ -91,7 +95,7 @@ fn neutral_point_with_reference_mode(
         let sm_vlm = -d_cm / d_cl;
         let x_np_vlm = x_cg + sm_vlm * c_ref;
         let x_wing_ac = main_wing_ac_x(airplane);
-        let eta_t = analysis.tail_efficiency;
+        let eta_t = analysis.reference_tail_efficiency();
         let mut x_np = x_wing_ac + eta_t * (x_np_vlm - x_wing_ac);
         if analysis.include_fuselage_stability && cl_alpha > 0.1 {
             let cm_a_fus = fuselage_cm_alpha_with_reference_mode(airplane, cl_alpha, true);
@@ -159,6 +163,7 @@ pub fn stability_and_trim_with_cache(
     altitude_m: f64,
     cache: &Arc<Mutex<VlmGeometryCache>>,
 ) -> Result<StabilityTrimResult, VlmError> {
+    let airplane = &*with_product_tail(airplane, analysis);
     let assembly = TrimAssembly::new(analysis, Some(cache));
     let system = assembly.assemble(airplane)?;
     stability_and_trim_with_reference_mode(
@@ -168,7 +173,8 @@ pub fn stability_and_trim_with_cache(
 
 /// [`super::stability_and_trim_reference_compatibility`], reusing an
 /// already-assembled VLM system; see [`stability_and_trim_with_system`] for
-/// the reuse contract.
+/// the reuse contract, with `system` from
+/// [`VlmSystem::assemble_reference_compatibility`].
 ///
 /// # Errors
 ///
@@ -184,7 +190,7 @@ pub fn stability_and_trim_reference_compatibility_with_system(
     stability_and_trim_with_reference_mode(
         system,
         airplane,
-        &TrimAssembly::new(analysis, None),
+        &TrimAssembly::reference_compatibility(analysis),
         cl_target,
         mach,
         altitude_m,
@@ -222,7 +228,9 @@ fn stability_and_trim_with_reference_mode(
     };
 
     let x_cg = airplane.xyz_ref[0];
-    let c_ref = airplane.c_ref.max(0.1);
+    let c_ref = airplane
+        .c_ref
+        .max(crate::reference_dimensions::REFERENCE_CHORD_FLOOR_M);
 
     let (x_np, sm) = if cl_alpha.is_nan() || cl_alpha.abs() < DEGENERACY_FLOOR {
         (x_cg, f64::NAN)
@@ -230,7 +238,7 @@ fn stability_and_trim_with_reference_mode(
         let sm_vlm = -cm_alpha / cl_alpha;
         let x_np_vlm = x_cg + sm_vlm * c_ref;
         let x_wing_ac = main_wing_ac_x(airplane);
-        let eta_t = analysis.tail_efficiency;
+        let eta_t = analysis.reference_tail_efficiency();
         let mut x_np = x_wing_ac + eta_t * (x_np_vlm - x_wing_ac);
 
         // `cl_alpha` is per degree here; the fuselage term wants it per radian.
@@ -273,16 +281,30 @@ fn stability_and_trim_with_reference_mode(
         }
     };
 
-    let perturbed = with_hstab_twist(airplane, i_h0 + delta_ih);
+    // The product sets the stabilizer in the plane of symmetry; the
+    // incidence derivative and the closed-form step start from that setting
+    // at `i_h0`, solved once more unless the built tail already is it.
+    let (perturbed, set_base) = if reference_compatibility {
+        (with_hstab_twist(airplane, i_h0 + delta_ih), None)
+    } else {
+        let set_base = (!is_at_hstab_incidence(airplane, i_h0))
+            .then(|| {
+                let set = with_hstab_incidence(airplane, i_h0);
+                probe(&assembly.assemble(&set)?, atmosphere, velocity, a_lo)
+            })
+            .transpose()?;
+        (with_hstab_incidence(airplane, i_h0 + delta_ih), set_base)
+    };
+    let r0 = set_base.as_ref().unwrap_or(&r1);
     let r3 = probe(&assembly.assemble(&perturbed)?, atmosphere, velocity, a_lo)?;
 
-    let cl_ih = (r3.cl_lift - r1.cl_lift) / delta_ih;
-    let cm_ih = (r3.cm_pitch - r1.cm_pitch) / delta_ih;
+    let cl_ih = (r3.cl_lift - r0.cl_lift) / delta_ih;
+    let cm_ih = (r3.cm_pitch - r0.cm_pitch) / delta_ih;
 
     // Closed-form 2x2 solve: [[cl_alpha, cl_ih], [cm_alpha, cm_ih]] @ [d_a, d_ih]
-    //                       = [cl_target - CL_1, -Cm_1]  (slopes per degree).
+    //                       = [cl_target - CL_0, -Cm_0]  (slopes per degree).
     let jacobian = vec![vec![cl_alpha, cl_ih], vec![cm_alpha, cm_ih]];
-    let rhs = vec![vec![cl_target - r1.cl_lift], vec![-r1.cm_pitch]];
+    let rhs = vec![vec![cl_target - r0.cl_lift], vec![-r0.cm_pitch]];
     let (d_a, d_ih, converged) = match linalg::solve(&jacobian, &rhs) {
         Ok(solution)
             if solution.len() >= 2
@@ -319,7 +341,7 @@ fn stability_and_trim_with_reference_mode(
     // product answer against the actual VLM residuals; compatibility mode
     // deliberately retains the frozen one-shot result for parity fixtures.
     let (trim_alpha_deg, trim_ih_deg, converged) = if !reference_compatibility && converged {
-        let (alpha, incidence, refined) = refine_trim(
+        let refined = refine_trim(
             airplane,
             assembly,
             cl_target,
@@ -328,8 +350,9 @@ fn stability_and_trim_with_reference_mode(
             a_lo + d_a,
             i_h0 + d_ih,
             0.0,
+            false,
         )?;
-        (alpha, incidence, refined)
+        (refined.alpha_deg, refined.incidence_deg, refined.converged)
     } else {
         (a_lo + d_a, i_h0 + d_ih, converged)
     };
@@ -338,7 +361,14 @@ fn stability_and_trim_with_reference_mode(
     // compatibility path never runs it; the incompressible fields above stay
     // the state the Trefftz-plane drag is solved at.
     let compressible = if !reference_compatibility && analysis.compressible_trim && converged {
-        super::compressible::compressible_trim(airplane, analysis, cl_target, mach, altitude_m)?
+        super::compressible::compressible_trim(
+            airplane,
+            analysis,
+            cl_target,
+            mach,
+            altitude_m,
+            assembly.companion_cache(),
+        )?
     } else {
         None
     };

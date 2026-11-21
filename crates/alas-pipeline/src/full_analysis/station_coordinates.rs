@@ -102,7 +102,7 @@ impl FullAnalysis {
         masses: &MassBreakdown,
         lumped_coordinates: MassCoordinates,
     ) -> Result<(MassCoordinates, [f64; 3]), String> {
-        if self.reference_compatibility {
+        if self.reference_masses {
             let cg = calculate_physical_cg(masses, &lumped_coordinates);
             return Ok((lumped_coordinates, cg));
         }

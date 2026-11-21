@@ -11,6 +11,10 @@ pub struct VerifiedAnalysis {
     config: AlasConfig,
     route: Option<AcceptanceRoute>,
     verification: std::sync::Arc<FinalistVerification>,
+    /// The vector the analysis was requested for, when it differs from the
+    /// resolved aircraft it reports (a clean sheet's start re-derives its
+    /// fuselage from the cabin).
+    requested: Option<DesignVector>,
 }
 
 impl VerifiedAnalysis {
@@ -23,6 +27,21 @@ impl VerifiedAnalysis {
             config,
             route,
             verification: std::sync::Arc::new(verification),
+            requested: None,
+        }
+    }
+
+    /// [`Self::new`] for an analysis requested for `requested`, which then
+    /// matches that vector as well as the resolved aircraft it reports.
+    pub(crate) fn of_request(
+        config: AlasConfig,
+        route: Option<AcceptanceRoute>,
+        verification: FinalistVerification,
+        requested: DesignVector,
+    ) -> Self {
+        Self {
+            requested: Some(requested),
+            ..Self::new(config, route, verification)
         }
     }
 
@@ -35,7 +54,8 @@ impl VerifiedAnalysis {
         route: Option<&AcceptanceRoute>,
     ) -> bool {
         self.config == *config
-            && self.verification.report.design == *design
+            && (self.verification.report.design == *design
+                || self.requested.as_ref() == Some(design))
             && self.route.as_ref() == route
     }
 

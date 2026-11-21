@@ -94,12 +94,11 @@ fn stability_side_view_draws_the_mac_from_the_same_lemac_and_chord_scalars() {
             .fold(f64::INFINITY, f64::min);
     assert!(mac_end_x > mac_start_x);
     assert!(mac_vertical_extent > 1.0, "MAC has an airfoil thickness");
-    let quarter_mac_x = mac_start_x + 0.25 * (mac_end_x - mac_start_x);
-    assert!((quarter_mac_x - wing_ac_x).abs() < 1e-8);
+    assert!(wing_ac_x > mac_start_x && wing_ac_x < mac_end_x);
     assert!((mac_end_x - mac_start_x).abs() > 0.0);
-    assert!(
-        (scalars.x_lemac + scalars.c_ref - scalars.x_wing_ac - 0.75 * scalars.c_ref).abs() < 1e-12
-    );
+    // The drawn MAC is the canonical frame's, not a reconstruction from the AC.
+    let frame = report.airplane.mac_frame().expect("a main wing");
+    assert!((scalars.x_lemac - frame.x_lemac_m).abs() < 1e-12);
     for theme in ["light", "dark"] {
         let background = crate::scene::Color::from_hex(crate::theme::get_palette(Some(theme)).bg);
         assert!(mac_color.contrast_against(background) >= 3.0);

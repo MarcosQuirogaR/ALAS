@@ -2,6 +2,7 @@
 // Copyright (C) 2026 Marcos Quiroga Rodriguez
 
 use super::*;
+use crate::flops_transport::seats::{SeatClass, SeatMasses};
 use crate::flops_transport::{FlopsOperatingItemsBreakdown, FlopsSystemsBreakdown};
 use crate::ledger::MassGroup;
 use crate::ledger::{InertiaTensor, MassMethod, MassRole};
@@ -39,6 +40,7 @@ fn sample_stations() -> ComponentStations {
         furnishings: station(16.0, 0.0),
         operating_items: station(16.0, 0.0),
         payload_fallback: station(16.0, 0.0),
+        flight_crew: None,
     }
 }
 
@@ -148,6 +150,7 @@ fn the_flops_split_preserves_systems_and_furnishings_totals() {
         furnishings_kg: 1_800.0,
         air_conditioning_kg: 550.0,
         anti_ice_kg: 150.0,
+        pneumatic_kg: 0.0,
         military_cargo_equipment_kg: 0.0,
         total_kg: 900.0 + 400.0 + 250.0 + 500.0 + 700.0 + 600.0 + 1_800.0 + 550.0 + 150.0,
     };
@@ -163,10 +166,13 @@ fn the_flops_split_preserves_systems_and_furnishings_totals() {
     };
     let flops = FlopsTransportBreakdown {
         systems,
+        seats: SeatMasses::default(),
         operating_items,
         cabin_equipment_method: alas_config::CabinEquipmentMethod::FlopsTransportV1,
         propulsion_sizing: crate::flops_transport::PropulsionSizing::RatedThrust,
         apu_installed: true,
+        bleed_air_system: true,
+        main_deck_freight: None,
     };
     // The FLOPS buildup puts the equation 138 group less furnishings in the
     // systems slot and furnishings plus the operating items in the
@@ -322,6 +328,7 @@ fn sample_flops() -> FlopsTransportBreakdown {
         furnishings_kg: 1_800.0,
         air_conditioning_kg: 550.0,
         anti_ice_kg: 150.0,
+        pneumatic_kg: 0.0,
         military_cargo_equipment_kg: 0.0,
         total_kg: 900.0 + 400.0 + 250.0 + 500.0 + 700.0 + 600.0 + 1_800.0 + 550.0 + 150.0,
     };
@@ -337,10 +344,13 @@ fn sample_flops() -> FlopsTransportBreakdown {
     };
     FlopsTransportBreakdown {
         systems,
+        seats: SeatMasses::default(),
         operating_items,
         cabin_equipment_method: alas_config::CabinEquipmentMethod::FlopsTransportV1,
         propulsion_sizing: crate::flops_transport::PropulsionSizing::RatedThrust,
         apu_installed: true,
+        bleed_air_system: true,
+        main_deck_freight: None,
     }
 }
 
@@ -409,7 +419,22 @@ fn a_positive_empty_mass_margin_is_an_explicit_systems_row_and_the_ledger_closes
         "residual row {} vs margin {margin_kg}",
         residual.mass_kg
     );
-    assert_eq!(residual.position_m, stations.systems.position_m);
+    // The residual shares the remainder station, which puts the whole systems
+    // group centroid at the group station (Roskam Part V ch. 10 midpoint).
+    let (group_kg, group_moment) = statement
+        .ledger()
+        .items()
+        .iter()
+        .filter(|item| item.group == MassGroup::Systems)
+        .fold((0.0, 0.0), |(m, mx), item| {
+            (m + item.mass_kg, mx + item.mass_kg * item.position_m[0])
+        });
+    assert!(
+        close(group_moment / group_kg, stations.systems.position_m[0]),
+        "systems group centroid {} vs station {}",
+        group_moment / group_kg,
+        stations.systems.position_m[0]
+    );
     assert_eq!(residual.group, MassGroup::Systems);
 
     // Exact closure of every group the FLOPS path writes.
@@ -667,5 +692,172 @@ fn the_default_aircraft_ledger_tensor_is_physical_and_plausible() {
         comparison.ratio[2],
         comparison.ledger_radii_m[2],
         comparison.reference_radii_m[2]
+    );
+}
+
+#[test]
+fn seats_sit_on_their_class_rows_and_flight_deck_seats_on_the_flight_deck() {
+    // A business row of 4 seats at 20 m, tourist rows of 6 seats
+    // at 26 m and 2 seats at 30 m, and hold cargo at 10 m that is not a seat (3.75 t each, the sample payload).
+    // Business seats go to 20 m, tourist seats to their seat centroid 27 m,
+    // flight-deck seats to the flight-crew station; passenger service and the
+    // rest stay at the cabin station and every group still closes.
+    let mut flops = sample_flops();
+    flops.seats = SeatMasses {
+        passenger_kg: [0.0, 140.0, 160.0],
+        flight_deck_kg: 115.0,
+        in_operating_items: false,
+    };
+    let masses = flops_masses(&flops, 0.0);
+    let stations = sample_stations();
+    let item = |seats: Option<(SeatClass, usize)>, x: f64| PayloadItemSummary {
+        label: "item".to_owned(),
+        mass_kg: 3_750.0,
+        position_m: [x, 0.0, 0.5],
+        extent_m: [1.0, 1.0, 1.0],
+        seats,
+    };
+    let payload_items = [
+        item(Some((SeatClass::Business, 4)), 20.0),
+        item(Some((SeatClass::Tourist, 6)), 26.0),
+        item(Some((SeatClass::Tourist, 2)), 30.0),
+        item(None, 10.0),
+    ];
+    let statement = MassStatement::build(MassStatementInputs {
+        masses: &masses,
+        stations: &stations,
+        payload_items: &payload_items,
+        takeoff_fuel_items: Vec::new(),
+        landing_fuel_items: Vec::new(),
+        unusable_fuel_items: Vec::new(),
+        flops: Some(&flops),
+        flops_gear_split_kg: None,
+    })
+    .expect("a seated FLOPS statement validates");
+    let find = |id: &str| {
+        statement
+            .ledger()
+            .items()
+            .iter()
+            .find(|item| item.id == id)
+            .unwrap_or_else(|| panic!("{id} row"))
+    };
+    assert!(close(
+        find("furnishings-seats-business").position_m[0],
+        20.0
+    ));
+    let tourist = find("furnishings-seats-tourist");
+    assert!(close(tourist.mass_kg, 160.0) && close(tourist.position_m[0], 27.0));
+    let flight_deck = find("furnishings-flight_deck_seats");
+    assert!(close(
+        flight_deck.position_m[0],
+        0.05 * stations.fuselage.extent_m[0]
+    ));
+    assert_eq!(
+        find("operating-passenger_service").position_m,
+        stations.operating_items.position_m
+    );
+    assert_eq!(
+        find("furnishings").position_m,
+        stations.furnishings.position_m
+    );
+    let furnishings_and_items = group_mass(&statement, MassGroup::Furnishings)
+        + group_mass(&statement, MassGroup::OperatingItems);
+    assert!(close(furnishings_and_items, masses.furnishings));
+
+    // Without a layout the passenger seats stay in the cabin-station rows.
+    let plain = flops_statement(&masses, &stations, &flops, Vec::new()).expect("validates");
+    assert!(!plain
+        .ledger()
+        .items()
+        .iter()
+        .any(|item| item.id.starts_with("furnishings-seats")));
+}
+
+#[test]
+fn lth_seats_come_out_of_the_passenger_service_row() {
+    // LTH puts the seats inside the operating items, so the seat row is an
+    // operating item and the passenger-service row shrinks by it.
+    let mut flops = sample_flops();
+    flops.cabin_equipment_method = alas_config::CabinEquipmentMethod::LthCivilTransportV1;
+    flops.seats = SeatMasses {
+        passenger_kg: [0.0, 0.0, 200.0],
+        flight_deck_kg: 0.0,
+        in_operating_items: true,
+    };
+    let masses = flops_masses(&flops, 0.0);
+    let stations = sample_stations();
+    let payload_items = [PayloadItemSummary {
+        label: "row".to_owned(),
+        mass_kg: masses.payload,
+        position_m: [25.0, 0.0, 0.5],
+        extent_m: [1.0, 1.0, 1.0],
+        seats: Some((SeatClass::Tourist, 6)),
+    }];
+    let statement = MassStatement::build(MassStatementInputs {
+        masses: &masses,
+        stations: &stations,
+        payload_items: &payload_items,
+        takeoff_fuel_items: Vec::new(),
+        landing_fuel_items: Vec::new(),
+        unusable_fuel_items: Vec::new(),
+        flops: Some(&flops),
+        flops_gear_split_kg: None,
+    })
+    .expect("an LTH seated statement validates");
+    let row = |id: &str| {
+        statement
+            .ledger()
+            .items()
+            .iter()
+            .find(|item| item.id == id)
+            .cloned()
+    };
+    let seats = row("operating-seats-tourist").expect("seat row");
+    assert_eq!(seats.group, MassGroup::OperatingItems);
+    let service = row("operating-passenger_service").expect("service row");
+    assert!(close(
+        service.mass_kg,
+        flops.operating_items.passenger_service_kg - 200.0
+    ));
+    let furnishings_and_items = group_mass(&statement, MassGroup::Furnishings)
+        + group_mass(&statement, MassGroup::OperatingItems);
+    assert!(close(furnishings_and_items, masses.furnishings));
+}
+
+#[test]
+fn a_main_deck_freighter_places_its_doors_floor_and_handling_system_without_changing_a_group() {
+    let stations = sample_stations();
+    let mut flops = sample_flops();
+    flops.systems.military_cargo_equipment_kg = 300.0;
+    flops.systems.total_kg += 300.0;
+    let masses = flops_masses(&flops, 0.0);
+    let plain = flops_statement(&masses, &stations, &flops, Vec::new()).expect("plain");
+    flops.main_deck_freight = Some(
+        crate::flops_transport::main_deck_freight::MainDeckFreightPlacement {
+            structure_increment_kg: 0.1 * masses.fuselage,
+            nose_door_kg: 0.02 * masses.fuselage,
+            nose_door_x_m: 1.0,
+            side_door_kg: 0.01 * masses.fuselage,
+            side_door_x_m: stations.fuselage.position_m[0] + 5.0,
+            deck_centroid_x_m: stations.fuselage.position_m[0] - 1.0,
+        },
+    );
+    let placed = flops_statement(&masses, &stations, &flops, Vec::new()).expect("placed");
+    for group in [MassGroup::Fuselage, MassGroup::Systems] {
+        assert!(close(group_mass(&plain, group), group_mass(&placed, group)));
+    }
+    let empty = |statement: &MassStatement| statement.state(LoadState::OperatingEmpty);
+    assert!(close(empty(&plain).mass_kg, empty(&placed).mass_kg));
+    // The fuselage moment moves by the rows' own arms; the handling system by
+    // its arm from the systems station.
+    let x = stations.fuselage.position_m[0];
+    let fuselage_moment =
+        0.02 * masses.fuselage * (1.0 - x) + 0.01 * masses.fuselage * 5.0 - 0.07 * masses.fuselage;
+    let handling_moment = 300.0 * (x - 1.0 - stations.systems.position_m[0]);
+    let moved = empty(&placed).mass_kg * (empty(&placed).cg_m[0] - empty(&plain).cg_m[0]);
+    assert!(
+        (moved - fuselage_moment - handling_moment).abs() < 1e-6 * empty(&plain).mass_kg,
+        "{moved} vs {fuselage_moment} + {handling_moment}"
     );
 }

@@ -26,13 +26,38 @@ impl AircraftBuilder {
         report: &mut BuildReport,
     ) {
         let x_wing_global = self.geometry.wing.root_datum_x_m + dv.wing_x_shift_m;
-        let drawn = DrawnWing {
-            area_m2: wings[0].reference_area(),
-            span_m: wings[0].projected_span(),
-            mac_m: wings[0].mean_aerodynamic_chord(),
-            mac_le_x_m: wings[0].mac_station().x_le_m,
+        let span_m = wings[0].projected_span();
+        // The drawn reference is the design planform: what the body carries
+        // through is a physical fact of the wing and adds no reference area.
+        let (drawn, carried) = match wings[0].planform_datum {
+            Some(datum) => (
+                DrawnWing {
+                    area_m2: datum.gross_area_m2,
+                    span_m,
+                    mac_m: datum.gross_mac_m,
+                    mac_le_x_m: datum.gross_mac_le_x_m,
+                },
+                true,
+            ),
+            None => (
+                DrawnWing {
+                    area_m2: wings[0].reference_area(),
+                    span_m,
+                    mac_m: wings[0].mean_aerodynamic_chord(),
+                    mac_le_x_m: wings[0].mac_station().x_le_m,
+                },
+                false,
+            ),
         };
-        wings[0].reference = self.reference_wing(planform, &drawn, x_wing_global, report);
+        let reference = self.reference_wing(planform, &drawn, x_wing_global, report);
+        wings[0].reference = reference.or_else(|| {
+            carried.then_some(WingReference {
+                area_m2: drawn.area_m2,
+                span_m: drawn.span_m,
+                mac_m: drawn.mac_m,
+                mac_le_x_m: drawn.mac_le_x_m,
+            })
+        });
     }
 
     /// The reference wing of the main wing built at fuselage station

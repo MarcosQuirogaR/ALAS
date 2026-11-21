@@ -123,3 +123,29 @@ fn line_series_clips_segments_to_the_data_rectangle() {
     assert_eq!(points.first().copied(), Some([10.0, 50.0]));
     assert_eq!(points.last().copied(), Some([110.0, 50.0]));
 }
+
+#[test]
+fn a_line_that_leaves_the_axes_and_returns_is_two_polylines_not_one_with_a_chord() {
+    let axes = Axes2D::new((0.0, 0.0, 100.0, 100.0), (0.0, 10.0), (0.0, 1.0));
+    let mut scene = Scene::new(100.0, 100.0, None);
+    // Inside, a spike far above the frame, inside again.
+    let pts = [(0.0, 0.5), (4.0, 0.5), (5.0, 9.0), (6.0, 0.5), (10.0, 0.5)];
+    axes.add_line_series(
+        &mut scene,
+        &pts,
+        Stroke::new(Color::from_hex("#ffffff"), 1.0),
+    );
+    let polylines: Vec<&Vec<[f64; 2]>> = scene
+        .elements
+        .iter()
+        .filter_map(|element| match element {
+            SceneElement::Polyline { points, .. } => Some(points),
+            _ => None,
+        })
+        .collect();
+    assert_eq!(polylines.len(), 2, "{polylines:?}");
+    // Every vertex stays on the plot rectangle.
+    for point in polylines.iter().flat_map(|line| line.iter()) {
+        assert!(point[1] >= -1e-9 && point[1] <= 100.0 + 1e-9, "{point:?}");
+    }
+}

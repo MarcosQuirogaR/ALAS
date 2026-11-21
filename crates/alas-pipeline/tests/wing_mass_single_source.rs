@@ -33,7 +33,10 @@ fn the_structural_result_carries_the_masses_the_findings_compare() {
             masses.flops_complete_wing_kg,
             report.component_masses["Wing"]
         );
-        assert_eq!(masses.flops_complete_wing_kg, result.torenbeek_wing_mass_kg);
+        assert_eq!(
+            masses.flops_complete_wing_kg,
+            result.ledger_complete_wing_mass_kg
+        );
 
         // The findings panel takes the same quantities from the native
         // feasibility assessment of the same design.

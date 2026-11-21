@@ -11,7 +11,7 @@
 use std::fmt;
 use std::sync::Arc;
 
-use crate::mdo::drag_table::{TrimmedDragTable, MACH_MIN};
+use crate::mdo::drag_table::{DragTableOutOfRange, TrimmedDragTable, MACH_MIN};
 use crate::mdo::types::ExternalPolar;
 
 /// Clean, trimmed drag coefficient of the aircraft.
@@ -27,18 +27,30 @@ pub trait CruiseDrag: Send + Sync {
     /// Eq. 4.21 and the e = 0.75 to 0.85 range are stated for the
     /// en-route configuration). Equal to [`Self::cd`] for a polar that has
     /// no such term.
-    fn cd_high_lift_base(&self, cl: f64, mach: f64, altitude_m: f64) -> f64 {
+    /// `flap_lift_cl` is the lift the devices add at constant angle of attack
+    /// ([`crate::mdo::drag_table::high_lift_lift_shift`]).
+    fn cd_high_lift_base(&self, cl: f64, mach: f64, altitude_m: f64, flap_lift_cl: f64) -> f64 {
+        let _ = flap_lift_cl;
         self.cd(cl, mach, altitude_m)
     }
 
     /// Lift coefficient of minimum drag-to-lift ratio at `mach` and
     /// `altitude_m`: the holding (endurance) point of a jet.
     fn min_drag_cl(&self, mach: f64, altitude_m: f64) -> f64;
+
+    /// How `(cl, mach)` lies outside the range the model was solved on, when
+    /// it does: [`Self::cd`] is then an extrapolation. `None` for a query
+    /// inside the range and for a closed-form polar, which has no solved
+    /// range.
+    fn out_of_range(&self, cl: f64, mach: f64) -> Option<DragTableOutOfRange> {
+        let _ = (cl, mach);
+        None
+    }
 }
 
 /// `CD = CD0 + k CL^2 + CD_wave(M)`, the wave term a quadratic ramp from
 /// `onset_mach` to `wave_cd` at `cruise_mach`.
-#[derive(Debug, Clone, Copy, PartialEq)]
+#[derive(serde::Serialize, serde::Deserialize, Debug, Clone, Copy, PartialEq)]
 pub struct ParabolicPolar {
     /// Zero-lift drag coefficient.
     pub cd0: f64,
@@ -93,8 +105,8 @@ impl CruiseDrag for TrimmedDragTable {
         TrimmedDragTable::cd(self, cl, mach, altitude_m)
     }
 
-    fn cd_high_lift_base(&self, cl: f64, mach: f64, altitude_m: f64) -> f64 {
-        TrimmedDragTable::cd_without_lift_viscous(self, cl, mach, altitude_m)
+    fn cd_high_lift_base(&self, cl: f64, mach: f64, altitude_m: f64, flap_lift_cl: f64) -> f64 {
+        TrimmedDragTable::cd_without_lift_viscous(self, cl, mach, altitude_m, flap_lift_cl)
     }
 
     /// A Mach below the table's lowest node, such as the zero the holding
@@ -105,6 +117,10 @@ impl CruiseDrag for TrimmedDragTable {
     /// holding speed.
     fn min_drag_cl(&self, mach: f64, altitude_m: f64) -> f64 {
         TrimmedDragTable::min_drag_cl(self, mach.max(MACH_MIN), altitude_m)
+    }
+
+    fn out_of_range(&self, cl: f64, mach: f64) -> Option<DragTableOutOfRange> {
+        TrimmedDragTable::out_of_range(self, cl, mach)
     }
 }
 
@@ -149,13 +165,34 @@ impl super::SegmentMissionModel {
     }
 
     /// Drag coefficient of a high-lift configuration before its increment:
-    /// the clean polar without the lift-dependent viscous term.
-    pub(super) fn high_lift_base_cd(&self, cl: f64, mach: f64, altitude_m: f64) -> f64 {
-        self.cruise_drag.0.cd_high_lift_base(cl, mach, altitude_m)
+    /// the clean polar without the lift-dependent viscous term, its devices
+    /// adding `flap_lift_cl` at constant angle of attack.
+    pub(super) fn high_lift_base_cd(
+        &self,
+        cl: f64,
+        mach: f64,
+        altitude_m: f64,
+        flap_lift_cl: f64,
+    ) -> f64 {
+        self.cruise_drag
+            .0
+            .cd_high_lift_base(cl, mach, altitude_m, flap_lift_cl)
     }
 
     /// Minimum drag-to-lift lift coefficient from the model's drag.
     pub(super) fn min_drag_cl(&self, mach: f64, altitude_m: f64) -> f64 {
         self.cruise_drag.0.min_drag_cl(mach, altitude_m)
+    }
+}
+
+impl super::PhaseAeroLimits {
+    /// Lift the take-off configuration adds at constant angle of attack.
+    pub(super) fn takeoff_lift_shift(&self) -> f64 {
+        crate::mdo::drag_table::high_lift_lift_shift(self.takeoff_cl_max, self.clean_cl_max)
+    }
+
+    /// Lift the landing configuration adds at constant angle of attack.
+    pub(super) fn landing_lift_shift(&self) -> f64 {
+        crate::mdo::drag_table::high_lift_lift_shift(self.landing_cl_max, self.clean_cl_max)
     }
 }

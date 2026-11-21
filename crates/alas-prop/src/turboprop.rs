@@ -159,18 +159,30 @@ mod tests {
 
         assert!(sea_level_power_w > intermediate_power_w);
         assert!(intermediate_power_w > fl170_power_w);
-        // The climb rating shares the maximum-continuous flat-rating corner
-        // (sea-level pressure at 48 C, TCDS IM.E.041) and lapses with Nita's
-        // PW120 exponent 0.728 below it.
-        let corner_kg_m3 = 1.225 * 288.15 / 321.15;
+        // The climb rating is flat until it meets the maximum-continuous
+        // line (corner at sea-level pressure and 48 C, TCDS IM.E.041; Nita's
+        // PW120 exponent 0.728) and is that line below: the corner density is
+        // the maximum-continuous one times (P_climb / P_MC)^(1/n).
+        let continuous_corner_kg_m3 = 1.225 * 288.15 / 321.15;
+        let corner_kg_m3 = continuous_corner_kg_m3
+            * (model.maximum_climb_power_w / model.maximum_continuous_power_w).powf(1.0 / 0.728);
         assert!(
             (model.flat_rating_corner_density_kg_m3(Pw127mRating::MaximumClimb) - corner_kg_m3)
                 .abs()
                 < 1e-12
         );
+        let line_w =
+            model.maximum_continuous_power_w * (0.70_f64 / continuous_corner_kg_m3).powf(0.728);
+        assert!((fl170_power_w / line_w - 1.0).abs() < 1e-12);
+        // Maximum cruise reads the same line there, and maximum continuous is unchanged.
+        let cruise_w = model.available_shaft_power_w(Pw127mRating::MaximumCruise, 0.70);
+        let continuous_w = model.available_shaft_power_w(Pw127mRating::MaximumContinuous, 0.70);
+        assert!((cruise_w / line_w - 1.0).abs() < 1e-12);
+        assert!((continuous_w / line_w - 1.0).abs() < 1e-12);
+        // Above its corner each rating is its sea-level value.
         assert_eq!(
-            fl170_power_w,
-            model.maximum_climb_power_w * (0.70_f64 / corner_kg_m3).powf(0.728)
+            model.available_shaft_power_w(Pw127mRating::MaximumClimb, 1.0),
+            model.maximum_climb_power_w
         );
     }
 
@@ -211,6 +223,185 @@ mod tests {
             (700.0..900.0).contains(&corner_altitude_m),
             "{corner_altitude_m}"
         );
+    }
+
+    /// With no ram exponent the in-flight lapse is the static lapse exactly,
+    /// at every speed and temperature: the PW127M and PW127G fits already
+    /// hold their 275 kt schedule.
+    #[test]
+    fn no_ram_exponent_leaves_the_lapse_bit_identical() {
+        let model = Pw127m568fModel::default();
+        assert_eq!(model.ram_power_exponent, 0.0);
+        for rating in [
+            Pw127mRating::NormalTakeoff,
+            Pw127mRating::MaximumContinuous,
+            Pw127mRating::MaximumClimb,
+        ] {
+            for density in [1.3, 1.0, 0.55, 0.3, 0.1] {
+                for (speed, temperature) in [(0.0, 288.15), (141.0, 250.0), (220.0, 220.0)] {
+                    assert_eq!(
+                        model
+                            .power_lapse_fraction_in_flight(rating, density, speed, temperature)
+                            .to_bits(),
+                        model.power_lapse_fraction(rating, density).to_bits()
+                    );
+                }
+            }
+        }
+    }
+
+    /// With a thermodynamic power stated, every rating is held until that
+    /// power, lapsed, falls to it, and no further: a lower rating keeps its
+    /// full value to a thinner air, and above every corner all ratings read
+    /// the same thermodynamic line. Without it the corners are unchanged.
+    #[test]
+    fn a_stated_thermodynamic_power_gives_each_rating_its_own_corner() {
+        let base = Pw127m568fModel::default();
+        let model = Pw127m568fModel {
+            thermodynamic_power_w: 1.4 * base.normal_takeoff_power_w,
+            ..base
+        };
+        let n = model.power_lapse_density_exponent;
+        for rating in [
+            Pw127mRating::NormalTakeoff,
+            Pw127mRating::MaximumTakeoffReserve,
+            Pw127mRating::MaximumContinuous,
+            Pw127mRating::MaximumClimb,
+            Pw127mRating::MaximumCruise,
+        ] {
+            let corner = model.flat_rating_corner_density_kg_m3(rating);
+            let power = model.rated_shaft_power_w(rating);
+            let expected = 1.225 * (power / model.thermodynamic_power_w).powf(1.0 / n);
+            assert!((corner / expected - 1.0).abs() < 1e-12, "{rating:?}");
+            // Above every corner the available power is the thermodynamic line.
+            let thin = 0.3;
+            let available = power * model.power_lapse_fraction(rating, thin);
+            let line = model.thermodynamic_power_w * (thin / 1.225).powf(n);
+            assert!((available / line - 1.0).abs() < 1e-9, "{rating:?}");
+        }
+        assert!(
+            model.flat_rating_corner_density_kg_m3(Pw127mRating::MaximumCruise)
+                < model.flat_rating_corner_density_kg_m3(Pw127mRating::MaximumContinuous)
+        );
+        assert_eq!(
+            model
+                .flat_rating_corner_density_kg_m3(Pw127mRating::FlightIdleSurrogate)
+                .to_bits(),
+            base.flat_rating_corner_density_kg_m3(Pw127mRating::FlightIdleSurrogate)
+                .to_bits()
+        );
+        for rating in [Pw127mRating::NormalTakeoff, Pw127mRating::MaximumCruise] {
+            assert_eq!(
+                Pw127m568fModel::default()
+                    .flat_rating_corner_density_kg_m3(rating)
+                    .to_bits(),
+                base.flat_rating_corner_density_kg_m3(rating).to_bits()
+            );
+        }
+    }
+
+    /// A rating temperature limit holds the rating to that temperature at
+    /// sea level and lapses it beyond as `(T_limit / T)^n`, while a cold day
+    /// at altitude keeps the density corner.
+    #[test]
+    fn a_rating_temperature_limit_bounds_the_hot_day_and_not_the_cold_altitude() {
+        let model = Pw127m568fModel {
+            takeoff_flat_rating_temperature_k: 377.02,
+            maximum_continuous_flat_rating_temperature_k: 377.02,
+            rating_temperature_limit_k: 288.15,
+            ..Pw127m568fModel::default()
+        };
+        let rating = Pw127mRating::NormalTakeoff;
+        let sea_level = |t: f64| 1.225 * 288.15 / t;
+        assert_eq!(
+            model.power_lapse_fraction_in_flight(rating, sea_level(288.15), 0.0, 288.15),
+            1.0
+        );
+        let hot = model.power_lapse_fraction_in_flight(rating, sea_level(318.15), 0.0, 318.15);
+        let expected = (288.15_f64 / 318.15).powf(0.728);
+        assert!((hot / expected - 1.0).abs() < 1e-12, "{hot}");
+        // ISA 2,000 m: 275.15 K, 1.0066 kg/m^3, inside the density corner.
+        assert_eq!(
+            model.power_lapse_fraction_in_flight(rating, 1.0066, 0.0, 275.15),
+            1.0
+        );
+        // The MCT shares the bound, so it never exceeds take-off power.
+        assert_eq!(
+            model.power_lapse_fraction_in_flight(
+                Pw127mRating::MaximumContinuous,
+                sea_level(318.15),
+                0.0,
+                318.15
+            ),
+            hot
+        );
+    }
+
+    /// The ram factor: 1 at rest at ISA sea level, constant along the lapse
+    /// fit's own 275 kt schedule (so the fit's altitude trend is kept, not
+    /// counted twice), the isentropic `(1 + 0.2 M^2)^4` relative to it at
+    /// other speeds, and never above the rating.
+    #[test]
+    fn ram_factor_is_relative_to_the_fit_schedule_and_capped_by_the_rating() {
+        let reference_m_s = 275.0 * 1_852.0 / 3_600.0;
+        let model = Pw127m568fModel {
+            ram_power_exponent: 4.0,
+            power_lapse_fit_reference_true_airspeed_m_s: reference_m_s,
+            ..Pw127m568fModel::default()
+        };
+        let speed_of_sound = |t: f64| (1.4_f64 * 287.052_87 * t).sqrt();
+        let ram = |v: f64, t: f64| 1.0 + 0.2 * (v / speed_of_sound(t)).powi(2);
+        assert_eq!(model.ram_power_factor(0.0, 288.15), 1.0);
+        let along_schedule = ram(reference_m_s, 288.15).powi(4);
+        for temperature in [288.15, 260.0, 238.62, 216.65] {
+            let factor = model.ram_power_factor(reference_m_s, temperature);
+            assert!(
+                (factor / along_schedule - 1.0).abs() < 1e-12,
+                "{temperature}"
+            );
+        }
+        // FL250 ISA, M 0.7.
+        let t_fl250 = 238.62;
+        let v = 0.7 * speed_of_sound(t_fl250);
+        let expected =
+            (ram(v, t_fl250) * ram(reference_m_s, 288.15) / ram(reference_m_s, t_fl250)).powi(4);
+        assert!((model.ram_power_factor(v, t_fl250) / expected - 1.0).abs() < 1e-12);
+        // Above the corner the rating caps it; below it the lapse is lifted.
+        let corner = model.flat_rating_corner_density_kg_m3(Pw127mRating::MaximumContinuous);
+        assert_eq!(
+            model.power_lapse_fraction_in_flight(
+                Pw127mRating::MaximumContinuous,
+                corner * 0.95,
+                v,
+                t_fl250
+            ),
+            1.0
+        );
+        let thin = 0.55;
+        let lifted =
+            model.power_lapse_fraction_in_flight(Pw127mRating::MaximumContinuous, thin, v, t_fl250);
+        let static_lapse = model.power_lapse_fraction(Pw127mRating::MaximumContinuous, thin);
+        assert!((lifted / (static_lapse * expected) - 1.0).abs() < 1e-12);
+        // An exponent outside the isentropic bound is rejected.
+        let bad = Pw127m568fModel {
+            ram_power_exponent: 4.5,
+            ..model
+        };
+        assert!(bad
+            .evaluate_at_temperature(
+                TurbopropCondition {
+                    density_kg_m3: thin,
+                    true_airspeed_m_s: v,
+                },
+                t_fl250,
+                TurbopropCommand {
+                    rating: Pw127mRating::MaximumContinuous,
+                    power_fraction: 1.0,
+                    mode: TurbopropMode::Governed,
+                    propeller_speed_rpm: model.governed_propeller_speed_rpm,
+                },
+            )
+            .is_err());
     }
 
     /// PSFC is flat in power setting over the sourced band (at and above the
@@ -973,10 +1164,8 @@ mod tests {
             result.resource_flows[0].mass_flow_kg_s,
             Some(2.0 * unit.fuel_flow_kg_s)
         );
-        assert!(matches!(
-            result.validity,
-            ValidityStatus::Extrapolated { .. }
-        ));
+        // Sea-level ISA take-off power: inside the PW100 evidence domain.
+        assert_eq!(result.validity, ValidityStatus::Valid);
     }
 
     #[test]
@@ -1155,22 +1344,71 @@ mod tests {
         }
     }
 
+    /// The evidence domain is judged point by point: a governed point inside
+    /// the PW120A PSFC and lapse ranges is valid; flight idle, a part-power
+    /// point below the 46 % knee, a point above 25,000 ft, one outside
+    /// ISA+/-20 K and an engine stating its own thermodynamic power are not.
+    #[test]
+    fn the_evidence_domain_is_judged_at_each_point() {
+        let system = atr_system();
+        let reason = |request: &PropulsionRequest, system: &Atr72TurbopropSystem| {
+            system
+                .evaluate(request)
+                .unwrap()
+                .validity
+                .extrapolation_reason()
+                .map(str::to_owned)
+        };
+        let mut cruise = system_request(FailureState::None);
+        cruise.demand = PropulsionDemand::Rating(PropulsionRating::Cruise);
+        // FL170 ISA, 275 KTAS: the published maximum-cruise point.
+        cruise.flight.altitude_m = 5_181.6;
+        cruise.flight.temperature_k = 254.47;
+        cruise.flight.density_kg_m3 = 0.7218;
+        cruise.flight.velocity_m_s = 141.47;
+        assert_eq!(reason(&cruise, &system), None);
+
+        let mut idle = cruise.clone();
+        idle.demand = PropulsionDemand::Rating(PropulsionRating::FlightIdle);
+        idle.mode = OperatingMode::FlightIdle;
+        assert!(reason(&idle, &system).is_some_and(|text| text.contains("flight idle")));
+
+        let mut low_power = cruise.clone();
+        low_power.demand = PropulsionDemand::RatedFraction {
+            rating: PropulsionRating::Cruise,
+            fraction: 0.1,
+        };
+        assert!(reason(&low_power, &system).is_some_and(|text| text.contains("46 %")));
+
+        let mut high = cruise.clone();
+        high.flight.altitude_m = 8_000.0;
+        high.flight.temperature_k = 236.15;
+        high.flight.density_kg_m3 = 0.5258;
+        assert!(reason(&high, &system).is_some_and(|text| text.contains("25,000 ft")));
+
+        let mut hot = cruise.clone();
+        hot.flight.temperature_k += 30.0;
+        assert!(reason(&hot, &system).is_some_and(|text| text.contains("ISA+30.0")));
+
+        let tp400 = Atr72TurbopropSystem::new(
+            Pw127m568fModel {
+                thermodynamic_power_w: 9_694_000.0,
+                ..Pw127m568fModel::default()
+            },
+            Vec::new(),
+            atr_system().installation.clone(),
+        )
+        .unwrap();
+        assert!(reason(&cruise, &tp400).is_some_and(|text| text.contains("thermodynamic")));
+    }
+
     #[test]
     fn atr_adapter_rejects_unavailable_maps_and_nonmechanical_loads() {
         let system = atr_system();
         let mut request = system_request(FailureState::None);
-        request.mode = OperatingMode::Reverse;
-        assert!(matches!(
-            system.evaluate(&request),
-            Err(PropulsionError::UnsupportedMode(OperatingMode::Reverse))
-        ));
-        request.mode = OperatingMode::Normal;
         request.demand = PropulsionDemand::Rating(PropulsionRating::Cruise);
         let cruise = system.evaluate(&request).unwrap();
-        assert!(matches!(
-            cruise.validity,
-            ValidityStatus::Extrapolated { .. }
-        ));
+        assert_eq!(cruise.validity, ValidityStatus::Valid);
         request.demand = PropulsionDemand::NormalizedForce(0.5);
         request.loads.electrical_power_w = 1_000.0;
         assert!(matches!(

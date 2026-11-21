@@ -42,11 +42,13 @@
 //! * FAR/CS-25.817: no more than three seats between any passenger and an
 //!   aisle.
 
+pub(crate) mod crew;
 mod door_seating;
 mod engine;
 mod exit_mix;
 mod exit_rules;
 mod fittings;
+mod seat_bands;
 mod seating;
 mod stations;
 mod upper_deck;
@@ -56,16 +58,23 @@ pub(crate) use engine::build_passenger_layout_with_aircraft_cg_target;
 pub use engine::{build_passenger_layout, build_passenger_layout_reference_compatibility};
 pub use exit_mix::{derived_exit_layout, door_type_for_diameter};
 pub(crate) use exit_rules::{
-    effective_pair_capacity, largest_pair_rating, min_exit_pairs, MAX_EXIT_PAIRS_PER_DECK,
+    deck_pairs, effective_pair_capacity, largest_pair_rating, min_exit_pairs, small_cabin_exit,
+    MAX_EXIT_PAIRS_PER_DECK,
 };
 pub use exit_rules::{
-    exit_spec, layout_rating, pair_rating, select_exit_type, ExitSpec, EXIT_TYPES,
+    exit_spec, layout_rating, pair_rating, select_exit_type, upper_deck_rating, ExitSpec,
+    EXIT_TYPES,
+};
+pub use seat_bands::{
+    band_limit, seat_limit, table_limit, type_iii_adjacent, ExtraExit, SEATS_ONE_EXIT,
+    SEATS_TWO_EXITS_TYPE_I, SEATS_TWO_EXITS_TYPE_II, SEATS_TYPE_IV_ONLY, TYPE_III_ADJACENT_SEATS,
+    TYPE_III_COMBINED_SEATS, TYPE_III_SEPARATION_ROWS,
 };
 pub(crate) use stations::resolve_door_stations;
 pub use stations::{
     DoorStation, MonumentKind, GALLEY_LENGTH_M, LAVATORY_LENGTH_M, MONUMENT_BAY_LENGTH_M,
 };
-pub(crate) use upper_deck::{layout_order, RemainingSourceCap};
+pub(crate) use upper_deck::{layout_order, multi_deck, RemainingSourceCap};
 
 use alas_config::{CertifiedExitLayout, PassengerCabinConfig};
 
@@ -78,8 +87,13 @@ use crate::numeric::{floor_div, round_half_even};
 /// [`MONUMENT_BAY_LENGTH_M`] instead.
 pub(crate) const MONUMENT_LEN: f64 = 0.95;
 
-/// The height a seat row is drawn at.
+/// The height a seat row is drawn at on the frozen reference frame.
 pub(crate) const SEAT_BOX_H: f64 = 1.25;
+
+/// Top of a seat back above the floor, m: 1.15 m on Airbus AC A320 fig.
+/// 2-5-0-991-005 (pixel measure, +-0.02 m); a row's envelope on a body with the
+/// physical envelope ends here.
+pub(crate) const SEAT_BACK_TOP_M: f64 = 1.15;
 
 /// FAR/CS-25.815 minimum main-aisle width up to nineteen passengers.
 const AISLE_W_SMALL: f64 = 0.30;
@@ -177,6 +191,47 @@ pub fn cabin_deck_segments(g: &CabinGeometry) -> Vec<DeckSegment<'_>> {
                     x1: g.cabin_end_x + 0.25 * g.tailcone_len,
                 }
             }
+        })
+        .collect()
+}
+
+/// [`cabin_deck_segments`] with the floor of declared zones cut out.
+///
+/// The seat packer and the fast auto-sizer lay seats out in these stretches;
+/// each stretch gets its own monument bays at both ends, as a bulkhead
+/// bounding the zone would. A main deck bounded by declared doors is not
+/// split: its walk jumps the zones as obstacles (`door_seating`). Without
+/// zones this is [`cabin_deck_segments`] unchanged.
+pub fn seating_segments(g: &CabinGeometry) -> Vec<DeckSegment<'_>> {
+    let declared_main = !g.door_stations.is_empty();
+    cabin_deck_segments(g)
+        .into_iter()
+        .enumerate()
+        .flat_map(|(index, segment)| {
+            let spans = if declared_main && index == 0 {
+                Vec::new()
+            } else {
+                g.reserved_spans(segment.deck.name)
+            };
+            // A declared-door main deck is not split, but it starts aft of a
+            // reserved stretch that reaches its forward end.
+            let segment = if declared_main && index == 0 {
+                let x0 = g
+                    .reserved_spans(segment.deck.name)
+                    .iter()
+                    .filter(|(a, b)| *a < segment.x0 + 1.0 && *b > segment.x0)
+                    .fold(segment.x0, |x0, (_, b)| x0.max(*b));
+                DeckSegment { x0, ..segment }
+            } else {
+                segment
+            };
+            crate::declared_items::carve(segment.x0, segment.x1, &spans)
+                .into_iter()
+                .map(move |(x0, x1)| DeckSegment {
+                    deck: segment.deck,
+                    x0,
+                    x1,
+                })
         })
         .collect()
 }
@@ -286,22 +341,49 @@ pub(crate) fn max_certifiable_capacity_with_source_layout(
     let spec = select_exit_type(g.diameter_m);
     let spacing = pax.min_exit_pair_spacing_m.max(1.0);
 
-    let mut per_deck = Vec::new();
-    let mut total = 0;
-    for (deck_index, segment) in cabin_deck_segments(g).into_iter().enumerate() {
+    let segments = cabin_deck_segments(g);
+    // The exits of a side are the pairs of every deck together, so the seat
+    // bands of 25.807(g)(1)-(g)(8) apply to the airframe: a deck is never
+    // rated above what all the exits of the airplane allow.
+    let mut letters: Vec<&str> = Vec::new();
+    let mut n_proxy_pairs = Vec::new();
+    for (deck_index, segment) in segments.iter().enumerate() {
         let deck_len = (segment.x1 - segment.x0).max(0.0);
-        let deck_cap = if deck_index == 0 {
-            if let Some(source_layout) = source_layout {
-                layout_rating(&source_layout)
-            } else {
+        match source_layout.and_then(|layout| deck_pairs(&layout, deck_index)) {
+            Some(pairs) => letters.extend(pairs.iter().map(|pair| pair.exit_type)),
+            None => {
                 let n_pairs =
                     (floor_div(deck_len, spacing) as i64).clamp(1, MAX_EXIT_PAIRS_PER_DECK);
-                n_pairs * effective_pair_capacity(spec, pax)
+                letters.extend(std::iter::repeat_n(spec.name, n_pairs as usize));
+                n_proxy_pairs.push((deck_index, n_pairs));
             }
+        }
+    }
+    let band = band_limit(&letters);
+
+    let mut per_deck = Vec::new();
+    let mut total = 0;
+    for (deck_index, segment) in segments.into_iter().enumerate() {
+        // A declared deck is rated by its own pairs; an undeclared deck (an
+        // upper deck the source gives no exits for) keeps the generic rule.
+        let declared = source_layout.and_then(|layout| deck_pairs(&layout, deck_index));
+        let table_cap = if let Some(pairs) = declared {
+            let types: Vec<&str> = pairs.iter().map(|pair| pair.exit_type).collect();
+            let stations: Vec<Option<f64>> = pairs
+                .iter()
+                .filter(|pair| pair.exit_type == "III")
+                .map(|pair| pair.station_m)
+                .collect();
+            let adjacent = type_iii_adjacent(&stations, pax.economy.pitch_m);
+            table_limit(&types, adjacent)
         } else {
-            let n_pairs = (floor_div(deck_len, spacing) as i64).clamp(1, MAX_EXIT_PAIRS_PER_DECK);
+            let n_pairs = n_proxy_pairs
+                .iter()
+                .find(|(index, _)| *index == deck_index)
+                .map_or(1, |(_, n)| *n);
             n_pairs * effective_pair_capacity(spec, pax)
         };
+        let deck_cap = table_cap.min(band);
         per_deck.push((segment.deck.name, deck_cap));
         total += deck_cap;
     }
@@ -335,27 +417,68 @@ pub(crate) fn max_certifiable_capacity_reference_compatibility(
     DeckCapacities { per_deck, total }
 }
 
+/// Seat unit width from which a class is a premium cabin whose single-aisle rows
+/// are laid out in mirrored blocks, m. Business and first seats are 0.70 m and
+/// wider; premium economy (0.52 m) and economy (0.46 m) are narrower.
+const PREMIUM_SEAT_WIDTH_M: f64 = 0.60;
+
 /// Seats abreast and aisle count for one class at station `x`.
 ///
 /// FAR/CS-25.817 allows at most three seats between any passenger and an
 /// aisle, so a single aisle admits six abreast and two admit twelve. Whichever
 /// legal option seats more in the local floor width wins, and a tie goes to the
-/// single aisle: a second aisle that adds no seats has only spent floor.
+/// single aisle: a second aisle that adds no seats has only spent floor. The row
+/// is `pitch` long (held to the narrowest chord under its own length).
 pub fn abreast_and_aisles(
     class: &alas_config::SeatClassConfig,
     deck: &DeckSpec,
     g: &CabinGeometry,
     aisle_w: f64,
     x: f64,
+    pitch: f64,
+) -> (i64, i64) {
+    abreast_and_aisles_in(class, deck, g, aisle_w, x, pitch, 1)
+}
+
+/// The aisle count the cabin has at station `x`: that of the class that needs
+/// most aisles (a twin-aisle fuselage has two in every class), so a class with
+/// fewer or wider seats is never laid out on a single aisle in it.
+pub fn cabin_aisles<'a>(
+    classes: impl IntoIterator<Item = &'a alas_config::SeatClassConfig>,
+    deck: &DeckSpec,
+    g: &CabinGeometry,
+    aisle_w: f64,
+    x: f64,
+) -> i64 {
+    classes
+        .into_iter()
+        .map(|class| abreast_and_aisles(class, deck, g, aisle_w, x, class.pitch_m).1)
+        .max()
+        .unwrap_or(1)
+}
+
+/// [`abreast_and_aisles`] for a cabin that has at least `min_aisles` aisles:
+/// with two, the row is a twin-aisle row of whatever the floor seats between
+/// them (CS 25.817: at most three seats either side of an aisle).
+pub fn abreast_and_aisles_in(
+    class: &alas_config::SeatClassConfig,
+    deck: &DeckSpec,
+    g: &CabinGeometry,
+    aisle_w: f64,
+    x: f64,
+    pitch: f64,
+    min_aisles: i64,
 ) -> (i64, i64) {
     let seat_w = class.width_m.max(MIN_SEAT_WIDTH);
     // A declared abreast is the main deck's; the upper deck under a hump is
     // narrower (747-400: 10 economy abreast below, 6 above; ACAP D6-58326-1
     // Rev F section 2.5.3), so there it is packed to its own floor width.
     let declared_fits_deck = g.upper_deck.is_none() || deck.name != crate::layout::UPPER;
-    let usable = g.usable_width(deck, x);
+    // The row has to fit the narrowest floor under its pitch, not only the
+    // width where it starts.
+    let usable = g.row_width_over(deck, x, x + pitch, seat_w);
     if class.abreast > 0 && declared_fits_deck {
-        let aisles = if class.abreast <= MAX_ABREAST_SINGLE_AISLE {
+        let aisles = if class.abreast <= MAX_ABREAST_SINGLE_AISLE && min_aisles < 2 {
             1
         } else {
             2
@@ -367,22 +490,36 @@ pub fn abreast_and_aisles(
         // sloped-sidewall floor width, so a source-backed count that the
         // simplified section estimate under-counts (747-400: 10 abreast of
         // 0.503 m with two aisles in a 6.2 m interior) is never cut.
-        let interior_m = g.diameter_m - 2.0 * g.wall;
+        // Never wider than the interior, nor than the chord the row fits under
+        // its pitch (a tapered nose or tail row is cut).
+        let interior_m =
+            (g.diameter_m - 2.0 * g.wall).min(g.row_chord_over(deck, x, x + pitch, seat_w));
         let fitting = floor_div(interior_m - f64::from(aisles as i32) * aisle_w, seat_w) as i64;
         if class.abreast <= fitting.max(1) {
             return (class.abreast, aisles);
         }
         let held = fitting.max(1);
-        let held_aisles = if held <= MAX_ABREAST_SINGLE_AISLE {
+        let held_aisles = if held <= MAX_ABREAST_SINGLE_AISLE && min_aisles < 2 {
             1
         } else {
             2
         };
         return (held, held_aisles);
     }
-    let n_single = (floor_div(usable - aisle_w, seat_w) as i64).min(MAX_ABREAST_SINGLE_AISLE);
+    let mut n_single = (floor_div(usable - aisle_w, seat_w) as i64).min(MAX_ABREAST_SINGLE_AISLE);
+    // A premium seat (a business or first-class unit, `PREMIUM_SEAT_WIDTH_M` or
+    // wider) is laid out in mirrored blocks either side of the aisle: an odd
+    // count on a single aisle (3-2) leaves one seat the floor cannot balance,
+    // so it is rounded down to the even count.
+    if g.enforces_physical_envelope()
+        && seat_w >= PREMIUM_SEAT_WIDTH_M
+        && n_single > 2
+        && n_single % 2 == 1
+    {
+        n_single -= 1;
+    }
     let n_twin = (floor_div(usable - 2.0 * aisle_w, seat_w) as i64).min(MAX_ABREAST_TWIN_AISLE);
-    if n_twin > n_single {
+    if n_twin > n_single || (min_aisles >= 2 && n_twin >= 1) {
         (n_twin.max(1), 2)
     } else {
         (n_single.max(1), 1)
@@ -397,7 +534,7 @@ pub fn abreast(
     aisle_w: f64,
     x: f64,
 ) -> i64 {
-    abreast_and_aisles(class, deck, g, aisle_w, x).0
+    abreast_and_aisles(class, deck, g, aisle_w, x, class.pitch_m).0
 }
 
 /// Split `n` seats abreast into the lateral blocks the aisles divide them into.
@@ -590,7 +727,7 @@ mod tests {
                 ..Default::default()
             };
             assert_eq!(
-                abreast_and_aisles(&class, &deck, &geometry, 0.51, mid_x),
+                abreast_and_aisles(&class, &deck, &geometry, 0.51, mid_x, class.pitch_m),
                 (declared, expected_aisles)
             );
         }
@@ -617,6 +754,7 @@ mod tests {
             &geometry,
             0.51,
             0.5 * (geometry.cabin_start_x + geometry.cabin_end_x),
+            class.pitch_m,
         );
         let interior_m = geometry.diameter_m - 2.0 * geometry.wall;
         assert!(seats < 6, "six 1.2 m seats cannot sit in {interior_m} m");

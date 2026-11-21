@@ -45,7 +45,6 @@ pub(crate) use super::units::UnitScale;
 use super::field::{Card, ContinuationTags, Field};
 use crate::loads::{self, LoadCase};
 use crate::mesh::{Deck, MeshNodeIndex, ParamValue};
-use crate::nastran::elliptic_forces_by_y_trapezoid;
 
 /// Which solver a deck is written for.
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
@@ -284,7 +283,15 @@ pub(crate) fn build_modes_deck_banded(
     out.push_str("BEGIN BULK\n");
 
     let mut tags = ContinuationTags::new();
-    param(&mut out, "COUPMASS", Field::Int(1));
+    // Lumped mass for the modes. NASTRAN-95's coupled mass (COUPMASS 1) gives
+    // the shell and bar grids rotary inertia, and the A320 wingbox then shows
+    // extra modes (15.97, 19.11, 25.42, 26.18 Hz) that are rotations of the
+    // spar-cap grids with almost no translation and no counterpart in the MSC
+    // Nastran solve of the same model. With lumped mass those modes go and the
+    // first eight frequencies sit within 1.2 % of MSC's (2.26/5.90/8.91/10.21/
+    // 13.86/19.62/20.69/23.87 Hz against 2.25/5.86/8.94/10.22/13.94/19.67/
+    // 20.95/24.07 Hz).
+    param(&mut out, "COUPMASS", Field::Int(-1));
     bulk(&mut out, &mut tags, deck, dialect, units);
     eigenvalue_card(&mut out, &mut tags, cfg, dialect, band);
     out.push_str("ENDDATA\n");

@@ -10,8 +10,12 @@
 //! allocated by exit capacity the upper deck would reserve seats its short
 //! floor cannot hold. So on a hump body the upper deck is laid out first,
 //! against its own exit ceiling, and the main deck gets what the source
-//! limit leaves of the seats actually placed upstairs. Bodies without an
-//! upper deck keep the deck-order allocation unchanged.
+//! limit leaves of the seats actually placed upstairs. A full double-deck
+//! body (A380 type) keeps its deck order, main deck first, but charges the
+//! limit the same way: with each deck rated by its own declared exits the
+//! main deck's ceiling can exceed what its floor seats, and the upper deck
+//! then takes the rest of the limit rather than what the main deck's ceiling
+//! leaves. Single-deck bodies keep the deck-order allocation unchanged.
 
 use super::seating::CabinClass;
 use super::{DeckCapacities, DeckSegment};
@@ -35,6 +39,13 @@ impl DeckCapacities {
             total: reversed.total,
         }
     }
+}
+
+/// More than one passenger deck, a hump's or a full upper deck: the source
+/// seat limit is then charged by the seats each deck places, against the
+/// decks' uncapped exit ceilings.
+pub(crate) fn multi_deck(g: &CabinGeometry) -> bool {
+    g.upper_deck.is_some() || g.passenger_decks.len() > 1
 }
 
 /// The decks in layout order: the partial upper deck first on a hump body.
@@ -65,7 +76,8 @@ pub(crate) fn upper_deck_start_class(classes: &[CabinClass], next: usize) -> usi
 /// The per-deck seat ceiling while the decks are laid out in
 /// [`layout_order`].
 pub(crate) struct RemainingSourceCap<'a> {
-    hump: bool,
+    /// More than one passenger deck: the limit is charged by seats placed.
+    multi_deck: bool,
     geometric: &'a DeckCapacities,
     capped: &'a DeckCapacities,
     source: Option<i64>,
@@ -82,7 +94,7 @@ impl<'a> RemainingSourceCap<'a> {
         source: Option<i64>,
     ) -> Self {
         Self {
-            hump: g.upper_deck.is_some(),
+            multi_deck: multi_deck(g),
             geometric,
             capped,
             source: source.filter(|cap| *cap >= 0),
@@ -92,7 +104,7 @@ impl<'a> RemainingSourceCap<'a> {
 
     /// The ceiling of deck `name`, given the seats placed so far.
     pub(crate) fn cap(&self, name: &str) -> i64 {
-        if !self.hump {
+        if !self.multi_deck {
             return self.capped.for_deck(name);
         }
         let left = self

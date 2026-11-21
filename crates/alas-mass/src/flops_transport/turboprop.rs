@@ -258,7 +258,7 @@ pub struct TurbopropPropulsionInputs {
 }
 
 /// The evaluated shaft-power propulsion group, kg.
-#[derive(Debug, Clone, Copy, PartialEq)]
+#[derive(serde::Serialize, serde::Deserialize, Debug, Clone, Copy, PartialEq)]
 pub struct TurbopropPropulsionBreakdown {
     /// One engine, turbomachine and (for a PW100-class declaration) its
     /// reduction gearbox, kg.
@@ -290,23 +290,28 @@ pub struct TurbopropPropulsionBreakdown {
     /// propellers, pylons, installation and fuel system, kg.
     pub total_without_nacelles_kg: f64,
     /// Which engine-mass source was used.
-    pub engine_mass_source: &'static str,
+    #[serde(deserialize_with = "alas_config::static_text::text")]
+    pub engine_mass_source: alas_config::static_text::Text,
     /// Resolved Mach number supplied to the propeller regression.
     pub design_mach: f64,
     /// Evidence/basis label for `design_mach`.
-    pub design_mach_basis: &'static str,
+    #[serde(deserialize_with = "alas_config::static_text::text")]
+    pub design_mach_basis: alas_config::static_text::Text,
     /// Resolved wetted area of one nacelle, m^2.
     pub nacelle_wetted_area_m2: f64,
     /// Evidence/basis label for `nacelle_wetted_area_m2`.
-    pub nacelle_area_basis: &'static str,
+    #[serde(deserialize_with = "alas_config::static_text::text")]
+    pub nacelle_area_basis: alas_config::static_text::Text,
     /// Resolved nacelle component density, kg/m^2.
     pub nacelle_area_density_kg_m2: f64,
     /// Evidence/basis label for `nacelle_area_density_kg_m2`.
-    pub nacelle_area_density_basis: &'static str,
+    #[serde(deserialize_with = "alas_config::static_text::text")]
+    pub nacelle_area_density_basis: alas_config::static_text::Text,
     /// Whether propeller mass came from the generic regression or a declared
     /// aircraft-specific source statement. The source statement's inclusion
     /// scope is not inferred when it is unspecified.
-    pub propeller_mass_basis: &'static str,
+    #[serde(deserialize_with = "alas_config::static_text::text")]
+    pub propeller_mass_basis: alas_config::static_text::Text,
 }
 
 /// Why a shaft-power propulsion group could not be evaluated.

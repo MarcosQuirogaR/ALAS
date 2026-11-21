@@ -1,34 +1,44 @@
 {
   "fixtures": {
     "cycle": {
-      "description": "alas.physics.propulsion: compute_turbofan_cycle across feasible/infeasible/static branches, anchor_mass_flow_kg_s, the four parametric sweeps and classify_engine_by_bpr, on the default PropulsionCycleConfig",
-      "generator": "gen_prop_cycle.py",
-      "runtime": "alas",
       "alas_commit": "7d1555c1f4db5110cf6cd187c156718e1a033b50",
+      "description": "alas.physics.propulsion: compute_turbofan_cycle across feasible/infeasible/static branches, anchor_mass_flow_kg_s, the four parametric sweeps and classify_engine_by_bpr, on the default PropulsionCycleConfig",
       "environment": {
-        "numpy": "2.5.1",
         "aerosandbox": "4.2.8",
+        "numpy": "2.5.1",
         "platform": "Windows-11-10.0.26200-SP0",
-        "scipy": "1.17.1",
-        "python": "3.13.13"
-      }
+        "python": "3.13.13",
+        "scipy": "1.17.1"
+      },
+      "generator": "gen_prop_cycle.py",
+      "runtime": "alas"
     },
     "suave_turbofan": {
-      "description": "SUAVE Turbofan.evaluate_thrust/size via turbofan_sizing(), at the cruise design point and replayed at sea-level-static, on the AVE and A320-200 presets",
-      "generator": "gen_prop_suave_turbofan.py",
-      "runtime": "suave",
       "alas_commit": "7d1555c1f4db5110cf6cd187c156718e1a033b50",
+      "description": "SUAVE Turbofan.evaluate_thrust/size via turbofan_sizing(), at the cruise design point and replayed at sea-level-static, on the AVE and A320-200 presets",
       "environment": {
-        "suave": {
-          "version": "2.5.2",
-          "tree": "external tools/SUAVE-2.5.2/trunk"
-        },
-        "scipy": "1.11.4",
-        "platform": "Windows-10-10.0.26200-SP0",
+        "PIL": "12.3.0",
         "aerosandbox": "absent",
+        "atmosphere": "us1976 (SUAVE, altitude read as geopotential)",
+        "matplotlib": "3.7.5",
+        "neuralfoil": "absent",
+        "numpy": "1.26.4",
+        "numpy_blas": {
+          "name": "openblas64",
+          "openblas configuration": "USE_64BITINT=1 DYNAMIC_ARCH=1 DYNAMIC_OLDER= NO_CBLAS= NO_LAPACK= NO_LAPACKE= NO_AFFINITY=1 USE_OPENMP= SKYLAKEX MAX_THREADS=2",
+          "version": "0.3.23.dev"
+        },
+        "platform": "Windows-10-10.0.26200-SP0",
         "python": "3.10.20",
-        "numpy": "1.26.4"
-      }
+        "scipy": "1.11.4",
+        "shapely": "absent",
+        "suave": {
+          "tree": "external tools/SUAVE-2.5.2/trunk",
+          "version": "2.5.2"
+        }
+      },
+      "generator": "gen_prop_suave_turbofan.py",
+      "runtime": "suave"
     }
   }
 }

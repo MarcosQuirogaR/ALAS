@@ -317,13 +317,18 @@ pub fn assess(
         // Include the observed secant slope as a consistency safeguard for
         // externally populated reports, not just the moment-derived slope.
         for j in 1..count {
+            // The secant slope judges the bending curvature: the web shear part of
+            // the deflection (not reduced by stiffer caps) is taken out.
+            let shear = |k: usize| case.shear_deflection_m.get(k).copied().unwrap_or(0.0);
             max_slope = max_slope.max(
-                ((case.deflection_m[j] - case.deflection_m[j - 1])
+                (((case.deflection_m[j] - shear(j)) - (case.deflection_m[j - 1] - shear(j - 1)))
                     / (report.y[j] - report.y[j - 1]))
                     .abs(),
             );
         }
-        max_slope = max_slope.max(case.tip_deflection_m.abs() / semispan);
+        let tip_bending =
+            case.tip_deflection_m - case.shear_deflection_m.last().copied().unwrap_or(0.0);
+        max_slope = max_slope.max(tip_bending.abs() / semispan);
         let error = (1.0 + max_slope * max_slope).powf(1.5) - 1.0;
         if !error.is_finite() {
             return invalid();

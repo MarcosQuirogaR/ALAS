@@ -28,7 +28,9 @@ use alas_mass::tanks::resolve_product_layout;
 
 use crate::full_analysis::AnalysisReport;
 
+mod mission_history;
 mod summaries;
+pub use mission_history::{MissionCgPoint, MissionEventRecord, MissionHistory, MissionStageResult};
 pub use summaries::{LedgerItemSummary, MassBalanceAssessment, MassStateSummary, TankSummary};
 
 use super::{FindingCode, FindingSeverity, FuelLoadingAssessment, PhysicalFinding};
@@ -56,11 +58,28 @@ const FUEL_CG_CURVE_STEPS: usize = 24;
 /// stand in for it, because the lumped gear point is the same refused
 /// station. That case pushes an error finding, so the run is infeasible
 /// rather than reported without a mass statement.
+#[cfg(test)]
 pub(super) fn assess_mass_balance(
     config: &AlasConfig,
     design: &DesignVector,
     report: &AnalysisReport,
     fuel_loading: &FuelLoadingAssessment,
+    findings: &mut Vec<PhysicalFinding>,
+) -> Option<MassBalanceAssessment> {
+    assess_mass_balance_with_flight(config, design, report, fuel_loading, None, findings)
+}
+
+/// [`assess_mass_balance`] and, when the run flew a mission plan, the history
+/// of mass, centre of gravity and tanks through it.
+pub(super) fn assess_mass_balance_with_flight(
+    config: &AlasConfig,
+    design: &DesignVector,
+    report: &AnalysisReport,
+    fuel_loading: &FuelLoadingAssessment,
+    flight: Option<(
+        &alas_mission::MissionResult,
+        &crate::mission_stage::plan::PlanLoadCase,
+    )>,
     findings: &mut Vec<PhysicalFinding>,
 ) -> Option<MassBalanceAssessment> {
     let warn = |findings: &mut Vec<PhysicalFinding>, code, message: String| {
@@ -73,6 +92,7 @@ pub(super) fn assess_mass_balance(
             unit: "",
         });
     };
+    super::clearance_flag::append(config, &report.airplane, findings);
     let Some(masses) = lumped_masses(report) else {
         warn(
             findings,
@@ -166,11 +186,7 @@ pub(super) fn assess_mass_balance(
     };
     let payload_items = payload_items(report);
     let capacity_kg = tanks.usable_capacity_kg();
-    // The flown states follow the dispatched route; the sized design loading
-    // is the separate maximum-fuel state below.
-    let flown_fuel_kg = fuel_loading
-        .flown_carried_fuel_kg
-        .unwrap_or(fuel_loading.analyzed_carried_fuel_kg);
+    let flown_fuel_kg = mission_history::loaded_fuel_kg(fuel_loading, flight);
     let takeoff_fuel_kg = match tanks.loadable_fuel_kg(flown_fuel_kg) {
         Ok(kg) => kg,
         Err(error) => {
@@ -184,7 +200,7 @@ pub(super) fn assess_mass_balance(
     };
     let landing_fuel_kg = fuel_loading
         .analyzed_landing_mass_kg
-        .map(|mass| (mass - fuel_loading.zero_fuel_mass_kg).max(0.0))
+        .map(|mass| (mass - fuel_loading.flown_zero_fuel_mass_kg()).max(0.0))
         .unwrap_or(FALLBACK_LANDING_FUEL_FRACTION * takeoff_fuel_kg)
         .min(takeoff_fuel_kg);
     // Landing is a *burn* from takeoff, not a fresh `distribute`.
@@ -259,7 +275,7 @@ pub(super) fn assess_mass_balance(
         .distribute(maximum_fuel_kg)
         .ok()
         .map(|state| statement.with_fuel_items(&state.mass_items(&tanks)));
-    let takeoff = statement.state(LoadState::Takeoff);
+    let [takeoff, landing] = mission_history::flown_states(&statement, fuel_loading);
     let mut states = vec![
         summarize(
             "operating empty",
@@ -267,7 +283,7 @@ pub(super) fn assess_mass_balance(
         ),
         summarize("zero fuel", statement.state(LoadState::ZeroFuel)),
         summarize("flown takeoff", takeoff),
-        summarize("flown landing", statement.state(LoadState::Landing)),
+        summarize("flown landing", landing),
     ];
     if let Some(props) = maximum_fuel_state {
         states.push(summarize("maximum fuel takeoff", props));
@@ -277,7 +293,16 @@ pub(super) fn assess_mass_balance(
     // load, which can exceed the tanks; the like-for-like comparison is the
     // lumped model re-evaluated at the fuel the ledger actually placed.
     let lumped_takeoff_cg_pct_mac = lumped_coordinates(report).map_or(f64::NAN, |coordinates| {
-        let mut lumped = masses;
+        // The report's fuel point is the centroid of the fuel the report was
+        // analysed at (the closure load), not of `takeoff_fuel_kg`. A lumped
+        // model at this fuel mass has to carry the centroid of this same fill
+        // in the same tanks, or the comparison mixes two fuel states.
+        let mut coordinates = coordinates;
+        let fuel_centroid = takeoff_state.properties(&tanks).cg_m;
+        if takeoff_fuel_kg > 0.0 && fuel_centroid.iter().all(|value| value.is_finite()) {
+            coordinates.fuel = fuel_centroid;
+        }
+        let mut lumped = mission_history::flown_lumped(masses, fuel_loading);
         lumped.fuel = takeoff_fuel_kg;
         let lumped_cg = calculate_physical_cg(&lumped, &coordinates);
         100.0 * (lumped_cg[0] - mac_le_x_m) / mac_m
@@ -304,6 +329,17 @@ pub(super) fn assess_mass_balance(
         });
     }
 
+    let history = flight.and_then(|(mission, case)| {
+        mission_history::for_flight(
+            config,
+            report,
+            mission,
+            case,
+            (&statement, &tanks, &takeoff_state),
+            &states,
+            findings,
+        )
+    });
     let span_m = report.airplane.b_ref;
     let fuselage_length_m = report
         .airplane
@@ -350,6 +386,7 @@ pub(super) fn assess_mass_balance(
             })
             .collect(),
         lumped_takeoff_cg_pct_mac,
+        history,
     })
 }
 
@@ -445,15 +482,22 @@ pub(super) fn payload_items(report: &AnalysisReport) -> Vec<PayloadItemSummary> 
         .as_ref()
         .map(|layout| {
             layout
-                .items
-                .iter()
-                .filter(|item| item.mass > 0.0)
+                .payload_items()
                 .enumerate()
                 .map(|(index, item)| PayloadItemSummary {
                     label: format!("{}_{index}", item.kind.as_str()),
                     mass_kg: item.mass,
-                    position_m: [item.x, item.y, item.z],
+                    position_m: [item.x, item.y, item.mass_z()],
                     extent_m: [item.length, item.width, item.height],
+                    seats: match &item.meta {
+                        alas_payload::layout::ItemMeta::Seat(seat) => Some((
+                            alas_mass::flops_transport::seats::SeatClass::from_cabin_class(
+                                seat.cls,
+                            ),
+                            usize::try_from(seat.filled).unwrap_or(0),
+                        )),
+                        _ => None,
+                    },
                 })
                 .collect()
         })
@@ -479,6 +523,98 @@ fn capacity_source_label(source: alas_mass::tanks::CapacitySource) -> &'static s
         alas_mass::tanks::CapacitySource::Geometric => "geometric",
         alas_mass::tanks::CapacitySource::Declared => "declared",
     }
+}
+
+/// Make the report's lumped group points describe the same aircraft as the
+/// item ledger, for the two groups whose lumped station is not the centroid of
+/// what the ledger places in them.
+///
+/// * Gear: the lumped point weights nose and main by the fixed
+///   [`alas_mass::stations::NOSE_GEAR_MASS_FRACTION`]; the ledger uses the
+///   FLOPS structural group's own nose/main split when one exists.
+/// * Furnishings: the lumped `furnishings` mass carries the cabin
+///   furnishings, the seats, every operating item (flight crew on the flight
+///   deck, cabin crew, passenger service, engine oil at the nacelles) and the
+///   unusable fuel in the tanks, all at one mid-cabin station. The ledger
+///   places each where it physically sits, so the lumped point is the
+///   mass-weighted centroid of those same ledger rows.
+///
+/// Both points are first moments of the ledger's own rows, so the lumped total
+/// moment equals the ledger's; nothing is fitted. A group is left untouched
+/// when the ledger does not build, or its mass does not close on the lumped
+/// group mass (then the two are not the same inventory). The physical CG is
+/// recomputed from the aligned points.
+pub fn ledger_aligned_coordinates(
+    config: &AlasConfig,
+    report: &AnalysisReport,
+) -> Option<(MassCoordinates, [f64; 3])> {
+    use alas_mass::ledger::MassGroup;
+    let masses = lumped_masses(report)?;
+    let mut coordinates = lumped_coordinates(report)?;
+    let station_config = super::design_mass_config(config, report);
+    let Ok(stations) =
+        product_component_stations(&station_config, &report.design, &report.airplane, &masses)
+    else {
+        return None;
+    };
+    let Ok(resolved_tanks) = resolve_product_layout(config, &report.design, &report.airplane)
+    else {
+        return None;
+    };
+    let flops_buildup = report.flops_mass_buildup.as_deref();
+    let flops_groups = flops_buildup.map(|buildup| &buildup.systems_and_operating_items);
+    if config.mass_model.mass_architecture.is_pure_flops() && flops_groups.is_none() {
+        return None;
+    }
+    let tanks = match flops_groups {
+        Some(flops) => {
+            match resolved_tanks.with_unusable_fuel_total(flops.operating_items.unusable_fuel_kg) {
+                Ok(tanks) => tanks,
+                Err(_) => return None,
+            }
+        }
+        None => resolved_tanks,
+    };
+    let payload_items = payload_items(report);
+    let Ok(statement) = MassStatement::build_with_methods(
+        MassStatementInputs {
+            masses: &masses,
+            stations: &stations,
+            payload_items: &payload_items,
+            takeoff_fuel_items: Vec::new(),
+            landing_fuel_items: Vec::new(),
+            unusable_fuel_items: tanks.unusable_items(),
+            flops: flops_groups,
+            flops_gear_split_kg: flops_buildup.and_then(FlopsMassBuildup::gear_split_kg),
+        },
+        flops_buildup.map_or_else(
+            || LedgerMethods::from_mass_model(&config.mass_model),
+            LedgerMethods::from_buildup,
+        ),
+    ) else {
+        return None;
+    };
+    let ledger = statement.ledger();
+    let closes = |kg: f64, reference_kg: f64| {
+        (kg - reference_kg).abs() <= 1.0e-6 * reference_kg.abs().max(1.0)
+    };
+    let gear = ledger.properties_where(|item| item.group == MassGroup::LandingGear);
+    if closes(gear.mass_kg, masses.gear) && gear.cg_m.iter().all(|v| v.is_finite()) {
+        coordinates.gear = gear.cg_m;
+    }
+    // Furnishings, operating items and the unusable fuel in the tanks.
+    let cabin = ledger.properties_where(|item| {
+        item.role.is_operating_empty()
+            && matches!(
+                item.group,
+                MassGroup::Furnishings | MassGroup::OperatingItems | MassGroup::Fuel
+            )
+    });
+    if closes(cabin.mass_kg, masses.furnishings) && cabin.cg_m.iter().all(|v| v.is_finite()) {
+        coordinates.furnishings = cabin.cg_m;
+    }
+    let cg = calculate_physical_cg(&masses, &coordinates);
+    Some((coordinates, cg))
 }
 
 // A test asserts on the default aircraft it built, so a failed expect there

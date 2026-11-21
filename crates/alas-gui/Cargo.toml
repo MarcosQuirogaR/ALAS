@@ -21,11 +21,13 @@ alas-mission = { path = "../alas-mission" }
 alas-opt = { path = "../alas-opt" }
 alas-payload = { path = "../alas-payload" }
 alas-perf = { path = "../alas-perf" }
+alas-mass = { path = "../alas-mass" }
 alas-pipeline = { path = "../alas-pipeline" }
 alas-report = { path = "../alas-report" }
 alas-route = { path = "../alas-route" }
 alas-screen = { path = "../alas-screen" }
 alas-struct = { path = "../alas-struct" }
+alas-units = { path = "../alas-units" }
 # The desktop UAV page owns only interaction state; selection, optimization,
 # geometry conversion, and shared-core verification remain in `alas-uav`.
 alas-uav = { path = "../alas-uav" }
@@ -36,6 +38,9 @@ egui = { workspace = true }
 serde = { workspace = true }
 serde_json = { workspace = true }
 serde_yaml = { workspace = true }
+
+[dev-dependencies]
+alas-acceptance = { path = "../alas-acceptance" }
 
 [lints]
 workspace = true

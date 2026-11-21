@@ -12,7 +12,7 @@
 //! L/D, closed takeoff mass, block fuel, the neutral point and CG; and from a
 //! two-evaluation search seeded with the nominal, the history row of that
 //! nominal (cruise angle of attack, trim stabilizer incidence, L/D, cost).
-//! Compare two outputs with the lane's `compare_equivalence.py`.
+//! Compare two outputs with the study's `compare_equivalence.py`.
 
 #![allow(clippy::print_stdout)]
 

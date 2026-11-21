@@ -1,8 +1,7 @@
 // SPDX-License-Identifier: AGPL-3.0-or-later
 // Copyright (C) 2026 Marcos Quiroga Rodriguez
 
-//! Uncertainty-aware verdict of the cruise-thrust and top-of-climb checks
-//! (owner decision 2026-10-13).
+//! Uncertainty-aware verdict of the cruise-thrust and top-of-climb checks.
 //!
 //! An engine whose cruise or climb thrust has a published datum (the deck is
 //! scaled onto it, `EmpiricalTurbofanModel::engine_scale`) keeps the hard
@@ -16,8 +15,7 @@
 //!
 //! The take-off thrust checks (CS 25.121(b) second segment, 25.121(d) approach
 //! climb, 25.119 landing climb: the take-off/go-around rating) carry the
-//! take-off band instead ([`takeoff_thrust_scatter`], owner decision
-//! 2026-10-14): the half-spread between the two take-off thrust sources, the
+//! take-off band instead ([`takeoff_thrust_scatter`]): the half-spread between the two take-off thrust sources, the
 //! Jenkinson charts the deck uses and the Bartel-Young/OpenAP correlation it
 //! replaced. The cruise datums of the engine catalogue are cruise or climb
 //! points and say nothing about the thrust at V2, so the band applies to every
@@ -393,11 +391,12 @@ mod tests {
             ("CF6-50", true),
             ("CF6-80C2", true),
             ("LEAP-1A", true),
+            ("PW305A", true),
             ("PW1500G", false),
             ("PW1900G", false),
             ("GEnx-1B", false),
             ("GE9X", false),
-            ("LEAP-1C", false),
+            ("LEAP-1C", true),
             ("Trent 900", false),
             ("Trent 970-84", false),
         ] {

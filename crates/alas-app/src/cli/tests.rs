@@ -81,6 +81,21 @@ fn cpacs_input_path_is_parsed_without_changing_solver_defaults() {
 }
 
 #[test]
+fn workspace_without_the_server_is_rejected_rather_than_ignored() {
+    let args = ["--workspace".to_owned(), "cases".to_owned()];
+    let error = parse_args(&args)
+        .err()
+        .unwrap_or_else(|| panic!("--workspace alone must be rejected"));
+    assert!(error.contains("--mcp"), "{error}");
+    let args = [
+        "--mcp".to_owned(),
+        "--workspace".to_owned(),
+        "cases".to_owned(),
+    ];
+    assert!(parse_args(&args).is_ok_and(|cli| cli.is_some_and(|cli| cli.mcp)));
+}
+
+#[test]
 fn a_stray_positional_argument_is_rejected_rather_than_ignored() {
     let args = ["--no-optimize".to_owned(), "config.yaml".to_owned()];
     let error = parse_args(&args)
@@ -176,4 +191,71 @@ fn every_long_flag_the_parser_accepts_appears_in_the_help_text() {
         }
     }
     assert!(flags >= 10, "only {flags} flags found; the scan is broken");
+}
+
+#[test]
+fn tool_installer_flags_parse_and_are_not_pipeline_runs() {
+    let args = [
+        "--install-tools".to_owned(),
+        "--yes".to_owned(),
+        "--uninstall-tool".to_owned(),
+        "gmsh".to_owned(),
+    ];
+    let parsed = parse_args(&args)
+        .unwrap_or_else(|error| panic!("installer flags parse: {error}"))
+        .unwrap_or_else(|| panic!("installer flags do not request help"));
+    assert!(parsed.install_tools && parsed.assume_yes);
+    assert_eq!(parsed.uninstall_tool.as_deref(), Some("gmsh"));
+}
+
+#[test]
+fn every_long_flag_the_parser_accepts_is_in_the_headless_reference() {
+    let source = include_str!("args.rs");
+    let reference = include_str!("../../../../docs/HEADLESS.md");
+    let parser = source
+        .split("pub fn parse_args")
+        .nth(1)
+        .and_then(|rest| rest.split("fn print_help").next())
+        .unwrap_or_else(|| panic!("parse_args source not found"));
+    for piece in parser.split('"') {
+        if piece.starts_with("--") && piece.chars().all(|c| c.is_ascii_lowercase() || c == '-') {
+            assert!(
+                reference.contains(&format!("`{piece}`")),
+                "{piece} missing from docs/HEADLESS.md"
+            );
+        }
+    }
+}
+
+#[test]
+fn config_file_program_locations_are_discarded_unless_trusted() {
+    let mut config = AlasConfig::default();
+    config.mses.mses_dir = "D:/attacker/mses".to_owned();
+    config.structures.patran_exe_path = "D:/attacker/patran.exe".to_owned();
+    let discarded = super::args::discard_config_tool_paths(&mut config);
+    assert_eq!(discarded, ["mses.mses_dir", "structures.patran_exe_path"]);
+    assert_eq!(config.mses.mses_dir, AlasConfig::default().mses.mses_dir);
+    assert!(super::args::discard_config_tool_paths(&mut config).is_empty());
+
+    let args = ["--trust-config-tool-paths".to_owned()];
+    let parsed = parse_args(&args)
+        .unwrap_or_else(|error| panic!("flag parses: {error}"))
+        .unwrap_or_else(|| panic!("flag does not request help"));
+    assert!(parsed.trust_config_tool_paths);
+    assert!(super::args::help_text().contains("--trust-config-tool-paths"));
+}
+
+#[test]
+fn live_dispatch_is_an_explicit_documented_flag() {
+    let default = parse_args(&[])
+        .unwrap_or_else(|error| panic!("no arguments parse: {error}"))
+        .unwrap_or_else(|| panic!("no arguments do not request help"));
+    assert!(!default.live_dispatch);
+
+    let args = ["--live-dispatch".to_owned()];
+    let parsed = parse_args(&args)
+        .unwrap_or_else(|error| panic!("flag parses: {error}"))
+        .unwrap_or_else(|| panic!("flag does not request help"));
+    assert!(parsed.live_dispatch);
+    assert!(super::args::help_text().contains("--live-dispatch"));
 }

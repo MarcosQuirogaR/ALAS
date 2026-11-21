@@ -48,6 +48,7 @@ path = "src/bin/matrix_native.rs"
 
 [dependencies]
 alas-config = { path = "../alas-config" }
+alas-plausibility = { path = "../alas-plausibility" }
 alas-exec = { path = "../alas-exec" }
 alas-geom = { path = "../alas-geom" }
 alas-atmo = { path = "../alas-atmo" }
@@ -59,6 +60,8 @@ alas-opt = { path = "../alas-opt" }
 alas-screen = { path = "../alas-screen" }
 alas-report = { path = "../alas-report" }
 alas-pipeline = { path = "../alas-pipeline" }
+alas-payload = { path = "../alas-payload" }
+alas-perf = { path = "../alas-perf" }
 serde = { workspace = true }
 serde_json = { workspace = true }
 serde_yaml = { workspace = true }
@@ -68,8 +71,15 @@ tracing = { workspace = true }
 # them out of [dependencies] keeps the GUI stack out of library and bin builds.
 [dev-dependencies]
 alas-app = { path = "../alas-app" }
-alas-payload = { path = "../alas-payload" }
-alas-perf = { path = "../alas-perf" }
+alas-prop = { path = "../alas-prop" }
+alas-route = { path = "../alas-route" }
+# capacity_probe: the tail volume coefficient beside the hold capacity.
+alas-stab = { path = "../alas-stab" }
 
 [lints]
 workspace = true
+
+[[bin]]
+name = "section_nf_probe"
+path = "src/bin/section_nf_probe.rs"
+test = false

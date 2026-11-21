@@ -17,11 +17,16 @@
 pub mod raster;
 pub mod render;
 #[cfg(test)]
+mod render_overlay_tests;
+#[cfg(test)]
 mod text_block_tests;
 pub mod view;
+mod view_cache;
 
+pub use raster::{with_embedded_globe_textures, EXPORT_GLOBE_SCALE};
 pub use render::{
     render_scene_to_shapes, render_scene_to_shapes_with_context, to_egui_color, to_egui_stroke,
     ViewportTransform,
 };
 pub use view::{SceneView, SceneViewState};
+pub use view_cache::pending_background_rasters;

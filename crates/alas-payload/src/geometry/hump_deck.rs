@@ -20,9 +20,9 @@
 //! to the cylindrical section). The main floor is instead one level,
 //! the highest the section rule puts it under the upper deck (the least depth
 //! the hold under the hump may have), held from the nose to the end of the
-//! hump; aft of the hump it stays there until the tail's upsweep takes the
-//! section rule above it. The hold's ceiling moves with the floor so the two
-//! never overlap.
+//! hump; aft of the hump it stays there to the tail (a floor is a plane; the
+//! tail's upsweep narrows the usable width over it instead of lifting it).
+//! The hold's ceiling moves with the floor so the two never overlap.
 //!
 //! Frame: x aft of the nose tip, z up, metres.
 
@@ -32,6 +32,30 @@ use super::{CabinGeometry, DeckSpec, MIN_DECK_SEPARATION_FRAC};
 const LEVEL_SAMPLE_STEP_M: f64 = 0.25;
 
 impl CabinGeometry {
+    /// The level floor of each passenger deck of a body without a partial
+    /// upper deck: the section rule's floor at the middle of the constant
+    /// cabin section, held along the whole deck (a floor is a plane; only
+    /// the keel of the loft follows the nose droop and the tail upsweep).
+    pub(super) fn level_floors(&self) -> Vec<f64> {
+        let x_ref = 0.5 * (self.cabin_start_x + self.cabin_end_x);
+        self.passenger_decks
+            .iter()
+            .map(|deck| self.zc_at(x_ref) + deck.floor_frac * self.internal_half_height(x_ref))
+            .collect()
+    }
+
+    /// `deck`'s level floor, when it is one of this body's own passenger decks
+    /// (a deck a caller built for itself, like a freight hold's, keeps the
+    /// section rule).
+    pub(super) fn level_floor_of(&self, deck: &DeckSpec) -> Option<f64> {
+        self.passenger_decks
+            .iter()
+            .position(|candidate| {
+                candidate.name == deck.name && candidate.floor_frac == deck.floor_frac
+            })
+            .and_then(|index| self.level_deck_floors.get(index).copied())
+    }
+
     /// The hump's crown rise at `x`, m; zero without a partial upper deck.
     /// Interpolated like the sections themselves, so the main lobe between
     /// two stations is the straight loft of the two main-lobe sections.
@@ -75,15 +99,11 @@ impl CabinGeometry {
     }
 
     /// The main-deck floor at `x`, the datum of the upper floor: the level
-    /// floor, or the section rule where the section's tail upsweep rises
-    /// above it aft of the hump.
-    fn main_floor_z(&self, x: f64) -> f64 {
-        let section = self.section_main_floor_z(x);
-        match (self.level_main_floor_z, self.upper_deck) {
-            (Some(level), Some(deck)) if x <= deck.end_x_m => level,
-            (Some(level), _) => level.max(section),
-            (None, _) => section,
-        }
+    /// floor, held to the tail (a floor is a plane; the tail's upsweep
+    /// narrows the usable width over it instead of lifting it).
+    pub(super) fn main_floor_z(&self, x: f64) -> f64 {
+        self.level_main_floor_z
+            .unwrap_or_else(|| self.section_main_floor_z(x))
     }
 
     /// Whether the upper-deck floor spans station `x`.

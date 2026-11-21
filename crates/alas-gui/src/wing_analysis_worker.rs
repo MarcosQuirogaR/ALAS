@@ -12,14 +12,42 @@
 use std::collections::hash_map::DefaultHasher;
 use std::hash::{Hash, Hasher};
 use std::sync::atomic::Ordering;
-use std::sync::mpsc::channel;
+use std::sync::mpsc::{channel, Receiver, TryRecvError};
 use std::sync::Arc;
+use std::time::{Duration, Instant};
 
-use alas_aero::wing_analysis::{analyse, build_wing_model, WingAnalysisOutcome};
+use alas_aero::wing_analysis::{analyse, build_wing_model, WingAnalysisOutcome, WingModel};
 use alas_config::{AlasConfig, DesignVector};
-use alas_report::families::geometry::figure_exterior_3d;
+use alas_report::families::geometry::{SandboxSceneModel, SandboxSceneOptions};
+use alas_report::scene::Camera3D;
+
+use crate::sandbox::scene::{LivePreviewFit, OrbitFit, SECTION_POINTS};
 
 use super::{RunPhase, WingAnalysisState, WingAnalysisTab};
+
+/// Quiet time after the last geometry edit before the surfaces and the live
+/// preview are rebuilt, so a slider drag does not rebuild them every frame.
+pub(crate) const PREVIEW_DEBOUNCE: Duration = Duration::from_millis(150);
+
+/// A geometry edit waiting for its debounce to elapse.
+pub(crate) struct PendingGeometry {
+    signature: u64,
+    since: Instant,
+}
+
+/// What the background rebuild produced for one geometry signature.
+struct GeometryBuilt {
+    signature: u64,
+    model: Result<WingModel, String>,
+    preview_model: Option<SandboxSceneModel>,
+}
+
+/// A background rebuild of the surfaces and the preview scene.
+pub(crate) struct GeometryJob {
+    signature: u64,
+    source_name: String,
+    rx: Receiver<GeometryBuilt>,
+}
 
 /// The single message a Wing Analysis worker sends.
 pub enum WingAnalysisRun {
@@ -41,6 +69,12 @@ impl WingAnalysisState {
     /// selected surface set actually changed, so holding the window open does
     /// not rebuild a lattice every frame. A changed snapshot invalidates the
     /// preview and any installed result through the geometry revision.
+    ///
+    /// The first snapshot and a surface-set change are built at once. An edit
+    /// of the geometry or the design point while a snapshot and its preview
+    /// are showing is debounced by [`PREVIEW_DEBOUNCE`] after the last edit
+    /// and rebuilt on a background thread; the last preview stays on screen
+    /// until the new one is ready.
     pub fn refresh_geometry(
         &mut self,
         config: &AlasConfig,
@@ -48,14 +82,22 @@ impl WingAnalysisState {
         source_name: &str,
         theme: &str,
     ) {
+        self.install_built_geometry(theme);
         let signature = geometry_signature(config, design, self.includes_empennage());
         let unchanged = self.geometry_signature == Some(signature);
         if unchanged && self.model.is_some() && self.preview.is_some() {
+            self.pending_geometry = None;
             if self.preview_theme != theme {
                 self.rebuild_preview(theme);
             }
             return;
         }
+        if self.geometry_signature.is_some() && self.model.is_some() && self.preview.is_some() {
+            self.debounce_geometry(config, design, source_name, theme, signature);
+            return;
+        }
+        self.pending_geometry = None;
+        self.geometry_job = None;
         self.geometry_signature = Some(signature);
         self.source_name = source_name.to_owned();
         if !unchanged || self.model.is_none() {
@@ -70,10 +112,13 @@ impl WingAnalysisState {
                     if !self.moment_reference_manual {
                         self.inputs.moment_reference_m = model.reference().moment_reference_m;
                     }
+                    self.preview_model =
+                        Some(SandboxSceneModel::new(model.airplane(), SECTION_POINTS));
                     self.model = Some(model);
                     self.geometry_error = None;
                 }
                 Err(error) => {
+                    self.preview_model = None;
                     self.model = None;
                     self.geometry_error = Some(error.to_string());
                 }
@@ -83,17 +128,137 @@ impl WingAnalysisState {
         self.rebuild_preview(theme);
     }
 
+    /// Note an edit and start the background rebuild once it has been quiet
+    /// for [`PREVIEW_DEBOUNCE`] and no earlier rebuild is still running.
+    fn debounce_geometry(
+        &mut self,
+        config: &AlasConfig,
+        design: &DesignVector,
+        source_name: &str,
+        _theme: &str,
+        signature: u64,
+    ) {
+        if self.pending_geometry.as_ref().map(|p| p.signature) != Some(signature) {
+            self.pending_geometry = Some(PendingGeometry {
+                signature,
+                since: Instant::now(),
+            });
+        }
+        let quiet = self
+            .pending_geometry
+            .as_ref()
+            .is_some_and(|p| p.since.elapsed() >= PREVIEW_DEBOUNCE);
+        if !quiet || self.geometry_job.is_some() {
+            return;
+        }
+        let geometry = config.geometry.clone();
+        let design = *design;
+        let surfaces = self.inputs.surfaces;
+        let moment_reference = self
+            .moment_reference_manual
+            .then_some(self.inputs.moment_reference_m);
+        let (tx, rx) = channel();
+        let spawned = crate::worker_stack::spawn_analysis_thread("alas-wing-preview", move || {
+            let model = build_wing_model(&geometry, &design, surfaces, moment_reference)
+                .map_err(|error| error.to_string());
+            let preview_model = model
+                .as_ref()
+                .ok()
+                .map(|model| SandboxSceneModel::new(model.airplane(), SECTION_POINTS));
+            let _ = tx.send(GeometryBuilt {
+                signature,
+                model,
+                preview_model,
+            });
+        });
+        drop(spawned);
+        self.geometry_job = Some(GeometryJob {
+            signature,
+            source_name: source_name.to_owned(),
+            rx,
+        });
+    }
+
+    /// Install a finished background rebuild when it still matches the latest
+    /// edit; a rebuild for a superseded edit is dropped.
+    fn install_built_geometry(&mut self, theme: &str) {
+        let Some(job) = &self.geometry_job else {
+            return;
+        };
+        let built = match job.rx.try_recv() {
+            Ok(built) => built,
+            Err(TryRecvError::Empty) => return,
+            Err(TryRecvError::Disconnected) => {
+                self.geometry_job = None;
+                return;
+            }
+        };
+        let Some(job) = self.geometry_job.take() else {
+            return;
+        };
+        debug_assert_eq!(job.signature, built.signature);
+        if self.pending_geometry.as_ref().map(|p| p.signature) != Some(built.signature) {
+            return;
+        }
+        self.pending_geometry = None;
+        self.geometry_signature = Some(built.signature);
+        self.source_name = job.source_name;
+        match built.model {
+            Ok(model) => {
+                if !self.moment_reference_manual {
+                    self.inputs.moment_reference_m = model.reference().moment_reference_m;
+                }
+                self.model = Some(model);
+                self.geometry_error = None;
+            }
+            Err(error) => {
+                self.model = None;
+                self.geometry_error = Some(error);
+            }
+        }
+        self.invalidate_geometry();
+        self.preview_model = built.preview_model;
+        self.rebuild_preview(theme);
+    }
+
     /// Redraw the live preview of the analysed surfaces.
     ///
-    /// The scene is the shared exterior wireframe renderer over a model that
-    /// contains only the analysed surfaces, so the preview cannot show a
-    /// component the run does not model.
+    /// The scene is the sandbox's shaded renderer over a model that contains
+    /// only the analysed surfaces, so the preview cannot show a component the
+    /// run does not model. The surfaces are lofted and partitioned once per
+    /// geometry ([`Self::preview_model`]) and the fit is made once per pane
+    /// size, so an orbit frame only reprojects them, about the centre of the
+    /// surfaces' bounding box.
     pub fn rebuild_preview(&mut self, theme: &str) {
         self.preview_theme = theme.to_owned();
-        self.preview = self.model.as_ref().map(|model| {
-            Arc::new(crate::scene::localize_scene_for_display(
-                figure_exterior_3d(model.airplane(), Some(self.camera.into()), Some(theme)),
-            ))
+        let camera: Camera3D = self.camera.into();
+        self.preview = self.preview_model.as_ref().map(|model| {
+            let fit = match self
+                .preview_fit
+                .filter(|fit| fit.canvas == self.preview_canvas)
+            {
+                Some(fit) => fit,
+                None => {
+                    let fit = OrbitFit::new(
+                        model,
+                        LivePreviewFit {
+                            canvas: self.preview_canvas,
+                            elev_deg: camera.elev_deg,
+                            azim_deg: camera.azim_deg,
+                            reserved: (0.0, 0.0),
+                        },
+                    );
+                    self.preview_fit = Some(fit);
+                    fit
+                }
+            };
+            let options = SandboxSceneOptions {
+                isolate: None,
+                max_section_points: SECTION_POINTS,
+                canvas: self.preview_canvas,
+                reference: Some(fit.reference(&camera)),
+            };
+            Arc::new(model.render(Some(camera), Some(theme), &options).0)
         });
         // Every call redraws the scene (a new geometry snapshot, an orbit
         // drag, a camera preset button, or a theme switch), so the cached

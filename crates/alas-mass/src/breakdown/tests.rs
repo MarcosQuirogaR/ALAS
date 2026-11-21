@@ -184,7 +184,7 @@ fn nacelle_fuselages_overwrite_the_propulsion_coordinate_with_their_mean_positio
         simple_fuselage("Nacelle L", 10.0, 18.0).translate([0.0, -9.8, -2.0]),
         simple_fuselage("Nacelle R", 10.0, 18.0).translate([0.0, 9.8, -2.0]),
     ]);
-    let coords = define_mass_coordinates(&plane, &geometry, None, None);
+    let coords = define_mass_coordinates(&plane, &geometry);
     // Mean X of the two nacelles' (start + half length): both at
     // x_start=10, length=8, so midpoint 14 for each: mean is 14.
     assert!((coords.propulsion[0] - 14.0).abs() < 1e-9);
@@ -196,7 +196,7 @@ fn nacelle_fuselages_overwrite_the_propulsion_coordinate_with_their_mean_positio
 fn no_nacelle_fuselages_leaves_the_wing_relative_propulsion_coordinate() {
     let geometry = GeometryConfig::default();
     let plane = plane_with_fuselages(vec![simple_fuselage("Fuselage", 0.0, 76.72)]);
-    let coords = define_mass_coordinates(&plane, &geometry, None, None);
+    let coords = define_mass_coordinates(&plane, &geometry);
     let wing = &plane.wings[0];
     let w_ac = wing.aerodynamic_center(AERODYNAMIC_CENTER_CHORD_FRACTION);
     let w_root_z = wing.xsecs[0].xyz_le[2];
@@ -247,6 +247,7 @@ fn a_positive_payload_layout_replaces_the_lumped_payload_and_recomputes_fuel() {
         total_mass: 40_000.0,
         cg_x: 33.0,
         cg_y: 0.5,
+        ..Default::default()
     };
     let (masses, coords, _) =
         run_mass_analysis(&plane, &requirements, &geometry, None, Some(&layout));
@@ -274,6 +275,7 @@ fn a_zero_mass_payload_layout_is_ignored() {
         total_mass: 0.0,
         cg_x: 99.0,
         cg_y: 99.0,
+        ..Default::default()
     };
     let (with_zero_layout, _, _) =
         run_mass_analysis(&plane, &requirements, &geometry, None, Some(&layout));

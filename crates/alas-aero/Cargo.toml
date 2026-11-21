@@ -8,6 +8,8 @@ authors.workspace = true
 rust-version.workspace = true
 
 [dependencies]
+# The partial-run report cache (`alas --only`) stores report types.
+serde = { workspace = true }
 # An `OperatingPoint` holds an `Atmosphere` and reads its density; nothing
 # else about the atmosphere model is this crate's concern.
 alas-atmo = { path = "../alas-atmo" }

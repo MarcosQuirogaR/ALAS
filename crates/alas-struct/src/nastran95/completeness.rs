@@ -11,7 +11,7 @@
 //! it can audit the reported set: at every probe `lambda` the Sturm count must
 //! equal the number of reported eigenvalues below it.
 //!
-//! The 2026-10-07 A320 wingbox run printed `19 ROOTS BELOW 9.437151E+03` while
+//! An A320 wingbox run printed `19 ROOTS BELOW 9.437151E+03` while
 //! its lowest reported eigenvalue was `9.437199E+03` (15.46 Hz): nineteen
 //! lower roots, including the 1.84 Hz first wing bending, were never extracted.
 //! The earlier adapter reported that set as the structure's modes.

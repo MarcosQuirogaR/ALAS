@@ -44,15 +44,53 @@ pub fn work_cap(nominal: SizingWork) -> SizingBudget {
 }
 
 /// The cap for a search under `objective` around `nominal`, or `None` when
-/// the nominal itself does not size, in which case there is no reference
-/// work and the search runs uncapped.
+/// the nominal's own closure does not close, in which case there is no
+/// reference work and the search runs uncapped.
 pub(crate) fn nominal_work_cap(
     objective: &DesignObjective,
     nominal: &DesignVector,
 ) -> Option<SizingBudget> {
-    assess_candidate_with_controls(objective, &nominal.to_array(), SizingControls::default())
-        .ok()
-        .map(|assessment| work_cap(assessment.sized.work))
+    nominal_reference(objective, nominal).cap
+}
+
+/// What the search takes from the nominal design's own closure, measured
+/// once before the search with the default controls, so it is the same at
+/// any worker count and on any machine.
+#[derive(Debug, Clone, PartialEq, Default)]
+pub(crate) struct NominalReference {
+    /// The per-candidate work cap ([`nominal_work_cap`]).
+    pub cap: Option<SizingBudget>,
+    /// The engine a clean-sheet sizing scaled to the nominal's thrust
+    /// requirements, when the nominal closed.
+    pub sized_engine: Option<alas_config::SizedEngine>,
+}
+
+/// The nominal's closure under `objective` ([`NominalReference`]).
+pub(crate) fn nominal_reference(
+    objective: &DesignObjective,
+    nominal: &DesignVector,
+) -> NominalReference {
+    let Ok(assessment) =
+        assess_candidate_with_controls(objective, &nominal.to_array(), SizingControls::default())
+    else {
+        return NominalReference::default();
+    };
+    let closed = assessment.sized.sizing_closed;
+    NominalReference {
+        cap: reference_work(closed, assessment.sized.work).map(work_cap),
+        sized_engine: assessment.resolved.sized_engine.filter(|_| closed),
+    }
+}
+
+/// The closure work a cap is a multiple of: the nominal's, only when its
+/// closure closed. A nominal that stops short (a dispatch stalled at the edge
+/// of what the aircraft can fly, a failed burn model, a mass that does not
+/// settle) spends a fraction of an ordinary closure: a clean-sheet 72.5 t
+/// twin's nominal stopped after 5 trip flights, its closed candidates took
+/// 15-24, and a cap of 25 rejected 27 of 32 candidates as
+/// `sizing_budget_exhausted` before their closure was judged.
+fn reference_work(closed: bool, work: SizingWork) -> Option<SizingWork> {
+    closed.then_some(work)
 }
 
 #[cfg(test)]
@@ -76,5 +114,16 @@ mod tests {
             ..SizingWork::default()
         });
         assert_eq!(huge.max_trip_flights, u32::MAX);
+    }
+
+    #[test]
+    fn only_a_closed_nominal_sets_the_cap() {
+        let work = SizingWork {
+            plan_freezes: 1,
+            trip_flights: 5,
+            deck_evals: 140_000,
+        };
+        assert_eq!(reference_work(true, work), Some(work));
+        assert_eq!(reference_work(false, work), None);
     }
 }

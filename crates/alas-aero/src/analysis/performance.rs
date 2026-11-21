@@ -18,18 +18,18 @@
 //! nothing else; `crate::analysis`'s module doc says why.
 
 use alas_atmo::Atmosphere;
-use alas_geom::aircraft::spacing::linspace;
+use alas_geom::aircraft::airplane::Airplane;
 use alas_geom::aircraft::wing::Wing;
 use alas_math::interp;
 
 use crate::operating_point::OperatingPoint;
 use crate::vlm::{self, VlmError, VlmResult, VlmSystem};
 
-use super::{compressible_report_alpha, swept_pg_beta, AeroAnalysis};
+use super::AeroAnalysis;
 
 /// The name `trimmed_performance` looks the horizontal stabilizer up by, and
 /// which `alas-geom::builder` gives it.
-const HSTAB_NAME: &str = "Horizontal Stabilizer";
+pub(super) const HSTAB_NAME: &str = "Horizontal Stabilizer";
 
 /// A lift-curve slope below this magnitude is treated as no slope at all, and
 /// the angle is reported without a zero-lift reference to compress it toward.
@@ -107,17 +107,25 @@ pub struct TrimmedPerformance {
 /// The corrected drag polar and stability curve over the angle schedule:
 /// `run_sweep`'s dict of arrays. Every field has one entry per angle, in
 /// schedule order.
-#[derive(Debug, Clone, PartialEq)]
+#[derive(serde::Serialize, serde::Deserialize, Debug, Clone, PartialEq)]
 pub struct PolarSweep {
-    /// The display/reporting angle of attack axis, in degrees, after the
-    /// compressibility correction described below.
+    /// The display/reporting angle of attack axis, in degrees: the
+    /// whole-wing Prandtl-Glauert relabel of the incompressible solve, or the
+    /// geometric angle itself when [`Self::compressible_mach`] is set.
     pub alpha_deg: Vec<f64>,
     /// The geometric angle of attack used for each VLM solve, in degrees.
     ///
-    /// The reporting axis above may be relabeled by the Prandtl-Glauert
-    /// correction without recomputing the coefficients. External solvers and
-    /// cross-model comparisons must use this native state axis.
+    /// On the incompressible lattice the reporting axis above is relabeled by
+    /// the Prandtl-Glauert correction without recomputing the coefficients;
+    /// on the compressible lattice the two axes are equal. External solvers
+    /// and cross-model comparisons use the axis their own compressibility
+    /// model needs (the true angle for a compressible solver).
     pub geometric_alpha_deg: Vec<f64>,
+    /// Freestream Mach of the solve when it ran on the Goethert-stretched
+    /// lattice, so `alpha_deg` is the true geometric angle and every column is
+    /// the compressible one; `None` on the incompressible lattice, whose
+    /// `alpha_deg` carries the whole-wing Prandtl-Glauert relabel.
+    pub compressible_mach: Option<f64>,
     /// Lift coefficient.
     pub cl: Vec<f64>,
     /// Total drag coefficient.
@@ -144,8 +152,11 @@ impl AeroAnalysis<'_> {
     /// ([`vlm::trefftz_induced_drag_coefficient`], whose module doc measures
     /// why): the near-field force sum gives a cambered, swept or
     /// dihedralled lattice a spurious thrust, enough to put the span
-    /// efficiency of an untwisted planar wing above Munk's bound. The frozen
-    /// reference path keeps the near-field sum its fixtures were made with.
+    /// efficiency of an untwisted planar wing above Munk's bound. The lattice
+    /// holds the lifting surfaces only, so the product adds the installation
+    /// loss on the wing's lift ([`Self::installation_induced_drag`]). The
+    /// frozen reference path
+    /// keeps the near-field sum its fixtures were made with.
     ///
     /// `system`, when the solve came from one, caches the drag form across
     /// solves.
@@ -154,12 +165,12 @@ impl AeroAnalysis<'_> {
     ///
     /// [`VlmError::NonFiniteResult`] when the solved panels do not form
     /// strips or the far-field drag is not finite.
-    fn induced_drag(
+    pub(super) fn induced_drag(
         &self,
         solved: &VlmResult,
         op_point: &OperatingPoint,
         system: Option<&vlm::VlmSystem<'_>>,
-        plane: &alas_geom::aircraft::airplane::Airplane,
+        plane: &Airplane,
     ) -> Result<f64, VlmError> {
         if self.reference_compatibility {
             return Ok(solved.cd_drag);
@@ -168,6 +179,12 @@ impl AeroAnalysis<'_> {
             Some(system) => system.trefftz_induced_drag_coefficient(solved, op_point),
             None => vlm::trefftz_induced_drag_coefficient(solved, op_point, plane.s_ref),
         }
+        .map(|lattice| {
+            lattice
+                + self.installation_induced_drag(super::installation::wing_lift_coefficient(
+                    solved, op_point, plane,
+                ))
+        })
         .ok_or(VlmError::NonFiniteResult)
     }
 
@@ -175,15 +192,44 @@ impl AeroAnalysis<'_> {
     /// configured resolution, assembled once so that a schedule of operating
     /// points pays the O(n^3) factorization a single time.
     fn system(&self) -> Result<vlm::VlmSystem<'_>, VlmError> {
+        self.assemble(self.plane)
+    }
+
+    /// The mesh and factored influence matrix of `plane` at the configured
+    /// resolution: the frozen reference lattice
+    /// ([`VlmSystem::assemble_reference_compatibility`]) for a
+    /// reference-compatibility analysis, the product one otherwise.
+    pub(super) fn assemble<'p>(&self, plane: &'p Airplane) -> Result<VlmSystem<'p>, VlmError> {
         let (spanwise, chordwise) = self.mesh_resolution();
-        vlm::VlmSystem::assemble(self.plane, spanwise, chordwise)
+        if self.reference_compatibility {
+            VlmSystem::assemble_reference_compatibility(plane, spanwise, chordwise)
+        } else {
+            VlmSystem::assemble(plane, spanwise, chordwise)
+        }
+    }
+
+    /// [`Self::assemble`] through this analysis's geometry cache; the
+    /// reference lattice is assembled uncached.
+    pub(super) fn assemble_cached<'p>(
+        &self,
+        plane: &'p Airplane,
+    ) -> Result<VlmSystem<'p>, VlmError> {
+        if self.reference_compatibility {
+            return self.assemble(plane);
+        }
+        let (spanwise, chordwise) = self.mesh_resolution();
+        let mut cache = self
+            .vlm_cache
+            .lock()
+            .map_err(|_| VlmError::NonFiniteResult)?;
+        VlmSystem::assemble_cached(plane, spanwise, chordwise, &mut cache)
     }
 
     /// The configured `(spanwise, chordwise)` mesh resolution as the `usize`
     /// pair the solver takes rather than the configuration's `i64`: floored
     /// at one, since a negative or zero resolution is not a mesh and both
     /// fields are documented as multipliers of at least one.
-    fn mesh_resolution(&self) -> (usize, usize) {
+    pub(super) fn mesh_resolution(&self) -> (usize, usize) {
         (
             self.analysis.spanwise_resolution.max(1) as usize,
             self.analysis.chordwise_resolution.max(1) as usize,
@@ -192,7 +238,11 @@ impl AeroAnalysis<'_> {
 
     /// A level operating point at `alpha_deg`: no sideslip, no rotation
     /// rates, which is every state these three entry points construct.
-    fn level_op_point(atmosphere: Atmosphere, velocity: f64, alpha_deg: f64) -> OperatingPoint {
+    pub(super) fn level_op_point(
+        atmosphere: Atmosphere,
+        velocity: f64,
+        alpha_deg: f64,
+    ) -> OperatingPoint {
         OperatingPoint::new(atmosphere, velocity, alpha_deg, 0.0, 0.0, 0.0, 0.0)
     }
 
@@ -230,8 +280,8 @@ impl AeroAnalysis<'_> {
         } else {
             alpha_required
         };
-        let alpha_report =
-            compressible_report_alpha(alpha_required, alpha_zero_lift, mach, self.sweep_deg);
+        let alpha_report = alpha_zero_lift
+            + self.incompressible_angle_factor(mach) * (alpha_required - alpha_zero_lift);
 
         let cd_induced = if self.reference_compatibility {
             // The frozen estimate scales the low probe's near-field drag by
@@ -274,24 +324,28 @@ impl AeroAnalysis<'_> {
         mach: f64,
         altitude_m: f64,
     ) -> Result<TrimmedPerformance, VlmError> {
-        let inviscid = self.trimmed_inviscid(trim, mach, altitude_m)?;
+        let inviscid = self.trimmed_inviscid(trim, None, mach, altitude_m)?;
         let atmosphere = Atmosphere::new(altitude_m);
         let cl_trim = inviscid.cl;
-        let components = self.drag_components(
+
+        // Only the reporting angle receives the compressibility correction.
+        let alpha_report = if trim.cl_alpha.abs() > CL_ALPHA_FLOOR {
+            let alpha_zero_lift = trim.trim_alpha_deg - cl_trim / trim.cl_alpha;
+            alpha_zero_lift
+                + self.incompressible_angle_factor(mach) * (trim.trim_alpha_deg - alpha_zero_lift)
+        } else {
+            trim.trim_alpha_deg
+        };
+        // The upsweep is charged at the attitude the lattice was trimmed at,
+        // the one the drag table's nodes carry.
+        let components = self.drag_components_at_attitude(
             mach,
             altitude_m,
             cl_trim,
             inviscid.cd_induced,
             Some(&atmosphere),
+            trim.trim_alpha_deg,
         );
-
-        // Only the reporting angle receives the compressibility correction.
-        let alpha_report = if trim.cl_alpha.abs() > CL_ALPHA_FLOOR {
-            let alpha_zero_lift = trim.trim_alpha_deg - cl_trim / trim.cl_alpha;
-            compressible_report_alpha(trim.trim_alpha_deg, alpha_zero_lift, mach, self.sweep_deg)
-        } else {
-            trim.trim_alpha_deg
-        };
 
         Ok(TrimmedPerformance {
             l_over_d: cl_trim / components.cd_total(),
@@ -310,61 +364,97 @@ impl AeroAnalysis<'_> {
     /// iteration needs only lift, pitching moment and wake energy, so it can
     /// omit the independent parasite/wave buildup and reporting conversion.
     ///
+    /// `reference_ih_deg` is read only under the search model's
+    /// `AnalysisConfig::rotated_tail_nodes` ([`Self::tail_set_solve`]);
+    /// `None` always solves the lattice rebuilt at the trim incidence.
+    ///
     /// # Errors
     ///
     /// See [`VlmError`].
     pub fn trimmed_inviscid(
         &self,
         trim: &TrimPoint,
+        reference_ih_deg: Option<f64>,
         mach: f64,
         altitude_m: f64,
     ) -> Result<TrimmedInviscid, VlmError> {
         let atmosphere = Atmosphere::new(altitude_m);
         let velocity = mach * atmosphere.speed_of_sound();
         let op_point = Self::level_op_point(atmosphere, velocity, trim.trim_alpha_deg);
+        self.tail_set_solve(self.plane, trim.trim_ih_deg, reference_ih_deg, &op_point)
+    }
 
+    /// Lift, Trefftz induced drag and lattice pitching moment of `base` (the
+    /// aircraft or its Goethert-stretched copy) at `op_point` with every
+    /// horizontal-stabilizer section at `trim_ih_deg` (left as built for a
+    /// NaN incidence or no stabilizer).
+    ///
+    /// The lattice is rebuilt at that incidence, except under the search
+    /// model's `AnalysisConfig::rotated_tail_nodes` with a finite
+    /// `reference_ih_deg`: the lattice is then built at the reference
+    /// incidence and the difference enters as a rotation of the tail's panel
+    /// normals about the pitch axis
+    /// ([`vlm::VlmSystem::solve_with_surface_pitch`]), so the nodes of one
+    /// drag-table curve share one lattice. The rotation leaves the tail's
+    /// vortex positions where the reference put them, a second-order effect
+    /// in the incidence change (Katz and Plotkin, *Low-Speed Aerodynamics*,
+    /// 2nd ed., ch. 12).
+    pub(super) fn tail_set_solve(
+        &self,
+        base: &alas_geom::aircraft::airplane::Airplane,
+        trim_ih_deg: f64,
+        reference_ih_deg: Option<f64>,
+        op_point: &OperatingPoint,
+    ) -> Result<TrimmedInviscid, VlmError> {
+        let tails: Vec<usize> = base
+            .wings
+            .iter()
+            .enumerate()
+            .filter(|(_, wing)| wing.name == HSTAB_NAME)
+            .map(|(index, _)| index)
+            .collect();
+        let rotation = reference_ih_deg.filter(|reference| {
+            self.analysis.rotated_tail_nodes
+                && !self.reference_compatibility
+                && !tails.is_empty()
+                && reference.is_finite()
+                && trim_ih_deg.is_finite()
+        });
+        let built_ih_deg = rotation.unwrap_or(trim_ih_deg);
         // Upstream overwrites every stabilizer section's twist in place and
         // restores it in a `finally`. A copy for the duration of the solve
         // is the same thing without the window in which an exception would
         // leave the aircraft altered, and it is also why the restore's own
         // quirk (it writes `xsecs[0]`'s twist back to all of them, losing any
         // spanwise variation) has nothing to reproduce here: no section of
-        // `self.plane` is ever written to.
-        let perturbed = self.with_stabilizer_incidence(trim.trim_ih_deg);
-        let plane = perturbed.as_ref().unwrap_or(self.plane);
-        let (spanwise, chordwise) = self.mesh_resolution();
-        let system = {
-            let mut cache = self
-                .vlm_cache
-                .lock()
-                .map_err(|_| VlmError::NonFiniteResult)?;
-            VlmSystem::assemble_cached(plane, spanwise, chordwise, &mut cache)?
+        // `base` is ever written to.
+        let perturbed = (!built_ih_deg.is_nan() && !tails.is_empty()).then(|| {
+            let mut plane = base.clone();
+            for &index in &tails {
+                set_twist(
+                    &mut plane.wings[index],
+                    built_ih_deg,
+                    !self.reference_compatibility,
+                );
+            }
+            plane
+        });
+        let plane = perturbed.as_ref().unwrap_or(base);
+        let system = self.assemble_cached(plane)?;
+        let solved = match rotation {
+            Some(reference) => system.solve_with_surface_pitch(
+                op_point,
+                &tails,
+                (trim_ih_deg - reference).to_radians(),
+            )?,
+            None => system.solve(op_point)?,
         };
-        let solved = system.solve(&op_point)?;
-
-        let cd_induced = self.induced_drag(&solved, &op_point, Some(&system), plane)?;
+        let cd_induced = self.induced_drag(&solved, op_point, Some(&system), plane)?;
         Ok(TrimmedInviscid {
             cl: solved.cl_lift,
             cd_induced,
             cm_residual: solved.cm_pitch,
         })
-    }
-
-    /// A copy of the aircraft with every horizontal-stabilizer section set to
-    /// `incidence_deg`, or `None` when there is nothing to set: no stabilizer
-    /// by that name, or an incidence the trim solve left as NaN.
-    fn with_stabilizer_incidence(
-        &self,
-        incidence_deg: f64,
-    ) -> Option<alas_geom::aircraft::airplane::Airplane> {
-        if incidence_deg.is_nan() || !self.plane.wings.iter().any(|w| w.name == HSTAB_NAME) {
-            return None;
-        }
-        let mut plane = self.plane.clone();
-        for wing in plane.wings.iter_mut().filter(|w| w.name == HSTAB_NAME) {
-            set_twist(wing, incidence_deg);
-        }
-        Some(plane)
     }
 
     /// The full angle sweep: the corrected drag polar and the stability
@@ -404,53 +494,7 @@ impl AeroAnalysis<'_> {
         mach: f64,
         altitude_m: f64,
     ) -> Result<PolarSweep, VlmError> {
-        let atmosphere = Atmosphere::new(altitude_m);
-        let velocity = mach * atmosphere.speed_of_sound();
-        let alphas = linspace(
-            self.analysis.sweep_alpha_min_deg,
-            self.analysis.sweep_alpha_max_deg,
-            self.analysis.sweep_n_points.max(0) as usize,
-        );
-
-        let mut sweep = PolarSweep {
-            alpha_deg: Vec::with_capacity(alphas.len()),
-            geometric_alpha_deg: alphas.clone(),
-            cl: Vec::with_capacity(alphas.len()),
-            cd: Vec::with_capacity(alphas.len()),
-            cd_induced: Vec::with_capacity(alphas.len()),
-            cd_wave: Vec::with_capacity(alphas.len()),
-            cd_parasite: Vec::with_capacity(alphas.len()),
-            cm: Vec::with_capacity(alphas.len()),
-            l_over_d: Vec::with_capacity(alphas.len()),
-        };
-
-        // The influence matrix depends on the geometry alone, so the whole
-        // schedule shares one assembly and one factorization; each angle is
-        // a new right-hand side.
-        if !alphas.is_empty() {
-            for alpha in &alphas {
-                let op_point = Self::level_op_point(atmosphere, velocity, *alpha);
-                let solved = system.solve(&op_point)?;
-                let cd_induced =
-                    self.induced_drag(&solved, &op_point, Some(system), system.airplane())?;
-                let components = self.drag_components(
-                    mach,
-                    altitude_m,
-                    solved.cl_lift,
-                    cd_induced,
-                    Some(&atmosphere),
-                );
-                sweep.alpha_deg.push(*alpha);
-                sweep.cl.push(solved.cl_lift);
-                sweep.cm.push(solved.cm_pitch);
-                sweep.cd.push(components.cd_total());
-                sweep.cd_induced.push(components.cd_induced);
-                sweep.cd_wave.push(components.cd_wave);
-                sweep.cd_parasite.push(components.cd_viscous());
-                sweep.l_over_d.push(solved.cl_lift / components.cd_total());
-            }
-        }
-
+        let mut sweep = self.solve_schedule(system, mach, altitude_m, 1.0, 1.0)?;
         let rises = sweep.cl.len() >= 2
             && sweep
                 .cl
@@ -459,7 +503,7 @@ impl AeroAnalysis<'_> {
                 .is_some_and(|(last, first)| last - first > 1e-6);
         if rises {
             let alpha_zero_lift = interp(0.0, &sweep.cl, &sweep.alpha_deg);
-            let beta = swept_pg_beta(mach, self.sweep_deg);
+            let beta = self.incompressible_angle_factor(mach);
             for alpha in &mut sweep.alpha_deg {
                 *alpha = alpha_zero_lift + beta * (*alpha - alpha_zero_lift);
             }
@@ -469,12 +513,16 @@ impl AeroAnalysis<'_> {
     }
 }
 
-/// Set every cross-section of `wing` to `twist_deg`.
+/// Set every cross-section of `wing` to the stabilizer incidence `twist_deg`,
+/// measured in the plane of symmetry ([`Wing::twist_about_pitch_axis`]) when
+/// `pitch_axis`; the frozen reference form (`false`) twists each section
+/// about its own spanwise axis.
 ///
 /// A free function rather than a `Wing` method: `alas-geom::aircraft::wing`'s row
 /// is scoped to what native aerodynamic model's own `Wing` offers, and upstream mutates
 /// the sections from outside rather than through any such method.
-fn set_twist(wing: &mut Wing, twist_deg: f64) {
+pub(super) fn set_twist(wing: &mut Wing, twist_deg: f64, pitch_axis: bool) {
+    wing.twist_about_pitch_axis = pitch_axis;
     for xsec in &mut wing.xsecs {
         xsec.twist = twist_deg;
     }

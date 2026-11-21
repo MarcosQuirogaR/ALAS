@@ -1,0 +1,30 @@
+# Acceptance criterion of each registered preset's design range (the matrix range cell).
+# The repository's definition of the range cells, read by the acceptance matrix (alas-config
+# presets::design_range). Grades copied from the range-cell grades of the campaign matrix
+# scorer's reference files. The scorer still reads its own reference files and is to be
+# switched to read this table; until then the two can differ.
+# criterion: band (the flown range at the design payload within the grade's band of the
+#   published range, reference_grade_bands.tsv) or at_least (a notional aircraft's own
+#   requirement: the flown range reaches it, no band).
+# published_range_nmi: "-" is the preset's own reference.design_point.range_nmi (its source is
+#   the design point's); a number is given only for a payload-defined point, whose design point
+#   declares no range.
+# grade: the matrix reference grade of the range cell (A manufacturer primary document with
+#   stated conditions, B manufacturer document read from a chart or with conditions incomplete,
+#   C secondary); "-" for at_least.
+# preset<TAB>criterion<TAB>grade<TAB>published_range_nmi<TAB>basis
+AVE	at_least	-	-	notional aircraft: its own 7,600 nmi design requirement, no published reference
+A340-300	band	B	-	maximum-payload corner read from the Aircraft Characteristics payload/range chart
+A350-900	band	A	-	Aircraft Characteristics design point with stated payload, MTOW and profile
+A380-800	band	A	-	Aircraft Characteristics payload/range chart, stated profile and reserves
+B787-9	band	B	-	maximum-zero-fuel-weight corner read from the Airport Planning payload/range chart
+A320-200	band	B	-	maximum-payload corner read from the Aircraft Characteristics payload/range chart
+A220-300	band	B	-	Airport Planning ZFW/range chart at 140 passengers, reserves not printed
+ATR72-600	band	B	-	manufacturer factsheet, basis printed in the brochure footnote only
+DC-10	band	B	-	maximum-payload corner read from the Airport Planning payload/range chart
+E195-E2	band	B	-	manufacturer specification sheet, payload not defined on the sheet
+C919	band	A	-	Airport Planning manual payload/range table with stated payload, MTOW and reserves
+B747-400	band	B	-	maximum-structural-payload corner read from the Airport Planning payload/range chart
+A400M	band	A	-	manufacturer brochure range-payload table
+LJ60	band	C	-	secondary: manufacturer data as quoted by Jane's All the World's Aircraft 2008-09, Learjet 60, Performance, p.791
+C295	band	B	2477	Jane's All the World's Aircraft 2008-09, EADS CASA C-295M, Performance, printed p.546: 2,940 kg payload, range with max fuel 2,477 n miles

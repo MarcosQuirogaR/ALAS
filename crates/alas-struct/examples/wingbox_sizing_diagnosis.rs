@@ -142,7 +142,13 @@ fn main() {
         let y = &sizing.y_stations;
         let (front, rear) = box_chord_band(&wsg);
         let box_width_fraction = rear - front;
-        let fuel = tanks::integral_fuel_running_mass_kg_m(&wsg, y, front, rear);
+        let fuel = tanks::integral_fuel_running_mass_kg_m(
+            &wsg,
+            y,
+            front,
+            rear,
+            tanks::JET_FUEL_DENSITY_KG_M3,
+        );
         let structure = box_running_mass_kg_m(&sizing, skin, web, cap, front, rear);
         let relieved: Vec<f64> = fuel.iter().zip(&structure).map(|(&f, &s)| f + s).collect();
         let relief = WingInertiaRelief {

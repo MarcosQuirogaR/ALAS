@@ -13,13 +13,39 @@ agrees with it. That is what the parity rule below is for.
 ## Getting set up
 
 ```
-git clone <local path>
-cd ALAS-native
-cargo test
-cargo xtask gate
+git clone <repository url> ALAS
+cd ALAS
+cargo xtask gate --quick
 ```
 
-The MSVC toolchain is required; `rust-toolchain.toml` pins the version.
+The MSVC toolchain is required on Windows; `rust-toolchain.toml` pins the
+version. `cargo test` runs everything but is slow; the tiers below are the
+normal loop.
+
+### Where things are
+
+| Path | What is in it |
+|---|---|
+| `crates/` | The workspace, one crate per discipline or layer. `docs/architecture/crates.md` lists each crate's responsibility and layer. |
+| `xtask/` | Repository tasks: `gate`, `test`, `checks`, `capability-map`, `dist`, `tiers`, `backup`. `cargo xtask` lists them. |
+| `docs/` | Start at `docs/README.md`. Decisions are in `docs/adr/`. |
+| `golden/`, `tests/golden/` | Reference values and their generators (parity fixtures), and one test fixture. |
+| `tools/` | Utility scripts. |
+| `external tools/` | Third-party payloads tracked for packaging (AVL, schemas). Other contents are local and ignored. |
+| `assets/`, `app_*.png`, `app_icon.ico` | Compile-time assets and branding. |
+| `site/` | The public website. |
+
+### Decisions
+
+Decisions that span modules, tools or process are recorded in `docs/adr/`. If a
+change reverses one, add a superseding ADR in the same pull request. A new crate
+needs an ADR (`docs/architecture/crates.md`, "Rules for a new crate").
+
+### Defects are not parked
+
+A defect, an unread configuration field, an unsourced value or a failing check
+is fixed or investigated to its root cause; it is not closed by calling it a
+known gap or an accepted exception (`docs/adr/0010-no-known-gaps.md`).
 
 Optional external tools (MSES, MSC Nastran, NASTRAN-95, AVL) are configured
 in the application and are never needed to build or to run the test suite. The
@@ -29,7 +55,7 @@ tests that use them are marked `#[ignore]` and run with
 > Do not move this repository inside a OneDrive- or Dropbox-synced folder. The
 > sync client holds locks on freshly written files, and `target/` produces
 > thousands of them per build. `cargo xtask backup` writes a single git bundle
-> into the synced folder instead, which is what the backup copy should be.
+> into the folder named by `ALAS_BACKUP_DIR` instead, which is what the backup copy should be.
 
 ---
 
@@ -56,10 +82,24 @@ tests that use them are marked `#[ignore]` and run with
    (`docs/RUNNING.md`, "Fast iteration"). Without nextest the gate still works
    but falls back to `cargo test` and cannot separate the heavy tests.
 
+   Tests that fail today are listed in `.config/expected-failures.tsv` (crate,
+   test name, reason). `cargo xtask expected-failures <nextest output>` fails on
+   a failing test that is not listed and on a listed test that now passes, so
+   the list only shrinks. `cargo xtask fmt` is the per-package rustfmt check:
+   `cargo fmt --all` exceeds the Windows command-line limit.
+
+   `cargo xtask hygiene` checks the tree as a public ref; a private work
+   branch passes `--private-branch` explicitly. In CI the gate adds `--locked` to its cargo calls.
+
    Doctests are not used: the gate does not run them, and the repository checks
    reject a doc example that rustdoc would run. Put the test in a unit test and
    mark illustrative snippets `text` or `ignore`.
-2. If you touched anything numerical, say in the commit body **what changed in
+2. If you added, removed or renamed a configuration field, pipeline stage,
+   figure, tool, GUI page, CLI flag or add-on key, run `cargo xtask
+   capability-map` and commit the regenerated files in the same commit
+   (`docs/architecture/README.md`). A field that no model reads is wired or
+   retired (`crates/alas-config/src/retired_keys.rs`), not left in place.
+3. If you touched anything numerical, say in the commit body **what changed in
    the output and why**. "No change expected" is a valid and useful claim; say
    it so a reviewer knows to verify it.
 
@@ -251,7 +291,8 @@ This is the part that matters most.
 
 ## Tests
 
-Three kinds, and they answer different questions.
+Four kinds, and they answer different questions. Which tier a test runs in is
+decided by its measured time, not by hand (`docs/adr/0008-test-tiers.md`).
 
 - **Parity tests** compare against fixtures generated from the Python
   implementation at the `rust-port-baseline` tag. They answer "is this the same
@@ -264,6 +305,12 @@ Three kinds, and they answer different questions.
   unintended changes surface. These are the right tool for anything with no
   reference answer, which includes most of the pipeline's end-to-end output.
 
+- **Plausibility tests** answer "is this physically believable": generic,
+  cited engineering bands applied to every registered aircraft
+  (`docs/adr/0006-plausibility-tier.md`). A new defect class becomes a rule
+  with its source; a result inside a reference tolerance does not excuse a
+  rule failure.
+
 Also worth a test: anything with a fallback path (a tool missing, a file
 absent, a blank configuration); anything that behaves differently in a release
 build than under `cargo test`; and any bug you fix: the test that would have
@@ -271,36 +318,19 @@ caught it.
 
 ---
 
-## Commits and pull requests
+## Commits
 
-Commit messages follow [Conventional Commits](https://www.conventionalcommits.org/):
-
-```
-type(scope): summary in the imperative, lower case, no final period
-
-Body: why the change was made and what was considered instead.
-```
-
-- **Types:** `feat`, `fix`, `perf`, `refactor`, `docs`, `test`, `build`,
-  `ci`, `chore`, `revert`. The scope is optional and is usually a crate or area
-  (`aero`, `mass`, `opt`, `gui`, `site`). Use `!` after the scope for a breaking
-  change.
-- The subject says what changed, in the present tense, imperative: "fix static
-  margin sign", not "fixed" or "fixes". Keep it under about 72 characters.
-- The body says **why**, and what you considered instead. If the reasoning is
-  interesting, it belongs here rather than in a comment. A change that moves a
-  number says which case, which quantity, before and after.
+- Present tense, imperative: "Fix static margin sign", not "Fixed" or "Fixes".
+- The subject says what changed; the body says **why**, and what you considered
+  instead. If the reasoning is interesting, it belongs here rather than in a
+  comment.
 - One logical change per commit. Mechanical reformatting goes in its own
   commit, never mixed with behaviour.
 - A translated module and its parity test are one commit. That is the one case
   where "one logical change" spans two files by design.
+- Rebase rather than merge to keep history readable.
 - Sign off with `git commit -s`, which certifies the
   [Developer Certificate of Origin](https://developercertificate.org/).
-
-Pull requests are **squash-merged**, so the pull request title becomes the one
-commit on `main` and must follow the same format. A workflow checks the title
-(`.github/workflows/pr-title.yml`). Individual commits inside a branch are
-free-form; keep them tidy anyway, because a reviewer reads them.
 
 ---
 

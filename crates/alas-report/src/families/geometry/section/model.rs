@@ -352,7 +352,8 @@ pub(super) fn select_station(scene: &CabinScene) -> Option<&SectionStation> {
 pub(super) fn aisle_centers(row: &SeatRow, seats: &[SeatSlice]) -> Vec<f64> {
     let mut centers = Vec::new();
     let mut index = 0usize;
-    for block in row.blocks.iter().take(row.blocks.len().saturating_sub(1)) {
+    let blocks = display_blocks(row.abreast, &row.blocks);
+    for block in blocks.iter().take(blocks.len().saturating_sub(1)) {
         let end = index + (*block).max(0) as usize;
         if end == 0 || end >= seats.len() {
             break;
@@ -365,4 +366,21 @@ pub(super) fn aisle_centers(row: &SeatRow, seats: &[SeatSlice]) -> Vec<f64> {
         index = end;
     }
     centers
+}
+
+/// Seat groups between aisles for display.
+///
+/// A twin-aisle row of up to eight abreast keeps two seats at each window
+/// (A340 and A330 2-4-2, 2-3-2, 2-2-2); nine and more keep three (3-3-3,
+/// 3-4-3). Single-aisle and other rows keep the layout's own grouping. The same
+/// rule is used by the load-and-balance cabin section.
+pub(super) fn display_blocks(abreast: i64, blocks: &[i64]) -> Vec<i64> {
+    if blocks.len() == 3 && abreast >= 6 && blocks.iter().sum::<i64>() == abreast {
+        let outboard = if abreast >= 9 { 3 } else { 2 };
+        let centre = abreast - 2 * outboard;
+        if centre >= 1 {
+            return vec![outboard, centre, outboard];
+        }
+    }
+    blocks.to_vec()
 }

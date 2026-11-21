@@ -60,7 +60,7 @@
 //!
 //! `gamma = 1.4` matches [`crate::Atmosphere`]'s existing
 //! `ratio_of_specific_heats()`, and every sea-level reference value below is
-//! derived from [`crate::isa::GAS_CONSTANT_AIR`] and the same `p0`, `T0`
+//! derived from [`crate::GAS_CONSTANT_AIR`] and the same `p0`, `T0`
 //! this crate's ISA model uses at zero altitude, rather than restated as
 //! independently rounded literals, see [`sea_level_density_kg_m3`] for why
 //! that matters for exact sea-level self-consistency.
@@ -108,7 +108,7 @@ pub const SEA_LEVEL_TEMPERATURE_K: f64 = 288.15;
 /// display and comparison only. **Not used by any conversion in this
 /// module**: [`sea_level_density_kg_m3`] computes the value actually used,
 /// from this module's own [`SEA_LEVEL_PRESSURE_PA`],
-/// [`SEA_LEVEL_TEMPERATURE_K`] and [`crate::isa::GAS_CONSTANT_AIR`] via the
+/// [`SEA_LEVEL_TEMPERATURE_K`] and [`crate::GAS_CONSTANT_AIR`] via the
 /// ideal gas law, which comes out to 1.224999..., not bit-identical to this
 /// rounded literal. Using this rounded constant for the actual EAS/TAS
 /// conversion instead would make `EAS != TAS` at the sea-level reference
@@ -119,17 +119,17 @@ pub const SEA_LEVEL_DENSITY_DISPLAY_KG_M3: f64 = SEA_LEVEL_DENSITY_ICAO_KG_M3;
 
 /// Standard sea-level density, in kg/m^3: `p0 / (R * T0)`, from this
 /// module's own [`SEA_LEVEL_PRESSURE_PA`], [`SEA_LEVEL_TEMPERATURE_K`] and
-/// [`crate::isa::GAS_CONSTANT_AIR`], the values every EAS/TAS conversion
+/// [`crate::GAS_CONSTANT_AIR`], the values every EAS/TAS conversion
 /// here actually uses, see [`SEA_LEVEL_DENSITY_DISPLAY_KG_M3`] for why this
 /// is not simply the commonly quoted 1.225.
 fn sea_level_density_kg_m3() -> f64 {
-    SEA_LEVEL_PRESSURE_PA / (crate::isa::GAS_CONSTANT_AIR * SEA_LEVEL_TEMPERATURE_K)
+    SEA_LEVEL_PRESSURE_PA / (crate::GAS_CONSTANT_AIR * SEA_LEVEL_TEMPERATURE_K)
 }
 
 /// Standard sea-level speed of sound, in m/s: `sqrt(gamma * R * T0)` at
-/// [`SEA_LEVEL_TEMPERATURE_K`], using [`crate::isa::GAS_CONSTANT_AIR`].
+/// [`SEA_LEVEL_TEMPERATURE_K`], using [`crate::GAS_CONSTANT_AIR`].
 fn sea_level_speed_of_sound_m_s() -> f64 {
-    (AIR_GAMMA * crate::isa::GAS_CONSTANT_AIR * SEA_LEVEL_TEMPERATURE_K).sqrt()
+    (AIR_GAMMA * crate::GAS_CONSTANT_AIR * SEA_LEVEL_TEMPERATURE_K).sqrt()
 }
 
 /// Why an airspeed conversion was rejected.
@@ -251,7 +251,7 @@ pub fn true_from_mach(mach: f64, ambient_temperature_k: f64) -> Result<f64, Airs
     let mach = check_subsonic(mach)?;
     let ambient_temperature_k = check_temperature(ambient_temperature_k)?;
     let local_speed_of_sound_m_s =
-        (AIR_GAMMA * crate::isa::GAS_CONSTANT_AIR * ambient_temperature_k).sqrt();
+        (AIR_GAMMA * crate::GAS_CONSTANT_AIR * ambient_temperature_k).sqrt();
     Ok(mach * local_speed_of_sound_m_s)
 }
 
@@ -287,7 +287,7 @@ pub fn calibrated_from_true(
     let ambient_pressure_pa = check_pressure(ambient_pressure_pa)?;
     let ambient_temperature_k = check_temperature(ambient_temperature_k)?;
     let local_speed_of_sound_m_s =
-        (AIR_GAMMA * crate::isa::GAS_CONSTANT_AIR * ambient_temperature_k).sqrt();
+        (AIR_GAMMA * crate::GAS_CONSTANT_AIR * ambient_temperature_k).sqrt();
     let mach = check_subsonic(tas / local_speed_of_sound_m_s)?;
     let qc_over_p = impact_pressure_ratio(mach);
     let qc = qc_over_p * ambient_pressure_pa;
@@ -312,8 +312,7 @@ pub fn equivalent_from_true(
     let tas = check_speed(true_m_s)?;
     let ambient_pressure_pa = check_pressure(ambient_pressure_pa)?;
     let ambient_temperature_k = check_temperature(ambient_temperature_k)?;
-    let density_kg_m3 =
-        ambient_pressure_pa / (crate::isa::GAS_CONSTANT_AIR * ambient_temperature_k);
+    let density_kg_m3 = ambient_pressure_pa / (crate::GAS_CONSTANT_AIR * ambient_temperature_k);
     Ok(tas * (density_kg_m3 / sea_level_density_kg_m3()).sqrt())
 }
 
@@ -332,8 +331,7 @@ pub fn true_from_equivalent(
     let eas = check_speed(equivalent_m_s)?;
     let ambient_pressure_pa = check_pressure(ambient_pressure_pa)?;
     let ambient_temperature_k = check_temperature(ambient_temperature_k)?;
-    let density_kg_m3 =
-        ambient_pressure_pa / (crate::isa::GAS_CONSTANT_AIR * ambient_temperature_k);
+    let density_kg_m3 = ambient_pressure_pa / (crate::GAS_CONSTANT_AIR * ambient_temperature_k);
     Ok(eas * (sea_level_density_kg_m3() / density_kg_m3).sqrt())
 }
 
@@ -498,8 +496,7 @@ mod tests {
     /// 1975; Houghton & Carpenter 1993; see the module documentation),
     /// independently of this implementation's `ln1p`/`expm1` code path, using
     /// plain `powf` arithmetic and this crate's own `GAS_CONSTANT_AIR`
-    /// (287.053, the pre-1986 CODATA value `8.31432/28.9644e-3` this crate
-    /// deliberately reproduces; see `crate::isa`):
+    /// (287.053):
     /// `a0 = sqrt(1.4*287.053*288.15) = 340.294 m/s`;
     /// `M0 = (250*0.514444)/340.294 = 0.37794`;
     /// `qc/p0 = (1+0.2*0.37794^2)^3.5 - 1 = 0.103609`;

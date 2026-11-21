@@ -125,6 +125,32 @@ fn an_analysis_report_populates_aero_and_weight_balance_nodes() {
     assert!(!xml.contains("<massBreakdown>"));
 }
 
+/// A reimported export is analysed on the vector it was built from: read as
+/// the configured vector, a redesigned registered aircraft took the preset's
+/// published tank inventory (an optimised A320 resumed 394 kg lighter).
+#[test]
+fn an_analysed_export_gives_back_its_design_vector_to_the_bit() {
+    let config = AlasConfig::default();
+    let mut report = test_report(&config);
+    report.design = DesignVector {
+        span_m: 35.603_924_628_002_986,
+        tip_twist_deg: -0.229_808_422_101_595_02,
+        bump_upper_front: 1.422_345_602_071_831_4e-5,
+        mtow_kg: Some(76_019.25),
+        ..DesignVector::default()
+    };
+
+    let xml = render_cpacs_v35_with_analysis(&report, &config, None, None, TEST_TIMESTAMP)
+        .expect("the synthetic completed report is CPACS representable");
+    let imported = read_cpacs(&xml).expect("the export reads back");
+    assert_eq!(imported.aircraft.design_vector, Some(report.design));
+
+    let geometry_only = render_cpacs_v35(&report.airplane, &config, TEST_TIMESTAMP)
+        .expect("the geometry-only export renders");
+    let imported = read_cpacs(&geometry_only).expect("the geometry-only export reads back");
+    assert_eq!(imported.aircraft.design_vector, None);
+}
+
 #[test]
 fn an_available_feasibility_load_case_is_exported_as_weight_and_balance() {
     let config = AlasConfig::default();
@@ -161,6 +187,13 @@ fn a_complete_mission_is_exported_as_a_cpacs_trajectory_summary() {
         true_course_rad: 0.0,
         temperature_deviation_k: 0.0,
         number_control_points: 2,
+        takeoff_rated: false,
+        rating_limited: false,
+        configuration_delta_cd: 0.0,
+        load_factor: 1.0,
+        entry_speed_m_s: 0.0,
+        exit_speed_m_s: 0.0,
+        speed_profile: Vec::new(),
     };
     let mut segment = Segment::new(spec, None).expect("the synthetic mission segment builds");
     segment.conditions.time_s = vec![0.0, 10.0];
@@ -201,6 +234,7 @@ fn unavailable_analysis_data_is_left_out_of_the_cpacs_document() {
     report.polar = PolarSweep {
         alpha_deg: Vec::new(),
         geometric_alpha_deg: Vec::new(),
+        compressible_mach: None,
         cl: Vec::new(),
         cd: Vec::new(),
         cd_induced: Vec::new(),
@@ -268,6 +302,7 @@ fn test_report(config: &AlasConfig) -> AnalysisReport {
         polar: PolarSweep {
             alpha_deg: vec![-2.0, 0.0, 2.0],
             geometric_alpha_deg: vec![-2.0, 0.0, 2.0],
+            compressible_mach: None,
             cl: vec![0.1, 0.3, 0.5],
             cd: vec![0.02, 0.03, 0.05],
             cd_induced: vec![0.001, 0.002, 0.004],

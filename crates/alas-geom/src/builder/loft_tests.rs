@@ -28,19 +28,18 @@ fn built_hash(name: &str, nacelle_v2: bool) -> u64 {
 }
 
 /// Pinned on the tree before the loft builder existed (merge of the core,
-/// nacelle and wing lanes): with `loft = None` the built geometry of these
+/// nacelle and wing changes): with `loft = None` the built geometry of these
 /// presets, nacelles included, must not change by one bit. Every registered
 /// preset now references a loft, so the test clears it: the legacy path is
 /// still the contract of a preset (or a user geometry) without a loft. The
-/// tail-placement and wingtip-device lanes keep these bits with their options
-/// unset, so the pre-loft values still hold after the merge.
+/// tail-placement and wingtip-device changes keep these bits with their options
+/// unset, so the pre-loft values still hold.
 #[test]
 fn presets_without_a_loft_build_bit_identical_geometry() {
-    // Step B group n re-pinned A320-200 (8201503206012110925: sharklet, hstab tip, C2 spline) and A220-300 (10432467997757862784: C2 spline, tip rake, fin, nacelle).
     let expected = [
-        ("A320-200", 5_005_306_108_022_006_076_u64), // fix/reference-coupling 2026-10-12 re-pin (was 9_216_735_326_126_434_042; A320 published LEMAC) // geo/freeze 2026-10-12 re-pin (was 15_418_978_461_693_265_906; Published reference wing) // geo/close 2026-10-12 re-pin (stale since step B/tailfit; was 1_987_696_515_165_510_844)
-        ("B747-400", 17_837_618_618_927_866_581_u64), // final re-pin 2026-10-14 (was 6_023_366_839_640_322_632, then 13_054_535_982_284_303_329 before the dihedral stations were moved onto the thickness nodes; printed Obert Fig. 24.82 wing thickness stations, fuel-chain lane) // geo/freeze 2026-10-12 re-pin (was 12_943_938_409_510_605_116; Published reference wing) // geo/close 2026-10-12 re-pin (was 4_595_416_962_605_450_059); // final merge (reference trapezoid set; step B w2 1_935_962_404_214_013_979; was 8_792_336_718_230_337_059)
-        ("A220-300", 15_907_647_827_761_157_902_u64), // geo/freeze 2026-10-12 re-pin (was 8_109_863_572_925_930_977; Published reference wing) // geo/close 2026-10-12 re-pin (was 9_862_626_242_776_915_474)
+        ("A320-200", 15_155_333_065_114_281_125_u64),
+        ("B747-400", 9_561_091_969_367_184_215_u64),
+        ("A220-300", 4_178_324_166_916_265_089_u64),
     ];
     // The pins above were taken with the MSVC math runtime; glibc rounds some
     // transcendental functions differently in the last bit, so off Windows the
@@ -50,7 +49,7 @@ fn presets_without_a_loft_build_bit_identical_geometry() {
     } else {
         [
             ("A320-200", 16_195_312_667_050_220_398_u64),
-            ("B747-400", 117_930_952_244_319_175_u64),
+            ("B747-400", 12_802_470_272_508_494_065_u64),
             ("A220-300", 18_386_087_386_061_217_417_u64),
         ]
     };
@@ -67,7 +66,7 @@ fn presets_without_a_loft_build_bit_identical_geometry() {
 fn fixture_builder(tweak: impl FnOnce(&mut GeometryConfig)) -> (AircraftBuilder, DesignVector) {
     let preset = presets::get("A320-200").expect("preset exists");
     let mut geometry = preset.geometry.clone();
-    geometry.wing.wingtip_device = None; // step B: the A320 now has a sharklet (a fourth surface)
+    geometry.wing.wingtip_device = None; // the A320 has a sharklet (a fourth surface)
     let f = &mut geometry.fuselage;
     f.diameter_m = 3.95;
     f.height_m = None;
@@ -104,7 +103,22 @@ fn a_referenced_loft_builds_the_fuselage_and_its_polyline_view() {
             * (pair[0].xyz_c[2] + 0.5 * pair[0].height + pair[1].xyz_c[2] + 0.5 * pair[1].height);
         assert!((chord - loft.crown_z(x)).abs() <= POLYLINE_TOLERANCE_M + 1e-12);
     }
-    assert_eq!(airplane.wings.len(), 3);
+    // Main wing, tailplane and fin, plus the A320 dorsal fillet that product geometry always
+    // builds.
+    let names: Vec<&str> = airplane
+        .wings
+        .iter()
+        .map(|wing| wing.name.as_str())
+        .collect();
+    assert_eq!(
+        names,
+        [
+            "Main Wing",
+            "Horizontal Stabilizer",
+            "Vertical Stabilizer",
+            "Dorsal Fin (outside the lattice)"
+        ]
+    );
 }
 
 #[test]
@@ -215,4 +229,32 @@ fn sample_xsecs_within_meets_the_tolerance_and_a_tighter_one_costs_stations() {
     assert!(coarse.max_deviation_m <= 0.02 && fine.max_deviation_m <= 0.002);
     assert!(fine.xsecs.len() > coarse.xsecs.len());
     assert!(!loft.sample_xsecs_within(1e-6, 8, 20).within_tolerance);
+}
+
+/// No shipped loft carries an APU cone since the A380-800 body was ended at its printed tail cut,
+/// so a design length that is too short is now refused by the loft itself, as a
+/// typed error, before any cone arithmetic; `BuildError::ApuConeLength` is reachable only with a
+/// loft file that declares a cone.
+#[test]
+fn a_design_length_not_longer_than_the_nose_and_tail_is_a_typed_error() {
+    let preset = presets::get("A380-800").unwrap();
+    let mut dv = preset.design_vector;
+    dv.fuselage_length_m = 2.0;
+    let error = AircraftBuilder::new(Some(preset.geometry.clone()))
+        .build(Some(&dv), false)
+        .unwrap_err();
+    assert!(
+        matches!(
+            &error,
+            BuildError::LoftBuild(crate::loft::LoftError::LengthTooShort { length_m, needed_m })
+                if *length_m == 2.0 && *needed_m > 2.0
+        ),
+        "{error}"
+    );
+    assert!(
+        error
+            .to_string()
+            .contains("does not exceed the nose and tail"),
+        "{error}"
+    );
 }

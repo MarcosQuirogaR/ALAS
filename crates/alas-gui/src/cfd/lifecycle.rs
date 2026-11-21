@@ -287,10 +287,12 @@ impl AirfoilCfdState {
             std::fs::write(&marker, b"# ALAS OpenFOAM case marker\n")
                 .map_err(|error| format!("cannot write {}: {error}", marker.display()))?;
         }
+        use alas_exec::process::NoConsoleWindow;
         std::process::Command::new(executable)
+            .no_window()
             .arg(&marker)
             .spawn()
-            .map(|_| ())
+            .map(alas_exec::process::reap_in_background)
             .map_err(|error| format!("cannot launch ParaView: {error}"))
     }
 

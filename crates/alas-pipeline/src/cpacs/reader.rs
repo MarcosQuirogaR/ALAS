@@ -8,13 +8,20 @@
 //! UIDs, then validates references before returning the typed document.
 
 mod airframe;
+mod body_record;
+mod design_vector;
 mod engines;
+mod main_wing;
 mod read_error;
+mod tail_planform;
 mod xml;
 
 use airframe::*;
+use body_record::parse_body_records;
 use engines::*;
+use main_wing::parse_main_wing_record;
 pub use read_error::CpacsReadError;
+use tail_planform::parse_tail_planform_records;
 use xml::*;
 
 use std::fs;
@@ -49,10 +56,15 @@ pub fn read_cpacs(xml: &str) -> Result<CpacsDocument, CpacsReadError> {
             engine.turboprop = Some(turboprop);
         }
     }
+    let mut aircraft = parse_aircraft(model)?;
+    aircraft.tail_planform_records = parse_tail_planform_records(root)?;
+    aircraft.body_records = parse_body_records(root)?;
+    aircraft.main_wing_record = parse_main_wing_record(root)?;
+    aircraft.design_vector = design_vector::parse_design_vector_record(root)?;
     let document = CpacsDocument {
         cpacs_version,
         header,
-        aircraft: parse_aircraft(model)?,
+        aircraft,
         engines,
         fuselage_profiles: parse_fuselage_profiles(vehicles)?,
         wing_airfoils: parse_wing_airfoils(vehicles)?,
@@ -166,6 +178,10 @@ fn parse_aircraft<'a, 'input: 'a>(node: Node<'a, 'input>) -> Result<CpacsAircraf
         fuselages,
         wings,
         engine_positions,
+        tail_planform_records: Vec::new(),
+        body_records: Vec::new(),
+        main_wing_record: None,
+        design_vector: None,
     })
 }
 fn parse_reference<'a, 'input: 'a>(

@@ -11,18 +11,36 @@
 //! equilibrium as presented by Currey, *Aircraft Landing Gear Design:
 //! Principles and Practices*, AIAA, 1988.
 
+mod chart;
+mod clean_trim;
 mod constraints;
+mod elevator_force;
+mod extended_chord;
 mod gear_placement;
+mod jet_inlet_demand;
+#[cfg(test)]
+mod gear_reaction_tests;
+mod ground_ends;
+mod iced_tail;
+mod landing_download;
+mod landing_flap;
 mod ledger_basis;
 mod ledger_states;
+mod liftoff;
 mod loading;
 mod physical_limits;
 mod rotation;
 mod rotation_thrust;
 mod support;
+mod tail_stall;
 #[cfg(test)]
 mod tests;
+mod ths_trim;
+pub(crate) mod usable_range;
+#[cfg(test)]
+pub(crate) use ths_trim::TakeoffTrimModel;
 mod types;
+mod wing_body;
 
 use alas_config::AlasConfig;
 use alas_geom::aircraft::airplane::Airplane;
@@ -34,9 +52,14 @@ use alas_perf::landing_gear::{
 };
 use constraints::{assess_loading_constraints, LoadingConstraintInputs};
 pub use constraints::{ModelCgConstraint, ModelCgConstraintAssessment};
+pub use liftoff::{
+    liftoff_lift, liftoff_lift_on, liftoff_lifts, liftoff_oleo_extension_m, oleo_extension_fraction,
+    LiftOffLift,
+};
+pub use jet_inlet_demand::{jet_inlet_spec, InletDragPolar};
 pub use gear_placement::{
-    configured_stations_suffice, configured_translation_m, place_main_gear, MainGearPlacement,
-    PlacementLedgers,
+    configured_stations_suffice, configured_translation_m, place_main_gear,
+    wing_follow_translation_m, MainGearPlacement, PlacementLedgers,
 };
 pub use ledger_states::{
     assess_model_cg_envelope_with_ledger, assess_model_cg_envelope_with_ledger_and_landing,
@@ -60,7 +83,7 @@ pub use types::{
 /// leading edge) so they can feed `resolved_station_positions` the same
 /// numbers `alas_mass::stations` would. The main-gear half of that pair is a
 /// wing-mounted gear rule with a stated domain, and the one place that domain
-/// is stated is `alas_mass::stations::main_gear_station`. This asks that owner
+/// is stated is `alas_mass::stations::main_gear_station`. This asks that function
 /// whether a station exists rather than restating the test here, so the two
 /// crates cannot drift apart into accepting different aircraft.
 ///
@@ -94,10 +117,8 @@ fn unmeasured_main_gear_station(
     }
 }
 
-use support::{
-    fuselage_lower_points_aft_of, ground_z_m, oew_cg_z, tail_volume_coefficient, SCISSOR_CL_H_MAX,
-    SCISSOR_CM_AC_WB_LANDING, SCISSOR_ETA, SCISSOR_X_AC_WB_FRAC,
-};
+pub(crate) use support::lower_contour_aft_of;
+use support::{ground_z_m, oew_cg_z, tail_volume_coefficient, SCISSOR_CL_H_MAX};
 
 /// Assess hard model constraints across OEW, analyzed ZFW/TOW, and explicit
 /// mid-mission/reserve fuel cases.
@@ -138,10 +159,10 @@ pub fn assess_model_cg_envelope(
     );
     // The lumped breakdown carries no inertia tensor: the rotation criterion
     // takes Raymer's radius of gyration.
-    ledger_basis::assess_model_cg_envelope_from_states(
+    ground_ends::assess_model_cg_envelope_from_states(
         plane,
         states,
-        f64::NAN,
+        None,
         cg_x,
         x_np,
         critical_x_np,
@@ -186,12 +207,12 @@ pub fn check_cg_envelope(
     let mtow_mass = loading_states[2].1;
 
     let x_wing_ac_val = if !plane.wings.is_empty() {
-        plane.wings[0].aerodynamic_center(0.25)[0]
+        plane.wings[0].carried_box().aerodynamic_center(0.25)[0]
     } else {
         0.0
     };
     // The reference wing's MAC leading edge when the geometry sets one,
-    // otherwise the reconstruction from the drawn wing's quarter-chord point.
+    // otherwise the reconstruction from the carried box's quarter-chord point.
     let x_mac_le = plane
         .wings
         .first()
@@ -252,6 +273,7 @@ pub fn check_cg_envelope(
         fus_diam,
         fus_diam * 1.1,
         &gear_stations.main_gear_x_m,
+        config.mass_model.pct_load_nlg_min,
         &config.landing_gear,
     );
     let pct_nlg_max = gear_layout.pct_load_nlg_max;

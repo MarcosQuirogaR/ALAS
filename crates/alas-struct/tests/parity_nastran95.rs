@@ -65,8 +65,15 @@ use alas_struct::sizing::size_wingbox_reference_compatibility;
 use serde::Deserialize;
 use support::{build_geometry, materials_for, MaterialsRecord};
 
-/// The mesh resolutions the convergence study runs at, coarse to fine.
-const REFINEMENTS: [(i64, i64); 3] = [(5, 6), (9, 10), (16, 20)];
+/// The mesh resolutions the convergence study runs at, coarse to fine. The rib
+/// layout is held at nine ribs: the rib count is a structural parameter (it moves
+/// the station where the skin starts, see `nastran95_mesh_study.rs`), not a mesh
+/// density, so only the chordwise point count varies here.
+const REFINEMENTS: [(i64, i64); 3] = [(9, 6), (9, 10), (9, 20)];
+
+/// The frozen decks of the NASTRAN-95 build check were written at these three
+/// layouts (rib count, chordwise points) and are kept as they are.
+const BUILD_REFINEMENTS: [(i64, i64); 3] = [(5, 6), (9, 10), (16, 20)];
 
 /// The relative cross-solver disagreement the finest mesh must sit inside. It is
 /// a ceiling, not the claim: the claim is that the disagreement is shrinking.
@@ -90,9 +97,11 @@ struct Refinement {
     /// The grid both solvers report the largest vertical deflection at.
     peak_grid: i64,
     n95_peak_t3: f64,
-    msc_peak_t3: f64,
+    /// SHA-256 of the NASTRAN-95 deck text this row was solved from.
+    deck_sha256: String,
+    msc_peak_t3: Option<f64>,
     /// `(n95 - msc) / msc`.
-    rel_diff: f64,
+    rel_diff: Option<f64>,
 }
 
 /// One wingbox's deck inputs: the mesh, its node index, and the two configs the
@@ -147,7 +156,7 @@ fn the_nastran95_static_deck_obeys_every_dialect_rule() {
     // No solver needed: this is the check that a formatter regression (the
     // kind that fails silently inside NASTRAN-95) is caught anywhere.
     let mut rivets_seen = false;
-    for (num_ribs, chordwise) in REFINEMENTS {
+    for (num_ribs, chordwise) in REFINEMENTS.into_iter().chain(BUILD_REFINEMENTS) {
         let (deck, node_index, req, cfg) = wingbox(num_ribs, chordwise);
         let text = build_static_deck(&deck, &node_index, &req, &cfg, Dialect::Nastran95);
         assert_dialect(&text, num_ribs, chordwise);
@@ -226,6 +235,8 @@ fn assert_dialect(deck: &str, num_ribs: i64, chordwise: i64) {
     }
 }
 
+// A live cross-solver run reports its numbers and notes on stderr.
+#[allow(clippy::print_stderr)]
 #[test]
 #[ignore = "needs ALAS_NASTRAN95_DIR (+ ALAS_NASTRAN95_RUNTIME) and ALAS_MSC_LAUNCHER/ALAS_MSC_SOLVER: live NASTRAN-95 and MSC Nastran installs"]
 fn the_two_solvers_converge_on_the_same_static_deflection() {
@@ -242,8 +253,8 @@ fn the_two_solvers_converge_on_the_same_static_deflection() {
             let (deck, node_index, req, cfg) = wingbox(num_ribs, chordwise);
             let n95_deck = build_static_deck(&deck, &node_index, &req, &cfg, Dialect::Nastran95);
             let msc_deck = build_static_deck(&deck, &node_index, &req, &cfg, Dialect::Modern);
-            let n95_peak = solve_and_peak_n95(n95, &n95_deck, num_ribs);
-            let msc_peak = msc.solve_and_peak(&msc_deck, num_ribs);
+            let n95_peak = solve_and_peak_n95(n95, &n95_deck, &format!("x{num_ribs}x{chordwise}"));
+            let msc_peak = msc.solve_and_peak(&msc_deck, &format!("x{num_ribs}x{chordwise}"));
             (num_ribs, deck.grids().len(), n95_peak, msc_peak)
         })
         .collect();
@@ -253,27 +264,50 @@ fn the_two_solvers_converge_on_the_same_static_deflection() {
         regenerate_fixture(&live);
         return;
     }
-    let fixture: Fixture = alas_testkit::load("struct", "nastran95");
+    let fixture = recorded_fixture();
+    let allow_unrecorded = std::env::var_os("ALAS_NASTRAN95_ALLOW_UNRECORDED_MSC").is_some();
 
     let mut observed: Vec<f64> = Vec::new();
     for (index, &(num_ribs, _grids, n95_peak, msc_peak)) in live.iter().enumerate() {
         let recorded = &fixture.refinements[index];
+        let chordwise = REFINEMENTS[index].1;
+        assert_eq!(
+            (recorded.num_ribs, recorded.chordwise),
+            (num_ribs, chordwise),
+            "fixture row {index} is for another refinement"
+        );
+        let label = format!("ribs={num_ribs} cw={chordwise}");
         // Both solvers must agree on *where* the wing deflects most; a different
         // peak grid means the two decks are not the same model, not that the
         // formulations differ.
         assert_eq!(
             n95_peak.0, msc_peak.0,
-            "ribs={num_ribs}: solvers disagree on the peak-deflection grid"
+            "{label}: solvers disagree on the peak-deflection grid"
         );
         assert_eq!(
             n95_peak.0, recorded.peak_grid,
-            "ribs={num_ribs}: peak grid moved from the recorded evidence"
+            "{label}: peak grid moved from the recorded evidence"
         );
         // The solve is deterministic for a fixed deck and build, so live results
         // must reproduce the recorded ones: a regression check on top of the
         // convergence one.
-        assert_close(n95_peak.1, recorded.n95_peak_t3, "n95 peak", num_ribs);
-        assert_close(msc_peak.1, recorded.msc_peak_t3, "msc peak", num_ribs);
+        assert_close(n95_peak.1, recorded.n95_peak_t3, "n95 peak", &label);
+        match recorded.msc_peak_t3 {
+            Some(recorded_msc) => assert_close(msc_peak.1, recorded_msc, "msc peak", &label),
+            None => {
+                assert!(
+                    allow_unrecorded,
+                    "{label}: the fixture has no recorded MSC peak (live {:.6} m); regenerate it \
+                     with ALAS_NASTRAN95_REGEN, or set ALAS_NASTRAN95_ALLOW_UNRECORDED_MSC to \
+                     accept an unrecorded reference for this run",
+                    msc_peak.1
+                );
+                eprintln!(
+                    "{label}: MSC reference not recorded (live {:.6} m), accepted by request",
+                    msc_peak.1
+                );
+            }
+        }
         observed.push(((n95_peak.1 - msc_peak.1) / msc_peak.1).abs());
     }
 
@@ -290,6 +324,193 @@ fn the_two_solvers_converge_on_the_same_static_deflection() {
         "the finest mesh's disagreement {:.4} exceeds the ceiling {FINEST_TOLERANCE}",
         observed.last().unwrap()
     );
+}
+
+fn recorded_fixture() -> Fixture {
+    alas_testkit::load("struct", "nastran95")
+}
+
+/// SHA-256 of a deck text, lowercase hex.
+fn deck_hash(text: &str) -> String {
+    let mut hasher = alas_exec::sha256::Sha256::new();
+    hasher.update(text.as_bytes());
+    hasher.finalize_hex()
+}
+
+/// No solver needed: the NASTRAN-95 deck of every cross-solver refinement hashes to
+/// the value recorded beside the peaks. A change to sizing, meshing, loads or
+/// defaults that moves a deck fails here, in the fast tier, and forces the
+/// fixture to be regenerated (`ALAS_NASTRAN95_REGEN` with both solvers, or
+/// `ALAS_NASTRAN95_REGEN_N95=1` for the NASTRAN-95 half) instead of going stale
+/// unnoticed behind an ignored two-solver test.
+#[test]
+fn the_cross_solver_decks_match_the_hashes_recorded_with_their_peaks() {
+    let fixture = recorded_fixture();
+    assert_eq!(fixture.refinements.len(), REFINEMENTS.len());
+    for (row, &(num_ribs, chordwise)) in fixture.refinements.iter().zip(&REFINEMENTS) {
+        assert_eq!((row.num_ribs, row.chordwise), (num_ribs, chordwise));
+        let (deck, node_index, req, cfg) = wingbox(num_ribs, chordwise);
+        let text = build_static_deck(&deck, &node_index, &req, &cfg, Dialect::Nastran95);
+        assert_eq!(
+            deck_hash(&text),
+            row.deck_sha256,
+            "ribs={num_ribs} cw={chordwise}: the model moved, so the recorded peaks are stale; \
+             regenerate golden/struct/nastran95.json"
+        );
+    }
+}
+
+/// NASTRAN-95 alone against the recorded cross-solver peaks (no MSC needed): the
+/// regression half that used to live only inside the two-solver test.
+#[test]
+#[ignore = "needs ALAS_NASTRAN95_DIR (+ ALAS_NASTRAN95_RUNTIME): a live NASTRAN-95 install"]
+fn the_nastran95_peaks_match_the_cross_solver_fixture() {
+    let solver = Nastran95Solver::from_env()
+        .expect("set ALAS_NASTRAN95_DIR (+ ALAS_NASTRAN95_RUNTIME) to run this test");
+    let fixture = recorded_fixture();
+    let regen = std::env::var_os("ALAS_NASTRAN95_REGEN_N95").is_some();
+    let mut rows = Vec::new();
+    for (row, &(num_ribs, chordwise)) in fixture.refinements.iter().zip(&REFINEMENTS) {
+        let label = format!("ribs={num_ribs} cw={chordwise}");
+        let (deck, node_index, req, cfg) = wingbox(num_ribs, chordwise);
+        let text = build_static_deck(&deck, &node_index, &req, &cfg, Dialect::Nastran95);
+        let (grid, peak) =
+            solve_and_peak_n95(&solver, &text, &format!("fixture_{num_ribs}x{chordwise}"));
+        if regen {
+            // An MSC peak belongs to the deck it was solved on: keep it only when
+            // the deck is unchanged, otherwise it would be filed under a new hash.
+            let hash = deck_hash(&text);
+            let msc = (hash == row.deck_sha256)
+                .then_some(row.msc_peak_t3)
+                .flatten();
+            rows.push((
+                num_ribs,
+                chordwise,
+                deck.grids().len(),
+                grid,
+                peak,
+                hash,
+                msc,
+            ));
+            continue;
+        }
+        assert_eq!(grid, row.peak_grid, "{label}: peak grid moved");
+        assert_close(peak, row.n95_peak_t3, "n95 peak", &label);
+    }
+    if regen {
+        assert!(
+            std::env::var_os("ALAS_NASTRAN95_REGEN_NOTE").is_some(),
+            "name the solver build in ALAS_NASTRAN95_REGEN_NOTE (the existing note: {})",
+            fixture.solver_note
+        );
+        write_fixture(&fixture.solver_note, &rows);
+    }
+}
+
+/// Relative tolerance of the NASTRAN-95-only build check against the recorded
+/// peaks. Same decks, different compiler at `-O0`: expected to agree far better
+/// than this; a different answer is a miscompiled or differently behaving build.
+const BUILD_TOLERANCE: f64 = 1.0e-3;
+
+/// `golden/struct/nastran95_build.json`: NASTRAN-95 peaks alone, recorded from a
+/// reference build, to validate another host's or compiler's build of the solver.
+/// It is not a physical reference (the cross-solver fixture and the closed-form
+/// cantilever test carry that); it pins "this build reproduces that build".
+#[derive(Debug, Deserialize)]
+struct BuildFixture {
+    solver_note: String,
+    refinements: Vec<BuildRefinement>,
+}
+
+#[derive(Debug, Deserialize)]
+struct BuildRefinement {
+    num_ribs: i64,
+    chordwise: i64,
+    peak_grid: i64,
+    n95_peak_t3: f64,
+}
+
+/// Directory of the frozen NASTRAN-95 decks the build check solves. They are
+/// committed so the check does not move when sizing, meshing or defaults change.
+fn build_deck_path(num_ribs: i64, chordwise: i64) -> PathBuf {
+    Path::new(env!("CARGO_MANIFEST_DIR"))
+        .join("../../golden/struct/nastran95_build_decks")
+        .join(format!("ribs{num_ribs}_chord{chordwise}.bdf"))
+}
+
+/// Solve each frozen deck with NASTRAN-95 alone (no MSC) and hold the peak grid
+/// and peak deflection to the values recorded from the reference build. With
+/// `ALAS_NASTRAN95_REGEN_BUILD` set, rebuild the decks from the current model,
+/// solve them and write both the decks and the fixture
+/// (`ALAS_NASTRAN95_BUILD_NOTE` names the compiler and host for the record).
+#[test]
+#[ignore = "needs ALAS_NASTRAN95_DIR (+ ALAS_NASTRAN95_RUNTIME): a live NASTRAN-95 install"]
+fn the_nastran95_peaks_match_the_recorded_reference_build() {
+    let solver = Nastran95Solver::from_env()
+        .expect("set ALAS_NASTRAN95_DIR (+ ALAS_NASTRAN95_RUNTIME) to run this test");
+    let regen = std::env::var("ALAS_NASTRAN95_REGEN_BUILD").is_ok();
+    let live: Vec<(i64, i64, i64, f64)> = BUILD_REFINEMENTS
+        .iter()
+        .map(|&(num_ribs, chordwise)| {
+            let path = build_deck_path(num_ribs, chordwise);
+            let n95_deck = if regen {
+                let (deck, node_index, req, cfg) = wingbox(num_ribs, chordwise);
+                let text = build_static_deck(&deck, &node_index, &req, &cfg, Dialect::Nastran95);
+                std::fs::create_dir_all(path.parent().expect("deck directory"))
+                    .expect("create the deck directory");
+                std::fs::write(&path, &text).expect("write the frozen deck");
+                text
+            } else {
+                std::fs::read_to_string(&path)
+                    .unwrap_or_else(|e| panic!("frozen deck {}: {e}", path.display()))
+            };
+            let (grid, peak) =
+                solve_and_peak_n95(&solver, &n95_deck, &format!("build_{num_ribs}x{chordwise}"));
+            (num_ribs, chordwise, grid, peak)
+        })
+        .collect();
+    if regen {
+        let note = std::env::var("ALAS_NASTRAN95_BUILD_NOTE")
+            .expect("name the reference build in ALAS_NASTRAN95_BUILD_NOTE");
+        let rows: Vec<String> = live
+            .iter()
+            .map(|&(ribs, chord, grid, peak)| {
+                format!(
+                    "    {{\n      \"num_ribs\": {ribs},\n      \"chordwise\": {chord},\n      \
+                     \"peak_grid\": {grid},\n      \"n95_peak_t3\": {peak:.10}\n    }}"
+                )
+            })
+            .collect();
+        let json = format!(
+            "{{\n  \"solver_note\": \"{note}; peak vertical deflection of subcase 1 (pull-up), metres, NASTRAN-95 alone.\",\n  \"refinements\": [\n{}\n  ]\n}}\n",
+            rows.join(",\n")
+        );
+        let path =
+            Path::new(env!("CARGO_MANIFEST_DIR")).join("../../golden/struct/nastran95_build.json");
+        std::fs::write(&path, json).expect("write the fixture");
+        return;
+    }
+    let fixture: BuildFixture = alas_testkit::load("struct", "nastran95_build");
+    for (index, &(num_ribs, chordwise, grid, peak)) in live.iter().enumerate() {
+        let recorded = &fixture.refinements[index];
+        assert_eq!(
+            (recorded.num_ribs, recorded.chordwise),
+            (num_ribs, chordwise),
+            "fixture row {index} is for another refinement ({})",
+            fixture.solver_note
+        );
+        assert_eq!(
+            grid, recorded.peak_grid,
+            "ribs={num_ribs}: peak grid differs from the reference build"
+        );
+        let relative = (peak - recorded.n95_peak_t3).abs() / recorded.n95_peak_t3.abs();
+        assert!(
+            relative < BUILD_TOLERANCE,
+            "ribs={num_ribs}: peak {peak:e} differs from the reference {:e} by {relative:e} (tolerance {BUILD_TOLERANCE}; {})",
+            recorded.n95_peak_t3,
+            fixture.solver_note
+        );
+    }
 }
 
 /// SOL 3,1 is a supported local NASTRAN-95 workflow even though its historic
@@ -405,30 +626,32 @@ fn sturm_gate_rejects_a_parsed_list_with_an_omitted_lowest_root() {
     );
 }
 
-/// Write `golden/struct/nastran95.json` from a live cross-solver run.
-///
-/// The fixture is the captured convergence evidence; there is no reference
-/// implementation to generate it, so the generator is the test itself, run with
-/// both solvers present and `ALAS_NASTRAN95_REGEN` set.
+/// One fixture row as written: rib count, chordwise points, grids, peak grid,
+/// NASTRAN-95 peak, deck hash, and the MSC peak when one is recorded.
+type FixtureRow = (i64, i64, usize, i64, f64, String, Option<f64>);
+
+/// Write `golden/struct/nastran95.json`. The provenance note is kept from the
+/// existing fixture unless `ALAS_NASTRAN95_REGEN_NOTE` supplies a new one (it
+/// must, when the compiler, revision or solver pairing changed).
 #[allow(clippy::print_stderr)]
-fn regenerate_fixture(live: &[Live]) {
-    let refinements: Vec<String> = live
+fn write_fixture(existing_note: &str, rows: &[FixtureRow]) {
+    let note =
+        std::env::var("ALAS_NASTRAN95_REGEN_NOTE").unwrap_or_else(|_| existing_note.to_owned());
+    let refinements: Vec<String> = rows
         .iter()
-        .zip(REFINEMENTS)
-        .map(|(&(num_ribs, grids, n95_peak, msc_peak), (_, chordwise))| {
-            let rel = (n95_peak.1 - msc_peak.1) / msc_peak.1;
+        .map(|(ribs, chordwise, grids, grid, n95, hash, msc)| {
+            let (msc_text, rel_text) = msc.map_or(("null".to_owned(), "null".to_owned()), |m| {
+                (format!("{m:.10}"), format!("{:.10}", (n95 - m) / m))
+            });
             format!(
-                "    {{\n      \"num_ribs\": {num_ribs},\n      \"chordwise\": {chordwise},\n      \
-                 \"grids\": {grids},\n      \"peak_grid\": {},\n      \"n95_peak_t3\": {:.10},\n      \
-                 \"msc_peak_t3\": {:.10},\n      \"rel_diff\": {:.10}\n    }}",
-                n95_peak.0, n95_peak.1, msc_peak.1, rel
+                "    {{\n      \"num_ribs\": {ribs},\n      \"chordwise\": {chordwise},\n      \
+                 \"grids\": {grids},\n      \"peak_grid\": {grid},\n      \"n95_peak_t3\": {n95:.10},\n      \
+                 \"deck_sha256\": \"{hash}\",\n      \"msc_peak_t3\": {msc_text},\n      \"rel_diff\": {rel_text}\n    }}"
             )
         })
         .collect();
     let json = format!(
-        "{{\n  \"solver_note\": \"NASTRAN-95 (Foadsf fork, gfortran -O0 -fno-automatic) \
-         cross-checked against MSC Nastran Student Edition 2026.1; peak vertical deflection \
-         of subcase 1 (pull-up), metres.\",\n  \"refinements\": [\n{}\n  ]\n}}\n",
+        "{{\n  \"solver_note\": \"{note}\",\n  \"refinements\": [\n{}\n  ]\n}}\n",
         refinements.join(",\n")
     );
     let path = Path::new(env!("CARGO_MANIFEST_DIR")).join("../../golden/struct/nastran95.json");
@@ -436,23 +659,51 @@ fn regenerate_fixture(live: &[Live]) {
     eprintln!("wrote {}", path.display());
 }
 
+/// Regenerate from a live two-solver run (`ALAS_NASTRAN95_REGEN`).
+fn regenerate_fixture(live: &[Live]) {
+    let rows: Vec<FixtureRow> = live
+        .iter()
+        .zip(REFINEMENTS)
+        .map(|(&(num_ribs, grids, n95_peak, msc_peak), (_, chordwise))| {
+            let (deck, node_index, req, cfg) = wingbox(num_ribs, chordwise);
+            let text = build_static_deck(&deck, &node_index, &req, &cfg, Dialect::Nastran95);
+            (
+                num_ribs,
+                chordwise,
+                grids,
+                n95_peak.0,
+                n95_peak.1,
+                deck_hash(&text),
+                Some(msc_peak.1),
+            )
+        })
+        .collect();
+    let existing = recorded_fixture();
+    assert!(
+        std::env::var_os("ALAS_NASTRAN95_REGEN_NOTE").is_some(),
+        "name the solver builds in ALAS_NASTRAN95_REGEN_NOTE (the existing note: {})",
+        existing.solver_note
+    );
+    write_fixture(&existing.solver_note, &rows);
+}
+
 /// A live number must match the recorded one to a determinism tolerance: the
 /// last-digit round-off two runs of the same solver can differ by.
-fn assert_close(got: f64, want: f64, what: &str, num_ribs: i64) {
+fn assert_close(got: f64, want: f64, what: &str, label: &str) {
     let relative = (got - want).abs() / want.abs().max(1e-30);
     assert!(
         relative < 1e-4,
-        "ribs={num_ribs}: {what} {got:e} differs from the recorded {want:e} ({relative:e})"
+        "{label}: {what} {got:e} differs from the recorded {want:e} ({relative:e})"
     );
 }
 
 /// Solve the NASTRAN-95 deck and return the grid of largest vertical deflection
 /// and that deflection, from the first subcase.
-fn solve_and_peak_n95(solver: &Nastran95Solver, deck: &str, num_ribs: i64) -> (i64, f64) {
-    let work = scratch_dir(&format!("n95_{num_ribs}"));
+fn solve_and_peak_n95(solver: &Nastran95Solver, deck: &str, label: &str) -> (i64, f64) {
+    let work = scratch_dir(&format!("n95_{label}"));
     match run_nastran95(solver, deck, &work, 300.0) {
         RunOutcome::Print(print) => peak_deflection(&read_displacement_tables(&print)),
-        RunOutcome::Failed(why) => panic!("ribs={num_ribs}: NASTRAN-95 solve failed: {why}"),
+        RunOutcome::Failed(why) => panic!("{label}: NASTRAN-95 solve failed: {why}"),
     }
 }
 
@@ -495,8 +746,8 @@ impl Msc {
         Some(Self { launcher, solver })
     }
 
-    fn solve_and_peak(&self, deck: &str, num_ribs: i64) -> (i64, f64) {
-        let work = scratch_dir(&format!("msc_{num_ribs}"));
+    fn solve_and_peak(&self, deck: &str, label: &str) -> (i64, f64) {
+        let work = scratch_dir(&format!("msc_{label}"));
         let bdf = work.join("wing.bdf");
         std::fs::write(&bdf, deck).unwrap();
         let status = Command::new(&self.launcher)
@@ -510,10 +761,7 @@ impl Msc {
             ])
             .status()
             .expect("MSC launcher runs");
-        assert!(
-            status.success(),
-            "ribs={num_ribs}: MSC launcher exited non-zero"
-        );
+        assert!(status.success(), "{label}: MSC launcher exited non-zero");
         let f06 = std::fs::read_to_string(work.join("wing.f06")).expect("MSC wrote an .f06");
         peak_deflection(&read_displacement_tables(&f06))
     }
@@ -572,9 +820,20 @@ fn msc_command_token(path: &Path) -> Result<String, String> {
 /// (its `/DOSNAM/` is `CHARACTER*72`), so this uses the drive root, not the
 /// system temp under a long profile path.
 fn scratch_dir(label: &str) -> PathBuf {
-    let base = std::env::var("ALAS_NASTRAN95_SCRATCH").unwrap_or_else(|_| "C:/nas-run".to_string());
+    let base = std::env::var("ALAS_NASTRAN95_SCRATCH")
+        .unwrap_or_else(|_| default_scratch_root().to_string());
     let path = Path::new(&base).join(label);
     let _ = std::fs::remove_dir_all(&path);
     std::fs::create_dir_all(&path).unwrap();
     path
+}
+
+/// The scratch root when `ALAS_NASTRAN95_SCRATCH` is unset: a drive root on
+/// Windows, `/tmp` elsewhere; both keep the staged rigid-format path short.
+fn default_scratch_root() -> &'static str {
+    if cfg!(windows) {
+        "C:/nas-run"
+    } else {
+        "/tmp/nas-run"
+    }
 }

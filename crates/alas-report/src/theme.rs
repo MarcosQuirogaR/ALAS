@@ -110,6 +110,36 @@ pub fn secondary_surface_line(palette: &Palette) -> &'static str {
     }
 }
 
+/// The one categorical palette of the figures: series `i` of a figure (one
+/// gear strut, one control surface) takes colour `i`, so two series of one
+/// legend never share a colour while the palette lasts. Every colour has a
+/// relative luminance between 0.15 and 0.29, which clears the 3:1 non-text
+/// contrast against both the light (#ffffff) and the dark (#1e1e1e) canvas.
+pub const CATEGORICAL: [&str; 8] = [
+    "#1f77b4", "#d97706", "#2ca02c", "#d62728", "#9467bd", "#0f8b8d", "#d81b60", "#7f7f7f",
+];
+
+/// Colour of series `index` of a figure, from [`CATEGORICAL`] (cycling past
+/// its end).
+pub fn series_color(index: usize) -> crate::scene::Color {
+    crate::scene::Color::from_hex(CATEGORICAL[index % CATEGORICAL.len()])
+}
+
+/// The colour of series `name` among the series of a figure: the colour it
+/// was given, or the next [`series_color`], registering `name` in `series`
+/// (which is also the order of the figure's legend).
+pub fn series_entry(
+    series: &mut Vec<(String, crate::scene::Color)>,
+    name: &str,
+) -> crate::scene::Color {
+    if let Some((_, color)) = series.iter().find(|(entry, _)| entry == name) {
+        return *color;
+    }
+    let color = series_color(series.len());
+    series.push((name.to_owned(), color));
+    color
+}
+
 /// Default theme used for the desktop interface.
 pub const DEFAULT_THEME: &str = "dark";
 

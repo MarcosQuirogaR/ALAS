@@ -69,7 +69,7 @@ pub(super) fn installation_message(directory: &Path, status: MsesStatus) -> Stri
     match status {
         MsesStatus::Absent => format!("MSES installation was not found at {}", directory.display()),
         MsesStatus::Incomplete => format!(
-            "MSES installation at {} is incomplete; required mset.exe, mses.exe, and mplot.exe",
+            "MSES installation at {} is incomplete; required mset, mses, and mplot (with or without .exe)",
             directory.display()
         ),
         _ => format!(

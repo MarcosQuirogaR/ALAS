@@ -50,6 +50,16 @@ pub(super) fn lth_furnishings_kg(fuselage_length_m: f64, average_fuselage_diamet
 /// service items), including unusable fuel and engine/APU oil: these fluids
 /// are listed in Pape section 2.11, pp. 22-23. Their explicit rows are allocated
 /// within this total. Cargo container tare remains separate.
+///
+/// The relation describes a current cabin. Beside `m_fur` it gives 8,499 kg on
+/// Boeing's 2008-technology 154-seat narrow-body, whose published furnishings
+/// and operational items are 8,259 kg (Bradley and Droney, NASA/CR-2011-216847,
+/// Table 5.9, p. 61; `examples/sugar_free_statement.rs`), and FLOPS equations
+/// 110 and 124 give 8,129 kg on the same aircraft. A sum of 1970s and 1980s
+/// unit masses (Torenbeek 1982 Table 8-13, NASA CR-144935 Table VI) gives
+/// 6,423 kg there: it reproduces the 1980s A320 statement (Obert 2009, Fig.
+/// 42.25: 6,028 kg at 73.5 t) and is 1.8 t light on a present-day cabin, so it
+/// is not used.
 pub(super) fn lth_operating_items_kg(passengers: usize, long_haul: bool) -> f64 {
     let count = passengers as f64;
     if count <= 0.0 {

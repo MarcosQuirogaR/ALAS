@@ -21,6 +21,28 @@ pub fn draw_title(scene: &mut Scene, title: &str, pal: &Palette) {
     });
 }
 
+/// Add the mass basis a weight-and-balance figure is drawn at, centred under
+/// the title: `MTOW sizing basis` (the sizing-closure takeoff mass) or
+/// `flown route` (the mass ledger of the flown mission), with the fuel it
+/// carries. Every figure of the page states one, so two panels never silently
+/// show different loadings.
+pub fn draw_basis_subtitle(scene: &mut Scene, basis: &str, fuel_kg: f64, pal: &Palette) {
+    let _chrome = crate::plot_data::ChromeGuard::begin();
+    scene.add(SceneElement::Text {
+        text: format!("{basis}, fuel {:.1} t", fuel_kg / 1000.0),
+        pos: [scene.width * 0.5, 37.0],
+        font_size: 10.0,
+        color: Color::from_hex(pal.tick),
+        align: TextAlign::Center,
+        baseline: TextBaseline::Middle,
+        angle_deg: 0.0,
+        bold: false,
+    });
+}
+
+/// The basis label of figures drawn from the sizing-closure component masses.
+pub const MTOW_SIZING_BASIS: &str = "MTOW sizing basis";
+
 /// Greedy word-wrap for the scene graph's font-metric-free text primitive.
 ///
 /// `max_chars_per_line` is a coarse character budget, not a measured pixel
@@ -165,6 +187,9 @@ fn draw_axes_configured(
     let x_ticks = major_ticks(axes.x_min, axes.x_max, axes.x_scale, 6);
     let y_ticks = major_ticks(axes.y_min, axes.y_max, axes.y_scale, 6);
     let x_step = tick_step(axes.x_min, axes.x_max, axes.x_scale, 6);
+    // The gap between the axis and its y tick labels grows with the tick font, so
+    // larger labels do not touch the tick marks.
+    let tick_gap = 7.0 + (axes.tick_font_size - 8.5).max(0.0) * 0.8;
     let y_step = tick_step(axes.y_min, axes.y_max, axes.y_scale, 6);
 
     for &value in &x_ticks {
@@ -206,9 +231,9 @@ fn draw_axes_configured(
                 stroke: Stroke::new(spine, 1.0),
             });
             scene.add(SceneElement::Text {
-                text: format_tick(value, x_step, axes.x_tick_decimals),
+                text: tick_label(axes.x_scale, value, x_step, axes.x_tick_decimals),
                 pos: [p[0], axes.top + axes.height + 7.0],
-                font_size: 8.5,
+                font_size: axes.tick_font_size,
                 color: tick_color,
                 align: TextAlign::Center,
                 baseline: TextBaseline::Top,
@@ -225,9 +250,14 @@ fn draw_axes_configured(
             stroke: Stroke::new(spine, 1.0),
         });
         scene.add(SceneElement::Text {
-            text: format_tick(value, y_step, axes.y_tick_decimals),
-            pos: [axes.left - 7.0, p[1]],
-            font_size: 8.5,
+            text: tick_label(
+                axes.y_scale,
+                if axes.y_tick_negated { -value } else { value },
+                y_step,
+                axes.y_tick_decimals,
+            ),
+            pos: [axes.left - tick_gap, p[1]],
+            font_size: axes.tick_font_size,
             color: tick_color,
             align: TextAlign::Right,
             baseline: TextBaseline::Middle,
@@ -240,8 +270,11 @@ fn draw_axes_configured(
         if let Some(label) = x_label.filter(|label| !label.trim().is_empty()) {
             scene.add(SceneElement::Text {
                 text: label.to_owned(),
-                pos: [axes.left + axes.width * 0.5, axes.top + axes.height + 29.0],
-                font_size: 10.0,
+                pos: [
+                    axes.left + axes.width * 0.5,
+                    axes.top + axes.height + (7.0 + axes.tick_font_size + 12.0).max(29.0),
+                ],
+                font_size: axes.tick_font_size + 1.5,
                 color: tick_color,
                 align: TextAlign::Center,
                 baseline: TextBaseline::Top,
@@ -257,11 +290,38 @@ fn draw_axes_configured(
         // label. Give that column a few extra pixels rather than moving every
         // ordinary (auto-formatted, usually narrower) y label.
         let wide_ticks = axes.y_tick_decimals.is_some_and(|decimals| decimals >= 2);
-        let offset = if wide_ticks { -46.0 } else { -38.0 };
+        let widest = y_ticks
+            .iter()
+            .map(|&value| {
+                tick_label(
+                    axes.y_scale,
+                    if axes.y_tick_negated { -value } else { value },
+                    y_step,
+                    axes.y_tick_decimals,
+                )
+                .chars()
+                .count()
+            })
+            .max()
+            .unwrap_or(0) as f64;
+        // The title clears the widest tick label: the label gap, its width, a
+        // margin and half the title's own height (it is rotated). Font sizes
+        // are points; the scene is in pixels.
+        let px = crate::scene::CSS_PIXELS_PER_POINT;
+        let clearance = tick_gap
+            + widest * axes.tick_font_size * px * 0.58
+            + 8.0
+            + (axes.tick_font_size + 1.5) * px * 0.6;
+        let default = if wide_ticks { 46.0 } else { 38.0 };
+        // Never past the left edge of the figure.
+        let offset = -clearance
+            .max(default)
+            .min(axes.left - 10.0)
+            .max(default.min(axes.left - 10.0));
         scene.add(SceneElement::Text {
             text: label.to_owned(),
             pos: [axes.left + offset, axes.top + axes.height * 0.5],
-            font_size: 10.0,
+            font_size: axes.tick_font_size + 1.5,
             color: tick_color,
             align: TextAlign::Center,
             baseline: TextBaseline::Middle,
@@ -292,10 +352,38 @@ pub(crate) fn tick_step(min: f64, max: f64, scale: Scale, target: usize) -> f64 
     (multiplier * power).max(1e-12)
 }
 
+/// A tick label: the shortest exact decimal on a symmetric-log axis (ticks sit on decades, so a
+/// step-derived precision would print "1.000" for 1), the step-derived format otherwise.
+fn tick_label(scale: Scale, value: f64, step: f64, fixed_decimals: Option<usize>) -> String {
+    if matches!(scale, Scale::SymLog { .. }) && fixed_decimals.is_none() {
+        if value == 0.0 {
+            return "0".to_owned();
+        }
+        return alas_units::notation::group_thousands(&format!("{value}"));
+    }
+    format_tick(value, step, fixed_decimals)
+}
+
 pub(crate) fn major_ticks(min: f64, max: f64, scale: Scale, target: usize) -> Vec<f64> {
     let (lo, hi) = ordered_range(min, max, scale);
     if !lo.is_finite() || !hi.is_finite() || hi <= lo {
         return vec![lo];
+    }
+    if let Scale::SymLog { linthresh } = scale {
+        // Linear tick spacing on a symmetric-log axis (-2, 0, 2) reads as a linear scale and
+        // misplaces every pole; ticks go on decades of both signs, plus zero, instead.
+        let lt = linthresh.max(1e-12);
+        let first = lt.log10().floor() as i32;
+        let last = hi.abs().max(lo.abs()).log10().floor() as i32;
+        let mut ticks = vec![0.0];
+        for exponent in first..=last.min(first + 24) {
+            let magnitude = 10.0_f64.powi(exponent);
+            ticks.push(magnitude);
+            ticks.push(-magnitude);
+        }
+        ticks.retain(|&value| value >= lo && value <= hi);
+        ticks.sort_by(f64::total_cmp);
+        return ticks;
     }
     if matches!(scale, Scale::Log10) {
         if hi <= 0.0 {
@@ -358,7 +446,7 @@ pub(crate) fn format_tick(value: f64, step: f64, fixed_decimals: Option<usize>) 
         value
     };
     if let Some(decimals) = fixed_decimals {
-        return format!("{value:.decimals$}");
+        return alas_units::notation::group_thousands(&format!("{value:.decimals$}"));
     }
     let abs_step = step.abs();
     if abs_step >= 1e6 || (abs_step > 0.0 && abs_step < 1e-4) {
@@ -369,5 +457,5 @@ pub(crate) fn format_tick(value: f64, step: f64, fixed_decimals: Option<usize>) 
     } else {
         (-abs_step.log10().floor() as i32 + 1).clamp(0, 8) as usize
     };
-    format!("{value:.decimals$}")
+    alas_units::notation::group_thousands(&format!("{value:.decimals$}"))
 }

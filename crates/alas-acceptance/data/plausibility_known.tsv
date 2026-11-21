@@ -1,0 +1,15 @@
+# aircraft	[PRICED:]rule[/kind]	bound
+# Registry of the open HIGH plausibility findings of the tier (tests/plausibility_tier.rs). Every row is a defect of the model with the evidence below; none is a statement that the result is acceptable. `plausibility_gate` fails while any row exists. `registered_findings_do_not_worsen` holds each row to its bound: the largest distance past the rule's limit the finding may have, in the rule's unit (`-` for a finding without a magnitude). A fix removes its row; an improvement may lower a bound; a bound is never raised. The file is edited by hand.
+# Units of the bound: CG-OEW-REFERENCE, % MAC beyond the published state or the class band; GEAR-AERO-AFT-BEHIND-GEAR, minus the raw nose reaction in % of the gear design weight; CG-ENVELOPE, the largest normalized exceedance of the violated hard constraints (dimensionless); MISSION-CLIMB-RATE/SlowerThanReference, % slower than the published time to climb.
+# GEAR-AERO-AFT-BEHIND-GEAR: the aerodynamic aft CG limit (critical neutral point minus the minimum static margin) lies behind the main gear, so the raw nose reaction at the design aft CG is negative; gear sizing is floored at the minimum nose share, so a fix must be verified on the raw value. Cause: the model's absolute CG and neutral-point stations (the clean neutral point sits at or behind the main gear: B747-400 +0.74 m, DC-10 +0.59 m), not the % MAC frame.
+B747-400	GEAR-AERO-AFT-BEHIND-GEAR	5.66
+DC-10	GEAR-AERO-AFT-BEHIND-GEAR	2.93
+# CG-ENVELOPE MinimumNoseGearLoad, B747-400: the analyzed take-off state carries less than the minimum nose share. The model main gear sits at 39.2 % MAC where the published 6.3 % nose share at the aft CG (ACAP D6-58326-1 section 7.3, 873,000 lb) puts it about 1 m further aft.
+B747-400	CG-ENVELOPE/MinimumNoseGearLoad	0.0018
+# ATR72-600 climb against the published time to climb (ATR 72-600 factsheet 2020 p. 2): the thrust side of the turboprop climb. Native flight: recorded at 31-32 % slower in the three sizing modes (2026-10-27), which is the bound. Priced profile: recorded at 30.9 %, 26.85 % when the bound was last lowered.
+ATR72-600	MISSION-CLIMB-RATE/SlowerThanReference	32.0
+ATR72-600	PRICED:MISSION-CLIMB-RATE/SlowerThanReference	26.85
+# CG-OEW-REFERENCE: model OEW CG against the Airbus light-weight clearance states (A320 17 / 26.5 % MAC) or Torenbeek 1982 Sec. 8.5.3 pp. 299-300 (wing pods 25-30, forward propellers 20-25 % MAC). Recorded with the seats on their class rows (Torenbeek Table 3-2): A320-200 34.8 (8.3 aft of the 26.5 state), DC-10 16.7 (8.3 ahead of the band); A400M 6.44 outside its band when the bound was last lowered. Cause: the wing station along the body (LEMAC over length); A400M not investigated.
+A320-200	CG-OEW-REFERENCE	8.3
+A400M	CG-OEW-REFERENCE	6.44
+DC-10	CG-OEW-REFERENCE	8.3

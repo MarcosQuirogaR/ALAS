@@ -12,13 +12,14 @@ use super::{warning, FindingCode, PhysicalFinding};
 /// schedule speed stands.
 pub(super) fn finding(selection: Option<ImprovedClimbSelection>) -> Option<PhysicalFinding> {
     let selection = selection.filter(|selection| selection.improved)?;
-    if !selection.meets {
+    if selection.climb_limited() {
         return Some(warning(
             FindingCode::ImprovedClimbV2,
             format!(
-                "improved climb cannot meet the CS 25.121(b) gradient: at the best-climb speed {:.3} VSR (schedule {:.3}) the required static T/W is {:.4} against {:.4} at the schedule speed, so the schedule speed stands and the second-segment finding is reported there",
-                selection.v2_over_vsr,
+                "climb-limited take-off: no V2 between the schedule {:.3} VSR and the overspeed limit {:.3} VS1g (V2/VS maxi, Airbus Getting to Grips with Aircraft Performance, 2002, p. 194) meets the CS 25.121(b) gradient; at the best speed within the limit, {:.3} VSR, the required static T/W is {:.4} ({:.4} at the schedule speed), so the take-off is not possible at this mass and configuration and the field length flown at that speed is not a scheduled one",
                 selection.schedule_v2_over_vsr,
+                selection.v2_max_over_vsr,
+                selection.v2_over_vsr,
                 selection.required,
                 selection.required_at_schedule,
             ),

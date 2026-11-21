@@ -192,6 +192,13 @@ impl Spec {
             true_course_rad: self.true_course_rad,
             temperature_deviation_k: self.temperature_deviation_k,
             number_control_points: self.number_control_points,
+            takeoff_rated: false,
+            rating_limited: false,
+            configuration_delta_cd: 0.0,
+            load_factor: 1.0,
+            entry_speed_m_s: 0.0,
+            exit_speed_m_s: 0.0,
+            speed_profile: Vec::new(),
         }
     }
 }

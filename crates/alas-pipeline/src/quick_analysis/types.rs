@@ -205,6 +205,15 @@ pub struct QuickFlag {
     pub blocking: bool,
     /// Human-readable explanation.
     pub message: String,
+    /// Measured value, when the check is quantitative.
+    #[serde(default)]
+    pub actual: Option<f64>,
+    /// Governing limit, when the check is quantitative.
+    #[serde(default)]
+    pub limit: Option<f64>,
+    /// Unit shared by `actual` and `limit`; empty when dimensionless.
+    #[serde(default)]
+    pub unit: String,
 }
 
 /// The supported feasibility flags.
@@ -233,6 +242,10 @@ pub struct QuickRouteFuel {
     pub route_distance_m: f64,
     /// Great-circle distance between the route's airports, m.
     pub great_circle_m: f64,
+    /// Whether the numbers are the priced estimate, shown at once; the native flight the full
+    /// analysis flies replaces them (false) when it lands.
+    #[serde(default)]
+    pub estimate: bool,
     /// The planner tier that supplied the route (`alas_route` source name).
     pub source: String,
     /// The assumption or limit that qualifies these numbers.

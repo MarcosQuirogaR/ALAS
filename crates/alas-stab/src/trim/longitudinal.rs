@@ -84,8 +84,15 @@ pub struct TrimAttitudeView {
     pub x_np: f64,
     /// Static margin at the real CG.
     pub static_margin: f64,
+    /// Moment slope of the airframe the lattice does not carry, per degree
+    /// (compressible trim only; zero otherwise).
+    pub cm_body_per_deg: f64,
     /// Whether these values came from the compressible lattice.
     pub compressible: bool,
+    /// `[[dCL/dalpha, dCL/di_h], [dCm/dalpha, dCm/di_h]]` per degree at the
+    /// trimmed attitude itself, when the solve measured it (the compressible
+    /// trim); the slope fields above are the probe-point ones.
+    pub jacobian_at_trim: Option<[[f64; 2]; 2]>,
 }
 
 impl StabilityTrimResult {
@@ -104,7 +111,9 @@ impl StabilityTrimResult {
                 cm_ih: c.cm_ih,
                 x_np: c.x_np,
                 static_margin: c.static_margin,
+                cm_body_per_deg: c.cm_body_per_deg,
                 compressible: true,
+                jacobian_at_trim: c.jacobian_at_trim,
             },
             None => TrimAttitudeView {
                 converged: self.converged,
@@ -116,7 +125,9 @@ impl StabilityTrimResult {
                 cm_ih: self.cm_ih,
                 x_np: self.x_np,
                 static_margin: self.static_margin,
+                cm_body_per_deg: 0.0,
                 compressible: false,
+                jacobian_at_trim: None,
             },
         }
     }
@@ -179,15 +190,20 @@ pub(super) fn fuselage_cm_alpha_with_reference_mode(
     let Some(wing) = main_wing(airplane).filter(|wing| !wing.xsecs.is_empty()) else {
         return f64::NAN;
     };
-    let x_le = wing.xsecs[0].xyz_le[0];
-    let x_te = x_le + wing.xsecs[0].chord;
+    let (root_le_m, root_chord_m) = wing.design_root();
+    let x_le = root_le_m[0];
+    let x_te = x_le + root_chord_m;
     let x_h = match hstab(airplane) {
         Some(h) => h.aerodynamic_center(AC_CHORD_FRACTION)[0],
         None => x_te + 3.0 * airplane.c_ref,
     };
 
-    let s_ref = airplane.s_ref.max(1.0);
-    let c_ref = airplane.c_ref.max(0.1);
+    let s_ref = airplane
+        .s_ref
+        .max(crate::reference_dimensions::REFERENCE_AREA_FLOOR_M2);
+    let c_ref = airplane
+        .c_ref
+        .max(crate::reference_dimensions::REFERENCE_CHORD_FLOOR_M);
     // Downwash uses the aircraft reference-plane aspect ratio in the product
     // path. The explicit parity mode retains the historical unfolded wing
     // aspect ratio used by the translated Python correlation.
@@ -201,7 +217,10 @@ pub(super) fn fuselage_cm_alpha_with_reference_mode(
 
     let l_f = xs[xs.len() - 1] - xs[0];
     // `max(0.1, ws.max())`: folding from 0.1 is that maximum, in one pass.
-    let d_f = ws.iter().copied().fold(0.1_f64, f64::max);
+    let d_f = ws.iter().copied().fold(
+        crate::reference_dimensions::FUSELAGE_SECTION_FLOOR_M,
+        f64::max,
+    );
     let k_fac = munk_apparent_mass_factor(l_f / d_f);
 
     let mut accum = 0.0;
@@ -240,13 +259,38 @@ pub(super) fn fuselage_cm_alpha_with_reference_mode(
 ///
 /// See [`VlmError`]: the VLM solve failing to mesh or factorize.
 pub fn static_margin(airplane: &Airplane, analysis: &AnalysisConfig) -> Result<f64, VlmError> {
+    static_margin_on(airplane, analysis, false)
+}
+
+/// Frozen translation/parity form of [`static_margin`]: the reference
+/// lattice of [`VlmSystem::assemble_reference_compatibility`].
+///
+/// # Errors
+///
+/// See [`static_margin`].
+pub fn static_margin_reference_compatibility(
+    airplane: &Airplane,
+    analysis: &AnalysisConfig,
+) -> Result<f64, VlmError> {
+    static_margin_on(airplane, analysis, true)
+}
+
+fn static_margin_on(
+    airplane: &Airplane,
+    analysis: &AnalysisConfig,
+    reference_compatibility: bool,
+) -> Result<f64, VlmError> {
     let atmosphere = Atmosphere::new(0.0);
     let velocity = analysis.autobalance_velocity_m_s;
     let (a_lo, a_hi) = (
         analysis.autobalance_alpha_low_deg,
         analysis.autobalance_alpha_high_deg,
     );
-    let system = assemble(airplane, analysis)?;
+    let system = if reference_compatibility {
+        probes::assemble_reference_compatibility(airplane, analysis)?
+    } else {
+        assemble(airplane, analysis)?
+    };
     let r_lo = probe(&system, atmosphere, velocity, a_lo)?;
     let r_hi = probe(&system, atmosphere, velocity, a_hi)?;
     let d_cm = r_hi.cm_pitch - r_lo.cm_pitch;
@@ -273,12 +317,43 @@ pub fn autobalance(
     analysis: &AnalysisConfig,
 ) -> Result<f64, VlmError> {
     let sm_current = static_margin(airplane, analysis)?;
+    Ok(shift_to_static_margin(
+        airplane,
+        target_static_margin,
+        sm_current,
+    ))
+}
+
+/// Frozen translation/parity form of [`autobalance`], measuring the margin
+/// with [`static_margin_reference_compatibility`].
+///
+/// # Errors
+///
+/// See [`VlmError`].
+pub fn autobalance_reference_compatibility(
+    airplane: &mut Airplane,
+    target_static_margin: f64,
+    analysis: &AnalysisConfig,
+) -> Result<f64, VlmError> {
+    let sm_current = static_margin_reference_compatibility(airplane, analysis)?;
+    Ok(shift_to_static_margin(
+        airplane,
+        target_static_margin,
+        sm_current,
+    ))
+}
+
+fn shift_to_static_margin(
+    airplane: &mut Airplane,
+    target_static_margin: f64,
+    sm_current: f64,
+) -> f64 {
     if sm_current.is_nan() {
-        return Ok(f64::NAN);
+        return f64::NAN;
     }
     let shift = (sm_current - target_static_margin) * airplane.c_ref;
     airplane.xyz_ref[0] += shift;
-    Ok(sm_current)
+    sm_current
 }
 
 /// Physically-anchored neutral point, static margin and lift-curve slope:
@@ -303,6 +378,7 @@ pub fn neutral_point(
     airplane: &Airplane,
     analysis: &AnalysisConfig,
 ) -> Result<(f64, f64, f64), VlmError> {
+    let airplane = &*with_product_tail(airplane, analysis);
     let system = assemble(airplane, analysis)?;
     with_system::neutral_point_with_system(&system, airplane, analysis)
 }
@@ -312,7 +388,7 @@ pub fn neutral_point_reference_compatibility(
     airplane: &Airplane,
     analysis: &AnalysisConfig,
 ) -> Result<(f64, f64, f64), VlmError> {
-    let system = assemble(airplane, analysis)?;
+    let system = probes::assemble_reference_compatibility(airplane, analysis)?;
     with_system::neutral_point_reference_compatibility_with_system(&system, airplane, analysis)
 }
 
@@ -334,6 +410,7 @@ pub fn stability_and_trim(
     mach: f64,
     altitude_m: f64,
 ) -> Result<StabilityTrimResult, VlmError> {
+    let airplane = &*with_product_tail(airplane, analysis);
     let system = assemble(airplane, analysis)?;
     with_system::stability_and_trim_with_system(
         &system, airplane, analysis, cl_target, mach, altitude_m,
@@ -348,7 +425,7 @@ pub fn stability_and_trim_reference_compatibility(
     mach: f64,
     altitude_m: f64,
 ) -> Result<StabilityTrimResult, VlmError> {
-    let system = assemble(airplane, analysis)?;
+    let system = probes::assemble_reference_compatibility(airplane, analysis)?;
     with_system::stability_and_trim_reference_compatibility_with_system(
         &system, airplane, analysis, cl_target, mach, altitude_m,
     )

@@ -152,6 +152,13 @@ pub fn build_wing_inventory(
     let mut findings = [None; MAX_FINDINGS];
     let mut count = 0usize;
     for name in REQUIRED_ITEMS {
+        // A wing that declares no spoiler panels (the C-295: none in the
+        // flying-controls entry of Jane's All the World's Aircraft 2008-2009,
+        // p. 545) carries no spoiler item, as an unslatted wing carries no
+        // leading-edge item: the item is required of the wings that have it.
+        if name == "spoilers_and_speedbrakes" && spoilers <= 0.0 {
+            continue;
+        }
         let present = items
             .iter()
             .any(|item| item.name == name && item.mass_kg > 0.0);

@@ -397,11 +397,11 @@ fn compare_case(case: &Value) {
         &python_y_range,
     );
     assert_eq!(
-        renderer_axes["xlabel"], "span Y [m]",
+        renderer_axes["xlabel"], "Span Y [m]",
         "first disagreement at {preset}.renderer.axes.xlabel"
     );
     assert_eq!(
-        renderer_axes["ylabel"], "longitudinal X [m]",
+        renderer_axes["ylabel"], "Longitudinal X [m]",
         "first disagreement at {preset}.renderer.axes.ylabel"
     );
 

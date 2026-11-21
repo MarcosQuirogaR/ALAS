@@ -40,6 +40,20 @@ pub enum DialogTarget {
     AircraftImport,
     /// My aircraft manager: export this stored aircraft file elsewhere.
     AircraftExport(PathBuf),
+    /// Files page: open any ALAS file from any path.
+    LibraryOpenPath,
+    /// Files page: import a file into the library.
+    LibraryImport,
+    /// Files page: export this library file to any path.
+    LibraryExport(PathBuf),
+    /// Library window: export the custom airport with this ICAO code.
+    AirportExportOne(String),
+    /// Library window: copy the chosen file into this library folder.
+    FolderImport(PathBuf),
+    /// Library window: copy this stored file to any path.
+    PlainFileExport(PathBuf),
+    /// Add-ons page: choose an add-on folder to install.
+    AddonFolder,
 }
 
 /// What kind of dialog to show.
@@ -195,11 +209,11 @@ impl AppState {
         match target {
             DialogTarget::ConfigLoad => {
                 self.config_path = text;
-                self.load_config();
+                self.guarded(crate::shell_confirm::Pending::ConfigFile);
             }
             DialogTarget::ConfigSave => {
                 self.config_path = text;
-                self.save_config();
+                self.save_config_settling();
             }
             DialogTarget::AirportImport => {
                 self.custom_airport_file_path = text;
@@ -219,6 +233,53 @@ impl AppState {
             DialogTarget::CfdResultJson => {
                 self.cfd.result_json_path = text;
             }
+            DialogTarget::LibraryOpenPath => {
+                self.guarded(crate::shell_confirm::Pending::Path(path));
+            }
+            DialogTarget::LibraryImport => {
+                self.library_import(&path);
+            }
+            DialogTarget::LibraryExport(source) => {
+                match crate::file_library::export(&source, &path) {
+                    Ok(()) => self.log(
+                        tr_fields("Exported file to {path}.", &[("path", text)]),
+                        LogKind::Info,
+                    ),
+                    Err(error) => self.log(
+                        tr_fields("File export failed: {error}", &[("error", error)]),
+                        LogKind::Error,
+                    ),
+                }
+            }
+            DialogTarget::AirportExportOne(icao) => {
+                let found = alas_config::airport_io::registered_custom_airports()
+                    .into_iter()
+                    .find(|airport| airport.icao == icao);
+                let outcome = found
+                    .ok_or_else(|| format!("No custom airport {icao}."))
+                    .and_then(|airport| {
+                        alas_config::airport_io::export_file(&path, &[airport])
+                            .map_err(|error| error.to_string())
+                    });
+                self.library_outcome(outcome, "Exported to {path}.", text);
+            }
+            DialogTarget::FolderImport(folder) => {
+                let name = path.file_name().map(std::ffi::OsStr::to_owned);
+                let outcome = name
+                    .ok_or_else(|| "The chosen file has no name.".to_owned())
+                    .and_then(|name| {
+                        let target = folder.join(name);
+                        crate::user_files::export_aircraft_file(&path, &target)
+                            .map(|()| target.display().to_string())
+                    });
+                self.library_window_refresh();
+                self.library_outcome(outcome.map(|_| ()), "Imported from {path}.", text);
+            }
+            DialogTarget::PlainFileExport(source) => {
+                let outcome = crate::user_files::export_aircraft_file(&source, &path);
+                self.library_outcome(outcome, "Exported to {path}.", text);
+            }
+            DialogTarget::AddonFolder => self.install_addon_from_folder(&path),
             DialogTarget::AircraftImport => self.import_user_aircraft(&path),
             DialogTarget::AircraftExport(source) => {
                 match crate::user_files::export_aircraft_file(&source, &path) {
@@ -231,6 +292,28 @@ impl AppState {
                         LogKind::Error,
                     ),
                 }
+            }
+        }
+    }
+}
+
+impl AppState {
+    /// Refresh the Library window after its folders changed.
+    pub(crate) fn library_window_refresh(&mut self) {
+        self.files.library.invalidate();
+    }
+
+    /// Report the outcome of a Library file operation in the window and log.
+    fn library_outcome(&mut self, outcome: Result<(), String>, ok: &str, path: String) {
+        match outcome {
+            Ok(()) => {
+                let message = tr_fields(ok, &[("path", path)]);
+                self.files.status = Some(message.clone());
+                self.log(message, LogKind::Info);
+            }
+            Err(error) => {
+                self.files.status = Some(error.clone());
+                self.log(error, LogKind::Warn);
             }
         }
     }

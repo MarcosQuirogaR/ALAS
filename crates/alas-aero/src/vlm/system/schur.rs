@@ -4,7 +4,7 @@
 //! The influence-matrix factorization a [`super::VlmSystem`] solves with:
 //! the ordinary LU, or the Schur-complement block elimination of
 //! [`alas_math::block_lu`] over the panels that equal a stored base lattice
-//! (everything except a rotating stabilizer). The block form differs from
+//! (the main wing; every other surface moves). The block form differs from
 //! the full LU only by rounding; it is enabled by
 //! [`crate::vlm::speed::schur_lu`] and abandons itself near the pivot-ratio
 //! gate, so the ordinary LU and its gate still decide there.
@@ -31,6 +31,28 @@ impl AicFactorization {
         match self {
             Self::Full(lu) => lu.solve_vector(b),
             Self::Block(block) => block.solve_vector(b),
+        }
+    }
+
+    /// Solve each of `columns` and keep its residual vector, see
+    /// [`alas_math::linalg::SolvedColumns`].
+    pub(in crate::vlm) fn solve_with_residuals(
+        &self,
+        columns: &[Vec<f64>],
+    ) -> alas_math::linalg::SolvedColumns {
+        match self {
+            Self::Full(lu) => lu.solve_with_residuals(columns),
+            Self::Block(block) => block.solve_with_residuals(columns),
+        }
+    }
+
+    /// The 1-norm condition estimate of the matrix, see
+    /// [`LuFactorization::condition_estimate`]; infinite for the block form,
+    /// whose conditioning the pivot-ratio gate keeps deciding.
+    pub(in crate::vlm) fn condition_estimate(&self) -> f64 {
+        match self {
+            Self::Full(lu) => lu.condition_estimate(),
+            Self::Block(_) => f64::INFINITY,
         }
     }
 
@@ -65,11 +87,14 @@ impl FrozenLattice {
         })
     }
 
-    /// Whether the frozen panels of `panels` all equal the stored ones, and
-    /// the moving set is small enough for the block update to pay off.
-    pub(in crate::vlm) fn applies_to(&self, panels: &[Panel]) -> bool {
+    /// Whether `moving` is the stored split and the frozen panels of
+    /// `panels` all equal the stored ones, and the moving set is small
+    /// enough for the block update to pay off.
+    pub(in crate::vlm) fn applies_to(&self, panels: &[Panel], moving: &[bool]) -> bool {
         panels.len() == self.n
             && 2 * self.base.moving_count() <= self.n
+            && moving.iter().filter(|&&moves| !moves).count() == self.frozen_panels.len()
+            && self.base.frozen().iter().all(|&i| !moving[i])
             && self
                 .base
                 .frozen()

@@ -57,8 +57,10 @@ pub(super) fn sizing_failure_detail(sizing: &WingboxSizing) -> Option<String> {
 }
 
 pub(super) fn missing_patran_result(configured: &str) -> PatranExportResult {
+    let mut status = "error";
     let detail = if configured.trim().is_empty() {
-        "Patran executable absent: configure it under Setup > External Tools".to_owned()
+        status = "not_configured";
+        "Patran executable absent: configure it under Workspace > External Tools".to_owned()
     } else if Path::new(configured).is_dir() {
         format!("Patran installation incomplete at {configured}: executable launcher is missing")
     } else if Path::new(configured).exists()
@@ -66,16 +68,17 @@ pub(super) fn missing_patran_result(configured: &str) -> PatranExportResult {
     {
         format!("Patran executable path is invalid: {configured} is not a regular executable file")
     } else {
+        status = "not_configured";
         format!("Patran executable absent at {configured}")
     };
     PatranExportResult {
-        status: "error".to_owned(),
+        status: status.to_owned(),
         error: Some(detail),
         png_paths: Vec::new(),
     }
 }
 
-pub(super) fn structural_error(msg: String, torenbeek: f64) -> StructuralAnalysisResult {
+pub(super) fn structural_error(msg: String, ledger_wing_mass_kg: f64) -> StructuralAnalysisResult {
     StructuralAnalysisResult {
         status: "error".to_owned(),
         error: Some(msg),
@@ -86,7 +89,7 @@ pub(super) fn structural_error(msg: String, torenbeek: f64) -> StructuralAnalysi
         nastran: None,
         nastran95: None,
         patran: None,
-        torenbeek_wing_mass_kg: torenbeek,
+        ledger_complete_wing_mass_kg: ledger_wing_mass_kg,
         wing_mass: None,
         evaluation_inputs: None,
     }

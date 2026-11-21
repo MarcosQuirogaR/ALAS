@@ -25,6 +25,19 @@ pub enum SystemsMassMethod {
     FlopsTransportV1,
 }
 
+/// Minimum cabin crew for `seats` installed passenger seats: none for a cabin
+/// of 19 seats or fewer, else one per 50 seats or fraction (EASA ORO.CC.100(a)
+/// and 14 CFR 121.391(a)). The one rule every preset, the clean-sheet class
+/// defaults, the synchronized cabin and the form read.
+#[must_use]
+pub fn minimum_cabin_crew(seats: usize) -> usize {
+    if seats <= 19 {
+        0
+    } else {
+        seats.div_ceil(50)
+    }
+}
+
 impl SystemsMassMethod {
     /// Whether this selection preserves the frozen Python mass behavior.
     pub fn is_reference_compatible(&self) -> bool {
@@ -174,7 +187,8 @@ pub struct FlopsInputProvenance {
         advanced,
         options = FlopsInputEvidence,
         label = "Evidence kind",
-        help = "Whether these values are read from a manufacturer, certification or NASA document for this variant, declared by whoever configured the run, a published FLOPS default, or an uncertain engineering estimate. The weakest kind is assumed when none is stated."
+        help = "Whether these values come from a manufacturer, certification or NASA document, were declared by the user, are a published FLOPS default, or are an uncertain estimate.",
+        long_help = "Whether these values are read from a manufacturer, certification or NASA document for this variant, declared by whoever configured the run, a published FLOPS default, or an uncertain engineering estimate. The weakest kind is assumed when none is stated."
     )]
     pub evidence: FlopsInputEvidence,
     /// Stated uncertainty, or why none can be stated.
@@ -186,7 +200,8 @@ pub struct FlopsInputProvenance {
     #[config(
         advanced,
         label = "Stated uncertainty",
-        help = "Uncertainty band for this input family, in its own units, or an explicit statement that none could be established. Left blank, the coverage report records that this family carries no uncertainty statement."
+        help = "Uncertainty band for this input family, in its own units, or an explicit statement that none could be established.",
+        long_help = "Uncertainty band for this input family, in its own units, or an explicit statement that none could be established. Left blank, the coverage report records that this family carries no uncertainty statement."
     )]
     pub uncertainty: String,
 }
@@ -307,7 +322,11 @@ pub struct FlopsTransportConfig {
     #[config(
         advanced,
         label = "Flight attendant count",
-        help = "Installed cabin flight attendants. No passenger-ratio default is applied by the physical product method."
+        readonly_unless(
+            field = "mass_model.flops_transport.manual_cabin_inputs",
+            value = "true"
+        ),
+        help = "Installed cabin flight attendants. Follows the cabin layout: never fewer than one per 50 passenger seats (EASA ORO.CC.100, 14 CFR 121.391); a larger value you enter is kept."
     )]
     pub flight_attendant_count: Option<usize>,
     /// Number of crew dedicated to galley service.
@@ -317,25 +336,45 @@ pub struct FlopsTransportConfig {
         help = "Installed galley-service crew. Enter zero explicitly when the aircraft carries none."
     )]
     pub galley_crew_count: Option<usize>,
+    /// Whether the cabin-derived inputs below are entered by hand.
+    #[serde(default, skip_serializing_if = "std::ops::Not::not")]
+    #[config(
+        advanced,
+        label = "Manual cabin and crew inputs",
+        help = "Off (Auto): the class counts and the cabin crew follow the cabin layout and one attendant per 50 seats. On: the values below are used as entered."
+    )]
+    pub manual_cabin_inputs: bool,
     /// Number of first-class passengers in the installed cabin.
     #[config(
         advanced,
         label = "First-class passenger count",
-        help = "Seed/mirror for direct FLOPS calls. Passenger product cases derive the installed first-class count from Cabin class configuration; edit the Cabin class layout to change seats."
+        readonly_unless(
+            field = "mass_model.flops_transport.manual_cabin_inputs",
+            value = "true"
+        ),
+        help = "Follows the cabin layout automatically: the installed first-class seat count comes from the Cabin class configuration; edit the cabin to change it."
     )]
     pub first_class_passenger_count: Option<usize>,
     /// Number of business-class passengers in the installed cabin.
     #[config(
         advanced,
         label = "Business-class passenger count",
-        help = "Seed/mirror for direct FLOPS calls. Passenger product cases derive the installed business-class count from Cabin class configuration; edit the Cabin class layout to change seats."
+        readonly_unless(
+            field = "mass_model.flops_transport.manual_cabin_inputs",
+            value = "true"
+        ),
+        help = "Follows the cabin layout automatically: the installed business-class seat count comes from the Cabin class configuration; edit the cabin to change it."
     )]
     pub business_class_passenger_count: Option<usize>,
     /// Number of tourist/economy passengers in the installed cabin.
     #[config(
         advanced,
         label = "Tourist-class passenger count",
-        help = "Seed/mirror for direct FLOPS calls. Passenger product cases derive the installed economy/tourist count from Cabin class configuration; edit the Cabin class layout to change seats."
+        readonly_unless(
+            field = "mass_model.flops_transport.manual_cabin_inputs",
+            value = "true"
+        ),
+        help = "Follows the cabin layout automatically: the installed economy/tourist seat count comes from the Cabin class configuration; edit the cabin to change it."
     )]
     pub tourist_class_passenger_count: Option<usize>,
     /// Hydraulic system working pressure, in pascals.
@@ -390,9 +429,20 @@ pub struct FlopsTransportConfig {
     #[config(
         advanced,
         label = "Auxiliary power unit installed",
-        help = "Whether the aircraft carries an APU. NASA FLOPS equation 101 is evaluated when true; an architecture that supplies hotel power from an installed engine declares false rather than carrying an invented APU mass."
+        help = "Whether the aircraft carries an APU. NASA FLOPS equation 101 is evaluated when true; an architecture with hotel power from an installed engine declares false.",
+        long_help = "Whether the aircraft carries an APU. NASA FLOPS equation 101 is evaluated when true; an architecture that supplies hotel power from an installed engine declares false rather than carrying an invented APU mass."
     )]
     pub apu_installed: bool,
+    /// Whether engine bleed air feeds the cabin and anti-ice systems, so the
+    /// aircraft carries a pneumatic distribution system. A bleedless electric
+    /// architecture such as the Boeing 787 declares `false`.
+    #[serde(default = "default_apu_installed")]
+    #[config(
+        advanced,
+        label = "Engine bleed-air system",
+        help = "Whether engine bleed air feeds the cabin and anti-ice systems: the pneumatic distribution mass (NASA CR-151970) is priced when true."
+    )]
+    pub bleed_air_system: bool,
     /// Cargo mass carried in standardized containers, in kilograms.
     #[config(
         advanced,
@@ -407,7 +457,8 @@ pub struct FlopsTransportConfig {
         advanced,
         options = CargoHoldLoading,
         label = "Cargo hold loading",
-        help = "Whether the holds are loose-loaded (bulk), unit-load-device (containerized) or mixed. FLOPS equations 125-126 charge 175 lb of container for every 950 lb of containerized mass; a bulk-loaded aircraft carries no such hardware and is charged none. Blank keeps the containerized convention the FLOPS source itself assumes."
+        help = "Whether the holds are loose-loaded (bulk), containerized (ULD) or mixed. FLOPS eqs. 125-126 charge 175 lb of container per 950 lb of containerized mass.",
+        long_help = "Whether the holds are loose-loaded (bulk), unit-load-device (containerized) or mixed. FLOPS equations 125-126 charge 175 lb of container for every 950 lb of containerized mass; a bulk-loaded aircraft carries no such hardware and is charged none. Blank keeps the containerized convention the FLOPS source itself assumes."
     )]
     pub cargo_loading: Option<CargoHoldLoading>,
     /// Share of the checked baggage that rides in containers, for a mixed
@@ -416,7 +467,8 @@ pub struct FlopsTransportConfig {
         advanced,
         label = "Containerized baggage fraction",
         unit = "0-1",
-        help = "Only read when the cargo hold loading is mixed: the share of checked baggage loaded into unit load devices rather than into the loose bulk compartment, normally the containerized share of the usable hold volume. Declared cargo is containerized by definition and is not scaled by it."
+        help = "Read only for mixed hold loading: the fraction of checked baggage in unit load devices rather than loose bulk (0-1), normally the containerized share of hold volume.",
+        long_help = "Only read when the cargo hold loading is mixed: the share of checked baggage loaded into unit load devices rather than into the loose bulk compartment, normally the containerized share of the usable hold volume. Declared cargo is containerized by definition and is not scaled by it."
     )]
     pub containerized_baggage_fraction: Option<f64>,
     /// Which method prices the cabin equipment and the occupant-driven
@@ -425,7 +477,8 @@ pub struct FlopsTransportConfig {
         advanced,
         options = CabinEquipmentMethod,
         label = "Cabin equipment method",
-        help = "FLOPS equation 110 and operating-item equations 119-126 as published, or the LTH civil-transport furnishings and operating-item relations. The two agree within four percent on a single-aisle; on a long-haul three-class widebody FLOPS is about 40 percent below both the LTH relations and the manufacturer's own accounting. FLOPS remains the default and the auditable baseline. A shaft-power aircraft below 40 t takes the regional turboprop systems relation instead."
+        help = "FLOPS eq. 110 and operating-item eqs. 119-126 as published, or the LTH civil-transport relations.",
+        long_help = "FLOPS equation 110 and operating-item equations 119-126 as published, or the LTH civil-transport furnishings and operating-item relations. The two agree within four percent on a single-aisle; on a long-haul three-class widebody FLOPS is about 40 percent below both the LTH relations and the manufacturer's own accounting. FLOPS remains the default and the auditable baseline. A shaft-power aircraft below 40 t takes the regional turboprop systems relation instead."
     )]
     pub cabin_equipment_method: CabinEquipmentMethod,
     /// Which LTH operating-item relation this aircraft takes.
@@ -433,13 +486,26 @@ pub struct FlopsTransportConfig {
         advanced,
         options = OperatingHaulClass,
         label = "Operating haul class",
-        help = "Read only by the LTH cabin-equipment method, which publishes one operating-item relation for short/medium-haul aircraft and a different one for long-haul aircraft. The source gives no range threshold, so the class is declared rather than inferred."
+        help = "Read only by the LTH cabin-equipment method, which has separate operating-item relations for short/medium-haul and long-haul aircraft.",
+        long_help = "Read only by the LTH cabin-equipment method, which publishes one operating-item relation for short/medium-haul aircraft and a different one for long-haul aircraft. The source gives no range threshold, so the class is declared rather than inferred."
     )]
     pub haul_class: Option<OperatingHaulClass>,
+    /// The installed executive interior, read only by the executive-jet cabin
+    /// method ([`CabinEquipmentMethod::ExecutiveJetV1`]): published internal
+    /// dimensions and declared monuments.
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    #[config(skip)]
+    pub executive_cabin: Option<crate::ExecutiveCabinDeclaration>,
+    /// Runtime cabin-sync input, never serialised: the all-coach passenger
+    /// capacity of the cabin shell at 34 in pitch (NASA CR-151970 `Np`,
+    /// `alas_payload::layout::PayloadLayout::all_coach_capacity`), which the
+    /// electrical group reads. `None` until a layout gives one.
+    #[serde(skip)]
+    #[config(skip)]
+    pub all_coach_passenger_count: Option<usize>,
     /// Revision-locked source families for every declared FLOPS input.
     #[config(
-        nested,
-        advanced,
+        hidden,
         help = "Mission, cabin, and installed-architecture provenance required before FLOPS can report a verified component buildup."
     )]
     pub provenance: FlopsTransportProvenance,
@@ -456,6 +522,7 @@ impl Default for FlopsTransportConfig {
             design_range_nmi: None,
             flight_crew_count: None,
             flight_attendant_count: None,
+            manual_cabin_inputs: false,
             galley_crew_count: None,
             first_class_passenger_count: None,
             business_class_passenger_count: None,
@@ -467,11 +534,14 @@ impl Default for FlopsTransportConfig {
             fuel_tank_count: None,
             maximum_fuel_capacity_kg: None,
             apu_installed: default_apu_installed(),
+            bleed_air_system: true,
             containerized_cargo_kg: None,
             cargo_loading: None,
             containerized_baggage_fraction: None,
             cabin_equipment_method: CabinEquipmentMethod::default(),
             haul_class: None,
+            executive_cabin: None,
+            all_coach_passenger_count: None,
             provenance: FlopsTransportProvenance::default(),
         }
     }
@@ -494,6 +564,7 @@ impl FlopsTransportConfig {
             design_range_nmi: Some(7_600.0),
             flight_crew_count: Some(2),
             flight_attendant_count: Some(7),
+            manual_cabin_inputs: false,
             galley_crew_count: Some(0),
             first_class_passenger_count: Some(0),
             business_class_passenger_count: Some(0),
@@ -505,6 +576,7 @@ impl FlopsTransportConfig {
             fuel_tank_count: Some(3),
             maximum_fuel_capacity_kg: Some(200_000.0),
             apu_installed: true,
+            bleed_air_system: true,
             containerized_cargo_kg: Some(0.0),
             // A 350-seat notional widebody is a containerised aircraft; the
             // study scenario says so explicitly rather than inheriting it.
@@ -530,6 +602,8 @@ impl FlopsTransportConfig {
             // it. Leaving this blank silently priced a long-haul cabin with
             // the short/medium-haul relation.
             haul_class: Some(OperatingHaulClass::LongHaul),
+            executive_cabin: None,
+            all_coach_passenger_count: None,
             provenance: FlopsTransportProvenance {
                 mission: conventional_default_provenance(
                     "mission speed and range are a notional conventional-transport scenario",
@@ -617,5 +691,16 @@ mod tests {
             serde_json::to_value(SystemsMassMethod::FlopsTransportV1).ok(),
             Some(serde_json::json!("flops_transport_v1"))
         );
+    }
+
+    #[test]
+    fn a_cabin_of_nineteen_seats_or_fewer_has_no_cabin_crew() {
+        // EASA ORO.CC.100(a): a cabin crew member from the 20th seat, then one per 50.
+        assert_eq!(minimum_cabin_crew(8), 0);
+        assert_eq!(minimum_cabin_crew(19), 0);
+        assert_eq!(minimum_cabin_crew(20), 1);
+        assert_eq!(minimum_cabin_crew(50), 1);
+        assert_eq!(minimum_cabin_crew(51), 2);
+        assert_eq!(minimum_cabin_crew(150), 3);
     }
 }

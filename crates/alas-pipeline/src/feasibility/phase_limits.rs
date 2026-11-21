@@ -66,7 +66,14 @@ pub const fn forward_mechanism_label(governance: ForwardLimitGovernance) -> &'st
         ForwardLimitGovernance::MaxNoseLoadHandling => "maximum nose-gear load",
         ForwardLimitGovernance::ScissorPlotEstimate => "scissor-plot estimate",
         ForwardLimitGovernance::RotationNoseWheelLiftoff => "nose-wheel liftoff (rotation)",
-        ForwardLimitGovernance::LandingTrimGroundEffect => "landing trim in ground effect",
+        ForwardLimitGovernance::TakeoffTrimStabiliserStop => {
+            "take-off climb trim at 1.3 VSR1 (stabiliser stop)"
+        }
+        ForwardLimitGovernance::CleanClimbTrim => "clean trim at 1.3 VSR1 or stall reach (tail authority)",
+        ForwardLimitGovernance::LandingTrimDesignRule => "design-rule (no sourced trim travel)",
+        ForwardLimitGovernance::LandingTrimSourcedTravel => {
+            "landing trim, sourced THS and elevator travel"
+        }
     }
 }
 

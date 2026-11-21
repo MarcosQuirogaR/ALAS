@@ -11,7 +11,10 @@ use alas_mass::breakdown::{OEW_KEYS, PAYLOAD};
 
 use crate::full_analysis::AnalysisReport;
 
-use super::{error, warning, FindingCode, FuelLoadingAssessment, PhysicalFinding};
+use super::{
+    error, warning, FindingCode, FindingSeverity, FuelLoadingAssessment, PhysicalFinding,
+    PropulsionStationEvidence,
+};
 
 /// Difference between the two operating-empty masses beyond which the mass
 /// closure is reported as not having closed on the modeled buildup, in kg.
@@ -103,6 +106,28 @@ pub(super) fn modeled_operating_empty_mass(
     })
 }
 
+/// A file that turns the registered preset into another aircraft type (a
+/// freighter flown on its passenger donor's preset) and states no
+/// `requirements.mlw_kg` is checked against the donor's landing weight, or
+/// against the mass-model fraction: say so instead of applying it silently.
+/// The take-off limit needs no such finding, `requirements.mtow_kg` is always
+/// stated.
+fn append_variant_landing_weight_finding(config: &AlasConfig, findings: &mut Vec<PhysicalFinding>) {
+    let Ok(preset) = presets::get(&config.preset) else {
+        return;
+    };
+    let another_type = config.requirements.aircraft_type != preset.requirements.aircraft_type;
+    if another_type && config.requirements.mlw_kg.is_none() {
+        findings.push(warning(
+            FindingCode::MaximumLandingWeightUndefined,
+            "no maximum landing weight is stated for this variant (the registered preset's value belongs to another aircraft type), so the landing mass is checked against the preset's own limit or the mass-model fraction; set requirements.mlw_kg to state the limit",
+            None,
+            Some(config.landing_mass_limit_kg(config.requirements.mtow_kg)),
+            "kg",
+        ));
+    }
+}
+
 pub(super) fn append_structural_mass_findings(
     config: &AlasConfig,
     design: &DesignVector,
@@ -111,6 +136,7 @@ pub(super) fn append_structural_mass_findings(
     findings: &mut Vec<PhysicalFinding>,
 ) {
     let tolerance = config.requirements.mtow_kg.abs().max(1.0) * 1.0e-10;
+    append_variant_landing_weight_finding(config, findings);
 
     let payload_kg = report.component_masses.get(PAYLOAD).copied();
     // The route payload was capped at the structural payload limit (the
@@ -138,7 +164,14 @@ pub(super) fn append_structural_mass_findings(
             ));
         }
     }
-    let structural_limit_kg = config.requirements.max_structural_payload_kg;
+    // With a published MZFW the structural limit is that MZFW less the modeled
+    // OEW (the effective limit the layout was bounded by); the declared cap
+    // binds only designs that inherit no published MZFW.
+    let structural_limit_kg = report
+        .geometry_summary
+        .get("effective_structural_payload_limit_kg")
+        .copied()
+        .unwrap_or(config.requirements.max_structural_payload_kg);
     if structural_limit_kg.is_finite() && structural_limit_kg > 0.0 {
         if let Some(payload_kg) = payload_kg {
             if payload_kg.is_finite() && payload_kg > structural_limit_kg + tolerance {
@@ -160,13 +193,27 @@ pub(super) fn append_structural_mass_findings(
     // design. A modified design may use the same preset name while having a
     // different geometry or mass buildup, so do not apply the source value to
     // that notional case.
-    let Ok(preset) = presets::get(&config.preset) else {
-        return;
-    };
-    if !design.same_geometry(&preset.design_vector) {
-        return;
-    }
-    let Some(mzfw_kg) = preset.reference.mzfw_kg else {
+    let preset = presets::get(&config.preset).ok();
+    let applies = config.requirements.mzfw_kg.is_some()
+        || preset.is_some_and(|preset| design.same_geometry(&preset.design_vector));
+    let Some(mzfw_kg) = presets::published_mzfw_kg(config).filter(|_| applies) else {
+        // A registered aircraft whose zero-fuel limit cannot be applied must
+        // say so: skipping silently let a freighter fly above its certified
+        // MZFW unflagged. A clean-sheet brief has no certified limit to miss.
+        if preset.is_some() {
+            findings.push(warning(
+                FindingCode::MaximumZeroFuelWeightUndefined,
+                "no maximum zero-fuel weight applies to this run (the registered preset's value belongs \
+                 to its own unchanged variant), so the zero-fuel mass is not checked; set \
+                 requirements.mzfw_kg to state the limit",
+                fuel_loading
+                    .zero_fuel_mass_kg
+                    .is_finite()
+                    .then_some(fuel_loading.zero_fuel_mass_kg),
+                None,
+                "kg",
+            ));
+        }
         return;
     };
     if mzfw_kg.is_finite()
@@ -185,7 +232,10 @@ pub(super) fn append_structural_mass_findings(
             payload_kg,
             config.mass_model.mass_architecture,
         );
-        let calibration_note = match (preset.reference.oew_kg, reconciliation) {
+        let calibration_note = match (
+            preset.and_then(|preset| preset.reference.oew_kg),
+            reconciliation,
+        ) {
             (Some(reference_oew_kg), Some(reconciliation)) => {
                 let residual_note = if reconciliation.disagrees() {
                     format!(
@@ -224,23 +274,28 @@ pub(super) fn append_structural_mass_findings(
     }
 }
 
-/// True when this design's `component_masses` carries nonzero propulsion
-/// mass but no measured nacelle station exists on the built geometry, so
-/// `alas_mass::stations::ComponentStations::propulsion_station_fallback`
-/// placed it at the wing centroid instead. That makes
-/// `super::FeasibilityReport::model_cg` and every %MAC/CG figure this run
-/// publishes not physical evidence for this design. Not a `FindingCode`
-/// (that enum is exhaustively, deliberately matched by `alas-gui`, which
-/// this crate must not edit); a plain report field carries the verdict
-/// instead. Re-resolves the same stations `station_coordinates_for` placed.
-pub(super) fn propulsion_fallback_station(config: &AlasConfig, report: &AnalysisReport) -> bool {
+/// Where this design's propulsion mass was placed. A design whose
+/// `component_masses` carries nonzero propulsion mass but whose built
+/// geometry has no measured nacelle station has it at the wing centroid
+/// (`alas_mass::stations::ComponentStations::propulsion_station_fallback`),
+/// which makes `super::FeasibilityReport::model_cg` and every %MAC/CG figure
+/// this run publishes not physical evidence for this design. A non-finite
+/// propulsion mass or stations that cannot be resolved leave the answer
+/// unknown. Re-resolves the same stations `station_coordinates_for` placed.
+pub(super) fn propulsion_station_evidence(
+    config: &AlasConfig,
+    report: &AnalysisReport,
+) -> PropulsionStationEvidence {
     let propulsion_mass_kg = report
         .component_masses
         .get(alas_mass::breakdown::PROPULSION)
         .copied()
         .unwrap_or(0.0);
-    if !(propulsion_mass_kg.is_finite() && propulsion_mass_kg > 0.0) {
-        return false;
+    if !propulsion_mass_kg.is_finite() {
+        return PropulsionStationEvidence::Unknown;
+    }
+    if propulsion_mass_kg <= 0.0 {
+        return PropulsionStationEvidence::NoPropulsionMass;
     }
     let Ok(stations) = alas_mass::stations::component_stations_with_gear(
         &report.airplane,
@@ -250,9 +305,45 @@ pub(super) fn propulsion_fallback_station(config: &AlasConfig, report: &Analysis
         &config.structures,
         &config.landing_gear,
     ) else {
-        return false;
+        return PropulsionStationEvidence::Unknown;
     };
-    stations.propulsion_station_fallback()
+    if stations.propulsion_station_fallback() {
+        PropulsionStationEvidence::WingCentroidFallback
+    } else {
+        PropulsionStationEvidence::MeasuredNacelle
+    }
+}
+
+/// The warning a propulsion station that is not a measured one must travel
+/// with, or `None` when the station is measured or there is nothing to place.
+pub(super) fn propulsion_station_finding(
+    evidence: PropulsionStationEvidence,
+) -> Option<PhysicalFinding> {
+    let (code, message) = match evidence {
+        PropulsionStationEvidence::NoPropulsionMass
+        | PropulsionStationEvidence::MeasuredNacelle => return None,
+        PropulsionStationEvidence::WingCentroidFallback => (
+            FindingCode::PropulsionStationFallback,
+            "the built geometry has no nacelle, so the propulsion mass is placed at the wing \
+             centroid instead of an engine station: the centre of gravity, static margin, \
+             landing-gear loads and every % MAC figure of this run describe an aircraft with \
+             its engines at the wing and are not evidence for this design",
+        ),
+        PropulsionStationEvidence::Unknown => (
+            FindingCode::PropulsionStationUnknown,
+            "the station of the propulsion mass could not be resolved, so it is not known \
+             whether the centre of gravity, static margin, landing-gear loads and % MAC \
+             figures of this run use a measured engine station",
+        ),
+    };
+    Some(PhysicalFinding {
+        code,
+        severity: FindingSeverity::Warning,
+        message: message.to_owned(),
+        actual: None,
+        limit: None,
+        unit: "",
+    })
 }
 
 // Tests assert on the fixtures they built here, so a failed expect is the

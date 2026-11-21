@@ -49,7 +49,12 @@ pub fn figure_airfoil_comparison(
         [axes.left + 8.0, axes.top + 8.0],
         &[
             (
-                "Initial".to_owned(),
+                if initial_coords == opt_coords {
+                    // Overlapping outlines read as one: no design change.
+                    "Initial (identical to optimized)".to_owned()
+                } else {
+                    "Initial".to_owned()
+                },
                 LegendMarker::Line(Stroke::dashed(
                     Color::from_hex(BASELINE_COLOR),
                     1.8,

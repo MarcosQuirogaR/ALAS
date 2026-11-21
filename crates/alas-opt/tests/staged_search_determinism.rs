@@ -23,12 +23,19 @@ const STAGE_EVALUATIONS: i64 = 40;
 
 #[test]
 fn the_same_seed_reaches_the_same_winner_at_1_and_4_workers() {
-    let preset = "A320-200";
+    // No curated survey certifies a take-off obstacle clearance (every survey carries the
+    // 100 m completeness allowance), so
+    // no registered preset has a feasible design at its own departure. The C919 departs
+    // the hand-entered open-ground fixture (support::open_ground_departure, EDDF's position
+    // and declared distances), where it has no hard finding at its nominal: this test is
+    // about the search, not the obstacle data.
+    let preset = "C919";
     let start = nominal(preset);
     // Evaluation budgets only: time limits depend on the machine and its load.
     let run_with = |workers: i64| {
         let mut config =
             support::reference_search_config(preset, workers, STAGE_EVALUATIONS, STAGE_EVALUATIONS);
+        support::open_ground_departure(&mut config);
         config.optimizer.solver.stop_on_evaluations_only = true;
         DesignOptimizer::new(config)
             .run(None, Some(&start), None)

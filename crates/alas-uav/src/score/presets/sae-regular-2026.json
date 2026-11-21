@@ -4,7 +4,7 @@
   "family": "sae_aero_design",
   "name": "SAE Aero Design 2026, Regular class (bottle cargo)",
   "status": "official",
-  "citation": "SAE Aero Design 2026 Rules 2026.0 (2025-09-05), s7 Regular class (requirements printed p.30-32, scoring s7.6 printed p.33); local copy refs/competitions/SAE2026_AeroDesign_rules.pdf; scoring equation checked on the rendered page",
+  "citation": "SAE Aero Design 2026 Rules 2026.0 (2025-09-05), s7 Regular class (requirements printed p.30-32, scoring s7.6 printed p.33); scoring equation checked on the rendered page",
   "gates": [
     {
       "id": "span_band",

@@ -15,24 +15,24 @@ fn xsec(x: f64, radius: f64) -> FuselageXSec {
 }
 
 fn wing() -> Wing {
-    Wing {
-        name: MAIN_WING.to_owned(),
-        xsecs: vec![
-            WingXSec {
-                xyz_le: [10.0, 0.0, 0.0],
-                chord: 6.0,
-                twist: 0.0,
-                airfoil: Airfoil::from_coordinates("probe", Vec::new()),
-            },
-            WingXSec {
-                xyz_le: [14.0, 12.0, 0.0],
-                chord: 2.0,
-                twist: 0.0,
-                airfoil: Airfoil::from_coordinates("probe", Vec::new()),
-            },
+    Wing::new(
+        "Main Wing",
+        vec![
+            WingXSec::new(
+                [10.0, 0.0, 0.0],
+                6.0,
+                0.0,
+                Airfoil::from_coordinates("probe", Vec::new()),
+            ),
+            WingXSec::new(
+                [14.0, 12.0, 0.0],
+                2.0,
+                0.0,
+                Airfoil::from_coordinates("probe", Vec::new()),
+            ),
         ],
-        symmetric: true,
-    }
+        true,
+    )
 }
 
 fn plane(sections: Vec<FuselageXSec>) -> Airplane {

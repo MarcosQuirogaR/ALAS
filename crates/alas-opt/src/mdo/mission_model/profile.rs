@@ -32,8 +32,6 @@ const MINIMUM_SEGMENT_ALTITUDE_M: f64 = 1.0e-6;
 /// standard value rather than one read from the atmosphere model - the same
 /// convention `alas_config::validation` uses for the same comparison.
 const SEA_LEVEL_DENSITY_KG_M3: f64 = alas_atmo::SEA_LEVEL_DENSITY_ICAO_KG_M3;
-/// Minimum ratio of design dive to design cruise speed, CS 25.335(b)(1).
-const VD_OVER_VC: f64 = 1.25;
 
 /// The highest true airspeed a rung spanning `low_m` to `high_m` may be flown
 /// at, m/s, from the aircraft's declared design dive speed.
@@ -153,6 +151,23 @@ impl Segment {
         }))
     }
 
+    /// This vertical segment from `start_m` up or down to its end, at the same speed and rate
+    /// (the duration follows the height, the distance with it).
+    pub fn starting_at(&self, start_m: f64) -> Self {
+        let full_m = (self.end_altitude_m - self.start_altitude_m).abs();
+        let kept_m = (self.end_altitude_m - start_m).abs();
+        let share = if full_m > 0.0 {
+            (kept_m / full_m).min(1.0)
+        } else {
+            1.0
+        };
+        Self {
+            start_altitude_m: start_m,
+            horizontal_distance_m: self.horizontal_distance_m * share,
+            ..*self
+        }
+    }
+
     /// A level segment at `altitude_m` over `distance_m`.
     pub fn level(kind: SegmentKind, altitude_m: f64, tas_m_s: f64, distance_m: f64) -> Self {
         Self {
@@ -241,11 +256,10 @@ pub(crate) struct ProfileGeometry<'a> {
     /// single value the native schedule applies to every segment (the
     /// departure airport's deviation).
     pub isa_deviation_c: f64,
-    /// The aircraft's declared design dive speed, m/s equivalent airspeed.
-    /// Zero or non-finite disables the envelope bound.
-    ///
-    /// MMO is bounded separately, see [`envelope_limit_m_s`].
+    /// Declared VD, m/s EAS; zero disables the bound (MMO: [`envelope_limit_m_s`]).
     pub dive_speed_eas_m_s: f64,
+    /// VC of that VD under the type's CS 25.335(b) criterion, m/s EAS; zero disables it.
+    pub cruise_speed_eas_m_s: f64,
     /// Cruise rungs off the declared level hold the declared Mach (a jet's
     /// Mach-hold cruise) instead of the declared equivalent airspeed (a
     /// power-limited turboprop); see [`Self::cruise_tas_at`].
@@ -404,27 +418,27 @@ impl ProfileGeometry<'_> {
                 p.descent_4_rate_m_s,
             ),
         ] {
-            let target = (target_ft * FOOT).max(arrival_m).min(altitude);
-            match p.climb_descent_speed_reference {
-                SpeedReference::TrueAirspeed => segments.extend(Segment::vertical(
-                    SegmentKind::Descent,
-                    altitude,
-                    target,
-                    speed,
-                    rate,
-                )?),
-                SpeedReference::CalibratedAirspeed => {
-                    segments.extend(self.cas_vertical_segments(
-                        SegmentKind::Descent,
-                        altitude,
-                        target,
-                        speed,
-                        rate,
-                        self.cas_subdivisions,
-                    )?);
-                }
+            // A step whose altitude is not above the arrival field is not flown (the native
+            // schedule drops it too): the landing segment starts where the last step ends.
+            if target_ft * FOOT <= arrival_m {
+                continue;
             }
+            let target = (target_ft * FOOT).min(altitude);
+            segments.extend(self.descent_rung(altitude, target, speed, rate)?);
             altitude = target;
+        }
+        // The landing configuration is flown only below its BADA height above the field: when the
+        // last step ends higher (a high field), a descent at the approach rung's speed and rate
+        // closes the height down to it first, as the native schedule does.
+        let landing_top_m = arrival_m + alas_config::mission::LANDING_CONFIGURATION_HEIGHT_M;
+        if altitude > landing_top_m + 1.0 {
+            segments.extend(self.descent_rung(
+                altitude,
+                landing_top_m,
+                p.descent_4_air_speed_m_s,
+                p.descent_4_rate_m_s,
+            )?);
+            altitude = landing_top_m;
         }
         match p.climb_descent_speed_reference {
             SpeedReference::TrueAirspeed => {
@@ -448,6 +462,31 @@ impl ProfileGeometry<'_> {
             }
         }
         Ok(segments)
+    }
+
+    /// One descent rung from `from_m` to `to_m` at the configured speed reference.
+    fn descent_rung(
+        &self,
+        from_m: f64,
+        to_m: f64,
+        speed: f64,
+        rate: f64,
+    ) -> Result<Vec<Segment>, FuelModelError> {
+        Ok(match self.profile.climb_descent_speed_reference {
+            SpeedReference::TrueAirspeed => {
+                Segment::vertical(SegmentKind::Descent, from_m, to_m, speed, rate)?
+                    .into_iter()
+                    .collect()
+            }
+            SpeedReference::CalibratedAirspeed => self.cas_vertical_segments(
+                SegmentKind::Descent,
+                from_m,
+                to_m,
+                speed,
+                rate,
+                self.cas_subdivisions,
+            )?,
+        })
     }
 
     fn descent_ladder(&self, cruise_m: f64) -> Result<Vec<Segment>, FuelModelError> {
@@ -565,10 +604,12 @@ impl ProfileGeometry<'_> {
     /// pressure and lift coefficient the declared speed represents. A jet
     /// holds the declared Mach, as transport cruise is flown (Airbus,
     /// "Getting to Grips with Aircraft Performance", 2002, cruise chapter),
-    /// up to the design cruise speed `VC <= VD / 1.25` (CS 25.335(b)(1))
-    /// in equivalent airspeed, below which it holds that speed; without a
-    /// declared VD it keeps the equivalent airspeed. A rung at the configured
-    /// level returns the declared number bit-unchanged.
+    /// up to the type certificate VMO (calibrated) where the profile declares
+    /// it, otherwise up to the design cruise speed VC of the declared VD
+    /// (CS 25.335(b), inverted) in equivalent airspeed, and holds that ceiling above
+    /// it; with neither it keeps the equivalent airspeed. The ceiling holds
+    /// at every level, the configured one included; otherwise a rung at the
+    /// configured level returns the declared number bit-unchanged.
     pub(super) fn cruise_tas_at(
         &self,
         cruise_m: f64,
@@ -581,23 +622,62 @@ impl ProfileGeometry<'_> {
         // The declared number is a standard-day Mach times a(T_ISA); on the
         // flown day the same Mach is `M a(T_ISA + dT)` (exactly 1 at dT = 0).
         let declared_m_s = declared_m_s * self.standard_day_speed_ratio(reference_m)?;
-        let resolved_m_s = if cruise_m == reference_m {
+        let reference = self.ambient(reference_m, "configured cruise")?;
+        let flown = self.ambient(cruise_m, "flown cruise")?;
+        let vc = self.cruise_speed_eas_m_s;
+        if !(reference.density_kg_m3 > 0.0 && flown.density_kg_m3 > 0.0) {
+            return Ok(declared_m_s);
+        }
+        let at_reference = cruise_m == reference_m;
+        // The VC cap binds at the configured level too: skipping it there
+        // made the cruise speed jump by the whole excess over VC between the
+        // configured level and 1 m below it (A220-300 at FL250: 241.6 m/s
+        // declared against 209 m/s at VC), and the route fit with it
+        // (RANGE-STEP: +65 kg block fuel between 270 and 275 nmi).
+        // The ceiling is the type certificate VMO where the preset declares
+        // it (VMO <= VC, CS 25.1505); without one, VC is the inverse of the
+        // CS 25.335(b) rule on the declared VD (a preset with a VMO has its VD
+        // from that VMO by the same rule, `alas_config::design_speeds`).
+        // VMO at the flown level's pressure altitude.
+        let vmo = self
+            .profile
+            .certified_caps()
+            .max_cas_m_s_at(flown.pressure_pa);
+        let ceiling_m_s = if !self.constant_mach_cruise {
+            None
+        } else if vmo.is_finite() && vmo > 0.0 {
+            // High above the VMO/MMO crossover VMO implies a supersonic Mach
+            // and does not bind; MMO governs there (`mach_scale`), as in
+            // `SpeedCaps::true_airspeed_m_s`.
+            match alas_atmo::airspeed::true_from_calibrated(
+                vmo,
+                flown.pressure_pa,
+                flown.temperature_k,
+            ) {
+                Ok(vmo_m_s) => Some(vmo_m_s),
+                Err(alas_atmo::airspeed::AirspeedError::Supersonic { .. }) => Some(f64::INFINITY),
+                Err(error) => {
+                    return Err(FuelModelError::InvalidModel(format!(
+                        "VMO cruise ceiling: {error}"
+                    )))
+                }
+            }
+        } else if vc.is_finite() && vc > 0.0 {
+            Some(vc / (flown.density_kg_m3 / SEA_LEVEL_DENSITY_KG_M3).sqrt())
+        } else {
+            None
+        };
+        let resolved_m_s = if let Some(ceiling_m_s) = ceiling_m_s {
+            let mach_hold = if at_reference {
+                declared_m_s
+            } else {
+                declared_m_s * flown.speed_of_sound_m_s / reference.speed_of_sound_m_s
+            };
+            mach_hold.min(ceiling_m_s)
+        } else if at_reference {
             declared_m_s
         } else {
-            let reference = self.ambient(reference_m, "configured cruise")?;
-            let flown = self.ambient(cruise_m, "flown cruise")?;
-            let vd = self.dive_speed_eas_m_s;
-            if !(reference.density_kg_m3 > 0.0 && flown.density_kg_m3 > 0.0) {
-                declared_m_s
-            } else if self.constant_mach_cruise && vd.is_finite() && vd > 0.0 {
-                let mach_hold =
-                    declared_m_s * flown.speed_of_sound_m_s / reference.speed_of_sound_m_s;
-                let vc_m_s =
-                    vd / VD_OVER_VC / (flown.density_kg_m3 / SEA_LEVEL_DENSITY_KG_M3).sqrt();
-                mach_hold.min(vc_m_s)
-            } else {
-                declared_m_s * (reference.density_kg_m3 / flown.density_kg_m3).sqrt()
-            }
+            declared_m_s * (reference.density_kg_m3 / flown.density_kg_m3).sqrt()
         };
         Ok(resolved_m_s)
     }
@@ -795,6 +875,7 @@ impl ProfileGeometry<'_> {
 #[cfg(test)]
 mod tests {
     use super::*;
+    use alas_config::design_speeds::design_cruise_speed_eas_m_s as design_cruise_eas_m_s;
     use alas_config::mission::CAS_SPEED_SUBDIVISIONS;
     use alas_units::NAUTICAL_MILE;
 
@@ -816,6 +897,7 @@ mod tests {
             // The envelope bounds are disabled in these geometry fixtures: they
             // pin the ladder kinematics of a schedule, not an aircraft.
             dive_speed_eas_m_s: 0.0,
+            cruise_speed_eas_m_s: 0.0,
             constant_mach_cruise: false,
         };
         let plan = geometry
@@ -901,6 +983,7 @@ mod tests {
             // The envelope bounds are disabled in these geometry fixtures: they
             // pin the ladder kinematics of a schedule, not an aircraft.
             dive_speed_eas_m_s: 0.0,
+            cruise_speed_eas_m_s: 0.0,
             constant_mach_cruise: false,
         };
         let plan = geometry
@@ -954,6 +1037,7 @@ mod tests {
             // The envelope bounds are disabled in these geometry fixtures: they
             // pin the ladder kinematics of a schedule, not an aircraft.
             dive_speed_eas_m_s: 0.0,
+            cruise_speed_eas_m_s: 0.0,
             constant_mach_cruise: false,
         };
         let range_m = 200.0 * NAUTICAL_MILE;
@@ -1003,6 +1087,7 @@ mod tests {
             // The envelope bounds are disabled in these geometry fixtures: they
             // pin the ladder kinematics of a schedule, not an aircraft.
             dive_speed_eas_m_s: 0.0,
+            cruise_speed_eas_m_s: 0.0,
             constant_mach_cruise: false,
         };
         let cas_m_s = 170.0 * 0.514_444_444; // 170 KCAS, the ATR optimum-climb figure.
@@ -1094,6 +1179,7 @@ mod tests {
             // The envelope bounds are disabled in these geometry fixtures: they
             // pin the ladder kinematics of a schedule, not an aircraft.
             dive_speed_eas_m_s: 0.0,
+            cruise_speed_eas_m_s: 0.0,
             constant_mach_cruise: false,
         };
         let cas_m_s = 170.0 * 0.514_444_444;
@@ -1154,5 +1240,98 @@ mod tests {
                 "{subdivisions} sub-rungs: planned time {time_s} s differs from {reference_time_s} s"
             );
         }
+    }
+
+    /// The resolved cruise speed of a jet is continuous in the level at the
+    /// configured level itself (RANGE-STEP): a declared speed above the
+    /// design cruise speed VC of the declared VD is capped there exactly as 1 m
+    /// below. FL250 numbers: M 0.78 is 241.6 m/s true; VD 175 m/s gives VC
+    /// 143.19 m/s equivalent by CS 25.335(b), about 214 m/s true.
+    #[test]
+    fn the_cruise_speed_cap_holds_at_the_configured_level() {
+        let profile = MissionProfileConfig::default();
+        let reference_m = 7_620.0;
+        let geometry = ProfileGeometry {
+            profile: &profile,
+            departure_elevation_m: 0.0,
+            arrival_elevation_m: 0.0,
+            cruise_altitude_m: reference_m,
+            cas_subdivisions: CAS_SPEED_SUBDIVISIONS,
+            isa_deviation_c: 0.0,
+            dive_speed_eas_m_s: 175.0,
+            cruise_speed_eas_m_s: design_cruise_eas_m_s(175.0),
+            constant_mach_cruise: true,
+        };
+        let ambient = alas_atmo::us1976_compute_values(reference_m, 0.0);
+        let declared_m_s = 0.78 * ambient.speed_of_sound_m_s;
+        let vc_m_s =
+            design_cruise_eas_m_s(175.0) / (ambient.density_kg_m3 / SEA_LEVEL_DENSITY_KG_M3).sqrt();
+        assert!(declared_m_s > vc_m_s + 20.0, "{declared_m_s} vs {vc_m_s}");
+        let at = |m: f64| geometry.cruise_tas_at(m, declared_m_s).unwrap();
+        assert!((at(reference_m) - vc_m_s).abs() < 1.0e-9);
+        assert!((at(reference_m) - at(reference_m - 1.0)).abs() < 0.05);
+        // Below the cap the configured level keeps the declared number.
+        let slow_m_s = 0.9 * vc_m_s;
+        assert_eq!(
+            geometry
+                .cruise_tas_at(reference_m, slow_m_s)
+                .unwrap()
+                .to_bits(),
+            slow_m_s.to_bits()
+        );
+    }
+
+    /// A declared VMO is the cruise ceiling in place of the VC of VD
+    /// (VD-DATA). A220-300 numbers: EASA TCDS IM.A.570 VMO 330 kt, the
+    /// unsourced VD 175 m/s. M 0.78 at FL250 lies just under VMO and is
+    /// flown as declared; 3,000 m lower the Mach hold would exceed VMO and is
+    /// held to it, continuous with the level.
+    #[test]
+    fn a_declared_vmo_is_the_cruise_ceiling() {
+        let profile = MissionProfileConfig {
+            max_operating_cas_m_s: 330.0 * alas_units::KNOT,
+            ..MissionProfileConfig::default()
+        };
+        let reference_m = 7_620.0;
+        let geometry = ProfileGeometry {
+            profile: &profile,
+            departure_elevation_m: 0.0,
+            arrival_elevation_m: 0.0,
+            cruise_altitude_m: reference_m,
+            cas_subdivisions: CAS_SPEED_SUBDIVISIONS,
+            isa_deviation_c: 0.0,
+            dive_speed_eas_m_s: 175.0,
+            cruise_speed_eas_m_s: design_cruise_eas_m_s(175.0),
+            constant_mach_cruise: true,
+        };
+        let vmo_tas = |m: f64| {
+            let a = alas_atmo::us1976_compute_values(m, 0.0);
+            alas_atmo::airspeed::true_from_calibrated(
+                profile.max_operating_cas_m_s,
+                a.pressure_pa,
+                a.temperature_k,
+            )
+            .unwrap()
+        };
+        let declared_m_s =
+            0.78 * alas_atmo::us1976_compute_values(reference_m, 0.0).speed_of_sound_m_s;
+        assert!(declared_m_s < vmo_tas(reference_m));
+        let at = |m: f64| geometry.cruise_tas_at(m, declared_m_s).unwrap();
+        assert_eq!(at(reference_m).to_bits(), declared_m_s.to_bits());
+        let low_m = reference_m - 3_000.0;
+        assert!((at(low_m) - vmo_tas(low_m)).abs() < 1.0e-9);
+        // VMO binds where the Mach hold would pass it; the level just under
+        // that boundary differs from it by the 1 m of level only.
+        let mut high = reference_m;
+        let mut low = low_m;
+        while high - low > 1.0e-3 {
+            let middle = 0.5 * (high + low);
+            if at(middle) < vmo_tas(middle) {
+                high = middle;
+            } else {
+                low = middle;
+            }
+        }
+        assert!((at(low) - at(low - 1.0)).abs() < 0.2);
     }
 }

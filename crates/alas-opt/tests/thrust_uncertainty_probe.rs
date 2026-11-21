@@ -2,7 +2,7 @@
 // Copyright (C) 2026 Marcos Quiroga Rodriguez
 
 //! Probe of the uncertainty-aware cruise-thrust and top-of-climb checks over
-//! the registered presets (owner decision 2026-10-13): for each jet, required
+//! the registered presets: for each jet, required
 //! and available thrust-to-weight of level cruise at the mid-cruise weight,
 //! the scatter band and the verdict. Run with
 //! `cargo test -p alas-opt --release --test thrust_uncertainty_probe -- --ignored --nocapture`.

@@ -33,6 +33,22 @@ const MIN_HEIGHT: f64 = 240.0;
 // little more than one line box of descent below the last row.
 const BOTTOM_MARGIN: f64 = 24.0;
 
+/// A status figure for a stage that never ran (skipped by the quick-look
+/// reference analysis, disabled, or with nothing retained), as opposed to one
+/// that ran and failed: the title is the muted text colour, not the failure
+/// red. The caller decides from the stage's own status, never from the text.
+pub fn skipped_status_scene(title: &str, message: &str, pal: &Palette) -> Scene {
+    let mut scene = sized_status_scene(title, message, false, pal, STATUS_WIDTH);
+    for element in &mut scene.elements {
+        if let SceneElement::Text { text, color, .. } = element {
+            if text == title {
+                *color = Color::from_hex(pal.tick);
+            }
+        }
+    }
+    scene
+}
+
 /// Build a status figure for `theme` at the default width.
 pub fn figure_status_message(title: &str, message: &str, ok: bool, theme: Option<&str>) -> Scene {
     status_scene(title, message, ok, get_palette(theme))

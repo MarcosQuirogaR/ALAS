@@ -113,6 +113,10 @@ fn search(preset: &str, evaluations: i64, workers: i64) -> Value {
     };
     let start = registered.design_vector;
     match DesignOptimizer::new(config).run(None, Some(&start), None) {
+        Ok(result) if !result.best_valid => json!({
+            "outcome": "no_feasible_design",
+            "evaluated_candidates": result.history.n_evaluations(),
+        }),
         Ok(result) => json!({
             "outcome": "feasible",
             "termination": result.termination,

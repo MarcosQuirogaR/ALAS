@@ -63,8 +63,8 @@ pub fn figure_design_evolution(
     let rect = (60.0, 40.0, 640.0, 420.0);
     let (u_range, v_range) =
         equal_aspect_ranges(y_min, y_max, rect.2, -x_max, -x_min, rect.3, 0.15);
-    let axes = Axes2D::new(rect, u_range, v_range);
-    axes.draw_frame_with_labels(&mut scene, pal, "span Y [m]", "longitudinal X [m]");
+    let axes = Axes2D::new(rect, u_range, v_range).with_negated_y_tick_labels();
+    axes.draw_frame_with_labels(&mut scene, pal, "Span Y [m]", "Longitudinal X [m]");
 
     for (progress, plane) in &planes {
         let color = Colormap::Turbo.sample(*progress);

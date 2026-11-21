@@ -197,35 +197,60 @@ pub fn layout_for(preset_name: &str) -> Option<FuelTankLayoutConfig> {
             center: center(1, 84_566.0),
             ..base
         },
-        // DC-10-30 ACAP total 36,652 US gal. The per-tank split is an
-        // estimate: tanks 1 and 3 about 7,850 US gal each in the wings,
-        // tank 2 about 6,060 US gal in the centre wing box, and the centre-
-        // section auxiliary tank about 14,890 US gal, transferred to the
-        // mains first.
-        "DC-10" => FuelTankLayoutConfig {
-            inner_wing: wing(0.12, 0.85, 3, 59_430.0),
-            center: center(2, 22_940.0),
-            auxiliary: AuxiliaryTankConfig {
-                enabled: true,
-                usable_volume_l: 56_365.0,
-                x_position_fraction: 0.47,
-                burn_priority: 1,
-            },
+        // EASA.A.151 Issue 33 III.2.2, mod 110211: 166,488 L usable. Airbus A350 Aircraft
+        // Characteristics, Feb 01/26, FIGURE-10-0-0-991-003-A01 (A350-900): wing tanks
+        // 2 x 29,924 L; centre tank 80,947 L, 107,039 L with the increased capacity (note 01)
+        // that mod 110211 certifies. Wings 59,848 L as printed; centre 106,640 L = the TCDS
+        // total minus the wings (the figure's 107,039 L is 0.37 % above it). The figure draws
+        // the centre tank out along the inboard wing to a step near the pylon, where the wing
+        // tank starts; the 0.30 station of that step is an estimate (oblique view).
+        "A350-900" => FuelTankLayoutConfig {
+            inner_wing: wing(0.30, 0.85, 2, 59_848.0),
+            center: center(1, 106_640.0),
             ..base
         },
-        // Boeing 747-400 ACAP D6-58326-1 Rev F section 2.1.1: 57,065 US gal
-        // (216,014 L) usable including the optional 3,300 US gal (12,492 L)
-        // horizontal-stabiliser tank, which is the trim tank here (filled
-        // aft in the climb and emptied first). ONLY THE TOTALS ARE SOURCED:
-        // the split of the remaining 203,522 L is an ESTIMATE, centre wing
-        // tank 62,000 L, inner mains (tanks 2 and 3, with reserve) 105,000 L
-        // and outer mains (tanks 1 and 4) 36,522 L; the spanwise stations
-        // are estimates too.
+        // DC-10-30: Boeing, DC-10 Airplane Characteristics for Airport
+        // Planning, sec 5.4.4 "Ground Service Connection Data, Series
+        // 30/30CF/40/40CF", printed p.111, usable US gal: tanks 1 and 3
+        // (wing) 6,090 each, tank 2 9,654, centre-wing tank 12,731,
+        // under-wing auxiliary tank 1,957; total 36,522 US gal (138,251 L at
+        // 3.785411784 L/gal). The page lists no fuselage or cargo-hold tank.
+        // Mapping: wing = 2 x 6,090 + 1,957 = 14,137 gal = 53,514 L (the
+        // under-wing auxiliary tank is counted in the wing cell); centre =
+        // 12,731 + 9,654 = 22,385 gal = 84,736 L (tank 2 is the wing-root /
+        // centre-section tank, so it is a centre-section tank here, as the
+        // inboard-extending centre tanks of the A220, 787 and A350). The page
+        // gives no tank stations: the wing span stations (0.12-0.85) and the
+        // burn priorities are the existing estimates, unchanged.
+        "DC-10" => FuelTankLayoutConfig {
+            inner_wing: wing(0.12, 0.85, 3, 53_514.0),
+            center: center(2, 84_736.0),
+            ..base
+        },
+        // Boeing 747-400 Airplane Characteristics for Airport Planning, D6-58326-1 Rev F (December 2024),
+        // section 5.4.3, p. 5-14, tank capacities for the CF6-80C2 airplane: reserve 2 and 3 5,004 L each,
+        // mains 1 and 4 16,548 L each, mains 2 and 3 47,486 L each, centre wing 64,960 L, horizontal
+        // stabiliser 12,490 L (3,300 US gal, the trim tank here: filled last, emptied first); total usable
+        // 216,199 L. Every main tank feeds its own engine, so mains 1-4 are the feed tanks (filled first,
+        // emptied last, together in proportion to capacity); the centre and reserve tanks are transfer
+        // tanks (centre emptied first, reserves into the inboard mains after it).
+        // DERIVED: the span stations. No public source gives the rib stations (FAA TCDS A20WE refers fuel
+        // to the Weight and Balance Manual), so the boundaries are where the preset's own spar-box volume
+        // (chord squared times the Obert Fig. 24.82 t/c along the drawn planform) splits in the published
+        // ratio between the side of body (0.10) and 0.85 (ESTIMATE, the reserve tanks' outboard end):
+        // mains 2/3 0.10-0.3907, mains 1/4 0.3907-0.6863, reserves 0.6863-0.85.
+        // NOT PUBLISHED: the refuel sequence inside the main group; the model fills the four mains in
+        // proportion to capacity.
         "B747-400" => FuelTankLayoutConfig {
-            inner_wing: wing(0.10, 0.60, 3, 105_000.0),
-            outer_wing: wing(0.60, 0.85, 4, 36_522.0),
-            center: center(2, 62_000.0),
-            trim: trim(1, 12_492.0),
+            inner_wing: with_feed(wing(0.10, 0.3907, 3, 94_972.0), 0.10, 0.3907, 94_972.0),
+            outer_wing: with_feed(
+                wing(0.3907, 0.85, 4, 33_096.0 + 10_008.0),
+                0.3907,
+                0.6863,
+                33_096.0,
+            ),
+            center: center(2, 64_960.0),
+            trim: trim(1, 12_490.0),
             ..base
         },
         // ATR 72-600 (EASA.A.084): two integral wing tanks, 5,000 kg usable
@@ -242,6 +267,21 @@ pub fn layout_for(preset_name: &str) -> Option<FuelTankLayoutConfig> {
         // (0.118 of the semispan) to 0.85, are not published.
         "C919" => FuelTankLayoutConfig {
             inner_wing: wing(0.12, 0.85, 1, 24_917.0),
+            ..base
+        },
+        // Learjet 60, EASA TCDS IM.A.212 III.7: usable 2,898 lb in the wings
+        // and 5,012 lb in the fuselage tank; volumes at 0.803 kg/L. Fuselage
+        // tank centroid from the III.7 arm, F.S. 427.1 in (PTM fig 19-2 frame,
+        // 10.52 m of 17.12 m). ESTIMATE: the wing tank spans, side of body to
+        // 0.85, are not published; PTM ch 5: fuselage fuel transfers to the wings.
+        "LJ60" => FuelTankLayoutConfig {
+            inner_wing: wing(0.16, 0.85, 2, 1_637.0),
+            auxiliary: AuxiliaryTankConfig {
+                enabled: true,
+                usable_volume_l: 2_831.0,
+                x_position_fraction: 0.6146,
+                burn_priority: 1,
+            },
             ..base
         },
         // Embraer E195-E2 specification sheet (April 2025): 13,690 kg usable
@@ -263,6 +303,18 @@ pub fn layout_for(preset_name: &str) -> Option<FuelTankLayoutConfig> {
             center: center(1, 14_566.0),
             ..base
         },
+        // C-295, EASA TCDS A.186 Issue 08 III.9, 0.80 kg/L: main 1,605 L and auxiliary
+        // 2,161 L per wing, 7,532 L (the printed 8,532 L total does not add up). Band edges are
+        // DERIVED, see `band_edge_provenance`: 0.1095 side of body, 0.271 nacelle station
+        // (3.50 m of the 12.905 m semispan), 0.90 tip end ESTIMATE. Main cell inboard of the
+        // nacelle, auxiliary outboard (Jane's CN-235 entry). The published volumes are kept;
+        // the model's spar box holds 2,386 L (both wings) in the inner band and 7,197 L to the
+        // tip, short of the 7,532 L TCDS / 7,650 L Jane's totals.
+        "C295" => FuelTankLayoutConfig {
+            inner_wing: wing(0.1095, 0.271, 2, 3_210.0),
+            outer_wing: wing(0.271, 0.90, 1, 4_322.0),
+            ..base
+        },
         // AVE is a 777-9-class notional twin: 52,136 US gal primary
         // capacity split as a centre tank of about 27,600 US gal (104,500 L)
         // extending into the inboard wing and mains of about 12,270 US gal
@@ -276,6 +328,67 @@ pub fn layout_for(preset_name: &str) -> Option<FuelTankLayoutConfig> {
     })
 }
 
+/// Where a preset's declared tank spanwise band comes from.
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub enum TankBandSource {
+    /// Read from a printed source (rib stations or span fractions).
+    Published(&'static str),
+    /// Computed from sourced inputs by the formula stated in the entry.
+    Derived(&'static str),
+    /// Not published: volume-consistent or geometry-derived estimate, with
+    /// the basis of the estimate.
+    Estimate(&'static str),
+}
+
+/// The provenance of the spanwise band(s) [`layout_for`] declares for the
+/// named preset; `None` for a preset with no registered layout.
+///
+/// Only the A320 band is printed (AMM ATA 28 rib boundaries, cited in
+/// [`layout_for`]); every other declared band is an ESTIMATE. C-295: EASA TCDS
+/// A.186 Issue 08 and Jane's (CN-235 entry) give volumes and the main/auxiliary
+/// split (main in the centre section inboard of the nacelles, auxiliary in the
+/// outer panels) but no rib stations or span fractions.
+pub fn band_provenance(preset_name: &str) -> Option<TankBandSource> {
+    use TankBandSource::{Derived, Estimate, Published};
+    Some(match preset_name {
+        "A320-200" => Published("AMM ATA 28 tank boundaries, ribs 2-15 and 15-22 (EASA.A.064 III.9)"),
+        "C295" => Derived("inner 0.1095-0.271 and outer 0.271-0.90 (tip end ESTIMATE), per-edge entries in band_edge_provenance; published volumes kept, box volume short of the totals"),
+        "A380-800" => Estimate("feed and group boundaries from the model's spar-box volume split; AC figure is oblique"),
+        "A220-300" | "A340-300" | "A350-900" | "B787-9" | "DC-10" | "B747-400" | "ATR72-600" | "C919"
+        | "E195-E2" | "LJ60" | "A400M" | "AVE" => {
+            Estimate("spans not published; volume-consistent estimate")
+        }
+        _ => return None,
+    })
+}
+
+/// Per-edge provenance of the C-295 band: (edge, source).
+///
+/// 0.1095 = `side_of_body_span_fraction` of the C295 preset geometry (fuselage
+/// half width 1.41 m over the 12.905 m semispan). 0.271 = nacelle station
+/// y 3.50 m (half the 7.00 m propeller spacing, Jane's All the World's
+/// Aircraft 2008-09, CN-235 entry) over the semispan 25.81 m / 2 (EASA TCDS
+/// A.186 Issue 08, Section 5 III, span; PDF p.11). The tip end 0.90 is an
+/// ESTIMATE. The model's spar box (alas-mass, usable fraction 0.92) holds
+/// 2,386 L in the inner band and 7,197 L to eta 1.0, short of the 7,532 L
+/// (TCDS III.9) and 7,650 L (Jane's 2008-09 pp.544-545) totals, so the
+/// outer edge cannot be solved from volume; the published volumes are kept.
+pub const C295_BAND_EDGES: [(&str, TankBandSource); 3] = [
+    ("0.1095 inboard", TankBandSource::Derived("side_of_body_span_fraction of the C295 preset geometry")),
+    ("0.271 split", TankBandSource::Derived("y 3.50 m / 12.905 m: half the 7.00 m propeller spacing (Jane's 2008-09, CN-235 entry) over half the 25.81 m span (EASA TCDS A.186 Issue 08, PDF p.11)")),
+    ("0.90 tip end", TankBandSource::Estimate("not published; volume cannot fix it, box holds 7,197 L to the tip against 7,532/7,650 L")),
+];
+
+/// The per-edge provenance of a preset's band; empty when only the
+/// whole-band [`band_provenance`] entry exists.
+pub fn band_edge_provenance(preset_name: &str) -> &'static [(&'static str, TankBandSource)] {
+    if preset_name == "C295" {
+        &C295_BAND_EDGES
+    } else {
+        &[]
+    }
+}
+
 #[cfg(test)]
 // A test asserts on arrangements it registered itself, so a failed expect
 // there is the assertion failing.
@@ -286,6 +399,37 @@ mod tests {
     #[test]
     fn an_unknown_preset_keeps_the_default_arrangement() {
         assert_eq!(layout_for("Concorde"), None);
+    }
+
+    #[test]
+    fn every_registered_wing_band_declares_its_provenance() {
+        for preset in crate::presets::registry() {
+            let layout = layout_for(preset.name).expect("registered arrangement");
+            let has_band =
+                layout.inner_wing.enabled || layout.mid_wing.enabled || layout.outer_wing.enabled;
+            if has_band {
+                assert!(
+                    band_provenance(preset.name).is_some(),
+                    "{}: tank band has no provenance entry",
+                    preset.name
+                );
+            }
+        }
+        assert!(matches!(
+            band_provenance("C295"),
+            Some(TankBandSource::Derived(_))
+        ));
+        let edges = band_edge_provenance("C295");
+        assert_eq!(edges.len(), 3);
+        assert!(matches!(edges[2].1, TankBandSource::Estimate(_)));
+        let c295 = layout_for("C295").expect("registered arrangement");
+        assert_eq!(c295.outer_wing.span_end_fraction, 0.90);
+        assert_eq!(
+            c295.inner_wing.span_end_fraction,
+            c295.outer_wing.span_start_fraction
+        );
+        // 3.50 m nacelle station over the 25.81 m span's semispan.
+        assert!((c295.inner_wing.span_end_fraction - 3.50 / (25.81 / 2.0)).abs() < 5.0e-4);
     }
 
     #[test]
@@ -408,11 +552,11 @@ mod tests {
             "Feed 1 + Feed 4, the outboard end of the mid cell"
         );
 
-        // The tanks sum to the certified tank total, and what the preset
-        // declares beyond it is exactly the certified 793 L "Systems"
-        // inventory: fuel in lines and engines, which is not a tank and is
-        // not modelled as one. Litres are exact integers here, so these are
-        // exact comparisons rather than banded ones.
+        // The tanks sum to the certified tank total, which is also the
+        // Airbus A380 AC usable fuel capacity (323,546 L, sec. 2-1-1 p.2) the
+        // preset now declares; the TCDS "Systems" row (793 L of line and
+        // engine fuel) is not a tank and is not part of that pair. Litres are
+        // exact integers here, so these are exact comparisons.
         let tanks_l = published(&a380.inner_wing)
             + published(&a380.mid_wing)
             + published(&a380.outer_wing)
@@ -423,7 +567,7 @@ mod tests {
             .reference
             .usable_fuel_volume_l
             .expect("declared usable volume");
-        assert_eq!(declared_l, 324_339.0);
-        assert_eq!(declared_l - tanks_l, 793.0);
+        assert_eq!(declared_l, 323_546.0);
+        assert_eq!(declared_l, tanks_l);
     }
 }

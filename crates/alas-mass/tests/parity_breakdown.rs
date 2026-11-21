@@ -108,6 +108,7 @@ fn run_mass_analysis_matches_the_fixture_across_requirements_and_layout_override
             total_mass: l.total_mass,
             cg_x: l.cg_x,
             cg_y: l.cg_y,
+            ..Default::default()
         });
 
         let (masses, coords, cg) = run_mass_analysis(

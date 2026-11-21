@@ -29,7 +29,7 @@ fn a_stale_runtime_preference_uses_the_adjacent_solver_bundle() {
         "alas-nastran95-adjacent-runtime-{}",
         std::process::id()
     ));
-    let executable = root.join("build/bin/nastran.exe");
+    let executable = root.join(Nastran95Solver::EXECUTABLE_RELATIVE);
     let rf = root.join("rf");
     let runtime = root.join("runtime");
     let stale = root.join("old-msys2/mingw64/bin");
@@ -70,7 +70,7 @@ fn an_existing_runtime_preference_remains_authoritative() {
         "alas-nastran95-configured-runtime-{}",
         std::process::id()
     ));
-    let executable = root.join("build/bin/nastran.exe");
+    let executable = root.join(Nastran95Solver::EXECUTABLE_RELATIVE);
     let rf = root.join("rf");
     let configured = root.join("configured-runtime");
     let adjacent = root.join("runtime");
@@ -100,6 +100,7 @@ fn a_configured_rf_stage_moves_transient_work_out_of_a_long_artifact_tree() {
         rf_stage: Some(PathBuf::from("C:/nas-rf")),
         open_core_words: None,
         max_open_core_words: LEGACY_MAX_OPEN_CORE_WORDS,
+        private_work: false,
     };
     let work = solver
         .workspace_for(Path::new("C:/a/deep/artifact/tree/nastran95/sol101"))
@@ -132,13 +133,20 @@ fn an_invalid_timeout_is_reported_before_the_runner_touches_the_filesystem() {
         rf_stage: None,
         open_core_words: None,
         max_open_core_words: LEGACY_MAX_OPEN_CORE_WORDS,
+        private_work: false,
     };
     for timeout in [f64::NAN, f64::INFINITY, 0.0, -1.0] {
         let outcome = run_nastran95(&solver, "", Path::new("not-created"), timeout);
         let RunOutcome::Failed(error) = outcome else {
             panic!("an invalid timeout must not launch a solve");
         };
-        assert!(error.starts_with("nastran.exe timeout must be"), "{error}");
+        assert!(
+            error.starts_with(&format!(
+                "{} timeout must be",
+                Nastran95Solver::EXECUTABLE_NAME
+            )),
+            "{error}"
+        );
     }
     assert!(!Path::new("not-created").exists());
 }
@@ -153,6 +161,7 @@ fn an_open_core_allocation_beyond_the_local_build_cap_is_rejected_before_staging
         rf_stage: None,
         open_core_words: Some("32000000".to_owned()),
         max_open_core_words: LEGACY_MAX_OPEN_CORE_WORDS,
+        private_work: false,
     };
     let outcome = run_nastran95(&solver, "", Path::new("not-created"), 30.0);
     let RunOutcome::Failed(error) = outcome else {
@@ -377,4 +386,30 @@ fn corrupted_eigenvector_mode_number_is_an_error_not_an_allocation() {
         read_eigenvector_tables(&at_limit).unwrap().len(),
         MAX_EIGENVECTOR_MODE
     );
+}
+
+#[test]
+fn private_work_gives_every_solve_its_own_rigid_format_directory() {
+    let solver = Nastran95Solver {
+        exe: PathBuf::from("unused-nastran95.exe"),
+        rf_source: PathBuf::from("unused-rf"),
+        runtime: None,
+        runtime_source: Nastran95RuntimeSource::Unspecified,
+        rf_stage: None,
+        open_core_words: None,
+        max_open_core_words: LEGACY_MAX_OPEN_CORE_WORDS,
+        private_work: true,
+    };
+    let artifact = Path::new("sol101");
+    let a = solver.workspace_for(artifact).expect("first");
+    let b = solver.workspace_for(artifact).expect("second");
+    assert_ne!(a, b, "two solves must not share a work directory");
+    let rf_a = rigid_format_stage_dir(&a, None).expect("rf");
+    let rf_b = rigid_format_stage_dir(&b, None).expect("rf");
+    assert_ne!(rf_a, rf_b, "two solves must not share an rf directory");
+    assert!(a.parent().is_some_and(Path::is_dir));
+    solver.release_workspace(&a);
+    solver.release_workspace(&b);
+    assert!(!a.parent().expect("root").exists());
+    assert!(!b.parent().expect("root").exists());
 }

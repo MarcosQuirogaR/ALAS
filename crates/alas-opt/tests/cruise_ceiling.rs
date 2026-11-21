@@ -2,7 +2,7 @@
 // Copyright (C) 2026 Marcos Quiroga Rodriguez
 
 //! The mission planner holds its cruise levels under the max-cruise-thrust
-//! ceiling (owner decision 2026-10-14), by the band rule of the
+//! ceiling, by the band rule of the
 //! `cruise_thrust` check (`ThrustAssessment::flyable`).
 
 #![allow(clippy::unwrap_used, clippy::expect_used)]
@@ -23,9 +23,12 @@ fn a_tighter_ceiling_lowers_the_planned_level_and_the_nominal_one_does_not_bind(
     let artifacts = &assessment.sized.fuel_artifacts;
     let plan = artifacts.frozen_plan.as_ref().unwrap();
     let mass_kg = assessment.sized.takeoff_mass_kg;
+    // The thrust ceiling alone: with it the DC-10's 1.3 g buffet ceiling binds first (both bands
+    // then plan 8,122 m).
     let freeze = |band: Option<f64>| {
         candidate_mission_model(&config, artifacts)
             .unwrap()
+            .with_buffet_onset_cl(None)
             .with_cruise_ceiling_band(band)
             .freeze_plan(mass_kg, plan.range_m, &plan.policy)
             .unwrap()

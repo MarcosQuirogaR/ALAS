@@ -77,7 +77,9 @@ fn drawn_mode_and_unset_config_build_identical_airplanes() {
     });
     assert_eq!(unset, explicit);
     assert_eq!(format!("{unset:?}"), format!("{explicit:?}"));
-    assert!(unset.wings[0].reference.is_none());
+    // The wing carries its planform datum; the drawn mode adds no
+    // published reference on top of it, which the equality above already shows.
+    assert!(unset.wings[0].reference.is_some());
 }
 
 #[test]

@@ -39,10 +39,25 @@ pub use tires::{TireSpec, TIRE_DATABASE};
 ///
 /// Two-leg layouts use the wing gear positions. A three-leg layout is the
 /// transport arrangement used by the A340: two wing units plus one
-/// fuselage-centreline unit. Four-leg layouts add the two body units. The
-/// fallback for a larger explicit count keeps every configured leg visible,
-/// but it does not invent a new aircraft-specific track definition.
-pub fn mlg_strut_positions(n_mlg_struts: i64, half_track: f64) -> Vec<(String, f64)> {
+/// fuselage-centreline unit. Four-leg layouts add the two body units.
+///
+/// Five or more legs are tandem legs in line on each side at the full track
+/// (the A400M's three twin-wheel legs per side, EASA TCDS A.169 and the Airbus
+/// A400M brochure plan view), `L`, `R`, then `L2`, `R2`, and so on, with an
+/// odd last leg on the centreline. The layout is mirrored about the
+/// centreline for every count. `main_gear_x_m` follows this same order, so a
+/// left and right leg of one row take consecutive entries.
+///
+/// Four legs of one wheel each (`wheels_per_leg == 1`) are also tandem legs in
+/// line at the full track, not wing and body units: the CN-235 and C-295 main
+/// gear, "two legs in tandem configuration on each side of the fuselage", each
+/// with its own shock absorber and one wheel (EADS-CASA, CN-235-300 Technical
+/// Review, 2002, Landing Gear, p. 26). A body unit always carries a bogie.
+pub fn mlg_strut_positions(
+    n_mlg_struts: i64,
+    half_track: f64,
+    wheels_per_leg: i64,
+) -> Vec<(String, f64)> {
     let count = n_mlg_struts.max(2) as usize;
     let mut positions = Vec::with_capacity(count);
     positions.push(("L".to_owned(), -half_track));
@@ -50,15 +65,17 @@ pub fn mlg_strut_positions(n_mlg_struts: i64, half_track: f64) -> Vec<(String, f
 
     if count == 3 {
         positions.push(("Body-C".to_owned(), 0.0));
-    } else if count >= 4 {
+    } else if count == 4 && wheels_per_leg != 1 {
         let body_offset = half_track * 0.45;
         positions.push(("Body-L".to_owned(), -body_offset));
         positions.push(("Body-R".to_owned(), body_offset));
-        for index in 4..count {
-            // No public generic convention establishes a fifth or later
-            // leg's station. Keep it on the centreline and expose it as an
-            // explicit estimated position instead of dropping its geometry.
-            positions.push((format!("Body-{index}"), 0.0));
+    } else if count >= 4 {
+        for row in 2..=count / 2 {
+            positions.push((format!("L{row}"), -half_track));
+            positions.push((format!("R{row}"), half_track));
+        }
+        if count % 2 == 1 {
+            positions.push(("Body-C".to_owned(), 0.0));
         }
     }
     positions
@@ -96,6 +113,7 @@ pub fn size_landing_gear(
         fuselage_diameter_m,
         cg_height_estimate_m,
         std::slice::from_ref(&x_mlg),
+        0.0,
         gear_config,
     )
 }
@@ -123,6 +141,7 @@ pub fn size_landing_gear_with_group_stations(
     fuselage_diameter_m: f64,
     cg_height_estimate_m: f64,
     requested_main_gear_x_m: &[f64],
+    min_static_nose_fraction: f64,
     gear_config: &LandingGearConfig,
 ) -> LandingGearLayout {
     size_landing_gear_at_design_state(
@@ -133,6 +152,8 @@ pub fn size_landing_gear_with_group_stations(
         aero_fwd_lim_x,
         aero_aft_lim_x,
         None,
+        min_static_nose_fraction,
+        geometry::TipBackBasis::default(),
         fuselage_diameter_m,
         cg_height_estimate_m,
         requested_main_gear_x_m,
@@ -162,6 +183,8 @@ pub fn size_landing_gear_at_design_state(
     aero_fwd_lim_x: f64,
     aero_aft_lim_x: f64,
     most_aft_state_x: Option<f64>,
+    min_static_nose_fraction: f64,
+    tip_back: geometry::TipBackBasis,
     fuselage_diameter_m: f64,
     cg_height_estimate_m: f64,
     requested_main_gear_x_m: &[f64],
@@ -173,6 +196,8 @@ pub fn size_landing_gear_at_design_state(
     let design_weight_kg = mrw_kg
         .filter(|value| value.is_finite() && *value > 0.0)
         .map_or(mtow_kg, |mrw| mrw.max(mtow_kg));
+    // Needs data: the nose reaction is sized at the aft limit here, not at the loading-envelope
+    // forward CG; the validation source (Airbus AC 7-3-0 Fig 7-3-0-991-006, E2 APM section 7) is not on disk.
     let design_aft_lim_x = most_aft_state_x
         .filter(|value| value.is_finite())
         .map_or(aero_aft_lim_x, |aft_state| aft_state.max(aero_aft_lim_x));
@@ -197,10 +222,8 @@ pub fn size_landing_gear_at_design_state(
         vec![x_mlg; n_mlg_struts as usize]
     };
     let x_mlg_primary = main_gear_x_m[0];
-    let x_mlg_aft_axle_m = main_gear_x_m
-        .iter()
-        .copied()
-        .fold(f64::NEG_INFINITY, f64::max);
+    // The tip-back pivot, the one rotation pivot the CG envelope also uses.
+    let x_mlg_aft_axle_m = alas_config::rotation_pivot_station(&main_gear_x_m, x_mlg);
     let effective_gear_station = alas_config::effective_main_gear_station(
         &main_gear_x_m,
         gear_config.mlg_strut_bogie_wheels.as_deref(),
@@ -219,7 +242,22 @@ pub fn size_landing_gear_at_design_state(
     // (most-aft) CG limit (x_cg large -> R_nlg small) and the design weight.
     let r_nlg = |x_cg: f64| design_weight_kg * (x_mlg_effective - x_cg) / effective_wheelbase;
     let r_nlg_design = r_nlg(aero_fwd_lim_x).max(0.0);
-    let r_mlg_total_design = (design_weight_kg - r_nlg(design_aft_lim_x)).max(0.0);
+    // The main gear and tip-back are judged at the most-aft ground CG: the
+    // aerodynamic limit is pulled back to the minimum-nose-load station, and a
+    // real loading state is never pulled forward (see `geometry::aft_design_state`).
+    let aft = geometry::aft_design_state(
+        design_weight_kg,
+        x_mlg_effective,
+        effective_wheelbase,
+        aero_aft_lim_x,
+        most_aft_state_x,
+        min_static_nose_fraction,
+    );
+    let (r_nlg_aft_design, r_mlg_total_design) = (aft.nose_kg, aft.main_total_kg);
+    let aero_aft_limit_pulled_back = aft.aero_limit_pulled_back;
+    let design_aft_cg_x = aft.x_cg_m;
+    // Raw moment balance at the unpulled design CG, for the diagnostic.
+    let r_nlg_aft_raw = r_nlg(design_aft_lim_x);
 
     // Dynamic nose-gear braking reaction at the forward CG limit and
     // the design weight, certification deceleration
@@ -243,17 +281,17 @@ pub fn size_landing_gear_at_design_state(
     };
     let nlg_static_per_wheel = r_nlg_design / n_nlg_wheels.max(1) as f64;
     let nlg_dynamic_per_wheel = r_nlg_dynamic / n_nlg_wheels.max(1) as f64;
-    // Size on max(1.07 x static, dynamic / dynamic-rating-factor).
-    let nlg_design_load_per_wheel = (nlg_static_per_wheel * gear_config.tire_safety_factor)
-        .max(nlg_dynamic_per_wheel / gear_config.tire_dynamic_rating_factor.max(1e-9));
-    let nlg_tire = tires::select_tire(nlg_design_load_per_wheel, &gear_config.tire_class);
+    let (nlg_tire, nlg_design_load_per_wheel) =
+        tires::nose_tire_and_load(nlg_static_per_wheel, nlg_dynamic_per_wheel, gear_config);
     let nlg_capacity_per_wheel = nlg_tire.rated_load_kg;
-    let nlg_tire_margin = if nlg_design_load_per_wheel > 0.0 {
-        nlg_capacity_per_wheel / nlg_design_load_per_wheel
-    } else {
-        f64::INFINITY
-    };
+    let nlg_tire_margin = tires::margin(nlg_capacity_per_wheel, nlg_design_load_per_wheel);
     let nlg_overloaded = nlg_capacity_per_wheel < nlg_design_load_per_wheel;
+    let mut tire_load_ratios = tires::nose_load_ratios(
+        nlg_static_per_wheel,
+        nlg_dynamic_per_wheel,
+        &nlg_tire,
+        gear_config.tire_dynamic_rating_factor,
+    );
 
     // Main gear
     // The reaction point is the wheel-count-weighted centroid, so the
@@ -268,7 +306,11 @@ pub fn size_landing_gear_at_design_state(
     // The provisional value only determines body-leg ordering; the final
     // value below is computed after the bogie sizes are known.
     let half_track_for_layout = fuselage_diameter_m * gear_config.track_diameter_factor / 2.0;
-    let provisional_strut_positions = mlg_strut_positions(n_mlg_struts, half_track_for_layout);
+    let provisional_strut_positions = mlg_strut_positions(
+        n_mlg_struts,
+        half_track_for_layout,
+        gear_config.wheels_per_mlg_strut,
+    );
     let configured_bogie_counts = gear_config
         .mlg_strut_bogie_wheels
         .as_deref()
@@ -308,6 +350,7 @@ pub fn size_landing_gear_at_design_state(
 
     let mut mlg_wheels_per_strut = Vec::with_capacity(provisional_strut_positions.len());
     let mut mlg_tires = Vec::with_capacity(provisional_strut_positions.len());
+    let mut label_load = 0.0_f64;
     let mut mlg_overloaded = false;
     let mut mlg_worst_margin = f64::INFINITY;
     for index in 0..provisional_strut_positions.len() {
@@ -321,17 +364,18 @@ pub fn size_landing_gear_at_design_state(
         let (wheels, tire, overloaded) = tires::size_bogie(
             strut_load_for_sizing,
             gear_config.tire_safety_factor,
-            &gear_config.tire_class,
+            tires::main_tire_key(&gear_config.tire_class, &gear_config.mlg_tire),
             forced_count,
         );
         let per_wheel_load = strut_load_for_sizing / wheels.max(1) as f64;
-        let margin = if per_wheel_load > 0.0 {
-            tire.rated_load_kg / (per_wheel_load * gear_config.tire_safety_factor)
-        } else {
-            f64::INFINITY
-        };
+        label_load = label_load.max(per_wheel_load * gear_config.tire_safety_factor);
+        let margin = tires::margin(
+            tire.rated_load_kg,
+            per_wheel_load * gear_config.tire_safety_factor,
+        );
         mlg_overloaded |= overloaded;
         mlg_worst_margin = mlg_worst_margin.min(margin);
+        tire_load_ratios.note_main(per_wheel_load, &tire);
         mlg_wheels_per_strut.push(wheels);
         mlg_tires.push(tire);
     }
@@ -361,11 +405,7 @@ pub fn size_landing_gear_at_design_state(
     let pct_load_mlg_max = mlg_capacity_kg / mtow_kg.max(1.0);
 
     // Strut material label
-    let strut_material = if gear_config.strut_material != "auto" {
-        gear_config.strut_material.clone()
-    } else {
-        tires::strut_material_for(mlg_tire.code).to_owned()
-    };
+    let strut_material = tires::strut_label(gear_config, label_load);
 
     // Lateral track width
     // A published track is a source baseline whose definition is already a
@@ -403,60 +443,34 @@ pub fn size_landing_gear_at_design_state(
     let turnover_angle_deg = cg_height_estimate_m.max(0.1).atan2(lever).to_degrees();
     let turnover_ok = turnover_angle_deg <= gear_config.turnover_angle_limit_deg;
 
-    // Longitudinal tip-back angle, at the most-aft main-gear axle and
-    // the design aft CG. The full requirement also needs the tail-scrape
-    // angle (fuselage lower-contour geometry this module does not hold); see
-    // `tip_back_ok`'s doc comment.
+    // Longitudinal tip-back at the most-aft main-gear axle and the most aft CG
+    // the aircraft reaches on the ground (the design CG, or the supplied
+    // reachable ground CG when it is further aft), against
+    // max(min_tip_back_deg, tail-scrape angle): the same two functions the
+    // CG envelope's per-state limits use.
+    let tip_back_cg_x = tip_back
+        .most_aft_ground_cg_x_m
+        .filter(|x| x.is_finite())
+        .map_or(design_aft_cg_x, |x| x.max(design_aft_cg_x));
+    let tip_back_h_cg = tip_back
+        .cg_height_m
+        .filter(|h| h.is_finite() && *h > 0.0)
+        .unwrap_or(cg_height_estimate_m);
     let tip_back_angle_deg =
-        geometry::tip_back_angle_deg(x_mlg_aft_axle_m, design_aft_lim_x, cg_height_estimate_m);
-    let tip_back_ok =
-        tip_back_angle_deg.is_finite() && tip_back_angle_deg >= gear_config.min_tip_back_deg;
+        geometry::tip_back_angle_deg(x_mlg_aft_axle_m, tip_back_cg_x, tip_back_h_cg);
+    let required_tip_back_deg =
+        geometry::required_tip_back_deg(gear_config.min_tip_back_deg, tip_back.scrape_angle_deg);
+    let tip_back_ok = tip_back_angle_deg.is_finite() && tip_back_angle_deg >= required_tip_back_deg;
 
-    // Wheel positions for the planform figure
-    let mut wheels: Vec<Wheel> = Vec::new();
-    let nlg_spacing = nlg_tire.width_m * 1.6;
-    for i in 0..n_nlg_wheels {
-        let y = (i as f64 - (n_nlg_wheels - 1) as f64 / 2.0) * nlg_spacing;
-        wheels.push(Wheel {
-            x: x_nlg,
-            y,
-            group: "NLG",
-            strut_label: "NLG".to_owned(),
-            diameter_m: nlg_tire.diameter_m,
-            width_m: nlg_tire.width_m,
-        });
-    }
-
-    let strut_sides = mlg_strut_positions(n_mlg_struts, half_track);
-    for (index, ((label, y_center), (&wheels_per_strut, tire))) in strut_sides
-        .into_iter()
-        .zip(mlg_wheels_per_strut.iter().zip(&mlg_tires))
-        .enumerate()
-    {
-        let bogie_spacing = tire.width_m * 1.6;
-        for i in 0..wheels_per_strut {
-            // Even wheel counts pair up fore/aft in a bogie; odd (which
-            // STANDARD_BOGIE_SIZES never yields) centres the extra wheel.
-            let row = if wheels_per_strut > 1 { i / 2 } else { 0 };
-            let side: f64 = if i % 2 == 0 { -1.0 } else { 1.0 };
-            let y = if wheels_per_strut > 1 {
-                y_center + side * bogie_spacing / 2.0
-            } else {
-                y_center
-            };
-            let x = main_gear_x_m[index]
-                + (row as f64 - ((wheels_per_strut as f64 / 2.0).ceil() - 1.0) / 2.0)
-                    * (tire.diameter_m * 1.3);
-            wheels.push(Wheel {
-                x,
-                y,
-                group: "MLG",
-                strut_label: format!("MLG-{label}"),
-                diameter_m: tire.diameter_m,
-                width_m: tire.width_m,
-            });
-        }
-    }
+    let wheels = layout::planform_wheels(
+        x_nlg,
+        n_nlg_wheels,
+        &nlg_tire,
+        mlg_strut_positions(n_mlg_struts, half_track, gear_config.wheels_per_mlg_strut),
+        &main_gear_x_m,
+        &mlg_wheels_per_strut,
+        &mlg_tires,
+    );
 
     LandingGearLayout {
         n_nlg_wheels,
@@ -481,16 +495,21 @@ pub fn size_landing_gear_at_design_state(
         wheels,
         r_nlg_design_kg: r_nlg_design,
         r_mlg_total_design_kg: r_mlg_total_design,
+        r_nlg_aft_design_kg: r_nlg_aft_design,
+        r_nlg_aft_raw_kg: r_nlg_aft_raw,
+        aero_aft_limit_pulled_back,
         r_nlg_dynamic_kg: r_nlg_dynamic,
         pct_load_nlg_max,
         pct_load_mlg_max,
         nlg_tire_margin,
         mlg_tire_margin,
         tire_overloaded,
+        tire_load_ratios,
         capacity_basis_declared,
         turnover_angle_deg,
         turnover_ok,
         tip_back_angle_deg,
+        required_tip_back_deg,
         tip_back_ok,
     }
 }

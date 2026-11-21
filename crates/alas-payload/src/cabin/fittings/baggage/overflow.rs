@@ -11,7 +11,7 @@
 use alas_config::{BaggagePolicy, HoldDeck};
 
 use super::*;
-use crate::cargo::{deck_spec, CargoSlot, HoldCompartment, STOWAGE_DENSITY_KG_M3};
+use crate::cargo::{deck_spec, CargoSlot, HoldCompartment};
 use crate::layout::MAIN;
 
 /// Smallest block dimension the shrink-and-retry fit will try, m.
@@ -207,7 +207,11 @@ pub(super) fn allocate(
 
 /// The room each compartment has left after the container positions are
 /// loaded.
-pub(super) fn rooms(compartments: &[HoldCompartment], slots: &[CargoSlot]) -> Vec<Room> {
+pub(super) fn rooms(
+    compartments: &[HoldCompartment],
+    slots: &[CargoSlot],
+    density_kg_m3: f64,
+) -> Vec<Room> {
     let mut loaded_kg = vec![0.0; compartments.len()];
     let mut occupied_m3 = vec![0.0; compartments.len()];
     for slot in slots
@@ -221,7 +225,12 @@ pub(super) fn rooms(compartments: &[HoldCompartment], slots: &[CargoSlot]) -> Ve
             } else {
                 1.0
             };
-            occupied_m3[index] += slot.usable_volume_m3() * fill;
+            occupied_m3[index] += if slot.uld.code == crate::cargo::BULK.code {
+                // Loose bulk takes the volume its mass stows at.
+                slot.payload / density_kg_m3
+            } else {
+                slot.usable_volume_m3() * fill
+            };
         }
     }
     compartments
@@ -229,7 +238,7 @@ pub(super) fn rooms(compartments: &[HoldCompartment], slots: &[CargoSlot]) -> Ve
         .enumerate()
         .map(|(index, compartment)| {
             let residual_volume = (compartment.volume_m3 - occupied_m3[index]).max(0.0);
-            let by_volume = residual_volume * STOWAGE_DENSITY_KG_M3;
+            let by_volume = residual_volume * density_kg_m3;
             let cap_kg = compartment.max_net_kg.map_or(by_volume, |limit| {
                 by_volume.min((limit - loaded_kg[index]).max(0.0))
             });
@@ -267,8 +276,9 @@ pub(super) fn place_overflow(
     leftover: f64,
     policy: BaggagePolicy,
     target_x: Option<f64>,
+    density_kg_m3: f64,
 ) -> Overflow {
-    let rooms = rooms(compartments, slots);
+    let rooms = rooms(compartments, slots, density_kg_m3);
     let allocation = allocate(&rooms, leftover, policy, target_x);
     let mut shares_kg = allocation.shares_kg;
     merge_small_shares(compartments, &mut shares_kg);
@@ -323,14 +333,26 @@ fn block(g: &CabinGeometry, compartment: &HoldCompartment, mass: f64) -> DeckIte
         HoldDeck::Lower => LOWER,
         HoldDeck::Main => MAIN,
     };
-    let x = compartment.centroid_x_m();
-    let bottom = g.floor_z(deck, x);
+    let centroid = compartment.centroid_x_m();
+    let mut x = centroid;
+    let mut bottom = g.floor_z(deck, x);
     let full_length = compartment.length_m().min(BULK_BLOCK_LEN_M);
     let full_height = g.clamp_height(deck, x, BULK_BLOCK_HEIGHT_M);
     let mut scale = 1.0;
     let mut dimensions = (full_length, 0.0, full_height);
     for attempt in 0..MAX_FIT_ATTEMPTS {
         let length = (full_length * scale).max(MIN_BLOCK_DIMENSION_M);
+        // The block stays inside its compartment, whose volume centroid can
+        // sit nearer one end than the block's own half-length allows.
+        x = if g.enforces_physical_envelope() && compartment.length_m() >= length {
+            centroid.clamp(
+                compartment.x_start_m + 0.5 * length,
+                compartment.x_end_m - 0.5 * length,
+            )
+        } else {
+            centroid
+        };
+        bottom = g.floor_z(deck, x);
         let height = (full_height * scale).max(MIN_BLOCK_DIMENSION_M);
         let width = if g.enforces_physical_envelope() {
             [bottom, bottom + height]
@@ -428,6 +450,7 @@ mod tests {
             x_start_m,
             x_end_m,
             volume_m3: 10.0,
+            volume_declared: false,
             max_net_kg: None,
             deck: HoldDeck::Lower,
         }

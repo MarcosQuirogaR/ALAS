@@ -68,10 +68,11 @@ fn the_three_checks_are_evaluated_for_the_a320_with_the_clause_speeds_and_gradie
     assert!((final_segment.cl - perf.cl_max_clean / 1.18_f64.powi(2)).abs() < 1e-12);
     // CS 25.121(d): the approach configuration is the take-off flap when its
     // stall speed is within 10 % of the landing flap (CLmax_TO x 1.1^2 >=
-    // CLmax_land). The declared-high-lift CLmax_TO of the A320 qualifies; the
-    // 2.10 class default did not.
-    let (cl_max_approach, _) = approach_configuration(perf);
-    assert_eq!(cl_max_approach, perf.cl_max_to);
+    // CLmax_land), and any lower setting with CLmax_land / 1.21 is admitted; the
+    // lowest-drag one is flown.
+    let (cl_max_approach, _) =
+        approach_configuration(perf, alas_config::presets::DEFAULT_LANDING_FLAP_DEG);
+    assert!((cl_max_approach - perf.cl_max_land / 1.21).abs() < 1e-12);
     assert!((approach.cl - cl_max_approach / 1.4_f64.powi(2)).abs() < 1e-12);
     assert!((landing.cl - perf.cl_max_land / 1.23_f64.powi(2)).abs() < 1e-12);
     assert_eq!(final_segment.gradient, 0.012);
@@ -126,7 +127,7 @@ fn the_landing_climb_grows_with_the_landing_drag_and_the_spool_up_loss() {
 }
 
 #[test]
-fn the_approach_climb_includes_the_landing_flap_drag_but_not_the_gear() {
+fn the_approach_climb_scales_with_the_landing_flap_drag_but_not_the_gear() {
     let (mut config, outcome) = a320();
     // Pin the landing configuration: the declared take-off CLmax of the A320
     // would otherwise qualify the take-off flap as the approach flap
@@ -138,7 +139,16 @@ fn the_approach_climb_includes_the_landing_flap_drag_but_not_the_gear() {
     assert_eq!(unchanged.cd.to_bits(), base.cd.to_bits());
     config.performance.landing_flap_delta_cd += 0.05;
     let draggier = evaluated(&evaluate(&config, &outcome), ClimbSegment::ApproachClimb);
-    assert!((draggier.cd - base.cd - 0.05).abs() < 1e-12);
+    let perf = &config.performance;
+    let ratio = alas_config::presets::approach_flap_drag_ratio(
+        perf.cl_max_clean,
+        perf.cl_max_le_increment,
+        perf.cl_max_land,
+        1.10,
+        alas_config::presets::DEFAULT_LANDING_FLAP_DEG,
+    )
+    .unwrap();
+    assert!((draggier.cd - base.cd - ratio * 0.05).abs() < 1e-12);
 }
 
 #[test]
@@ -169,8 +179,9 @@ fn the_net_path_margin_is_the_gross_margin_minus_the_cs25_115_reduction() {
 
 #[test]
 fn the_approach_configuration_is_the_lowest_drag_flap_whose_vsr_is_within_110_percent_of_landing() {
-    // Take-off CLmax below CLmax_land / 1.21 = 2.149: VSR would exceed 1.10
-    // VSR0, so the landing flaps are the approach configuration.
+    // The clause admits any setting with VSR <= 1.10 VSR0. The lowest such setting
+    // (pooled lift-share curve, Raymer Eq. 12.61 drag share) is flown instead of full
+    // landing flap, and never carries more drag than the landing increment.
     let mut perf = alas_config::PerformanceConfig {
         cl_max_land: 2.60,
         landing_flap_delta_cd: 0.040,
@@ -178,23 +189,44 @@ fn the_approach_configuration_is_the_lowest_drag_flap_whose_vsr_is_within_110_pe
         cl_max_to: 2.10,
         ..Default::default()
     };
-    assert_eq!(approach_configuration(&perf), (2.60, 0.040));
-    // At and above the boundary the take-off flaps qualify and carry less drag.
-    perf.cl_max_to = 2.60 / 1.21;
-    assert_eq!(approach_configuration(&perf), (2.60 / 1.21, 0.015));
+    let ratio = alas_config::presets::approach_flap_drag_ratio(
+        perf.cl_max_clean,
+        perf.cl_max_le_increment,
+        perf.cl_max_land,
+        1.10,
+        alas_config::presets::DEFAULT_LANDING_FLAP_DEG,
+    )
+    .unwrap();
+    assert!(ratio > 0.0 && ratio < 1.0);
+    let approach = (2.60 / 1.21, ratio * 0.040);
+    assert_eq!(
+        approach_configuration(&perf, alas_config::presets::DEFAULT_LANDING_FLAP_DEG),
+        approach
+    );
+    // A take-off increment below the approach one, with a qualifying CLmax, is flown.
     perf.cl_max_to = 2.60;
-    assert_eq!(approach_configuration(&perf), (2.60, 0.015));
-    // A take-off increment above the landing one never selects the take-off flaps.
+    perf.oei_climb_delta_cd = 0.001;
+    assert_eq!(
+        approach_configuration(&perf, alas_config::presets::DEFAULT_LANDING_FLAP_DEG),
+        (2.60, 0.001)
+    );
+    // A take-off increment above the approach one never selects the take-off flaps.
     perf.oei_climb_delta_cd = 0.050;
-    assert_eq!(approach_configuration(&perf), (2.60, 0.040));
-    // A non-finite take-off CLmax falls back to the landing configuration.
+    assert_eq!(
+        approach_configuration(&perf, alas_config::presets::DEFAULT_LANDING_FLAP_DEG),
+        approach
+    );
+    // A non-finite take-off CLmax falls back to the approach setting.
     perf.oei_climb_delta_cd = 0.015;
     perf.cl_max_to = f64::NAN;
-    assert_eq!(approach_configuration(&perf), (2.60, 0.040));
+    assert_eq!(
+        approach_configuration(&perf, alas_config::presets::DEFAULT_LANDING_FLAP_DEG),
+        approach
+    );
 }
 
 #[test]
-fn the_atr_approach_climb_flies_take_off_flaps_and_meets_the_clause_at_the_registered_design() {
+fn the_atr_approach_climb_meets_the_clause_at_the_registered_design() {
     let config = AlasConfig::from_value(&serde_json::json!({
         "preset": "ATR72-600",
         "optimizer": {"design_space": {"mode": "reference_adaptation"}}
@@ -207,9 +239,9 @@ fn the_atr_approach_climb_flies_take_off_flaps_and_meets_the_clause_at_the_regis
     let checks = evaluate(&config, &outcome);
     let approach = evaluated(&checks, ClimbSegment::ApproachClimb);
     let perf = &config.performance;
-    // CLmax_to is within 1.10^2 of CLmax_land for the ATR: take-off flaps.
-    assert!(perf.cl_max_to * 1.21 >= perf.cl_max_land);
-    assert!((approach.cl - perf.cl_max_to / 1.4_f64.powi(2)).abs() < 1e-12);
+    // Take-off CLmax is below CLmax_land / 1.21: the approach flap is the lowest
+    // intermediate setting, at CLmax_land / 1.21 and a share of the landing drag.
+    assert!((approach.cl - perf.cl_max_land / 1.21 / 1.4_f64.powi(2)).abs() < 1e-12);
     let installed_tw = outcome.n_engines as f64 * outcome.static_thrust_kn * 1_000.0
         / (outcome.sized.takeoff_mass_kg * 9.806_65);
     assert!(

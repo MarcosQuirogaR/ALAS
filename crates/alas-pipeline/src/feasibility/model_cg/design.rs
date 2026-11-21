@@ -104,6 +104,8 @@ mod tests {
             takeoff_cg_x_m: 7.0,
             takeoff_cg_z_m: 1.0,
             takeoff_pitch_inertia_kg_m2: f64::NAN,
+            oew_pitch_inertia_kg_m2: f64::NAN,
+            zero_fuel_pitch_inertia_kg_m2: f64::NAN,
         };
         assert!(validate_design_basis(basis, loading, 20).is_ok());
         basis.takeoff_mass_kg = 75.0;

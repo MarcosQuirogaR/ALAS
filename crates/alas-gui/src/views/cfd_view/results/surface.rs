@@ -45,7 +45,7 @@ pub(super) fn show_surface_distribution(result: &alas_cfd::CfdResults, ui: &mut 
                     "{count} wall faces; branches classified by wall normal and plotted in increasing x/c ({order}).",
                     &[
                         ("count", count.to_string()),
-                        ("order", format!("{:?}", surface.order)),
+                        ("order", surface_order_label(surface.order)),
                     ],
                 ))
                 .weak()
@@ -196,12 +196,14 @@ fn show_surface_plot_pair(
                 points: upper.to_vec(),
                 color: series_color(ui, 0),
                 dashed: false,
+                open_markers: false,
             },
             PlotSeries {
                 name: lower_title.to_owned(),
                 points: lower.to_vec(),
                 color: series_color(ui, 1),
                 dashed: true,
+                open_markers: false,
             },
         ];
         let width = ui.available_width();
@@ -237,6 +239,16 @@ fn show_surface_plot_pair(
         plot_legend(ui, &series);
         super::plot_footer(ui, "x/c [-]", y_label, upper.len() + lower.len());
     });
+}
+
+/// Translated name of how the wall samples were ordered.
+fn surface_order_label(order: alas_cfd::surface::SurfaceOrder) -> String {
+    match order {
+        alas_cfd::surface::SurfaceOrder::MeshTopology => tr("mesh edge topology"),
+        alas_cfd::surface::SurfaceOrder::GeometricNearestNeighbour => {
+            tr("nearest-neighbour fallback")
+        }
+    }
 }
 
 #[cfg(test)]

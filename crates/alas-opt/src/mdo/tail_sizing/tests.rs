@@ -54,16 +54,28 @@ fn built(preset: &str, dv: &DesignVector) -> (AlasConfig, DesignVector, Airplane
 
 #[test]
 fn tail_volumes_hold_the_nominal_values_for_a_resized_wing() {
+    // The fin keeps its coefficient; the tailplane keeps its coefficient on
+    // a longer chord and `S_H l_H / S` on a shorter one, so its coefficient
+    // rises by the chord ratio there (`tailplane_volume_target`).
     for preset in PRESETS {
-        let (nominal_h, nominal_v) = nominal_volumes(preset).unwrap();
+        let ((nominal_h, nominal_v), nominal_mac_m) = nominals(preset).unwrap();
         for (span, chord) in [(1.0, 1.0), (1.06, 0.93), (0.94, 1.08), (1.10, 1.10)] {
             let (_, _, plane) = built(preset, &perturbed(preset, span, chord));
             let (vh, vv) = tail_volume_coefficients(&plane);
             let (vh, vv) = (vh.unwrap(), vv.unwrap());
+            let target_h = tailplane_volume_target(nominal_h, nominal_mac_m, plane.c_ref);
             assert!(
-                (vh / nominal_h - 1.0).abs() < 1e-6 && (vv / nominal_v - 1.0).abs() < 1e-6,
-                "{preset} span x{span} chord x{chord}: V_H {vh} vs {nominal_h}, V_V {vv} vs {nominal_v}"
+                (vh / target_h - 1.0).abs() < 1e-6 && (vv / nominal_v - 1.0).abs() < 1e-6,
+                "{preset} span x{span} chord x{chord}: V_H {vh} vs {target_h}, V_V {vv} vs {nominal_v}"
             );
+            if chord < 1.0 {
+                assert!(
+                    target_h > nominal_h * 1.05,
+                    "{preset}: {target_h} {nominal_h}"
+                );
+            } else {
+                assert_eq!(target_h, nominal_h, "{preset} chord x{chord}");
+            }
         }
     }
 }
@@ -83,20 +95,32 @@ fn an_unperturbed_preset_keeps_its_own_tails() {
 
 #[test]
 fn tail_areas_scale_with_wing_size_and_inversely_with_the_arm() {
-    // V = S_tail l / (S_w ref), so at the nominal volume
-    // S_H = V_H S_w MAC / l_H and S_V = V_V S_w b / l_V.
+    // V = S_tail l / (S_w ref), so at the target volume
+    // S_H = V_H S_w MAC / l_H and S_V = V_V S_w b / l_V. The tailplane's
+    // target is the nominal one unless the mean chord shortened (the longer
+    // span of this wing carries more of it outboard of the kink).
     for preset in PRESETS {
-        let (nominal_h, nominal_v) = nominal_volumes(preset).unwrap();
+        let ((nominal_h, nominal_v), nominal_mac_m) = nominals(preset).unwrap();
         let (_, _, plane) = built(preset, &perturbed(preset, 1.08, 1.05));
-        let x_ac = |wing: &alas_geom::aircraft::wing::Wing| wing.aerodynamic_center(0.25)[0];
-        let wing_x = x_ac(&plane.wings[0]);
+        let nominal_h = tailplane_volume_target(nominal_h, nominal_mac_m, plane.c_ref);
+        // The arms as the coefficients define them: from the quarter-chord
+        // centre of the carried wing box to that of each tail's theoretical
+        // planform. (The whole-wing centre differs from the carried box's
+        // once the derived wing position moves the wing against the body.)
+        let wing_x = plane.wings[0].carried_box().aerodynamic_center(0.25)[0];
+        let x_ac = |wing: &alas_geom::aircraft::wing::Wing| {
+            wing.reference_planform().aerodynamic_center(0.25)[0]
+        };
         let l_h = x_ac(&plane.wings[1]) - wing_x;
         let l_v = x_ac(&plane.wings[2]) - wing_x;
         let s_h = plane.wings[1].reference_area();
-        let s_v = plane.wings[2].unfolded_area();
+        let s_v = plane.wings[2].reference_planform().unfolded_area();
         let expected_h = nominal_h * plane.s_ref * plane.c_ref / l_h;
         let expected_v = nominal_v * plane.s_ref * plane.b_ref / l_v;
-        assert!((s_h / expected_h - 1.0).abs() < 1e-6, "{preset} S_H");
+        assert!(
+            (s_h / expected_h - 1.0).abs() < 1e-6,
+            "{preset} S_H {s_h} {expected_h}"
+        );
         assert!((s_v / expected_v - 1.0).abs() < 1e-6, "{preset} S_V");
     }
 }

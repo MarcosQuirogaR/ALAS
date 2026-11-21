@@ -55,6 +55,9 @@ pub(super) struct FirstPass<'a> {
     /// Operating empty mass, kg, and its station, m, of the first pass.
     pub oew_kg: f64,
     pub x_oew_m: f64,
+    /// The payload centroid, m, a load plan steers the hold and cabin load to
+    /// (`load_plan`); `None` keeps the nominal placement.
+    pub steer_payload_cg_x_m: Option<f64>,
 }
 
 impl FullAnalysis {
@@ -66,7 +69,7 @@ impl FullAnalysis {
         first: &FirstPass<'_>,
         coordinate_model: MassCoordinateModel<'_>,
     ) -> Result<PayloadPass, String> {
-        if self.reference_compatibility {
+        if self.reference_masses {
             return self.reference_payload_pass(design, plane, first, coordinate_model);
         }
         let (mut oew_kg, mut x_oew_m) = (first.oew_kg, first.x_oew_m);
@@ -79,8 +82,14 @@ impl FullAnalysis {
             if let Some(limit_kg) = structural_payload_limit_kg {
                 payload_config.requirements.max_structural_payload_kg = limit_kg;
             }
-            let layout = build_payload_layout(plane, &payload_config, oew_kg, x_oew_m)
-                .map_err(|error| format!("payload layout error: {error}"))?;
+            let layout = super::load_plan::build_steered_layout(
+                plane,
+                &payload_config,
+                oew_kg,
+                x_oew_m,
+                first.steer_payload_cg_x_m,
+            )
+            .map_err(|error| format!("payload layout error: {error}"))?;
             let (layout, offloaded_payload_kg) = route_payload_cap::cap_route_payload(
                 layout,
                 structural_payload_limit_kg,
@@ -88,7 +97,21 @@ impl FullAnalysis {
             );
             if let Some(pass) = previous.take() {
                 if summary_of(&pass.layout) == summary_of(&layout) {
-                    return Ok(pass);
+                    // The fixed point: this layout was built at the empty mass
+                    // the previous pass's own analysis produced, and equals
+                    // that pass's layout, so the analysis is unchanged. Its
+                    // structural limit, however, was evaluated at the empty
+                    // mass the previous pass was handed, one iteration older.
+                    // Report the limit (and the payload it offloads) at the
+                    // pass's own empty mass, which is the report's OEW. A
+                    // layout below the cap (the B747-400's nominal cabin) does
+                    // not change when the limit does, so the stale limit used
+                    // to survive: 668 kg of OEW and 0.8 t of maximum payload.
+                    return Ok(PayloadPass {
+                        structural_payload_limit_kg,
+                        offloaded_payload_kg,
+                        ..pass
+                    });
                 }
             }
             // One cabin per case (see `cabin_sync`).
@@ -167,6 +190,8 @@ fn summary_of(layout: &PayloadLayout) -> PayloadLayoutSummary {
         total_mass: layout.total_mass,
         cg_x: layout.cg_x,
         cg_y: layout.cg_y,
+        equipment_mass: layout.equipment_mass(),
+        equipment_cg: layout.equipment_cg(),
     }
 }
 
@@ -176,6 +201,59 @@ fn summary_of(layout: &PayloadLayout) -> PayloadLayoutSummary {
 #[cfg(test)]
 mod tests {
     use super::*;
+
+    /// The structural payload limit a report carries is the limit evaluated at
+    /// the operating empty mass the report itself carries, and the zero-fuel mass
+    /// it allows is the certified MZFW: one rule for every preset with a
+    /// published MZFW, the declared cap does not bind. Checked with the declared
+    /// cap and with the cap disabled (`0`) on the presets where the two used to
+    /// differ the most (the DC-10's seed cabin is 946 kg heavier than the
+    /// synchronized one; the A380-800 and the A320-200 declare a cap below
+    /// `MZFW - OEW`).
+    ///
+    /// The returned pass carries the limit evaluated at its own analysis's
+    /// empty mass, not at the empty mass it was handed: the B747-400 converges
+    /// on its first repeat with a layout below the cap, and the limit it was
+    /// built with (at the seed-cabin empty mass, 668 kg heavier) used to be
+    /// reported, cutting 0.8 t from the maximum payload.
+    #[test]
+    fn the_reported_payload_limit_is_evaluated_at_the_reports_own_empty_mass() {
+        for name in ["DC-10", "A320-200", "A380-800", "B747-400"] {
+            let preset = presets::get(name).unwrap();
+            let mzfw_kg = preset.reference.mzfw_kg.unwrap();
+            for disable_cap in [false, true] {
+                let mut config =
+                    AlasConfig::from_value(&serde_json::json!({ "preset": name })).unwrap();
+                if disable_cap {
+                    config.requirements.max_structural_payload_kg = 0.0;
+                }
+                let report = FullAnalysis::new(config.clone())
+                    .run(&preset.design_vector, true)
+                    .unwrap();
+                let oew_kg: f64 = alas_mass::breakdown::OEW_KEYS
+                    .iter()
+                    .map(|key| report.component_masses.get(*key).copied().unwrap_or(0.0))
+                    .sum();
+                let reported = report.geometry_summary["effective_structural_payload_limit_kg"];
+                let expected =
+                    effective_structural_payload_limit_kg(&config, &preset.design_vector, oew_kg)
+                        .unwrap();
+                assert!(
+                    (reported - expected).abs() < 1.0e-6,
+                    "{name} (cap disabled {disable_cap}): reported {reported} kg, MZFW - report OEW = {expected} kg"
+                );
+                assert!(
+                    oew_kg + reported <= mzfw_kg + 1.0e-6,
+                    "{name}: zero-fuel mass above MZFW"
+                );
+                assert!(
+                    (oew_kg + reported - mzfw_kg).abs() < 1.0e-6,
+                    "{name} (cap disabled {disable_cap}): zero-fuel mass {} kg against MZFW {mzfw_kg} kg",
+                    oew_kg + reported
+                );
+            }
+        }
+    }
 
     /// A report bound to a sized candidate carries the zero-fuel mass the
     /// closure sized: the same operating empty mass and the same payload,

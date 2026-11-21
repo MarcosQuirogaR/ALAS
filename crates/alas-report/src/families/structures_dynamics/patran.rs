@@ -12,7 +12,7 @@
 
 use alas_pipeline::structural::StructuralAnalysisResult;
 
-use super::status::{resolve_structural_result, status_message_scene};
+use super::status::{resolve_structural_result, status_message_scene, tool_not_configured_scene};
 use crate::scene::{Color, Scene, SceneElement, TextAlign, TextBaseline};
 use crate::theme::get_palette;
 
@@ -31,15 +31,26 @@ pub fn figure_structures_patran(
     let Some(patran) = result.patran.as_ref() else {
         return status_message_scene(
             TITLE,
-            "Not run for this design (Advanced Settings -> Structural Analysis -> Render Patran deformation plots). Requires a working Patran install and a successful NASTRAN SOL 101 solve.",
+            "Not run for this design (Analyses > Advanced > Structures > Render Patran deformation plots). Requires a working Patran install and a successful NASTRAN SOL 101 solve.",
             false,
             pal,
         );
     };
+    if patran.png_paths.is_empty() && patran.status == "not_configured" {
+        return tool_not_configured_scene(
+            TITLE,
+            "Patran",
+            &format!(
+                "Set its executable under Workspace > External Tools to render deformation plots. Reported status: {}",
+                patran.error.as_deref().unwrap_or("executable not configured")
+            ),
+            pal,
+        );
+    }
     if patran.status == "not_run" {
         return status_message_scene(
             TITLE,
-            "Not run for this design (Advanced Settings -> Structural Analysis -> Render Patran deformation plots). Requires a working Patran install and a successful NASTRAN SOL 101 solve.",
+            "Not run for this design (Analyses > Advanced > Structures > Render Patran deformation plots). Requires a working Patran install and a successful NASTRAN SOL 101 solve.",
             false,
             pal,
         );
@@ -146,6 +157,46 @@ mod tests {
         assert_eq!(images, ["C:/renders/pull.png", "C:/renders/push.png"]);
         assert!(scene.elements.iter().any(|element| {
             matches!(element, SceneElement::Text { text, .. } if text.contains("Some load cases failed"))
+        }));
+    }
+    fn patran_result(status: &str, error: &str) -> StructuralAnalysisResult {
+        StructuralAnalysisResult {
+            status: "ok".to_owned(),
+            patran: Some(alas_pipeline::structural::PatranExportResult {
+                status: status.to_owned(),
+                error: Some(error.to_owned()),
+                png_paths: Vec::new(),
+            }),
+            ..StructuralAnalysisResult::default()
+        }
+    }
+
+    fn title_color(scene: &Scene) -> Option<Color> {
+        scene.elements.iter().find_map(|e| match e {
+            SceneElement::Text { text, color, .. } if text == TITLE => Some(*color),
+            _ => None,
+        })
+    }
+
+    #[test]
+    fn a_real_patran_error_naming_an_absent_file_keeps_the_red_card() {
+        let error = "Patran produced no image: result file absent after launch";
+        let scene = figure_structures_patran(Some(&patran_result("error", error)), None);
+        let pal = get_palette(None);
+        assert_ne!(title_color(&scene), Some(Color::from_hex(pal.title)));
+        assert!(scene.elements.iter().any(|e| {
+            matches!(e, SceneElement::TextBlock { text, .. } if text.contains("Patran export failed") && text.contains(error))
+        }));
+    }
+
+    #[test]
+    fn a_missing_patran_tool_shows_the_neutral_card_with_the_original_text() {
+        let error = "Patran executable absent: configure it under Workspace > External Tools";
+        let scene = figure_structures_patran(Some(&patran_result("not_configured", error)), None);
+        let pal = get_palette(None);
+        assert_eq!(title_color(&scene), Some(Color::from_hex(pal.title)));
+        assert!(scene.elements.iter().any(|e| {
+            matches!(e, SceneElement::TextBlock { text, .. } if text.contains("not configured") && text.contains(error))
         }));
     }
 }

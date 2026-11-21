@@ -259,7 +259,7 @@ fn groups_json(build: &FlopsMassBuildup) -> Value {
             "engine_oil_kg": operating.engine_oil_kg,
             "passenger_service_kg": operating.passenger_service_kg,
             // Reported outside operating empty mass: Boeing D6-58333 Rev Q
-            // section 2.1 and FAA AC 120-27F both exclude unit load devices,
+            // section 2.1 and FAA AC 120-27F A.3 name no unit load device,
             // and AC 120-85B tracks them with the load. FLOPS is the outlier
             // in carrying `WCON` inside `WOPIT`, and its own convention is
             // kept reproducible on the line below.

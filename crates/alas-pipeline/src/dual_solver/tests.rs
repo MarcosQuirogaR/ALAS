@@ -127,7 +127,61 @@ fn avl_only_mode_never_selects_a_failed_branch_as_a_vlm_fallback() {
 }
 
 #[test]
-fn an_all_invalid_default_de_branch_is_reported_as_a_typed_pipeline_failure() {
+fn an_all_invalid_default_de_branch_is_reported_as_a_flagged_infeasible_result() {
+    let mut config = AlasConfig::default();
+    config.optimizer.solver.refinement.max_evaluations = 24;
+    config.optimizer.solver.screening.max_evaluations = 8;
+    config.requirements.min_passenger_capacity = i64::MAX;
+
+    let result = run_solver_optimizations(
+        &config,
+        OptimizationSolverMode::Vlm,
+        false,
+        Some(42),
+        &RunEnvironment::default(),
+        &DesignVector::default(),
+        None,
+        None,
+        None,
+        None,
+    );
+
+    // An infeasible search no longer aborts: the start design is delivered
+    // in its place, flagged infeasible, with the violated constraints named.
+    assert_eq!(
+        result.vlm.status,
+        SolverOptimizationStatus::Infeasible,
+        "{:?}",
+        result.vlm.error
+    );
+    let optimization = result.vlm.optimization.as_ref().expect("flagged result");
+    assert!(!optimization.best_valid);
+    assert!(result.vlm.design.is_some());
+    assert_eq!(
+        optimization.best_design,
+        DesignVector::default(),
+        "the start is delivered, never a design the search found infeasible"
+    );
+    let line = optimization
+        .infeasibility_summary()
+        .expect("the flagged result explains itself");
+    assert!(line.starts_with("No feasible design: "), "{line}");
+    assert!(line.contains("candidates)"), "{line}");
+    let acceptance = optimization
+        .delivered_acceptance
+        .as_ref()
+        .expect("reporting-fidelity verdict recorded");
+    assert!(!acceptance.verified);
+    let worst = acceptance
+        .worst_violation
+        .as_ref()
+        .expect("the worst violated constraint is recorded");
+    assert!(worst.normalized_violation > 0.0);
+    assert!(line.contains(&worst.id), "{line}");
+}
+
+#[test]
+fn an_unanalysable_default_de_branch_stays_a_typed_failure_naming_its_cause() {
     let mut config = AlasConfig::default();
     config.optimizer.solver.refinement.max_evaluations = 24;
     config.optimizer.solver.screening.max_evaluations = 8;
@@ -146,14 +200,15 @@ fn an_all_invalid_default_de_branch_is_reported_as_a_typed_pipeline_failure() {
         None,
     );
 
+    // No physical operating point exists, so there is no design to flag: the
+    // branch fails and names the cause instead of reporting a fabricated one.
     assert_eq!(result.vlm.status, SolverOptimizationStatus::Failed);
     assert!(result.vlm.design.is_none());
-    assert!(result.vlm.optimization.is_none());
     assert!(result
         .vlm
         .error
         .as_deref()
-        .is_some_and(|error| error.contains("no feasible design")));
+        .is_some_and(|error| error.contains("trim_cruise_cl_exceeds_max")));
 }
 
 #[test]
@@ -257,7 +312,7 @@ fn a_request_inside_a_de_generation_costs_at_most_one_more_analysis() {
     // request, small enough that a failure of this test wastes a bounded
     // amount of time rather than an unbounded one.
     config.optimizer.solver.refinement.max_evaluations = 80;
-    config.optimizer.solver.screening.max_evaluations = 8;
+    config.optimizer.solver.screening.max_evaluations = 2;
     // This test measures cancellation by analysis count. A wall-time run
     // may legitimately stop after the initial population when its measured
     // duration predicts that another generation would exceed the search
@@ -266,6 +321,27 @@ fn a_request_inside_a_de_generation_costs_at_most_one_more_analysis() {
     // aircraft feasibility and machine throughput.
     config.optimizer.solver.stop_on_evaluations_only = true;
     config.optimizer.solver.workers = 1;
+    // The bound is on cancellation, not on engine sizing. A clean-sheet
+    // candidate otherwise closes its airframe 3 to 6 times per analysis (one
+    // closure per engine-rating iteration, E1, plus main-gear re-closures),
+    // about 3 s per closure and about 16 s per analysis on the CI host,
+    // and the search needs its screening analyses plus the 24-member
+    // minimum initial population before its first generation. Holding the
+    // catalogue engine keeps one
+    // closure per analysis and leaves the phase and count assertions below
+    // untouched (E6). Cancellation inside a later engine-sizing closure is
+    // covered by `alas-opt` `mdo::engine::sizing::tests::a_cancellation_in_a_later_closure_is_never_answered_with_the_last_good_one`.
+    config.optimizer.design_space.engine_sized_by_requirements = false;
+    // A cheap fixture: the property is an analysis count, not physics. A
+    // reference adaptation at the requested MTOW sizes neither the fuselage
+    // nor the takeoff mass, and a two-panel chord lattice is the coarsest the
+    // in-loop model accepts. With a two-candidate scan, the 2 + 24 + 2
+    // analyses before the first generation take about 130 s on one thread
+    // (test profile) against 544 s for the clean-sheet default; the kernel's
+    // minimum initial population of full analyses is the floor.
+    config.optimizer.design_space.mode = alas_config::DesignMode::ReferenceAdaptation;
+    config.optimizer.objective.mtow_sizing = alas_config::MtowSizing::FixedRequirement;
+    config.analysis.chordwise_resolution = 2;
 
     let watch = alas_opt::CancelWatch::new();
     let worker_watch = std::sync::Arc::clone(&watch);
@@ -288,7 +364,12 @@ fn a_request_inside_a_de_generation_costs_at_most_one_more_analysis() {
     // Wait for the search to actually be inside a generation. The wait is
     // on the telemetry's own phase, not on elapsed time, so what the
     // assertion below measures is exactly the boundary it names.
-    let deadline = std::time::Instant::now() + std::time::Duration::from_secs(600);
+    //
+    // The guard is an analysis count, not a clock: the search may not spend
+    // its whole configured budget, nor finish, before its first generation.
+    // A hang inside one analysis is the test runner's timeout to catch.
+    let budget = (config.optimizer.solver.screening.max_evaluations
+        + config.optimizer.solver.refinement.max_evaluations) as u64;
     loop {
         let snapshot = watch.snapshot();
         if snapshot.phase == alas_opt::CancelPhase::DeGeneration
@@ -297,9 +378,8 @@ fn a_request_inside_a_de_generation_costs_at_most_one_more_analysis() {
             break;
         }
         assert!(
-            std::time::Instant::now() < deadline,
-            "the default configuration never reached a DE generation; phase {} after {} \
-             analyses",
+            snapshot.evaluations_completed < budget && !handle.is_finished(),
+            "the search never reached a DE generation; phase {} after {} analyses",
             snapshot.phase.as_str(),
             snapshot.evaluations_completed
         );
@@ -396,6 +476,8 @@ fn delivered_fixture(best_valid: bool, verified: Option<bool>) -> alas_opt::Opti
             wall_time_s: 0.0,
             analyses: 1,
             baseline: None,
+            worst_violation: None,
+            phases: Vec::new(),
         });
     }
     result
@@ -492,6 +574,7 @@ fn the_avl_branch_enters_the_shared_reporting_fidelity_ladder() {
             nominal: &nominal,
             acceptance_route: None,
             cancel: Some(&cancel),
+            registered: None,
         },
         &mut optimization,
     );

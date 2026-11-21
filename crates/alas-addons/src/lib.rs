@@ -20,6 +20,7 @@
 #![cfg_attr(test, allow(clippy::unwrap_used, clippy::expect_used))]
 
 pub mod apply;
+mod control;
 pub mod discovery;
 mod error;
 pub mod manifest;
@@ -28,20 +29,23 @@ pub mod script;
 pub mod settings;
 
 use std::collections::BTreeMap;
+use std::path::PathBuf;
 use std::time::Duration;
 
 use serde_json::Value;
 
+pub use control::{parse_progress, RunControl, RunEvent, PROGRESS_PREFIX};
 pub use discovery::{discover, install_examples, Discovery, InstalledAddon};
 pub use error::AddonError;
 pub use manifest::{AddonKind, AddonManifest};
+pub use process::ResultFile;
 pub use settings::AddonSettings;
 
 /// Largest entry script accepted, bytes.
 const MAX_SCRIPT_BYTES: u64 = 256 * 1024;
 
 /// What one run produced.
-#[derive(Debug, Clone, PartialEq)]
+#[derive(Debug, Clone, PartialEq, Default)]
 pub struct RunOutcome {
     /// Every declared output, in manifest order of declaration.
     pub outputs: BTreeMap<String, f64>,
@@ -49,6 +53,14 @@ pub struct RunOutcome {
     pub messages: Vec<String>,
     /// The add-on log: script `print` output or process stderr.
     pub log: String,
+    /// Named text results (process add-ons).
+    pub texts: BTreeMap<String, String>,
+    /// Result files to link in the panel (process add-ons), resolved against
+    /// the add-on folder.
+    pub files: Vec<ResultFile>,
+    /// A returned `{target: number}` configuration overlay file, resolved
+    /// against the add-on folder.
+    pub config_overlay: Option<PathBuf>,
 }
 
 /// Fill defaults, reject unknown or non-finite inputs.
@@ -112,6 +124,19 @@ pub fn run_addon(
     design: &Value,
     settings: &AddonSettings,
 ) -> Result<RunOutcome, AddonError> {
+    run_addon_with(addon, inputs, design, settings, &[], &RunControl::none())
+}
+
+/// [`run_addon`] with `env` added to a process add-on's environment and a
+/// [`RunControl`] for live progress and cancellation.
+pub fn run_addon_with(
+    addon: &InstalledAddon,
+    inputs: &BTreeMap<String, f64>,
+    design: &Value,
+    settings: &AddonSettings,
+    env: &[(String, String)],
+    control: &RunControl,
+) -> Result<RunOutcome, AddonError> {
     let manifest = &addon.manifest;
     if !settings.is_enabled(&addon.id, &manifest.version, manifest.kind) {
         return Err(AddonError::Process(format!(
@@ -122,6 +147,7 @@ pub fn run_addon(
     let inputs = resolve_inputs(manifest, inputs)?;
     let timeout = Duration::from_secs_f64(manifest.timeout_seconds());
     let mut messages = Vec::new();
+    let (mut texts, mut files, mut config_overlay) = (BTreeMap::new(), Vec::new(), None);
     let (raw, log) = match manifest.kind {
         AddonKind::Script => {
             let path = addon.dir.join(&manifest.entry);
@@ -145,16 +171,35 @@ pub fn run_addon(
         AddonKind::Process => {
             let launch = process::ProcessSettings {
                 python: settings.python_path(),
+                env: env.to_vec(),
             };
-            let result = process::run_process(
+            let result = process::run_process_with(
                 &addon.dir,
                 &manifest.entry,
                 &inputs,
                 design,
                 &launch,
                 timeout,
+                control,
             )?;
             messages = result.messages;
+            texts = result.texts;
+            let resolve = |path: PathBuf| {
+                if path.is_absolute() {
+                    path
+                } else {
+                    addon.dir.join(path)
+                }
+            };
+            files = result
+                .files
+                .into_iter()
+                .map(|file| ResultFile {
+                    label: file.label,
+                    path: resolve(file.path),
+                })
+                .collect();
+            config_overlay = result.config_overlay.map(resolve);
             (result.outputs, result.stderr)
         }
     };
@@ -163,5 +208,8 @@ pub fn run_addon(
         outputs,
         messages,
         log,
+        texts,
+        files,
+        config_overlay,
     })
 }

@@ -27,6 +27,7 @@ pub(super) fn bind_sized_finalist(
     events: Option<&(dyn Fn(RunEvent) + Sync)>,
     run_clock: Instant,
     cancel: Option<&AtomicBool>,
+    allow_infeasible: bool,
 ) -> Result<(DesignVector, AnalysisReport), String> {
     // The product optimizer's objective closes the mass/dispatch
     // fixed point below the configured MTOW limit.  A branch report
@@ -49,7 +50,7 @@ pub(super) fn bind_sized_finalist(
             format!("optimized finalist could not be re-evaluated at its exported design: {error}")
         }
     })?;
-    if !assessment.hard_feasible {
+    if !assessment.hard_feasible && !allow_infeasible {
         let violations = assessment.violated_hard_details().join(", ");
         return Err(format!(
             "optimized finalist is not hard-feasible on replay: {}",

@@ -16,7 +16,8 @@
 use std::collections::HashMap;
 
 use alas_aero::operating_point::{AxisFrame, OperatingPoint};
-use alas_atmo::Atmosphere;
+use alas_atmo::{Atmosphere, GAS_CONSTANT_AIR};
+use alas_testkit::reference_ambient::reference_ambient;
 use alas_testkit::{Comparison, Tier};
 use serde::Deserialize;
 
@@ -64,9 +65,29 @@ fn axis_frame(name: &str) -> AxisFrame {
     }
 }
 
+/// The standard atmosphere at the case altitude with the temperature that
+/// gives the density the reference's fitted atmosphere returned there.
+///
+/// The fixture's dynamic pressure was produced with that fitted atmosphere,
+/// which differs from the U.S. Standard Atmosphere, 1976 the product
+/// evaluates by up to 1.7 % in density. The reference's state at the altitude
+/// is read from `golden/atmo/differentiable.json`; the model is driven with
+/// its density through the pressure of the level and a temperature deviation,
+/// so the comparison is of `q = rho V^2 / 2` and not of the two atmospheres.
+/// Pressure and density are tied by the gas constant of the product
+/// (287.0528742 J/(kg K) against the reference's 287.0530720), which is why
+/// the density, not the pressure, is the matched quantity: `q` follows from it
+/// exactly.
+fn atmosphere_with_reference_density(altitude_m: f64) -> Atmosphere {
+    let reference = reference_ambient(altitude_m);
+    let level = Atmosphere::new(altitude_m);
+    let temperature = level.pressure() / (GAS_CONSTANT_AIR * reference.density_kg_m3);
+    level.with_temperature_deviation(temperature - level.temperature())
+}
+
 fn build_point(inputs: &Inputs) -> OperatingPoint {
     OperatingPoint::new(
-        Atmosphere::new(inputs.altitude_m),
+        atmosphere_with_reference_density(inputs.altitude_m),
         inputs.velocity,
         inputs.alpha,
         inputs.beta,

@@ -68,6 +68,21 @@ pub struct CompressibleTrim {
     pub cl_ih: f64,
     /// `dCm/di_h`, per degree, physical.
     pub cm_ih: f64,
+    /// `[[dCL/dalpha, dCL/di_h], [dCm/dalpha, dCm/di_h]]`, per degree and
+    /// physical (body slope included), at the trimmed attitude itself; the
+    /// four fields above are the probe-point slopes the first step used.
+    /// `None` when the refinement did not converge.
+    pub jacobian_at_trim: Option<[[f64; 2]; 2]>,
+    /// Lift slope, per degree, of the wing-body interference lift (Torenbeek
+    /// 1982 E-33) the lattice does not carry; [`Self::cl_alpha`] stays the
+    /// lattice's own, the total slope is the sum. Zero without a fuselage
+    /// correction.
+    pub cl_body_per_deg: f64,
+    /// The moment slope of the airframe the lattice does not carry (fuselage,
+    /// nacelles), per degree and physical; its moment is `cm_body_per_deg`
+    /// times the body angle. Added to the lattice moment, it is what `Cm = 0`
+    /// is solved against.
+    pub cm_body_per_deg: f64,
 }
 
 /// Solve the compressible trim of `airplane`. `None` when the airplane has no
@@ -83,6 +98,7 @@ pub(super) fn compressible_trim(
     cl_target: f64,
     mach: f64,
     altitude_m: f64,
+    companion: Option<Arc<Mutex<VlmGeometryCache>>>,
 ) -> Result<Option<CompressibleTrim>, VlmError> {
     let Some(i_h0) = hstab(airplane)
         .and_then(|h| h.xsecs.first())
@@ -94,7 +110,7 @@ pub(super) fn compressible_trim(
     let stretched = goethert_stretch(airplane, beta);
     // The stretched family has its own geometry memo: sharing the physical
     // lattice's cache would rebuild it on every alternation.
-    let cache = Arc::new(Mutex::new(VlmGeometryCache::default()));
+    let cache = companion.unwrap_or_else(|| Arc::new(Mutex::new(VlmGeometryCache::default())));
     let assembly = TrimAssembly::new(analysis, Some(&cache));
     let atmosphere = Atmosphere::new(altitude_m);
     let velocity = mach * atmosphere.speed_of_sound();
@@ -108,12 +124,15 @@ pub(super) fn compressible_trim(
     if d_alpha.abs() < DEGENERACY_FLOOR {
         return Ok(None);
     }
-    let cl_alpha = (r2.cl_lift - r1.cl_lift) / d_alpha;
+    let cl_alpha_lattice = (r2.cl_lift - r1.cl_lift) / d_alpha;
     let x_cg = airplane.xyz_ref[0];
-    let c_ref = airplane.c_ref.max(0.1);
-    let (x_np, airframe_shift_m) = compressible_np_from_stretched_probes(
-        airplane, &stretched, analysis, atmosphere, velocity, beta, a_lo, a_hi, &r1, &r2,
-    )?;
+    let c_ref = airplane
+        .c_ref
+        .max(crate::reference_dimensions::REFERENCE_CHORD_FLOOR_M);
+    let (x_np, airframe_shift_m, (body_lift_per_rad, x_body_lift_m)) =
+        compressible_np_from_stretched_probes(
+            airplane, &stretched, analysis, atmosphere, velocity, beta, a_lo, a_hi, &r1, &r2,
+        )?;
     // STAB-02: the airframe the lattice does not carry (fuselage, nacelles)
     // moved the neutral point by `airframe_shift_m` (m, aft positive), so the
     // pitching-moment slope it adds, per degree and physical, is
@@ -122,54 +141,96 @@ pub(super) fn compressible_trim(
     // Its moment at alpha = 0 is taken as zero (Munk body moment, linear in
     // the body angle; no Cm0 term is available, documented limitation). Trim
     // `Cm = 0` and the neutral point therefore describe the same airframe.
-    let cm_body = -cl_alpha * airframe_shift_m / c_ref;
+    //
+    // Wing-body interference lift (Torenbeek 1982 E-33/E-34, which the neutral
+    // point carries): `cl_body` per degree at `x_body_lift_m`. It is reported
+    // in `cl_body_per_deg` and carried in the moment, but the lift closure (and every
+    // consumer that re-evaluates the lattice at the trim attitude) stays the
+    // lattice's own: the body lift is about 2 % of the trim lift and not part
+    // of the lattice CL a consumer reads back. The airframe
+    // moment slope is then, from `Cm_alpha = -CL_alpha_total (x_np - x_cg)/c`
+    // with the lattice `-CL_alpha_lattice (x_s - x_cg)/c` removed,
+    // `-CL_alpha_total shift/c - cl_body (x_body - x_cg)/c`.
+    let cl_body = body_lift_per_rad.to_radians();
+    let cl_alpha_total = cl_alpha_lattice + cl_body;
+    let cm_body = -cl_alpha_total * airframe_shift_m / c_ref
+        - if cl_body != 0.0 {
+            cl_body * (x_body_lift_m - x_cg) / c_ref
+        } else {
+            0.0
+        };
     let cm_alpha = beta * (r2.cm_pitch - r1.cm_pitch) / d_alpha + cm_body;
     let static_margin = (x_np - x_cg) / c_ref;
 
-    let perturbed = with_hstab_twist(&stretched, i_h0 + delta_ih);
+    // The stabilizer set in the plane of symmetry at `i_h0`, as the
+    // incompressible product trim (`with_system`) takes it.
+    let set_base = (!is_at_hstab_incidence(&stretched, i_h0))
+        .then(|| {
+            let set = with_hstab_incidence(&stretched, i_h0);
+            probe(&assembly.assemble(&set)?, atmosphere, velocity, a_lo)
+        })
+        .transpose()?;
+    let r0 = set_base.as_ref().unwrap_or(&r1);
+    let perturbed = with_hstab_incidence(&stretched, i_h0 + delta_ih);
     let r3 = probe(&assembly.assemble(&perturbed)?, atmosphere, velocity, a_lo)?;
-    let cl_ih = (r3.cl_lift - r1.cl_lift) / delta_ih;
-    let cm_ih = beta * (r3.cm_pitch - r1.cm_pitch) / delta_ih;
+    let cl_ih = (r3.cl_lift - r0.cl_lift) / delta_ih;
+    let cm_ih = beta * (r3.cm_pitch - r0.cm_pitch) / delta_ih;
 
     // The same closed-form 2x2 as the incompressible solve, on the physical
     // moment `beta Cm'`; the Newton refinement below removes its linearization
     // error against the stretched lattice's own residuals.
-    let jacobian = vec![vec![cl_alpha, cl_ih], vec![cm_alpha, cm_ih]];
+    let jacobian = vec![vec![cl_alpha_lattice, cl_ih], vec![cm_alpha, cm_ih]];
     let rhs = vec![
-        vec![cl_target - r1.cl_lift],
-        vec![-beta * r1.cm_pitch - cm_body * a_lo],
+        vec![cl_target - r0.cl_lift],
+        vec![-beta * r0.cm_pitch - cm_body * a_lo],
     ];
     let step = linalg::solve(&jacobian, &rhs).ok().and_then(|solution| {
         let d_a = solution.first()?.first().copied()?;
         let d_ih = solution.get(1)?.first().copied()?;
-        let det = cl_alpha * cm_ih - cl_ih * cm_alpha;
+        let det = cl_alpha_lattice * cm_ih - cl_ih * cm_alpha;
         (d_a.is_finite() && d_ih.is_finite() && det.abs() > DEGENERACY_FLOOR).then_some((d_a, d_ih))
     });
-    let (trim_alpha_deg, trim_ih_deg, converged) = match step {
-        Some((d_a, d_ih)) => refine_trim(
-            &stretched,
-            &assembly,
-            cl_target,
-            atmosphere,
-            velocity,
-            a_lo + d_a,
-            i_h0 + d_ih,
-            // The lattice moment is `Cm' = Cm_physical / beta`.
-            cm_body / beta,
-        )?,
-        None => (a_lo, i_h0, false),
+    let (trim_alpha_deg, trim_ih_deg, converged, jacobian_at_trim) = match step {
+        Some((d_a, d_ih)) => {
+            let refined = refine_trim(
+                &stretched,
+                &assembly,
+                cl_target,
+                atmosphere,
+                velocity,
+                a_lo + d_a,
+                i_h0 + d_ih,
+                // The lattice moment is `Cm' = Cm_physical / beta`.
+                cm_body / beta,
+                true,
+            )?;
+            // The moment row back to the physical moment `beta Cm'`.
+            let physical = refined
+                .jacobian
+                .map(|[cl_row, cm_row]| [cl_row, [beta * cm_row[0], beta * cm_row[1]]]);
+            (
+                refined.alpha_deg,
+                refined.incidence_deg,
+                refined.converged,
+                physical,
+            )
+        }
+        None => (a_lo, i_h0, false, None),
     };
     Ok(Some(CompressibleTrim {
         beta,
         converged,
         x_np,
         static_margin,
-        cl_alpha,
+        cl_alpha: cl_alpha_lattice,
+        cl_body_per_deg: cl_body,
         cm_alpha,
         trim_alpha_deg,
         trim_ih_deg,
         cl_ih,
         cm_ih,
+        jacobian_at_trim,
+        cm_body_per_deg: cm_body,
     }))
 }
 
@@ -279,14 +340,17 @@ mod tests {
 
     #[test]
     fn the_compressible_trim_closes_lift_and_moment_on_the_stretched_lattice() {
-        let plane = transport();
         let analysis = AnalysisConfig::default();
+        // The product trim solves the tail at its dynamic-pressure ratio; the
+        // re-solve below carries it the same way.
+        let mut plane = transport();
+        plane.set_horizontal_tail_dynamic_pressure_ratio(0.8);
         let (mach, altitude) = (0.78, 11_000.0);
         let result = super::super::stability_and_trim(&plane, &analysis, 0.5, mach, altitude)
             .expect("trim solves");
         let comp = result.compressible.expect("compressible trim is on");
         let stretched = goethert_stretch(&plane, comp.beta);
-        let twisted = with_hstab_twist(&stretched, comp.trim_ih_deg);
+        let twisted = with_hstab_incidence(&stretched, comp.trim_ih_deg);
         let atmosphere = Atmosphere::new(altitude);
         let velocity = mach * atmosphere.speed_of_sound();
         let system = assemble(&twisted, &analysis).unwrap();
@@ -345,7 +409,7 @@ mod tests {
         )];
         let (mach, altitude) = (0.78, 11_000.0);
         let mut analysis = AnalysisConfig {
-            tail_efficiency: 1.0,
+            tail_efficiency: Some(1.0),
             include_fuselage_stability: true,
             ..AnalysisConfig::default()
         };
@@ -359,14 +423,19 @@ mod tests {
             .compressible
             .expect("compressible trim is on");
         assert!(with.converged && without.converged);
+        // With Torenbeek's K_I (E-33, p. 479) the net body effect on this tapered
+        // wing is not signed: the root lift lost under the body (K_I < 1) is
+        // stabilising and outweighs D1/D2 here. The body moves the margin and
+        // the trim must carry exactly that.
         assert!(
-            with.static_margin < without.static_margin,
-            "fuselage destabilises"
+            (with.static_margin - without.static_margin).abs() > 1.0e-3,
+            "fuselage moves the margin"
         );
         assert!(
-            (-with.cm_alpha / with.cl_alpha - with.static_margin).abs() < 2.0e-3,
+            (-with.cm_alpha / (with.cl_alpha + with.cl_body_per_deg) - with.static_margin).abs()
+                < 2.0e-3,
             "Cm_alpha/CL_alpha {} vs SM {}",
-            -with.cm_alpha / with.cl_alpha,
+            -with.cm_alpha / (with.cl_alpha + with.cl_body_per_deg),
             with.static_margin
         );
         assert!(
@@ -376,9 +445,9 @@ mod tests {
         // The trim closes `beta Cm_lattice + dCm_alpha_body * alpha = 0`, with
         // the body slope read as the difference of the two reported slopes.
         let cm_body = with.cm_alpha - without.cm_alpha;
-        assert!(cm_body > 0.0, "destabilising body slope {cm_body}");
+        assert!(cm_body.abs() > 1.0e-5, "body moment slope {cm_body}");
         let stretched = goethert_stretch(&plane, with.beta);
-        let twisted = with_hstab_twist(&stretched, with.trim_ih_deg);
+        let twisted = with_hstab_incidence(&stretched, with.trim_ih_deg);
         let atmosphere = Atmosphere::new(altitude);
         let velocity = mach * atmosphere.speed_of_sound();
         let system = assemble(&twisted, &analysis).unwrap();
@@ -391,5 +460,60 @@ mod tests {
         assert!((with.trim_ih_deg - without.trim_ih_deg).abs() > 1e-4 * with.trim_alpha_deg.abs());
         // The body angle moves only second order (the tail load is small).
         assert!((with.trim_alpha_deg - without.trim_alpha_deg).abs() < 0.3);
+    }
+
+    #[test]
+    fn the_trim_and_the_neutral_point_describe_one_airframe_at_a_stated_tail_efficiency() {
+        // The tail's effectiveness is the surface's
+        // dynamic-pressure ratio in the lattice, so the trim moment slope and the
+        // neutral point (which then weights the tail by the remainder only) agree
+        // at a tail efficiency below 1 (stated here, 0.8), not only at 1.
+        const STATED: f64 = 0.8;
+        use alas_geom::aircraft::fuselage::{Fuselage, FuselageXSec, DEFAULT_SHAPE};
+        let station = |x: f64, r: f64| {
+            FuselageXSec::new([x, 0.0, 0.0], Some(r), None, None, DEFAULT_SHAPE).unwrap()
+        };
+        let mut plane = transport();
+        plane.fuselages = vec![Fuselage::new(
+            "Fuselage",
+            vec![
+                station(-12.0, 0.4),
+                station(-9.0, 1.9),
+                station(12.0, 1.9),
+                station(24.0, 0.6),
+            ],
+        )];
+        let margin = |plane: &Airplane, efficiency: f64| {
+            let analysis = AnalysisConfig {
+                tail_efficiency: Some(efficiency),
+                ..AnalysisConfig::default()
+            };
+            let trim = super::super::stability_and_trim(plane, &analysis, 0.5, 0.78, 11_000.0)
+                .unwrap()
+                .compressible
+                .expect("compressible trim is on");
+            assert!(trim.converged);
+            (
+                -trim.cm_alpha / (trim.cl_alpha + trim.cl_body_per_deg),
+                trim.static_margin,
+            )
+        };
+        // The product entry point gives the tail its dynamic-pressure ratio from
+        // the analysis, so a plane that did not carry one agrees with the
+        // neutral point at the product efficiency, and with one that did.
+        let (slope_margin, neutral_margin) = margin(&plane, STATED);
+        assert!(
+            (slope_margin - neutral_margin).abs() < 3.0e-3,
+            "Cm_alpha / CL_alpha {slope_margin} vs SM {neutral_margin} with the tail at the product efficiency"
+        );
+        let mut carried = plane.clone();
+        carried.set_horizontal_tail_dynamic_pressure_ratio(STATED);
+        assert_eq!(margin(&carried, STATED), (slope_margin, neutral_margin));
+        // And the tail effectiveness is in the margin: a free-stream tail is more stable.
+        let (_, free_neutral) = margin(&plane, 1.0);
+        assert!(
+            free_neutral > neutral_margin + 0.01,
+            "{free_neutral} vs {neutral_margin}"
+        );
     }
 }

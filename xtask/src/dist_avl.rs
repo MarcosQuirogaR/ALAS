@@ -20,6 +20,26 @@ use crate::dist::BundleStatus;
 /// reviewed for that platform.
 const AVL_LINUX_NOTICE_NAME: &str = "AVL-LINUX-BUILD.txt";
 
+/// SHA-256 of the committed AVL 3.52 source archive and win32 executable. A
+/// change to either file must be a reviewed change to these constants.
+const AVL_SOURCE_SHA256: &str = "0b588ecea9222f5b625d0af0c87ae31daf3cdba1532cf0bbb36f93d6e854849b";
+const AVL_EXE_SHA256: &str = "443520d255408491222a8df9060bd000f78da95a68845a2f6efdbc67e203f07a";
+
+/// Fail unless `source` has the pinned SHA-256.
+fn verify_pinned(source: &Path, expected: &str) -> Result<(), String> {
+    let bytes =
+        fs::read(source).map_err(|e| format!("failed to read {}: {e}", source.display()))?;
+    let actual = crate::dist::sha256_hex(&bytes);
+    if actual == expected {
+        Ok(())
+    } else {
+        Err(format!(
+            "{} has SHA-256 {actual}, expected the pinned {expected}",
+            source.display()
+        ))
+    }
+}
+
 /// Copy AVL's GPL corresponding source and licence text into every package,
 /// and the unchanged win32 executable only into a package built for
 /// `target_os = "windows"`.
@@ -53,6 +73,9 @@ pub(crate) fn bundle_avl(root: &Path, package_dir: &Path) -> Result<BundleStatus
                 source.display()
             ));
         }
+        if name == "avl3.52.tgz" {
+            verify_pinned(&source, AVL_SOURCE_SHA256)?;
+        }
         let destination = package_tools.join(name);
         fs::copy(&source, &destination).map_err(|e| {
             format!(
@@ -80,6 +103,7 @@ pub(crate) fn bundle_avl(root: &Path, package_dir: &Path) -> Result<BundleStatus
             source.display()
         ));
     }
+    verify_pinned(&source, AVL_EXE_SHA256)?;
     let destination = package_tools.join(exe_name);
     fs::copy(&source, &destination).map_err(|e| {
         format!(
@@ -129,7 +153,19 @@ mod tests {
     use std::fs;
     use std::path::PathBuf;
 
-    use super::{bundle_avl, AVL_LINUX_NOTICE_NAME};
+    use super::{bundle_avl, verify_pinned, AVL_LINUX_NOTICE_NAME, AVL_SOURCE_SHA256};
+
+    #[test]
+    fn the_committed_source_archive_matches_its_pin_and_a_changed_file_does_not() {
+        let root = PathBuf::from(env!("CARGO_MANIFEST_DIR"))
+            .parent()
+            .map(PathBuf::from)
+            .expect("workspace root beside xtask crate");
+        verify_pinned(&root.join("external tools/avl3.52.tgz"), AVL_SOURCE_SHA256)
+            .expect("committed archive matches the pin");
+        let message = verify_pinned(&root.join("Cargo.toml"), AVL_SOURCE_SHA256).unwrap_err();
+        assert!(message.contains("expected the pinned"), "{message}");
+    }
 
     /// On the Windows target, packaging must still bundle the reviewed win32
     /// executable exactly as before this change.

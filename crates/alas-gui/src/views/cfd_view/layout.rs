@@ -46,7 +46,7 @@ pub(crate) fn scientific_field(ui: &mut Ui, value: egui::DragValue<'_>) -> egui:
         ui,
         value
             .custom_formatter(|number, _| format!("{number:.3e}"))
-            .custom_parser(|text| text.trim().parse::<f64>().ok()),
+            .custom_parser(crate::user_number::parse_user_number),
     )
 }
 
@@ -68,7 +68,7 @@ pub(crate) fn adaptive_field(ui: &mut Ui, value: egui::DragValue<'_>) -> egui::R
                     format!("{number:.4}")
                 }
             })
-            .custom_parser(|text| text.trim().parse::<f64>().ok()),
+            .custom_parser(crate::user_number::parse_user_number),
     )
 }
 

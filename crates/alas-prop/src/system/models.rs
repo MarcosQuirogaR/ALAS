@@ -7,6 +7,16 @@ use super::*;
 pub trait PropulsionSystemModel: Send + Sync {
     /// Evaluate one system operating point.
     fn evaluate(&self, request: &PropulsionRequest) -> Result<PropulsionResult, PropulsionError>;
+    /// Evaluate one operating point for a solver's inner loop: the force,
+    /// Jet-A flow, active limits and trace [`Self::evaluate`] reports, bit
+    /// for bit, and its errors. The default evaluates in full; a model whose
+    /// result bookkeeping is costly overrides it.
+    fn evaluate_point(
+        &self,
+        request: &PropulsionRequest,
+    ) -> Result<PropulsionPoint, PropulsionError> {
+        self.evaluate(request).map(PropulsionPoint::from)
+    }
     /// Solve the technology controls needed to deliver a requested body force.
     /// Implementations that lack an inverse solver return
     /// [`PropulsionError::UnsupportedDemand`].
@@ -167,7 +177,7 @@ impl LegacyTurbofanModel {
             0.0,
             mach * air.speed_of_sound_m_s,
             mach,
-            9.806_65,
+            alas_atmo::STANDARD_GRAVITY,
         );
         let output = evaluate_thrust(
             &freestream,
@@ -336,6 +346,15 @@ impl PropulsionOrchestrator {
         request: &PropulsionRequest,
     ) -> Result<PropulsionResult, PropulsionError> {
         self.model.evaluate(request)
+    }
+
+    /// Evaluate one operating point for a solver's inner loop
+    /// ([`PropulsionSystemModel::evaluate_point`]).
+    pub fn evaluate_point(
+        &self,
+        request: &PropulsionRequest,
+    ) -> Result<PropulsionPoint, PropulsionError> {
+        self.model.evaluate_point(request)
     }
 
     /// Query available system output at a flight condition and failure state.

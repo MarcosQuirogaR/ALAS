@@ -15,6 +15,15 @@ impl CpacsDocument {
     /// resolution and the `c_ref`/`x_LEMAC` decoupling are
     /// `wing_roles`'s job; see that module's doc comment.
     pub fn to_airplane(&self) -> Result<Airplane, CpacsAircraftError> {
+        self.import_airplane().map(|(airplane, _)| airplane)
+    }
+
+    /// [`Self::to_airplane`], with what a run on this geometry must be told about the
+    /// way the document was read.
+    ///
+    /// A document that declares a reference area has that one area for its aerodynamics
+    /// and masses. With no declared area the sections are all there is to take it from.
+    pub fn import_airplane(&self) -> Result<(Airplane, Vec<String>), CpacsAircraftError> {
         if self.aircraft.wings.is_empty() {
             return Err(CpacsAircraftError::NoWings);
         }
@@ -26,7 +35,7 @@ impl CpacsDocument {
             .iter()
             .map(|wing| self.convert_wing(wing, &fuselage_origins))
             .collect::<Result<Vec<_>, _>>()?;
-        let fuselages = self
+        let mut fuselages = self
             .aircraft
             .fuselages
             .iter()
@@ -34,12 +43,39 @@ impl CpacsDocument {
             .collect::<Result<Vec<_>, _>>()?;
 
         crate::cpacs::wing_roles::resolve_main_wing(&mut wings);
-        let reference_wing = &wings[0];
+        crate::cpacs::tail_planform_record::restore_tail_planforms(
+            &mut wings,
+            &self.aircraft.tail_planform_records,
+        );
+        crate::cpacs::body_record::restore_bodies(&mut fuselages, &self.aircraft.body_records);
         let reference = self.aircraft.reference.as_ref();
-        let s_ref = reference
-            .and_then(|value| value.area)
-            .unwrap_or_else(|| reference_wing.projected_area());
-        let wing_mac_m = reference_wing.mac_station().chord_m;
+        let declared_area = reference.and_then(|value| value.area);
+        let mut warnings = Vec::new();
+        let record_kept = self
+            .aircraft
+            .main_wing_record
+            .as_ref()
+            .is_some_and(|record| {
+                crate::cpacs::wing_roles::restore_main_wing_record(
+                    &mut wings[0],
+                    record,
+                    declared_area.zip(reference.and_then(|value| value.length)),
+                    &mut warnings,
+                )
+            });
+        if !record_kept && declared_area.is_none() {
+            warnings.push(
+                "the document declares no reference area: S_ref is the projected area of its \
+                 sections, which are taken as the planform, including any fillet they contain"
+                    .to_owned(),
+            );
+        }
+        for warning in &warnings {
+            tracing::warn!(aircraft_name = %self.aircraft.name, "{warning}");
+        }
+        let reference_wing = &wings[0];
+        let s_ref = declared_area.unwrap_or_else(|| reference_wing.projected_area());
+        let wing_mac_m = crate::cpacs::wing_roles::quoted_mac_m(reference_wing);
         let c_ref = reference
             .and_then(|value| value.length)
             .unwrap_or(wing_mac_m);
@@ -52,8 +88,11 @@ impl CpacsDocument {
         validate_reference("area", s_ref)?;
         validate_reference("length", c_ref)?;
         validate_reference("span", b_ref)?;
+        if !record_kept {
+            crate::cpacs::wing_roles::apply_declared_reference(&mut wings[0], s_ref, b_ref, c_ref);
+        }
 
-        Ok(Airplane {
+        let airplane = Airplane {
             name: self.aircraft.name.clone(),
             xyz_ref: reference
                 .and_then(|value| value.point)
@@ -63,7 +102,8 @@ impl CpacsDocument {
             s_ref,
             c_ref,
             b_ref,
-        })
+        };
+        Ok((airplane, warnings))
     }
 
     /// Apply CPACS engine geometry and take-off cycle data to the existing
@@ -300,6 +340,18 @@ impl CpacsDocument {
                 Airfoil::from_coordinates(profile.name.clone(), coordinates),
             ));
         }
+        let rotations: Vec<f64> = wing
+            .sections
+            .iter()
+            .map(|section| {
+                section
+                    .transformation
+                    .as_ref()
+                    .and_then(|value| value.rotation)
+                    .map_or(0.0, |rotation| rotation[0])
+            })
+            .collect();
+        keep_section_planes(&mut sections, &rotations);
         Ok(Wing::new(wing.name.clone(), sections, symmetric))
     }
 

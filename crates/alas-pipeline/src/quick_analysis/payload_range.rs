@@ -41,12 +41,16 @@ pub struct PayloadCapacityEstimate {
 /// optional MZFW-derived limit, carried payload, declared MTOW and modeled
 /// OEW.
 ///
-/// The declared cap is the user's structural payload requirement; it is not
-/// achievable when the mass budget `MTOW - OEW` or the preset's MZFW-derived
-/// limit is smaller. A non-finite or non-positive declared cap contributes
-/// no bound, and when no MZFW-derived limit exists either, the structural
-/// maximum is unknown: the corner then carries the analysed payload, as the
-/// report's payload-range figure does, still bounded by the mass budget.
+/// One rule for every aircraft with a published MZFW: the structural maximum
+/// is that MZFW less the modeled OEW, so the maximum-payload corner sits on
+/// the certified MZFW line, and the declared cap (historically the published
+/// MZFW less the published OEW) does not bind. Only without an MZFW-derived
+/// limit is the declared cap the structural maximum. Either is bounded by the
+/// mass budget `MTOW - OEW`. A non-finite or non-positive declared cap
+/// contributes no bound, and when no MZFW-derived limit exists either, the
+/// structural maximum is unknown: the corner then carries the analysed
+/// payload, as the report's payload-range figure does, still bounded by the
+/// mass budget.
 pub fn payload_capacity_estimate(
     declared_cap_kg: f64,
     mzfw_limit_kg: Option<f64>,
@@ -69,7 +73,9 @@ pub fn payload_capacity_estimate(
             };
         }
     }
-    if positive(declared_cap_kg) {
+    if mzfw_limit_kg.is_some() {
+        // The MZFW line is the structural maximum; the declared cap does not bind.
+    } else if positive(declared_cap_kg) {
         if declared_cap_kg < estimate.capacity_kg {
             estimate = PayloadCapacityEstimate {
                 capacity_kg: declared_cap_kg,
@@ -156,10 +162,7 @@ pub fn payload_range_corners(
         .or_else(|| effective_structural_payload_limit_kg(config, &report.design, oew_kg));
     // The published MZFW less the modeled OEW bounds the payload as well, the
     // same basis the report's payload-range chart uses.
-    let published_limit_kg = presets::get(&config.preset)
-        .ok()
-        .and_then(|preset| preset.reference.mzfw_kg)
-        .map(|mzfw_kg| mzfw_kg - oew_kg);
+    let published_limit_kg = presets::published_mzfw_kg(config).map(|mzfw_kg| mzfw_kg - oew_kg);
     let mzfw_limit_kg = [effective_limit_kg, published_limit_kg]
         .into_iter()
         .flatten()
@@ -278,5 +281,13 @@ mod tests {
         assert_eq!(zero_cap.capacity_kg, 10.0);
         let mzfw_only = payload_capacity_estimate(0.0, Some(35.0), 10.0, 100.0, 60.0);
         assert_eq!(mzfw_only.capacity_kg, 35.0);
+        // A declared cap below the MZFW line does not bind: the corner sits
+        // on the MZFW line.
+        let on_mzfw = payload_capacity_estimate(30.0, Some(35.0), 10.0, 100.0, 60.0);
+        assert_eq!(on_mzfw.capacity_kg, 35.0);
+        assert_eq!(
+            on_mzfw.basis,
+            "preset MZFW less modeled operating empty mass"
+        );
     }
 }

@@ -39,8 +39,16 @@
 //!   outside the job; the tree kill at timeout still reaches it, the
 //!   kill-on-close does not. Narrow, and recorded here rather than hidden.
 //!
-//! On other platforms there is no job object; [`supervision_status`] says so,
-//! and the process-group kill in `process` remains the whole story.
+//! On Unix there is no job object and the workspace forbids `unsafe`, so
+//! `prctl(PR_SET_PDEATHSIG)` (which needs `pre_exec`) is not available. Each
+//! supervised child instead gets a small watchdog process (`sh`, in its own
+//! process group, one per child) that polls once a second and, when ALAS is
+//! gone while the child is still running, kills the child's process group.
+//! It also exits by itself when the child ends. Residual behaviour: the kill
+//! comes up to about a second after ALAS dies, so a child may run that long; a
+//! SIGKILL aimed at the watchdog as well (for example `pkill sh`, or killing
+//! the whole session) leaves the child running, and so does a host without
+//! `/bin/sh`, which [`supervision_status`] reports as `Unavailable`.
 
 use std::collections::VecDeque;
 use std::process::{Child, Command};
@@ -51,9 +59,9 @@ use std::time::SystemTime;
 /// Whether owned processes are placed under kernel-enforced supervision.
 #[derive(Debug, Clone, PartialEq, Eq)]
 pub enum SupervisionStatus {
-    /// The job object exists; every supervised spawn is assigned to it.
+    /// Parent-exit supervision is in force: the Windows job object, or on Unix the per-child watchdog.
     Active,
-    /// This platform has no job objects. Process groups and tree kills still
+    /// Parent-exit supervision is unavailable here (no job object, or no `/bin/sh` for the Unix watchdog). Process groups and tree kills still
     /// apply, but nothing outlives ALAS to clean up after a forced exit.
     Unsupported,
     /// The job object could not be created; the OS error text is kept so a
@@ -78,8 +86,41 @@ pub struct LaunchRecord {
     pub program: String,
     /// When the spawn returned.
     pub started: SystemTime,
-    /// True when the child was assigned to the ALAS job object.
+    /// True when the child is under parent-exit supervision (the ALAS job object, or the Unix watchdog).
     pub supervised: bool,
+    /// The run stage the launching thread was working for (see
+    /// [`with_launch_stage`]), such as `downstream/mses`; `None` when the
+    /// launch came from outside any declared stage.
+    pub stage: Option<String>,
+}
+
+thread_local! {
+    static LAUNCH_STAGE: std::cell::RefCell<Option<String>> = const { std::cell::RefCell::new(None) };
+}
+
+/// Runs `work` with launches from this thread recorded under `stage`.
+///
+/// Stages run concurrently (the downstream analyses each run on their own
+/// thread), so the stage of a launch is a property of the thread that makes
+/// it, not of whichever stage last reported. The previous stage is restored
+/// afterwards, so declarations nest. A thread `work` spawns does not inherit
+/// the stage; it re-declares it with [`launch_stage`] read on this thread.
+pub fn with_launch_stage<T>(stage: &str, work: impl FnOnce() -> T) -> T {
+    struct Restore(Option<String>);
+    impl Drop for Restore {
+        fn drop(&mut self) {
+            let previous = self.0.take();
+            LAUNCH_STAGE.with(|current| *current.borrow_mut() = previous);
+        }
+    }
+    let previous = LAUNCH_STAGE.with(|current| current.replace(Some(stage.to_owned())));
+    let _restore = Restore(previous);
+    work()
+}
+
+/// The stage launches from this thread are recorded under, if declared.
+pub fn launch_stage() -> Option<String> {
+    LAUNCH_STAGE.with(|current| current.borrow().clone())
 }
 
 /// How many launches the ledger remembers; an airfoil sweep spawns hundreds,
@@ -125,6 +166,56 @@ pub fn launches_after(sequence: u64) -> Vec<LaunchRecord> {
         .collect()
 }
 
+static LAUNCHES_BLOCKED: std::sync::atomic::AtomicBool = std::sync::atomic::AtomicBool::new(false);
+
+/// Refuse (or allow again) every supervised launch.
+///
+/// A user cancellation kills the running solvers, but the stage that was
+/// waiting on one would go on to start the next (the next load case, the next
+/// Patran render) before it reaches a cancellation check. While launches are
+/// blocked each of those spawns fails at once, so the stage unwinds without
+/// starting new work. The caller lifts the block when the run has ended.
+pub fn block_launches(blocked: bool) {
+    LAUNCHES_BLOCKED.store(blocked, Ordering::SeqCst);
+}
+
+/// The error a launch gets while [`block_launches`] is in force.
+fn refuse_when_blocked(blocked: bool) -> std::io::Result<()> {
+    if blocked {
+        Err(std::io::Error::new(
+            std::io::ErrorKind::Interrupted,
+            "external tool launch refused: the run was cancelled",
+        ))
+    } else {
+        Ok(())
+    }
+}
+
+/// Kill, by PID, the process tree of every launch ALAS owns that is still
+/// alive and started at or after `since`. Returns the root PIDs it signalled.
+///
+/// This is the prompt half of a user cancellation: the pipeline's cooperative
+/// cancel flag is only read between stages, while a solver (NASTRAN, Patran,
+/// VSPAERO) may run for many minutes. Killing the children makes each blocked
+/// wait return at once, so the stage ends and the flag is then seen.
+///
+/// On Windows the ALAS job object lists the live members, so a PID the OS has
+/// reused for an unrelated process is never touched. On Unix the process group
+/// of each recent ledger entry is signalled; `since` bounds the PID-reuse
+/// window to the run being cancelled.
+pub fn terminate_launched_since(since: SystemTime) -> Vec<u32> {
+    let roots: Vec<u32> = recent_launches()
+        .into_iter()
+        .filter(|entry| entry.started >= since)
+        .map(|entry| entry.pid)
+        .filter(|pid| platform::is_live(*pid))
+        .collect();
+    for pid in &roots {
+        crate::process::kill_process_tree(*pid);
+    }
+    roots
+}
+
 /// Whether the ALAS job object is in force for this process.
 ///
 /// Creating the job is lazy and shared with the first supervised spawn, so
@@ -135,7 +226,7 @@ pub fn supervision_status() -> SupervisionStatus {
 
 /// Spawns a [`Command`] as a process ALAS owns for its whole life.
 pub trait SupervisedSpawn {
-    /// Spawn, then place the child under the ALAS job object and record the
+    /// Spawn, then place the child under parent-exit supervision and record the
     /// launch in the ledger under `role`.
     ///
     /// Spawning is the only step that can fail: a child that is running but
@@ -147,6 +238,7 @@ pub trait SupervisedSpawn {
 
 impl SupervisedSpawn for Command {
     fn spawn_supervised(&mut self, role: &str) -> std::io::Result<Child> {
+        refuse_when_blocked(LAUNCHES_BLOCKED.load(Ordering::SeqCst))?;
         let program = self.get_program().to_string_lossy().into_owned();
         let child = spawn_retrying_busy_executable(self)?;
         let supervised = platform::assign(&child).is_ok();
@@ -157,6 +249,7 @@ impl SupervisedSpawn for Command {
             program,
             started: SystemTime::now(),
             supervised,
+            stage: launch_stage(),
         });
         Ok(child)
     }
@@ -224,8 +317,12 @@ mod platform {
             .map_err(|error| error.to_string())
     }
 
+    /// Whether `pid` is a live member of the ALAS job.
+    pub(super) fn is_live(pid: u32) -> bool {
+        contains(pid)
+    }
+
     /// Whether `pid` is a member of the ALAS job right now.
-    #[cfg(test)]
     pub(super) fn contains(pid: u32) -> bool {
         job()
             .ok()
@@ -237,14 +334,65 @@ mod platform {
 #[cfg(not(windows))]
 mod platform {
     use super::SupervisionStatus;
-    use std::process::Child;
+    use crate::process::{NewProcessGroup, NoConsoleWindow};
+    use std::path::Path;
+    use std::process::{Child, Command, Stdio};
 
-    pub(super) fn status() -> SupervisionStatus {
-        SupervisionStatus::Unsupported
+    /// Poll interval is the script's `sleep 1`. Exits quietly when the child
+    /// is gone; kills the child's group (and the child itself, in case it is
+    /// not a group leader) when the parent is gone first.
+    const WATCHDOG: &str =
+        "while kill -0 \"$1\" 2>/dev/null && kill -0 \"$2\" 2>/dev/null; do sleep 1; done; \
+        kill -0 \"$2\" 2>/dev/null || exit 0; \
+        kill -s KILL -- \"-$2\" 2>/dev/null; kill -s KILL \"$2\" 2>/dev/null; exit 0";
+
+    /// Without a job there is no authoritative live list; the group signal is
+    /// harmless when the group is already gone.
+    pub(super) fn is_live(_pid: u32) -> bool {
+        true
     }
 
-    pub(super) fn assign(_child: &Child) -> Result<(), String> {
-        Err("job objects exist only on Windows".to_owned())
+    pub(super) fn status() -> SupervisionStatus {
+        if Path::new("/bin/sh").is_file() {
+            SupervisionStatus::Active
+        } else {
+            SupervisionStatus::Unavailable("no /bin/sh for the parent-exit watchdog".to_owned())
+        }
+    }
+
+    /// The watchdog for `child`, which should be watched on behalf of the
+    /// process `parent`.
+    pub(super) fn watchdog_command(parent: u32, child: u32) -> Command {
+        let mut command = Command::new("/bin/sh");
+        command
+            .args(["-c", WATCHDOG, "alas-watchdog"])
+            .arg(parent.to_string())
+            .arg(child.to_string())
+            .stdin(Stdio::null())
+            .stdout(Stdio::null())
+            .stderr(Stdio::null())
+            .no_window()
+            // Its own group, so a signal to ALAS's group does not take the
+            // watchdog down with the process it is watching.
+            .new_process_group();
+        command
+    }
+
+    pub(super) fn assign(child: &Child) -> Result<(), String> {
+        let watchdog = watchdog_command(std::process::id(), child.id())
+            .spawn()
+            .map_err(|error| format!("cannot start the parent-exit watchdog: {error}"))?;
+        // The watchdog ends within a second of the child; reap it then.
+        std::thread::spawn(move || {
+            let mut watchdog = watchdog;
+            let _ = watchdog.wait();
+        });
+        Ok(())
+    }
+
+    #[cfg(test)]
+    pub(super) fn watchdog_for_test(parent: u32, child: u32) -> std::io::Result<Child> {
+        watchdog_command(parent, child).spawn()
     }
 }
 
@@ -275,12 +423,8 @@ mod tests {
 
     #[test]
     fn supervision_status_matches_the_platform() {
-        let expected = if cfg!(windows) {
-            SupervisionStatus::Active
-        } else {
-            SupervisionStatus::Unsupported
-        };
-        assert_eq!(supervision_status(), expected);
+        // Windows: the job object. Unix: the parent-exit watchdog (needs /bin/sh).
+        assert_eq!(supervision_status(), SupervisionStatus::Active);
     }
 
     #[test]
@@ -294,7 +438,8 @@ mod tests {
             .find(|entry| entry.pid == pid)
             .expect("a supervised spawn is always recorded");
         assert_eq!(entry.role, "ledger probe");
-        assert_eq!(entry.supervised, cfg!(windows));
+        assert!(entry.supervised);
+        assert_eq!(entry.stage, None, "no stage was declared");
         assert!(entry
             .program
             .contains(if cfg!(windows) { "cmd" } else { "sh" }));
@@ -309,6 +454,113 @@ mod tests {
             .any(|shown| shown.pid == pid));
         kill_process_tree(pid);
         let _ = child.wait();
+    }
+
+    #[test]
+    fn a_blocked_launch_is_refused_as_interrupted() {
+        let error = refuse_when_blocked(true).expect_err("a blocked launch fails");
+        assert_eq!(error.kind(), std::io::ErrorKind::Interrupted);
+        assert!(refuse_when_blocked(false).is_ok());
+    }
+
+    #[test]
+    fn terminating_launched_children_ends_a_long_running_solver_promptly() {
+        let since = SystemTime::now();
+        let mut child = long_running_command()
+            .spawn_supervised("terminate probe")
+            .expect("the OS shell is present in any environment that runs these tests");
+        let pid = child.id();
+        let started = std::time::Instant::now();
+        let killed = terminate_launched_since(since);
+        assert!(killed.contains(&pid), "the live child is signalled by PID");
+        let _ = child.wait();
+        assert!(
+            started.elapsed() < std::time::Duration::from_secs(20),
+            "the kill returns far sooner than the child's own 60 s"
+        );
+    }
+
+    #[test]
+    fn a_launch_is_recorded_under_the_stage_its_thread_declared() {
+        let mut child = with_launch_stage("downstream/mses", || {
+            assert_eq!(
+                with_launch_stage("inner", launch_stage).as_deref(),
+                Some("inner")
+            );
+            assert_eq!(launch_stage().as_deref(), Some("downstream/mses"));
+            long_running_command()
+                .spawn_supervised("stage probe")
+                .expect("the OS shell is present in any environment that runs these tests")
+        });
+        assert_eq!(launch_stage(), None, "the declaration ends with its scope");
+        let pid = child.id();
+        let entry = recent_launches()
+            .into_iter()
+            .find(|entry| entry.pid == pid)
+            .expect("a supervised spawn is always recorded");
+        assert_eq!(entry.stage.as_deref(), Some("downstream/mses"));
+        kill_process_tree(pid);
+        let _ = child.wait();
+    }
+
+    /// Wait until `child` has ended, up to `limit`.
+    #[cfg(unix)]
+    fn ends_within(child: &mut std::process::Child, limit: std::time::Duration) -> bool {
+        let deadline = std::time::Instant::now() + limit;
+        loop {
+            if child.try_wait().expect("a child can be polled").is_some() {
+                return true;
+            }
+            if std::time::Instant::now() > deadline {
+                return false;
+            }
+            std::thread::sleep(std::time::Duration::from_millis(100));
+        }
+    }
+
+    #[cfg(unix)]
+    #[test]
+    fn the_watchdog_kills_the_child_group_when_its_parent_is_gone() {
+        use crate::process::NewProcessGroup;
+        // A stand-in for ALAS: the watchdog only needs the parent's pid to
+        // disappear while the child runs on.
+        let mut parent = long_running_command().spawn().expect("sh is present");
+        let mut child = long_running_command()
+            .new_process_group()
+            .spawn()
+            .expect("sh is present");
+        let mut watchdog =
+            platform::watchdog_for_test(parent.id(), child.id()).expect("the watchdog starts");
+        std::thread::sleep(std::time::Duration::from_millis(1500));
+        assert!(
+            child.try_wait().expect("polls").is_none(),
+            "the child must survive while its parent is alive"
+        );
+        parent.kill().expect("the stand-in parent can be killed");
+        let _ = parent.wait();
+        assert!(
+            ends_within(&mut child, std::time::Duration::from_secs(10)),
+            "the child outlived its parent"
+        );
+        let _ = watchdog.wait();
+    }
+
+    #[cfg(unix)]
+    #[test]
+    fn the_watchdog_leaves_the_parent_alone_when_the_child_ends_first() {
+        let mut parent = long_running_command().spawn().expect("sh is present");
+        let mut child = long_running_command().spawn().expect("sh is present");
+        let mut watchdog =
+            platform::watchdog_for_test(parent.id(), child.id()).expect("the watchdog starts");
+        child.kill().expect("the child can be killed");
+        let _ = child.wait();
+        assert!(
+            ends_within(&mut watchdog, std::time::Duration::from_secs(10)),
+            "the watchdog must end once its child has"
+        );
+        assert!(parent.try_wait().expect("polls").is_none());
+        let _ = parent.kill();
+        let _ = parent.wait();
     }
 
     #[cfg(windows)]

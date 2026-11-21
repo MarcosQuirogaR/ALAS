@@ -125,3 +125,18 @@ impl WingStructureGeometry {
         (zu - zl) * self.local_chord(eta)
     }
 }
+
+impl WingStructureGeometry {
+    /// Jig twist at `eta`, degrees, nose-up positive: linear root to break and
+    /// break to tip, as the aerodynamic wing is lofted between its sections.
+    pub fn twist_at_deg(&self, eta: f64) -> f64 {
+        let [root, kink, tip] = self.twist_deg;
+        if eta <= self.break_eta {
+            let t = eta / self.break_eta.max(1e-9);
+            root + t * (kink - root)
+        } else {
+            let t = (eta - self.break_eta) / (1.0 - self.break_eta).max(1e-9);
+            kink + t * (tip - kink)
+        }
+    }
+}

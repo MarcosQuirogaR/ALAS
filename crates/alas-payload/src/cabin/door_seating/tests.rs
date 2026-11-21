@@ -258,10 +258,22 @@ fn the_atr_lays_out_its_72_seats_at_the_factsheet_pitch_with_baggage_fore_and_af
                 b.max(item.x + 0.5 * item.length),
             )
         });
-    let compartments = crate::cargo::derive_hold_compartments(g, &[], Some(extent), &[]);
-    assert_eq!(compartments.len(), 2, "{compartments:?}");
-    assert!(compartments[0].x_end_m <= extent.0 + 1e-9);
-    assert!(compartments[1].x_start_m >= extent.1 - 1e-9);
+    // The ATR declares both compartments of its factsheet cabin plan.
+    let declared = crate::cargo::derive_hold_compartments(
+        g,
+        &[],
+        Some(extent),
+        &built.config.cabin.cargo.hold_compartments,
+    );
+    assert_eq!(declared.len(), 2, "{declared:?}");
+    assert!(declared[0].x_end_m <= extent.0 + 1e-9);
+    assert!(declared[1].x_start_m >= extent.1 - 1e-9);
+    // Without a declaration only the compartment behind the last seat is
+    // derived, and it stops where the constant cabin section ends.
+    let derived = crate::cargo::derive_hold_compartments(g, &[], Some(extent), &[]);
+    assert_eq!(derived.len(), 1, "{derived:?}");
+    assert!(derived[0].x_start_m >= extent.1 - 1e-9);
+    assert!(derived[0].x_end_m <= g.cabin_end_x + 1e-9);
 }
 
 #[test]

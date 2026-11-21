@@ -163,12 +163,13 @@ fn propeller_trace(
         perf,
     );
     let atmosphere = alas_atmo::us1976_compute_values(0.0, 0.0);
-    let (cd0, k) = report_field_polar(
+    let field_polar = report_field_polar(
         config,
         report,
         speeds.v2_ms / atmosphere.speed_of_sound_m_s,
         &airport,
     )?;
+    let (cd0, k) = (field_polar.cd0, field_polar.k);
     let ActiveEngineModel::Turboprop(spec) = config
         .geometry
         .engine

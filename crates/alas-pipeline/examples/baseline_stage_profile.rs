@@ -21,7 +21,21 @@ use std::sync::Mutex;
 use alas_config::{presets, AlasConfig};
 use alas_pipeline::{DesignPipeline, PipelineOptions, RunEnvironment};
 
+/// The pipeline holds deep frames: the main thread's default stack overflowed
+/// on the first preset, so the work runs on a thread with the app's headless
+/// stack size.
 fn main() -> Result<(), Box<dyn Error>> {
+    let worker = std::thread::Builder::new()
+        .name("baseline-stage-profile".into())
+        .stack_size(512 << 20)
+        .spawn(|| run().map_err(|error| error.to_string()))?;
+    worker
+        .join()
+        .map_err(|_| "the profile thread panicked")?
+        .map_err(Into::into)
+}
+
+fn run() -> Result<(), Box<dyn Error>> {
     let names: Vec<String> = std::env::args().skip(1).collect();
     if names.is_empty() {
         return Err("usage: baseline_stage_profile PRESET...".into());

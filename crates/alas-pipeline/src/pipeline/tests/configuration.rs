@@ -4,6 +4,9 @@
 use super::*;
 use alas_config::presets;
 
+#[path = "../../../../alas-testkit/fixtures/open_ground.rs"]
+mod open_ground;
+
 #[test]
 fn successful_mses_exports_retain_the_verbatim_mplot_tables() {
     let output =
@@ -84,7 +87,7 @@ fn a_pipeline_seed_reaches_the_optimizer_configuration() {
     let effective = crate::dual_solver::seeded_config(&config, Some(42))
         .unwrap_or_else(|error| panic!("seed is representable: {error}"));
     assert_eq!(effective.optimizer.solver.seed, Some(42));
-    // Decision D6: the unconfigured default is the fixed reproducible seed.
+    // The unconfigured default is the fixed reproducible seed.
     assert_eq!(
         config.optimizer.solver.seed,
         Some(alas_config::DEFAULT_SEED)
@@ -225,11 +228,24 @@ fn fixed_design_review_exposes_its_binding_constraint_without_promoting_a_finali
         quiet: true,
     };
 
+    // A clean-sheet space derives the fuselage coordinate from the cabin the
+    // brief needs and publishes it in the vector, so the returned design
+    // rebuilds the evaluated aircraft (`size_fuselage_from_cabin`, alas-opt
+    // mdo/build.rs): the published vector is the evaluator's
+    // resolved one. The derived wing setting is not part of it, so
+    // the tip twist stays the pinned value.
+    let (resolved, _) =
+        alas_opt::resolve_tail_sizing(&config, &design, false).expect("the pinned design resolves");
+    assert_eq!(
+        resolved.tip_twist_deg.to_bits(),
+        design.tip_twist_deg.to_bits()
+    );
+
     let result = DesignPipeline::new(config)
         .run_with_design_space(&options, &RunEnvironment::default(), &design, &bounds)
         .unwrap_or_else(|error| panic!("fixed-design finalist run: {error}"));
 
-    assert_eq!(result.optimized_design, Some(design));
+    assert_eq!(result.optimized_design, Some(resolved));
     // The review is usable: it reports its findings (none at error severity
     // since the rotation model update, see below).
     let errors = result
@@ -238,7 +254,7 @@ fn fixed_design_review_exposes_its_binding_constraint_without_promoting_a_finali
         .iter()
         .filter(|finding| finding.severity == crate::FindingSeverity::Error)
         .collect::<Vec<_>>();
-    // Pin update (round 3): was exactly one error, the nose-wheel lift-off
+    // Was exactly one error, the nose-wheel lift-off
     // (rotation) forward-CG finding. With the 5 deg/s^2 class pitch
     // acceleration (Sadraey 12.3, transports 4-6; was 7) and the DATCOM
     // K' large-deflection elevator table, the default shape's takeoff CG is
@@ -278,7 +294,7 @@ fn fixed_design_review_exposes_its_binding_constraint_without_promoting_a_finali
 /// percentage-mode capacity policy, not that installed-cabin contract.
 ///
 /// Whether a percentage-mode brief should be a requirement the product can fail is a
-/// product decision, not one this lane may take on its own, so this test pins
+/// product decision, not one this test may take on its own, so this test pins
 /// the contract that actually ships. If that decision is ever made, this test
 /// is the one to invert.
 #[test]
@@ -349,10 +365,40 @@ fn a_passenger_brief_is_reconciled_to_what_the_cabin_seats_rather_than_constrain
     assert_eq!(summary.total_pax, summary.seated_pax);
     assert!(summary.seated_pax > 0 && summary.seated_pax < requested);
 
-    // The independent half of the original test, which does still hold: a
-    // rejected optimizer branch never becomes a finalist or an apparently
-    // valid result.
-    assert_eq!(result.optimized_design, Some(design));
+    // The mass model flies the passengers the cabin seats, not the brief.
+    let flops = &result
+        .optimized_report
+        .as_ref()
+        .and_then(|report| report.flops_mass_buildup.as_ref())
+        .expect("the finalist report carries its FLOPS mass build-up")
+        .inputs;
+    let flown = flops.first_class_passenger_count
+        + flops.business_class_passenger_count
+        + flops.tourist_class_passenger_count;
+    assert_eq!(
+        i64::try_from(flown).expect("a passenger count is representable"),
+        summary.seated_pax
+    );
+
+    // A search with no feasible candidate delivers its least-violating design
+    // flagged, never as an apparently valid result, and publishes
+    // the vector its report was assessed on: the clean-sheet fuselage is the
+    // cabin-resolved length, not the supplied coordinate.
+    let optimization = result
+        .optimization_result
+        .as_ref()
+        .expect("the flagged search result is kept");
+    assert!(!optimization.best_valid);
+    assert_eq!(optimization.history.n_valid(), 0);
+    assert!(optimization
+        .infeasibility_summary()
+        .is_some_and(|line| line.starts_with("No feasible design: ")));
+    assert!(optimization
+        .delivered_acceptance
+        .as_ref()
+        .is_some_and(|acceptance| !acceptance.verified));
+    let assessed = result.optimized_report.as_ref().map(|report| report.design);
+    assert_eq!(result.optimized_design, assessed);
 }
 
 #[test]
@@ -369,6 +415,10 @@ fn a_hard_feasible_finalist_preserves_search_bounds_and_resolved_tail() {
     config.optimizer.solver.refinement.max_evaluations = 24;
     config.optimizer.solver.screening.max_evaluations = 8;
     config.optimizer.solver.workers = 1;
+    // Open ground at the preset's own departure: no curated survey
+    // certifies a take-off obstacle clearance, so no candidate at EVRA is
+    // hard-feasible (see the fixture's documentation).
+    open_ground::open_ground_at_own_departure(&mut config);
 
     let design = alas_config::presets::get("A220-300")
         .expect("A220-300 preset")

@@ -18,6 +18,8 @@
 
 use serde::{Deserialize, Serialize};
 
+use super::tail_edges::{TailEdgeStation, VentralFinStation};
+use super::wing::WingThicknessStation;
 use crate::design_variables::DesignVector;
 
 use crate::ConfigNode;
@@ -34,10 +36,19 @@ pub struct EmpennageConfig {
     )]
     pub tail_airfoil: String,
 
+    /// The fin's own section; `None` builds the fin from `tail_airfoil`.
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    #[config(
+        label = "Fin airfoil section",
+        help = "Optional section of the vertical stabiliser; empty builds it from the tail airfoil section. The dorsal fillet stays a flat plate."
+    )]
+    pub vstab_airfoil: Option<String>,
+
     /// How many spanwise panels each tail surface is meshed into.
     #[config(
         label = "Tail VLM panel count",
-        help = "Spanwise panels across each tail surface for the vortex-lattice solver, as an absolute count rather than a count per section. Both stabilizers are single-section surfaces, so this is the panel count they already had; it is stated absolutely so a cranked fin later gets the same density rather than twice it."
+        help = "Spanwise vortex-lattice panels across each tail surface, as an absolute count rather than per section, so a later cranked fin gets the same density.",
+        long_help = "Spanwise panels across each tail surface for the vortex-lattice solver, as an absolute count rather than a count per section, so a cranked fin later gets the same density rather than twice it. The default of 24 is mesh-converged: from 6 to 48 panels Cn_beta falls 8-9 % and Cy_beta 5-6 %, halving the step at each doubling, and 24 panels come within 3 % of 96; Cm_alpha moves under 1 % and the neutral point 0.02 m."
     )]
     pub n_subdivisions: i64,
 
@@ -112,7 +123,8 @@ pub struct EmpennageConfig {
     #[config(
         label = "V-stab vertical offset",
         unit = "m",
-        help = "Vertical placement of the vertical-stabiliser root line relative to the fuselage centerline: the line its root chord and height are measured from, usually the fuselage top line at the fin. The built fin's edges continue down, or are trimmed up, to the top of the tail cone (or of a centreline engine) under the root, so the tip stays where this line and the tip offset put it."
+        help = "Vertical placement of the fin root line relative to the fuselage centreline [m], usually the fuselage top line at the fin.",
+        long_help = "Vertical placement of the vertical-stabiliser root line relative to the fuselage centerline: the line its root chord and height are measured from, usually the fuselage top line at the fin. The built fin's edges continue down, or are trimmed up, to the top of the tail cone (or of a centreline engine) under the root, so the tip stays where this line and the tip offset put it."
     )]
     pub vstab_z_m: f64,
 
@@ -145,7 +157,8 @@ pub struct EmpennageConfig {
     #[config(
         label = "V-stab root leading edge x (from nose)",
         unit = "m",
-        help = "Absolute position, measured aft from the nose tip, of the vertical-stabiliser leading edge on its root line (the V-stab vertical offset height, usually the fuselage crown). When set it replaces the offset forward of the tail tip, so the fin does not move with the fuselage length; the tail x shift still applies. Leave unset to place the fin by the offset."
+        help = "Absolute position of the fin leading edge on its root line, measured aft from the nose tip [m].",
+        long_help = "Absolute position, measured aft from the nose tip, of the vertical-stabiliser leading edge on its root line (the V-stab vertical offset height, usually the fuselage crown). When set it replaces the offset forward of the tail tip, so the fin does not move with the fuselage length; the tail x shift still applies. Leave unset to place the fin by the offset."
     )]
     pub vstab_root_le_x_m: Option<f64>,
 
@@ -154,7 +167,8 @@ pub struct EmpennageConfig {
     #[config(
         label = "H-stab root leading edge x (from nose)",
         unit = "m",
-        help = "Absolute position, measured aft from the nose tip, of the horizontal-stabiliser leading edge at its root station. When set it replaces the offset forward of the tail tip; the tail x shift still applies. Leave unset to place the tailplane by the offset."
+        help = "Absolute position of the horizontal-stabiliser leading edge at its root, measured aft from the nose tip [m].",
+        long_help = "Absolute position, measured aft from the nose tip, of the horizontal-stabiliser leading edge at its root station. When set it replaces the offset forward of the tail tip; the tail x shift still applies. Leave unset to place the tailplane by the offset."
     )]
     pub hstab_root_le_x_m: Option<f64>,
 
@@ -163,17 +177,26 @@ pub struct EmpennageConfig {
     #[config(
         label = "H-stab drawn root station y",
         unit = "m",
-        help = "Distance from the centreline of the station where the tailplane root chord, root incidence, vertical offset and root leading edge x are drawn (the fuselage side). The tip leading edge y stays the half-span from the centreline; its x and z are relative to this station. The builder extends the straight leading and trailing edges to the centreline, so the reference area is the trapezoid carried through the fuselage. Leave unset when the root values are those at the centreline."
+        help = "Distance from the centreline of the station where tailplane root chord, incidence, offset and leading edge x are drawn [m] (the fuselage side).",
+        long_help = "Distance from the centreline of the station where the tailplane root chord, root incidence, vertical offset and root leading edge x are drawn (the fuselage side). The tip leading edge y stays the half-span from the centreline; its x and z are relative to this station. The builder extends the straight leading and trailing edges to the centreline, so the reference area is the trapezoid carried through the fuselage. Leave unset when the root values are those at the centreline."
     )]
     pub hstab_root_station_y_m: Option<f64>,
 
-    /// Dorsal fin: x where the fillet starts on the fin root line.
+    /// Dorsal fin: how far ahead of the fin root-line leading edge the fillet's
+    /// side line leaves the body. It moves with the fin.
     #[serde(default, skip_serializing_if = "Option::is_none")]
     #[config(
-        label = "Dorsal fin start x (from nose)",
+        label = "Dorsal fin length ahead of fin",
         unit = "m",
-        help = "Absolute position, measured aft from the nose tip, where the dorsal fillet starts on the fin root line. The fillet is a strip ahead of the fin leading edge that ends on that edge at the dorsal height. Needs the dorsal height too; leave both unset for a fin without a dorsal."
+        help = "How far ahead of the fin root leading edge the dorsal fillet leaves the top of the body [m].",
+        long_help = "How far ahead of the fin root leading edge the dorsal fillet leaves the top of the body. It moves with the fin when the fuselage length changes. The side line leaves the body along its top and curves up onto the fin leading edge at the dorsal height. A length of zero or less means no dorsal. Needs the dorsal height too; leave both unset for a fin without a dorsal."
     )]
+    pub vstab_dorsal_length_m: Option<f64>,
+
+    /// Dorsal fin seat in files older than `vstab_dorsal_length_m`: absolute, m
+    /// from the nose tip. Read only when that length is unset.
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    #[config(skip)]
     pub vstab_dorsal_x_start_m: Option<f64>,
 
     /// Dorsal fin: height of the fillet above the fin root line.
@@ -181,17 +204,85 @@ pub struct EmpennageConfig {
     #[config(
         label = "Dorsal fin height",
         unit = "m",
-        help = "Height above the fin root line at which the dorsal fillet meets the fin leading edge. Needs the dorsal start x too; leave both unset for a fin without a dorsal."
+        help = "Height above the fin root line at which the dorsal fillet meets the fin leading edge. Needs the dorsal length too; leave both unset for a fin without a dorsal."
     )]
     pub vstab_dorsal_height_m: Option<f64>,
+
+    /// Dorsal fin: fraction of the way from the mid-chord of the side line towards
+    /// the corner it rounds; unset takes the usual fillet.
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    #[config(
+        hidden,
+        help = "How full the dorsal fillet's side line is, between 0 and 1: near 0 a straight line from the body to the fin, 0.3 when unset."
+    )]
+    pub vstab_dorsal_shoulder: Option<f64>,
+
+    /// Dorsal fin: height above the body at which the side line starts, where the
+    /// drawing shows it leaving from behind a nacelle.
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    #[config(
+        hidden,
+        unit = "m",
+        help = "Height above the top of the body at which the dorsal fillet's side line starts, for a line that comes out from behind a nacelle [m]. Unset starts on the body."
+    )]
+    pub vstab_dorsal_seat_rise_m: Option<f64>,
 
     /// Whether the dorsal fillet is a lifting surface in the aero model.
     #[serde(default, skip_serializing_if = "is_false")]
     #[config(
         label = "Dorsal fin in aerodynamic model",
-        help = "Add the dorsal fillet to the airplane's lifting surfaces (vortex lattice, drag build-up). Off keeps the aerodynamic model of the plain fin and uses the fillet for geometry only."
+        help = "Add the dorsal fillet to the vortex lattice as a lifting surface. Off, it keeps its geometry, wetted area and drag but carries no lift.",
+        long_help = "Add the dorsal fillet to the vortex lattice as a lifting surface. Off, the fillet is part of the geometry, wetted area and drag build-up but carries no lift: test data show no effect on the fin lift curve up to 15 deg of sideslip."
     )]
     pub vstab_dorsal_in_aero: bool,
+
+    /// The drawn ventral fin pair under the tail, inboard to outboard (see
+    /// [`VentralFinStation`]), or one fin on the centreline when every station
+    /// is at y 0; empty for none.
+    #[serde(default, skip_serializing_if = "Vec::is_empty")]
+    #[config(
+        hidden,
+        help = "Optional drawn stations of a ventral fin pair under the tail. Part of the geometry, wetted area, drag build-up and paint; outside the vortex lattice."
+    )]
+    pub ventral_fin_stations: Vec<VentralFinStation>,
+
+    /// Local offsets of the built tailplane edges (see [`TailEdgeStation`]).
+    #[serde(default, skip_serializing_if = "Vec::is_empty")]
+    #[config(
+        hidden,
+        help = "Optional stations that offset the built tailplane edges from their straight lines: a rounded tip corner. The straight-edged trapezoid stays the reference planform.",
+        long_help = "Optional stations that offset the built tailplane leading and trailing edges from the straight lines, metres at unit tail scale, positive aft, as fractions of the centreline-to-tip run with 1 at the tip. The lattice, the exports, the renders and the wetted area read these edges; the tail area, the arm, the tail volume and the handbook correlations read the straight-edged reference trapezoid."
+    )]
+    pub hstab_edge_stations: Vec<TailEdgeStation>,
+
+    /// Local offsets of the built fin edges (see [`TailEdgeStation`]).
+    #[serde(default, skip_serializing_if = "Vec::is_empty")]
+    #[config(
+        hidden,
+        help = "Optional stations that offset the built fin edges from their straight lines: a rounded tip corner, a cap sloping down aft. The straight-edged trapezoid stays the reference planform.",
+        long_help = "Optional stations that offset the built fin leading and trailing edges from the straight lines, metres at unit tail scale, positive aft, as fractions of the root-line-to-tip run with 1 at the tip. A cap sloping down aft is the trailing edge pulled forward up to the tip. The lattice, the exports, the renders and the wetted area read these edges; the fin area, the arm, the tail volume and the handbook correlations read the straight-edged reference trapezoid."
+    )]
+    pub vstab_edge_stations: Vec<TailEdgeStation>,
+
+    /// Multipliers on the fin section thickness along the fin; `span_fraction`
+    /// is the fraction of [`TailEdgeStation`], the root line to the tip.
+    #[serde(default, skip_serializing_if = "Vec::is_empty")]
+    #[config(
+        hidden,
+        help = "Optional stations scaling the fin section thickness from root to tip, for a fin that thins toward its tip. Chords and areas do not change.",
+        long_help = "Optional stations scaling the thickness of the fin section along the fin, as fractions of the root-line-to-tip run with 1 at the tip; the scale is linear between stations and held beyond the first and the last. Only the built sections read it: the fin area, the arm and the tail volume do not change."
+    )]
+    pub vstab_thickness_stations: Vec<WingThicknessStation>,
+
+    /// Where the fin's reference planform ends, as a fraction of its straight lines
+    /// with 1 at the tip; unset, a T-tail's ends at the tailplane seat.
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    #[config(
+        hidden,
+        help = "Optional end of the fin's reference planform, as a fraction of its straight lines with 1 at the tip. Unset, a T-tail's reference fin ends at the tailplane seat.",
+        long_help = "Optional end of the fin's reference planform, the fin of the published areas, as a fraction of the root-line-to-tip run of its straight edges with 1 at the tip. Unset, a T-tail's reference fin ends where the tailplane sits on it; set it where the fin continues above the tailplane. The built surface does not change."
+    )]
+    pub vstab_reference_end_fraction: Option<f64>,
 
     /// Fin scale relative to the design vector's tail scale.
     ///
@@ -209,12 +300,18 @@ pub struct EmpennageConfig {
 ///
 /// Every rebuild of a sized candidate applies the same value, so the
 /// optimizer, the reported aircraft and any mission replay see one tail.
-#[derive(Debug, Clone, Copy, PartialEq)]
+#[derive(serde::Serialize, serde::Deserialize, Debug, Clone, Copy, PartialEq)]
 pub struct TailSizing {
     /// The design vector's `tail_scale`.
     pub tail_scale: f64,
     /// Fin scale divided by `tail_scale`.
     pub vstab_scale_ratio: f64,
+    /// Wing incidences the evaluation derived for a clean-sheet transport, degrees:
+    /// root, break and tip (the design vector's absolute `tip_twist_deg`), all moved by
+    /// one rigid rotation of the wing about its root so the washout is unchanged.
+    /// `None` keeps the configuration's incidences. Absolute values, so applying them
+    /// again changes nothing.
+    pub wing_incidence_deg: Option<[f64; 3]>,
 }
 
 impl TailSizing {
@@ -223,6 +320,17 @@ impl TailSizing {
         Self {
             tail_scale: dv.tail_scale,
             vstab_scale_ratio: empennage.vstab_scale_ratio,
+            wing_incidence_deg: None,
+        }
+    }
+
+    /// Write the derived wing incidences, when there are any, into the wing and
+    /// the design vector.
+    pub fn apply_wing_to(&self, wing: &mut super::wing::WingConfig, dv: &mut DesignVector) {
+        if let Some([root, break_, tip]) = self.wing_incidence_deg {
+            wing.root_twist_deg = root;
+            wing.break_twist_deg = break_;
+            dv.tip_twist_deg = tip;
         }
     }
 
@@ -247,7 +355,13 @@ impl Default for EmpennageConfig {
         // placed as on a current twin-aisle transport.
         Self {
             tail_airfoil: "naca0012".to_owned(),
-            n_subdivisions: 6,
+            vstab_airfoil: None,
+            // 24 panels per tail surface: on the conventional-tail presets Cn_beta
+            // falls 8-9 % and Cy_beta 5-6 % from 6 to 48 panels, halving its step at
+            // each doubling, and 24 is within 3 % of 96 (A320: 0.1976 at 6, 0.1830
+            // at 24, 0.1789 at 96 per rad) at three times the panel count of 6; the
+            // neutral point moves 0.02 m. The reference-compatibility mesh keeps 6.
+            n_subdivisions: 24,
             hstab_offset_from_tail_m: 10.7,
             hstab_z_m: 1.2,
             hstab_root_chord_m: 8.0,
@@ -263,9 +377,17 @@ impl Default for EmpennageConfig {
             vstab_root_le_x_m: None,
             hstab_root_le_x_m: None,
             hstab_root_station_y_m: None,
+            vstab_dorsal_length_m: None,
             vstab_dorsal_x_start_m: None,
             vstab_dorsal_height_m: None,
+            vstab_dorsal_shoulder: None,
+            vstab_dorsal_seat_rise_m: None,
             vstab_dorsal_in_aero: false,
+            hstab_edge_stations: Vec::new(),
+            vstab_edge_stations: Vec::new(),
+            ventral_fin_stations: Vec::new(),
+            vstab_thickness_stations: Vec::new(),
+            vstab_reference_end_fraction: None,
             vstab_scale_ratio: 1.0,
         }
     }

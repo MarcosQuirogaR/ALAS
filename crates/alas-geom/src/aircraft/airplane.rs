@@ -24,7 +24,7 @@ use super::wing::Wing;
 /// quantities moments and stability derivatives are taken about:
 /// `Airplane`, scoped to the fields [`crate::builder::AircraftBuilder`]
 /// always supplies (see the module doc).
-#[derive(Debug, Clone, PartialEq)]
+#[derive(serde::Serialize, serde::Deserialize, Debug, Clone, PartialEq)]
 pub struct Airplane {
     /// The airplane's name.
     pub name: String,
@@ -42,4 +42,29 @@ pub struct Airplane {
     pub c_ref: f64,
     /// Aircraft reference span, projected onto the lateral/Y axis.
     pub b_ref: f64,
+}
+
+/// The name the builder gives the horizontal stabilizer.
+pub const HORIZONTAL_STABILIZER_NAME: &str = "Horizontal Stabilizer";
+
+impl Airplane {
+    /// The dynamic-pressure ratio the horizontal stabilizer is solved with
+    /// ([`Wing::dynamic_pressure_ratio`]); `1.0` without one.
+    #[must_use]
+    pub fn horizontal_tail_dynamic_pressure_ratio(&self) -> f64 {
+        self.wings
+            .iter()
+            .find(|wing| wing.name == HORIZONTAL_STABILIZER_NAME)
+            .map_or(1.0, |wing| wing.dynamic_pressure_ratio)
+    }
+
+    /// Give the horizontal stabilizer the dynamic-pressure `ratio` of its
+    /// effectiveness in the wing wake and the fuselage flow.
+    pub fn set_horizontal_tail_dynamic_pressure_ratio(&mut self, ratio: f64) {
+        for wing in &mut self.wings {
+            if wing.name == HORIZONTAL_STABILIZER_NAME {
+                wing.dynamic_pressure_ratio = ratio;
+            }
+        }
+    }
 }

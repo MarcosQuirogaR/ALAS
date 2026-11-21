@@ -105,7 +105,9 @@ fn check(
         "{id}: height {height} vs {expected_h}"
     );
     // built at the preset length: no remap
-    let length_ratio = preset.design_vector.fuselage_length_m / spec.reference_length_m;
+    let hull_length =
+        preset.design_vector.fuselage_length_m - spec.apu_cone.map_or(0.0, |c| c.length_m);
+    let length_ratio = hull_length / spec.reference_length_m;
     assert!(
         (length_ratio - 1.0).abs() < 1e-9,
         "{id}: length ratio {length_ratio}"
@@ -129,8 +131,10 @@ macro_rules! data_file_test {
 }
 
 // (crown, keel, plan) inflection budget and TV-ratio limit recorded in the file:
-// the absolute 1 / 2 / 2 and 1.5 everywhere except the E195-E2 (documented in
-// its provenance: the drawn radome / windshield corner at x = 3.5-3.9 m).
+// the absolute 1 / 2 / 2 and 1.5 everywhere except the E195-E2 and the B747-400 (documented in
+// their provenance: the drawn radome / windshield corner and windshield notch) and the
+// A320-200 (documented in its provenance: the drawn windscreen corner, whose two
+// extra crown inflections lie inside x = 1.0-3.3 m; crown 3, TV limit 2.06).
 data_file_test!(
     a220_300_file,
     "a220_300",
@@ -143,8 +147,8 @@ data_file_test!(
     a320_200_file,
     "a320_200",
     "A320-200",
-    (1, 2, 2),
-    1.5,
+    (3, 2, 2),
+    2.06,
     GATE_AB
 );
 data_file_test!(
@@ -155,10 +159,10 @@ data_file_test!(
     1.5,
     GATE_AB
 );
-// Tail-cone refit 2026-10-12 (geo/tailcone-2026-10-12): the aft body of the A380-800 (x >= 57.73 m)
+// Tail-cone refit: the aft body of the A380-800 (x >= 57.73 m)
 // and the A400M (x >= 29.1 m) was refitted to the calibrated side drawings with the forward
 // coefficients frozen. Recorded fit (old -> new): A380-800 rms 2.72 -> 2.34 cm, max 7.85 -> 7.85 cm
-// over the drawn samples (the 0.8 m APU-cone step, x 70.3-72.3 m, is not representable and is
+// over the drawn samples (what was then read as a 0.8 m APU-cone step, x 70.3-72.3 m, is the tailplane tip and is
 // excluded); A400M rms 4.59 -> 4.37 cm, max 25.76 -> 25.76 cm (forward, frozen). Fairness (crown / keel
 // / plan inflections, TV): A380-800 0/2/2 -> 1/2/2, TV 1.37 -> 1.39; A400M 1/1/0 -> 1/1/0, TV 1.03.
 // Built overlay fus_aft side over: A380-800 1.071 -> 0.257 m2, A400M 0.078 -> 0.000 m2.
@@ -184,11 +188,12 @@ data_file_test!(
     b747_400_file,
     "b747_400",
     "B747-400",
-    (1, 2, 2),
-    1.5,
+    (4, 2, 2), // 2 at the fuselage and 2 of the drawn windshield notch, x 3.4 and 5.1 m
+    1.54,
     GATE_AB
 );
 data_file_test!(b787_9_file, "b787_9", "B787-9", (1, 2, 2), 1.5, GATE_AB);
 data_file_test!(c919_file, "c919", "C919", (1, 2, 2), 1.5, GATE_AB);
 data_file_test!(dc_10_file, "dc_10", "DC-10", (1, 2, 2), 1.5, GATE_C);
 data_file_test!(e195_e2_file, "e195_e2", "E195-E2", (2, 2, 2), 1.7, GATE_AB);
+data_file_test!(lj60_file, "lj60", "LJ60", (4, 2, 3), 1.5, GATE_C);

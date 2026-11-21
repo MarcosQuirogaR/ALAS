@@ -2,7 +2,7 @@
 // Copyright (C) 2026 Marcos Quiroga Rodriguez
 
 //! Lofted fuselage-class bodies: G2 B-spline profile curves and a closed-form
-//! cross-section family (design 2026-10-10, sections 2 and 5).
+//! cross-section family.
 //!
 //! A [`Loft`] is built from a [`LoftSpec`] (the data-file schema owned by
 //! `alas-config`) and [`LoftParams`] (built length, width / height / nose /
@@ -52,6 +52,7 @@ mod residual;
 mod residual_tests;
 mod sampling;
 mod section;
+mod tail_cone;
 #[cfg(test)]
 mod testing;
 #[cfg(test)]
@@ -66,7 +67,7 @@ pub use fairness::{FairnessReport, LineFairness};
 pub use legacy::{
     from_legacy, from_legacy_with, CurveFitReport, LegacyFit, LegacyFitOptions, LegacyFitReport,
 };
-pub use nacelle::{NacelleBodyKind, NacelleError, NacelleLoft};
+pub use nacelle::{NacelleError, NacelleLoft};
 pub use polyline::SampledPolyline;
 pub use residual::ResidualDefect;
 pub use section::{unit_area, unit_area_dn, Section};
@@ -114,7 +115,7 @@ pub enum LoftError {
 }
 
 /// How a [`LoftSpec`] is instantiated.
-#[derive(Debug, Clone, Copy, PartialEq)]
+#[derive(serde::Serialize, serde::Deserialize, Debug, Clone, Copy, PartialEq)]
 pub struct LoftParams {
     /// Built length, m.
     pub length_m: f64,
@@ -289,5 +290,30 @@ impl Loft {
     /// Cache for the integrals; used by the integral module.
     fn integrals_cell(&self) -> &OnceLock<Integrals> {
         &self.integrals
+    }
+}
+
+/// A loft is stored as what it is built from, its specification and
+/// parameters; reading one back rebuilds it with [`Loft::new`], so the curves
+/// are the ones the builder made and the integrals are recomputed on use.
+impl serde::Serialize for Loft {
+    fn serialize<S: serde::Serializer>(&self, serializer: S) -> Result<S::Ok, S::Error> {
+        use serde::ser::SerializeStruct;
+        let mut state = serializer.serialize_struct("Loft", 2)?;
+        state.serialize_field("spec", &self.spec)?;
+        state.serialize_field("params", &self.params)?;
+        state.end()
+    }
+}
+
+impl<'de> serde::Deserialize<'de> for Loft {
+    fn deserialize<D: serde::Deserializer<'de>>(deserializer: D) -> Result<Self, D::Error> {
+        #[derive(serde::Deserialize)]
+        struct Stored {
+            spec: LoftSpec,
+            params: LoftParams,
+        }
+        let stored = Stored::deserialize(deserializer)?;
+        Self::new(&stored.spec, stored.params).map_err(serde::de::Error::custom)
     }
 }

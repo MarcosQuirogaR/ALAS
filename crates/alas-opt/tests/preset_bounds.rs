@@ -12,13 +12,16 @@
 use alas_config::{presets, AlasConfig, DESIGN_VARIABLE_SPECS};
 use alas_opt::DesignOptimizer;
 
-/// The envelope a front end would compute for itself, in design-variable
-/// order.
+/// The envelope a front end computes for itself, in design-variable order:
+/// `AlasConfig::design_envelope`, the class guardrails, the aerodrome span
+/// limit and the held variables included, as the desktop design-space view
+/// does (`DesignSpaceConfig::envelope` alone is the transport-class window
+/// and would hand a business jet a span floor above its code limit).
 fn caller_anchored_bounds(
     config: &AlasConfig,
     nominal: &alas_config::DesignVector,
 ) -> Vec<(f64, f64)> {
-    let envelope = config.optimizer.design_space.envelope(nominal);
+    let envelope = config.design_envelope(nominal);
     DESIGN_VARIABLE_SPECS
         .iter()
         .map(|spec| {

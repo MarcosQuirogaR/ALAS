@@ -18,9 +18,8 @@
 //! computed whenever the analysis is enabled, so the absence of a solver
 //! degrades the results rather than removing them.
 //!
-//! Several fields declare a label and a unit but no explanation upstream;
-//! those explanations are this port's, as CONTRIBUTING.md requires, and they
-//! change no value.
+//! Several fields declare a label and a unit but no explanation upstream; those
+//! explanations are this port's, as CONTRIBUTING.md requires, and change no value.
 
 use serde::{Deserialize, Serialize};
 
@@ -33,15 +32,17 @@ pub struct StructuresConfig {
     /// Whether a normal run sizes and analyses a wingbox.
     #[config(
         label = "Enabled",
-        help = "Size a generic wingbox (skin/spars/ribs) for the optimized design's main wing, write NASTRAN .bdf files, and compute theoretical (no-NASTRAN) deformations/stresses/frequencies as part of a normal Run, populating the Structural Analysis Results tab. This switch controls the downstream structural solve; the configured spars, materials, and gauges still define the main-wing mass centroid used by weight and balance, without replacing the Torenbeek total wing mass."
+        help = "Size a generic wingbox for the optimized wing, write NASTRAN .bdf files and compute theoretical deformations, stresses and frequencies in a normal Run.",
+        long_help = "Size a generic wingbox (skin/spars/ribs) for the optimized design's main wing, write NASTRAN .bdf files, and compute theoretical (no-NASTRAN) deformations/stresses/frequencies as part of a normal Run, populating the Structural Analysis Results tab. This switch controls the downstream structural solve; the configured spars, materials, and gauges still define the main-wing mass centroid used by weight and balance, without replacing the Torenbeek total wing mass."
     )]
     pub enabled: bool,
 
     /// Where each spar sits along the chord.
     #[config(
         label = "Spar chord positions",
-        unit = "x/c",
-        help = "Chordwise position of each spar, as a fraction of local chord (0=leading edge, 1=trailing edge). One entry per spar, any order (sorted automatically). E.g. (0.25, 0.70) is a classic front/rear 2-spar box; add a third entry for a mid-spar."
+        unit = "fraction of chord",
+        help = "Chordwise position of each spar as a fraction of local chord (0 leading edge, 1 trailing edge), one entry per spar in any order.",
+        long_help = "Chordwise position of each spar, as a fraction of local chord (0=leading edge, 1=trailing edge). One entry per spar, any order (sorted automatically). E.g. (0.25, 0.70) is a classic front/rear 2-spar box; add a third entry for a mid-spar."
     )]
     pub spar_chord_fractions: Vec<f64>,
 
@@ -49,21 +50,24 @@ pub struct StructuresConfig {
     #[config(
         options = TeRibMode,
         label = "Trailing-edge rib panel mode",
-        help = "Which ribs get trailing-edge panels (rear-spar to TE), preventing TE buckling: 'all', 'none', 'alternate', 'inboard' (only inboard of the wing break), 'outboard', or 'step_N' (every Nth rib)."
+        help = "Which ribs get trailing-edge panels to prevent TE buckling: 'all', 'none', 'alternate', 'inboard', 'outboard', or 'step_N' (every Nth rib).",
+        long_help = "Which ribs get trailing-edge panels (rear-spar to TE), preventing TE buckling: 'all', 'none', 'alternate', 'inboard' (only inboard of the wing break), 'outboard', or 'step_N' (every Nth rib)."
     )]
     pub te_rib_mode: String,
 
     /// Whether a partial-span third spar runs from the root to the kink.
     #[config(
         label = "Add center spar (root-to-kink)",
-        help = "Adds an optional third spar running only from the root to the wing break/kink station, at center_spar_chord_fraction of local chord: the partial-span reinforcement spar common on widebody wings (extra bending/shear capacity where root load is highest, without the mass of running it all the way to the tip). Off by default (classic 2-spar box). This spar carries no load and contributes no mass outboard of the kink; it simply doesn't exist there."
+        help = "Adds an optional third spar from the root to the wing break, at center_spar_chord_fraction of chord: partial-span reinforcement where root load is highest.",
+        long_help = "Adds an optional third spar running only from the root to the wing break/kink station, at center_spar_chord_fraction of local chord: the partial-span reinforcement spar common on widebody wings (extra bending/shear capacity where root load is highest, without the mass of running it all the way to the tip). Off by default (classic 2-spar box). This spar carries no load and contributes no mass outboard of the kink; it simply doesn't exist there."
     )]
     pub center_spar_enabled: bool,
 
     /// Where that partial-span spar sits along the chord.
     #[config(
+        visible_if(path = "structures.center_spar_enabled", equals = "true"),
         label = "Center spar chord position",
-        unit = "x/c",
+        unit = "fraction of chord",
         help = "Chordwise position of the optional center spar (see center_spar_enabled), as a fraction of local chord. Only used when center_spar_enabled is True."
     )]
     pub center_spar_chord_fraction: f64,
@@ -104,7 +108,8 @@ pub struct StructuresConfig {
     #[config(
         label = "Additional safety factor",
         unit = "-",
-        help = "Extra margin multiplied onto the design loads on top of the CS-25 ultimate load factors already used (DesignRequirements.ultimate_load_factor / limit_load_factor_neg). 1.0 = no extra margin beyond CS-25 ultimate."
+        help = "Extra margin multiplied onto the design loads on top of the CS-25 ultimate load factors (dimensionless). 1.0 means no extra margin beyond CS-25 ultimate.",
+        long_help = "Extra margin multiplied onto the design loads on top of the CS-25 ultimate load factors already used (DesignRequirements.ultimate_load_factor / limit_load_factor_neg). 1.0 = no extra margin beyond CS-25 ultimate."
     )]
     pub additional_safety_factor: f64,
 
@@ -120,7 +125,8 @@ pub struct StructuresConfig {
     #[config(
         label = "Linear beam curvature error budget",
         unit = "fraction",
-        help = "Maximum relative curvature error from neglecting beam rotation, evaluated as (1 + slope squared) to the power 1.5 minus 1. The default 0.05 is a 5% numerical model-validity budget, not a certification deflection limit. It gates the 1 g flight-shape case only: a wing whose 1 g shape is outside this domain requires a geometrically nonlinear structural model and cannot be accepted by this linear analysis. Ultimate tip deflection and curvature are diagnostic; deformation-induced load redistribution still needs separate substantiation. Must be finite and greater than zero."
+        help = "Maximum relative curvature error from neglecting beam rotation, (1 + slope^2)^1.5 - 1.",
+        long_help = "Maximum relative curvature error from neglecting beam rotation, evaluated as (1 + slope squared) to the power 1.5 minus 1. The default 0.05 is a 5% numerical model-validity budget. It gates the 1 g flight-shape case only: a wing whose 1 g shape is outside this domain requires a geometrically nonlinear structural model and cannot be accepted by this linear analysis. Ultimate tip deflection and curvature are diagnostic; deformation-induced load redistribution still needs separate substantiation. Must be finite and greater than zero."
     )]
     pub max_linear_curvature_relative_error: f64,
 
@@ -129,7 +135,8 @@ pub struct StructuresConfig {
     #[config(
         label = "Lower-cover fatigue stress limit (1 g)",
         unit = "Pa",
-        help = "Largest tensile stress the lower wing cover may carry in 1 g level flight, set by the design service life. Torenbeek, Advanced Aircraft Design (2013), section 11.7.1: 75 MPa for riveted skin-stringer 2024-T3 panels of short-range airliners (more than 50 000 flights), 110 MPa for integrally machined long-range panels (about 25 000 flights). The sizing raises the section until the 1 g tensile stress is within it. 0 = no fatigue limit, which is also the value for composite covers, whose damage-tolerance strain limit already applies."
+        help = "Largest tensile stress of the lower wing cover in 1 g flight, set by service life [Pa].",
+        long_help = "Largest tensile stress the lower wing cover may carry in 1 g level flight, set by the design service life. Torenbeek, Advanced Aircraft Design (2013), section 11.7.1: 75 MPa for riveted skin-stringer 2024-T3 panels of short-range airliners (more than 50 000 flights), 110 MPa for integrally machined long-range panels (about 25 000 flights). The sizing raises the section until the 1 g tensile stress is within it. 0 = no fatigue limit, which is also the value for composite covers, whose damage-tolerance strain limit already applies."
     )]
     pub lower_cover_fatigue_stress_1g_pa: f64,
 
@@ -137,7 +144,8 @@ pub struct StructuresConfig {
     #[config(
         label = "Skin gauge",
         unit = "m",
-        help = "Wing skin thickness; this is the value actually used (no shear-flow/buckling upsizing is modeled, see structural_sizing.py), so treat it as a practical starting assumption for this class of aircraft, not a bare absolute-minimum gauge. 6mm matches the reference sizing scripts' own baseline for a large long-range wing; a much thinner value (e.g. 2mm) understates real skin panel buckling resistance and inflates the auto-derived rib count substantially, since rib spacing scales with sqrt(t_skin)."
+        help = "Wing skin thickness actually used [m]. 6 mm matches a large long-range wing.",
+        long_help = "Wing skin thickness; this is the value actually used (no shear-flow/buckling upsizing is modeled, see structural_sizing.py), so treat it as a practical starting assumption for this class of aircraft, not a bare absolute-minimum gauge. 6mm matches the reference sizing scripts' own baseline for a large long-range wing; a much thinner value (e.g. 2mm) understates real skin panel buckling resistance and inflates the auto-derived rib count substantially, since rib spacing scales with sqrt(t_skin)."
     )]
     pub t_skin_min_m: f64,
 
@@ -145,7 +153,8 @@ pub struct StructuresConfig {
     #[config(
         label = "Minimum spar web gauge",
         unit = "m",
-        help = "Floor on spar web thickness. The web is sized for shear, which for a large wing lands below what is practical to manufacture and handle, so the floor rather than the shear calculation is usually what sets it."
+        help = "Floor on spar web thickness [m]. The web is sized for shear, which for a large wing falls below what can be manufactured, so this floor usually sets it.",
+        long_help = "Floor on spar web thickness. The web is sized for shear, which for a large wing lands below what is practical to manufacture and handle, so the floor rather than the shear calculation is usually what sets it."
     )]
     pub t_web_min_m: f64,
 
@@ -169,7 +178,8 @@ pub struct StructuresConfig {
     #[config(
         label = "Cap taper lock station",
         unit = "0-1 of semispan",
-        help = "Spanwise fraction below which spar caps keep their full root section (bending moment is highest inboard, so locking the section here preserves most of the tip-deflection stiffness). Above this station, caps taper linearly down to cap_taper_tip_fraction at the tip."
+        help = "Spanwise fraction below which spar caps keep their full root section (bending is highest inboard).",
+        long_help = "Spanwise fraction below which spar caps keep their full root section (bending moment is highest inboard, so locking the section here preserves most of the tip-deflection stiffness). Above this station, caps taper linearly down to cap_taper_tip_fraction at the tip."
     )]
     pub cap_taper_eta_lock: f64,
 
@@ -183,14 +193,17 @@ pub struct StructuresConfig {
 
     /// Panel-buckling coefficient the rib spacing is derived from.
     #[config(
+        advanced,
         label = "Rib spacing buckling coefficient",
         unit = "-",
-        help = "Empirical panel-buckling coefficient (c) in the Euler skin-panel critical stress formula used to auto-derive rib spacing/count: higher allows wider rib spacing for the same skin thickness."
+        help = "Empirical panel-buckling coefficient in the Euler skin-panel critical stress used to derive rib spacing (dimensionless): higher allows wider rib spacing.",
+        long_help = "Empirical panel-buckling coefficient (c) in the Euler skin-panel critical stress formula used to auto-derive rib spacing/count: higher allows wider rib spacing for the same skin thickness."
     )]
     pub rib_buckling_coeff: f64,
 
     /// Effective radius of gyration of a stiffened skin panel.
     #[config(
+        advanced,
         label = "Stiffened-panel radius of gyration",
         unit = "m",
         help = "Effective radius of gyration of a skin panel stiffened by a stringer, used by the same rib-spacing buckling formula."
@@ -199,6 +212,7 @@ pub struct StructuresConfig {
 
     /// An exact rib count, instead of the derived one.
     #[config(
+        advanced,
         label = "Rib count override",
         help = "Force an exact number of ribs instead of the auto-derived panel-buckling spacing. Leave blank to let the app determine rib count/spacing."
     )]
@@ -206,13 +220,16 @@ pub struct StructuresConfig {
 
     /// How finely the spanwise integrals are sampled.
     #[config(
+        advanced,
         label = "Spanwise integration stations",
-        help = "Number of spanwise points used for load/moment/deflection integration, structural wing-mass centroid integration, and the analytical deformation/stress solver. Higher = smoother curves, slower."
+        help = "Number of spanwise points for load, moment and deflection integration, wing-mass centroid integration and the analytical stress solver. Higher is smoother but slower.",
+        long_help = "Number of spanwise points used for load/moment/deflection integration, structural wing-mass centroid integration, and the analytical deformation/stress solver. Higher = smoother curves, slower."
     )]
     pub spanwise_stations: i64,
 
     /// How finely each rib section is sampled for the mesh.
     #[config(
+        advanced,
         label = "Mesh chordwise points per rib",
         help = "Number of chordwise points sampled per rib cross-section in the FEM mesh."
     )]
@@ -222,7 +239,8 @@ pub struct StructuresConfig {
     #[config(
         hidden,
         label = "NASTRAN executable path",
-        help = "Path (repo-root-relative or absolute) to nastran.exe. Leave blank to only generate .bdf files and use the theoretical (analytical) deformation/stress/frequency estimates, no NASTRAN install is required for that path. Set on Setup > External Tools."
+        help = "Path to nastran.exe (absolute or repo-relative). Blank only writes .bdf files and uses the analytical estimates; no NASTRAN install is needed.",
+        long_help = "Path (repo-root-relative or absolute) to nastran.exe. Leave blank to only generate .bdf files and use the theoretical (analytical) deformation/stress/frequency estimates, no NASTRAN install is required for that path. Set on Workspace > External Tools."
     )]
     pub nastran_exe_path: String,
 
@@ -235,7 +253,8 @@ pub struct StructuresConfig {
     #[config(
         hidden,
         label = "MSC NASTRAN solver override",
-        help = "Optional absolute path to MSC analysis.exe. When set, the NASTRAN launcher receives it as the a.solver keyword. Leave blank for complete installations whose launcher finds its own solver."
+        help = "Optional absolute path to MSC analysis.exe, passed to the NASTRAN launcher as the a.solver keyword. Leave blank when the launcher finds its own solver.",
+        long_help = "Optional absolute path to MSC analysis.exe. When set, the NASTRAN launcher receives it as the a.solver keyword. Leave blank for complete installations whose launcher finds its own solver."
     )]
     pub nastran_solver_path: String,
 
@@ -245,7 +264,8 @@ pub struct StructuresConfig {
     #[config(
         hidden,
         label = "Local NASTRAN-95 directory",
-        help = "Directory containing build/bin/nastran.exe and rf/NASINFO for the local NASA NASTRAN-95 adapter. This is independent of MSC NASTRAN; set it under Setup > External Tools to retain a local SOL 101/SOL 103 comparison across desktop launches."
+        help = "Directory with build/bin/nastran and rf/NASINFO for the local NASA NASTRAN-95 adapter, independent of MSC NASTRAN.",
+        long_help = "Directory containing build/bin/nastran (build/bin/nastran.exe on Windows) and rf/NASINFO for the local NASA NASTRAN-95 adapter. This is independent of MSC NASTRAN; set it under Workspace > External Tools to retain a local SOL 101/SOL 103 comparison across desktop launches."
     )]
     pub nastran95_dir_path: String,
 
@@ -274,7 +294,8 @@ pub struct StructuresConfig {
     #[config(
         hidden,
         label = "NASTRAN-95 open-core words",
-        help = "Optional NASTRAN-95 OCMEM allocation in words. Leave blank to use the full allocation compiled into nastran.exe. Current local builds record that limit beside the executable; rebuild with a larger COMMON /ZZZZZZ/ allocation to solve a larger mesh."
+        help = "Optional NASTRAN-95 OCMEM allocation in words.",
+        long_help = "Optional NASTRAN-95 OCMEM allocation in words. Leave blank to use the full allocation compiled into the NASTRAN-95 executable. Current local builds record that limit beside the executable; rebuild with a larger COMMON /ZZZZZZ/ allocation to solve a larger mesh."
     )]
     pub nastran95_open_core_words: String,
 
@@ -282,7 +303,8 @@ pub struct StructuresConfig {
     #[config(
         hidden,
         label = "Run NASTRAN",
-        help = "Actually invoke nastran_exe_path as a subprocess on the generated .bdf files. On by default: when the executable isn't configured/found, the app still writes valid .bdf files and shows the theoretical (analytical) results only, so leaving this on is always safe. Set on Setup > External Tools."
+        help = "Actually invoke nastran_exe_path on the generated .bdf files.",
+        long_help = "Actually invoke nastran_exe_path as a subprocess on the generated .bdf files. On by default: when the executable isn't configured/found, the app still writes valid .bdf files and shows the theoretical (analytical) results only, so leaving this on is always safe. Set on Workspace > External Tools."
     )]
     pub run_nastran: bool,
 
@@ -310,12 +332,14 @@ pub struct StructuresConfig {
     /// Whether force-PSD random-response RMS is calculated from SOL 111.
     #[config(
         label = "Calculate random-vibration RMS from SOL 111",
-        help = "Integrate the solved unit-force SOL 111 response against the one-sided force PSD below. This produces displacement RMS in metres over the configured frequency sweep; it is not a base-acceleration calculation."
+        help = "Integrate the solved unit-force SOL 111 response against the one-sided force PSD below, giving displacement RMS [m] over the frequency sweep.",
+        long_help = "Integrate the solved unit-force SOL 111 response against the one-sided force PSD below. This produces displacement RMS in metres over the configured frequency sweep; it is not a base-acceleration calculation."
     )]
     pub run_sol_vibration_random: bool,
 
     /// How long one solution may take.
     #[config(
+        advanced,
         label = "NASTRAN timeout per solution",
         unit = "s",
         help = "Max time allowed for one NASTRAN solution (SOL 101/103/111 each run separately) before it's killed."
@@ -333,6 +357,7 @@ pub struct StructuresConfig {
 
     /// How many modes to extract.
     #[config(
+        advanced,
         label = "Number of modes to extract",
         help = "Max structural modes for SOL 103's EIGRL and the analytical Rayleigh-quotient estimate."
     )]
@@ -340,6 +365,7 @@ pub struct StructuresConfig {
 
     /// Top of the frequency sweep.
     #[config(
+        advanced,
         label = "Frequency sweep upper limit",
         unit = "Hz",
         help = "Highest frequency the sine sweep excites. Above the last mode of interest there is nothing left to find, and every extra step costs a solve."
@@ -348,6 +374,7 @@ pub struct StructuresConfig {
 
     /// Frequency sweep increment.
     #[config(
+        advanced,
         label = "Frequency sweep step",
         unit = "Hz",
         help = "Spacing between sweep frequencies. A step coarser than a mode's half-power bandwidth steps over the resonance without seeing it."
@@ -356,6 +383,7 @@ pub struct StructuresConfig {
 
     /// Structural damping assumed for the vibration response.
     #[config(
+        advanced,
         label = "Modal damping ratio",
         unit = "fraction of critical",
         help = "Structural damping assumed for the sine/random vibration response (2% is a common metallic-airframe assumption)."
@@ -364,9 +392,11 @@ pub struct StructuresConfig {
 
     /// The native force-PSD input for random-vibration RMS.
     #[config(
+        advanced,
         label = "Random excitation force PSD",
         unit = "N^2/Hz",
-        help = "One-sided, flat force power spectral density at the engine excitation grid. RMS displacement is integral(|H(f)|^2 S_F df)^(1/2), where H is the solved SOL 111 unit-force receptance. Use the measured or specified PSD for the aircraft; 1 N^2/Hz is the neutral unit-input default."
+        help = "One-sided flat force PSD at the engine excitation grid [N^2/Hz].",
+        long_help = "One-sided, flat force power spectral density at the engine excitation grid. RMS displacement is integral(|H(f)|^2 S_F df)^(1/2), where H is the solved SOL 111 unit-force receptance. Use the measured or specified PSD for the aircraft; 1 N^2/Hz is the neutral unit-input default."
     )]
     pub random_force_psd_n2_per_hz: f64,
 
@@ -382,7 +412,7 @@ pub struct StructuresConfig {
     #[config(
         hidden,
         label = "Patran executable path",
-        help = "Path (repo-root-relative or absolute) to patran.exe. Leave blank to skip, no Patran install is required for anything else in Structural Analysis. Set on Setup > External Tools."
+        help = "Path (repo-root-relative or absolute) to patran.exe. Leave blank to skip, no Patran install is required for anything else in Structural Analysis. Set on Workspace > External Tools."
     )]
     pub patran_exe_path: String,
 
@@ -390,7 +420,8 @@ pub struct StructuresConfig {
     #[config(
         hidden,
         label = "Render Patran deformation plots",
-        help = "After a successful NASTRAN SOL 101 static solve, batch-replay a Patran session per load case to export a deformation-plot PNG (same view MSC Patran's own interactive GUI shows). On by default; needs a real licensed Patran install and launches it as a subprocess per load case (a few seconds each), has no effect when patran_exe_path isn't configured. Requires run_nastran and run_sol_static to both be on. Set on Setup > External Tools."
+        help = "After a successful SOL 101 static solve, replay a Patran session per load case to export a deformation-plot PNG.",
+        long_help = "After a successful NASTRAN SOL 101 static solve, batch-replay a Patran session per load case to export a deformation-plot PNG (same view MSC Patran's own interactive GUI shows). On by default; needs a real licensed Patran install and launches it as a subprocess per load case (a few seconds each), has no effect when patran_exe_path isn't configured. Requires run_nastran and run_sol_static to both be on. Set on Workspace > External Tools."
     )]
     pub run_patran_export: bool,
 }
@@ -399,62 +430,7 @@ fn default_nastran_memory_mb() -> i64 {
     2048
 }
 
-impl Default for StructuresConfig {
-    fn default() -> Self {
-        Self {
-            enabled: true,
-            spar_chord_fractions: vec![0.25, 0.70],
-            te_rib_mode: "all".to_owned(),
-            center_spar_enabled: false,
-            center_spar_chord_fraction: 0.50,
-            skin_material: "Al 7075-T6".to_owned(),
-            spar_web_material: "Al 7075-T6".to_owned(),
-            spar_cap_material: "CFRP UD".to_owned(),
-            rib_material: "Al 7075-T6".to_owned(),
-            additional_safety_factor: 1.0,
-            max_linear_curvature_relative_error: default_linear_curvature_error(),
-            lower_cover_fatigue_stress_1g_pa: 0.0,
-            t_skin_min_m: 0.006,
-            t_web_min_m: 0.002,
-            t_rib_m: 0.004,
-            t_te_strip_m: 0.002,
-            cap_taper_eta_lock: 0.40,
-            cap_taper_tip_fraction: 0.20,
-            rib_buckling_coeff: 1.5,
-            rib_radius_of_gyration_m: 0.030,
-            num_ribs_override: None,
-            spanwise_stations: 200,
-            mesh_chordwise_points: 50,
-            nastran_exe_path: String::new(),
-            nastran_solver_path: String::new(),
-            nastran95_dir_path: String::new(),
-            nastran95_runtime_path: String::new(),
-            nastran95_rf_stage_path: String::new(),
-            nastran95_open_core_words: String::new(),
-            run_nastran: true,
-            run_sol_static: true,
-            run_sol_modes: true,
-            // SOL 111 is part of the default structural response set; the
-            // NASTRAN adapter still honors explicit user/reference limits.
-            run_sol_vibration_sine: true,
-            // A unit force PSD makes SOL 111 immediately observable; a user
-            // can replace it with the aircraft-specific excitation level.
-            run_sol_vibration_random: true,
-            timeout_s: 3600.0,
-            nastran_memory_mb: default_nastran_memory_mb(),
-            // Sixteen modes is the smallest full-mesh NASTRAN-95 request
-            // validated to retain all four active Rayleigh target matches.
-            n_modes: 16,
-            freq_sweep_max_hz: 60.0,
-            freq_step_hz: 1.0,
-            modal_damping_ratio: 0.02,
-            random_force_psd_n2_per_hz: 1.0,
-            psd_base_g2_per_hz: 0.01,
-            patran_exe_path: String::new(),
-            run_patran_export: true,
-        }
-    }
-}
+mod defaults;
 
 fn is_zero_stress(value: &f64) -> bool {
     *value == 0.0

@@ -7,10 +7,12 @@ use alas_config::design_variables::DesignVector;
 use serde::{Deserialize, Serialize};
 
 use super::{
-    BaselineComparison, NoFeasibleDesign, ReportingBaseline, RestorationDiagnostics,
+    BaselineComparison, LadderPhase, NoFeasibleDesign, ReportingBaseline, RestorationDiagnostics,
     StageRejections, StageSummary,
 };
 use crate::history::OptimizationHistory;
+
+mod delivery;
 
 /// One member of a retained multi-objective Pareto set.
 #[derive(Debug, Clone, PartialEq, Serialize, Deserialize)]
@@ -88,7 +90,9 @@ pub struct SearchDiagnostics {
     #[serde(default)]
     pub restoration: Option<RestorationDiagnostics>,
     /// Whether the refinement reached its convergence criterion. A budget,
-    /// time, stagnation or cancellation stop is `false`.
+    /// time, stagnation or cancellation stop is `false`. A search with no
+    /// free design variable that was not cancelled is `true`: it evaluated
+    /// its whole design space.
     pub converged: bool,
     /// Coupled full-fidelity analyses executed by the refinement.
     pub analysis_evaluations: usize,
@@ -154,6 +158,17 @@ pub struct SearchDiagnostics {
     /// unchanged baseline, and must be labelled so.
     #[serde(default)]
     pub baseline_clamped: bool,
+    /// The factor on the selected engine the search's later sized analyses
+    /// started their engine sizing from, and the replays of its finalists
+    /// start from (`SizingControls::initial_engine_factor`); `None` when no
+    /// engine was sized.
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub engine_start: Option<f64>,
+    /// The first-update slope the search's later engine sizings and its
+    /// finalists' replays take (`SizingControls::initial_engine_slope`);
+    /// `None` when fewer than three calibration analyses measured one.
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub engine_slope: Option<f64>,
     /// The history row the winner was analysed in. Its vector can differ
     /// from `best_design` where the evaluator derives a coordinate (the
     /// tail scale of a reference adaptation), so the row is recorded rather
@@ -164,6 +179,16 @@ pub struct SearchDiagnostics {
     /// ([`crate::EvaluationTrace`]).
     #[serde(default)]
     pub evaluation_trace: crate::EvaluationTrace,
+    /// Whether the search ran its own candidate plan to its end: it stopped
+    /// on its evaluation counts or on its own stall or convergence rule, not
+    /// on a clock, a rejection cap or a cancellation. A completed plan is a
+    /// completed search; how far its best design was still moving is
+    /// [`Self::convergence`].
+    #[serde(default)]
+    pub plan_completed: bool,
+    /// How the best design was still moving when the plan ended.
+    #[serde(default)]
+    pub convergence: Option<super::convergence::ConvergenceIndicator>,
 }
 
 /// Termination label for a run whose delivered design was rejected by the
@@ -173,6 +198,16 @@ pub const REPORTING_FIDELITY_REJECTED: &str = "reporting_fidelity_rejected";
 /// Termination label for a run that delivered a verified design other than
 /// the finalist the search's own convergence certificate belongs to.
 pub const REPORTING_FIDELITY_FALLBACK: &str = "reporting_fidelity_fallback";
+
+/// Termination label for a run that delivered the registered aircraft it
+/// started from: no candidate of the search was both verified at reporting
+/// fidelity and at least as good as that aircraft there.
+pub const REGISTERED_DESIGN_RETAINED: &str = "registered_design_retained";
+
+/// Termination label for a run that delivered the start it searched from when
+/// that start is not the registered aircraft (a clean sheet's class-sized or
+/// cabin-sized start): no candidate was verified and at least as good there.
+pub const START_DESIGN_RETAINED: &str = "start_design_retained";
 
 /// Termination label for a search stopped by its caller's cooperative
 /// cancellation flag.
@@ -197,6 +232,19 @@ impl OptimizationResult {
     #[must_use]
     pub fn was_cancelled(&self) -> bool {
         self.termination == CANCELLED
+    }
+
+    /// Whether the search finished the work it set out to do: its
+    /// candidate plan ran to its end ([`SearchDiagnostics::plan_completed`])
+    /// or its convergence criterion was met. A search stopped by a clock, a
+    /// rejection cap or its caller did not.
+    #[must_use]
+    pub fn completed_plan(&self) -> bool {
+        self.converged()
+            || self
+                .search_diagnostics
+                .as_ref()
+                .is_some_and(|diagnostics| diagnostics.plan_completed)
     }
 
     /// Whether the search reported reaching its own convergence criterion.
@@ -301,9 +349,84 @@ pub struct DeliveredAcceptance {
     /// design's trip fuel against it. Absent when it could not be evaluated.
     #[serde(default)]
     pub baseline: Option<ReportingBaseline>,
+    /// The most violated hard constraint of the least-violating design when
+    /// the search found no feasible one. Absent otherwise.
+    #[serde(default)]
+    pub worst_violation: Option<ViolatedConstraint>,
+    /// The ladder's phases and their wall times, in run order. Empty for a
+    /// delivery made without the ladder.
+    #[serde(default)]
+    pub phases: Vec<LadderPhase>,
+}
+
+/// One violated hard constraint: its identifier, the model value against its
+/// limit in the constraint's own unit, and the dimensionless violation the
+/// search ranked it by.
+#[derive(Debug, Clone, PartialEq, Serialize, Deserialize)]
+pub struct ViolatedConstraint {
+    /// Machine-readable constraint identifier.
+    pub id: String,
+    /// Model value of the constrained quantity, in `unit`.
+    pub actual: f64,
+    /// Limit the value is held against, in `unit`.
+    pub limit: f64,
+    /// Unit of `actual` and `limit`.
+    pub unit: String,
+    /// Dimensionless violation (residual over the limit's magnitude).
+    pub normalized_violation: f64,
 }
 
 impl OptimizationResult {
+    /// One line stating why the search found no feasible design: how many
+    /// candidates each hard constraint rejected and, when known, the worst
+    /// violated constraint with its value and limit. `None` when the search
+    /// found a feasible candidate, was cancelled, or evaluated nothing.
+    #[must_use]
+    pub fn infeasibility_summary(&self) -> Option<String> {
+        let evaluated = self.history.n_evaluations();
+        if evaluated == 0 || self.history.n_valid() > 0 || self.was_cancelled() {
+            return None;
+        }
+        let mut counts: std::collections::BTreeMap<&str, usize> = std::collections::BTreeMap::new();
+        for reason in &self.history.reject_reason {
+            for category in reason.split('+').filter(|category| !category.is_empty()) {
+                *counts.entry(category).or_insert(0) += 1;
+            }
+        }
+        let mut ranked: Vec<(&str, usize)> = counts.into_iter().collect();
+        ranked.sort_by(|left, right| right.1.cmp(&left.1).then(left.0.cmp(right.0)));
+        let worst = self
+            .delivered_acceptance
+            .as_ref()
+            .and_then(|acceptance| acceptance.worst_violation.as_ref());
+        let head = match worst {
+            Some(worst) => {
+                let count = ranked
+                    .iter()
+                    .find(|(id, _)| *id == worst.id)
+                    .map_or(0, |(_, count)| *count);
+                format!(
+                    "{} {:.4} {} against {:.4} {} ({count}/{evaluated} candidates)",
+                    worst.id, worst.actual, worst.unit, worst.limit, worst.unit
+                )
+            }
+            None => match ranked.first() {
+                Some((id, count)) => format!("{id} ({count}/{evaluated} candidates)"),
+                None => format!("unclassified ({evaluated}/{evaluated} candidates)"),
+            },
+        };
+        let reasons = ranked
+            .iter()
+            .map(|(id, count)| format!("{id} {count}"))
+            .collect::<Vec<_>>()
+            .join(", ");
+        Some(if reasons.is_empty() {
+            format!("No feasible design: {head}")
+        } else {
+            format!("No feasible design: {head}; rejections: {reasons}")
+        })
+    }
+
     /// Attach the application's reporting-fidelity verdict and make the
     /// run's own convergence label agree with it.
     ///
@@ -330,71 +453,6 @@ impl OptimizationResult {
             diagnostics.converged = diagnostics.converged && certified;
         }
         self.delivered_acceptance = Some(acceptance);
-    }
-
-    /// Hard-feasible candidates from this run's own history, best first, for
-    /// a caller that must re-verify more than the finalist.
-    ///
-    /// Ranked exactly as the search ranks: a candidate with any violated hard
-    /// residual is never offered, so a fallback can only ever be a design the
-    /// search itself considered admissible. `best_design` is placed first
-    /// whatever its history row says, because it is the design the search
-    /// returned, and the winner's own history row is skipped. Duplicate
-    /// vectors are removed on their exact bit pattern so a design is not
-    /// verified twice.
-    pub fn ranked_hard_feasible_candidates(&self, limit: usize) -> Vec<DesignVector> {
-        let winner_row = self
-            .search_diagnostics
-            .as_ref()
-            .and_then(|diagnostics| diagnostics.winner_history_row);
-        let mut ranked: Vec<(usize, f64, DesignVector)> = self
-            .history
-            .design_vectors
-            .iter()
-            .enumerate()
-            // A row with no design (an unparsed candidate) cannot be verified.
-            .filter_map(|(index, design)| design.as_ref().map(|design| (index, design)))
-            .filter(|(index, _)| {
-                Some(*index) != winner_row
-                    && self.history.valid.get(*index).copied().unwrap_or(false)
-                    && self
-                        .history
-                        .hard_violation
-                        .get(*index)
-                        .copied()
-                        .is_some_and(|violation| violation <= 0.0)
-                    && self
-                        .history
-                        .cost
-                        .get(*index)
-                        .copied()
-                        .is_some_and(f64::is_finite)
-            })
-            .map(|(index, design)| (index, self.history.cost[index], *design))
-            .collect();
-        ranked.sort_by(|left, right| left.1.total_cmp(&right.1).then(left.0.cmp(&right.0)));
-
-        let key = |design: &DesignVector| {
-            design
-                .to_array()
-                .iter()
-                .map(|value| value.to_bits())
-                .collect::<Vec<u64>>()
-        };
-        let mut seen = vec![key(&self.best_design)];
-        let mut candidates = vec![self.best_design];
-        for (_, _, design) in ranked {
-            if candidates.len() >= limit.max(1) {
-                break;
-            }
-            let candidate_key = key(&design);
-            if seen.contains(&candidate_key) {
-                continue;
-            }
-            seen.push(candidate_key);
-            candidates.push(design);
-        }
-        candidates
     }
 }
 

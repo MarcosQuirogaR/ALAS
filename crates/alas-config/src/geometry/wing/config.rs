@@ -6,8 +6,10 @@
 use serde::{Deserialize, Serialize};
 
 use super::airfoil_class::AirfoilClass;
+use super::divergence_law::DragDivergenceLaw;
+use super::edge_stations::WingEdgeStation;
 use super::planform::WingSection;
-use super::profile::{WingDihedralStation, WingThicknessStation};
+use super::profile::{WingDihedralStation, WingSectionStation, WingThicknessStation};
 use super::reference::ReferenceWingConfig;
 use super::smooth::WingProfileInterpolation;
 use crate::ConfigNode;
@@ -54,7 +56,8 @@ pub struct WingConfig {
     #[config(
         label = "Wing tip rise in flight",
         unit = "0-1 of semispan",
-        help = "How far the wing tip rises from the static ground shape (the heights above, as the ground-clearance tables measure them at maximum ramp weight) to the 1 g flight shape, as a fraction of the semispan. The aerodynamics and the dihedral checks use the flight shape; ground clearance uses the heights above. Leave unset when one shape serves both."
+        help = "Rise of the wing tip from the static ground shape to the 1 g flight shape, as a fraction of semispan.",
+        long_help = "How far the wing tip rises from the static ground shape (the heights above, as the ground-clearance tables measure them at maximum ramp weight) to the 1 g flight shape, as a fraction of the semispan. The aerodynamics and the dihedral checks use the flight shape; ground clearance uses the heights above. Leave unset when one shape serves both."
     )]
     pub flight_tip_rise_semispan_fraction: Option<f64>,
 
@@ -63,7 +66,8 @@ pub struct WingConfig {
     #[config(
         hidden,
         unit = "m",
-        help = "Optional rise of the wing-root height from the static ground shape to the 1 g flight shape, metres; the flight height polyline then starts at the raised root. Unset keeps the root where the ground shape has it."
+        help = "Optional rise of the wing-root height from the static ground shape to the 1 g flight shape [m]; the flight height polyline starts at the raised root.",
+        long_help = "Optional rise of the wing-root height from the static ground shape to the 1 g flight shape, metres; the flight height polyline then starts at the raised root. Unset keeps the root where the ground shape has it."
     )]
     pub flight_root_rise_m: Option<f64>,
 
@@ -71,7 +75,8 @@ pub struct WingConfig {
     #[serde(default, skip_serializing_if = "is_false")]
     #[config(
         hidden,
-        help = "When set, the nacelles hang from the static ground-shape wing in the flight shape too, as the manufacturer front views and clearance tables draw them, instead of rising with the flight rise of the wing."
+        help = "When set, nacelles hang from the static ground-shape wing in the flight shape too, as manufacturer front views draw them, instead of rising with the wing.",
+        long_help = "When set, the nacelles hang from the static ground-shape wing in the flight shape too, as the manufacturer front views and clearance tables draw them, instead of rising with the flight rise of the wing."
     )]
     pub nacelles_hold_ground_height: bool,
 
@@ -152,7 +157,8 @@ pub struct WingConfig {
     #[config(
         hidden,
         unit = "deg",
-        help = "Optional leading-edge sweep of the inboard panel (centreline to kink), degrees. When unset the design-vector sweep runs straight from the centreline to the tip. Read only with a side-of-body or kink station."
+        help = "Optional leading-edge sweep of the inboard panel (centreline to kink) [deg]. Unset runs the design-vector sweep straight to the tip.",
+        long_help = "Optional leading-edge sweep of the inboard panel (centreline to kink), degrees. When unset the design-vector sweep runs straight from the centreline to the tip. Read only with a side-of-body or kink station."
     )]
     pub inboard_le_sweep_deg: Option<f64>,
 
@@ -161,9 +167,25 @@ pub struct WingConfig {
     #[config(
         hidden,
         unit = "m",
-        help = "Optional chord at the extreme wing tip of a swept-back tip, metres. The design-vector tip chord is then the chord the straight leading and trailing edges would reach at the tip; from the rake start the leading edge sweeps further aft while the trailing edge stays one straight line, so the tip chord shrinks to this value."
+        help = "Optional chord at the extreme tip of a swept-back tip [m].",
+        long_help = "Optional chord at the extreme wing tip of a swept-back tip, metres. The design-vector tip chord is then the chord the straight leading and trailing edges would reach at the tip; from the rake start the leading edge sweeps further aft while the trailing edge stays one straight line, so the tip chord shrinks to this value. With a rake reference tip chord the value holds at that tip chord and keeps its ratio to the design-vector tip chord elsewhere."
     )]
     pub tip_rake_tip_chord_m: Option<f64>,
+
+    /// Straight-edge tip chord the swept-back tip chord was read against.
+    ///
+    /// The rake is a feature of the tip: a candidate tip chord `c_t` gives the rake chord
+    /// `tip_rake_tip_chord_m * c_t / reference`, exactly the configured chord at
+    /// `c_t == reference`. Unset keeps the configured chord absolute, and a candidate whose
+    /// tip chord falls to it is refused. The preset registry sets it to each preset's own
+    /// design-vector tip chord.
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    #[config(
+        hidden,
+        unit = "m",
+        help = "Optional straight-edge tip chord the swept-back tip chord was read against [m]; the rake chord then keeps its ratio to the design-vector tip chord."
+    )]
+    pub tip_rake_reference_tip_chord_m: Option<f64>,
 
     /// Where the swept-back tip rake starts.
     #[serde(default, skip_serializing_if = "Option::is_none")]
@@ -173,11 +195,59 @@ pub struct WingConfig {
     )]
     pub tip_rake_start_span_fraction: Option<f64>,
 
+    /// Where the outboard trailing edge breaks (the drawn wing has a bulge of chord there).
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    #[config(
+        hidden,
+        help = "Optional span fraction of an outboard trailing-edge break between kink and tip (with the break chord offset).",
+        long_help = "Optional span fraction of an outboard trailing-edge break between the kink and the tip (used with the break chord offset). The leading edge stays on the straight outboard line; the trailing edge passes through the break station and then runs straight to the tip."
+    )]
+    pub te_break_span_fraction: Option<f64>,
+
+    /// Chord added at the trailing-edge break to the straight kink-to-tip chord.
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    #[config(
+        hidden,
+        unit = "m",
+        help = "Optional extra chord at the outboard trailing-edge break [m], added to the straight kink-to-tip chord (positive moves the trailing edge aft).",
+        long_help = "Optional extra chord, metres, at the outboard trailing-edge break: the chord there is the straight kink-to-tip taper chord plus this offset (positive moves the trailing edge aft). Needs the break span fraction; the reference wing and the reference area stay on the straight outboard lines."
+    )]
+    pub te_break_chord_offset_m: Option<f64>,
+
+    /// Span fraction of a second trailing-edge break, outboard of the first.
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    #[config(
+        hidden,
+        help = "Optional span fraction of a second outboard trailing-edge break, outboard of the first and inboard of the tip rake (with its chord offset).",
+        long_help = "Optional span fraction of a second outboard trailing-edge break, outboard of the first break and inboard of the tip rake (used with its chord offset). Together the two breaks draw the trailing edge as a polyline."
+    )]
+    pub te_break_2_span_fraction: Option<f64>,
+
+    /// Chord added at the second trailing-edge break to the straight kink-to-tip chord.
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    #[config(
+        hidden,
+        unit = "m",
+        help = "Optional extra chord at the second outboard trailing-edge break [m], added to the straight kink-to-tip chord (positive moves the trailing edge aft).",
+        long_help = "Optional extra chord, metres, at the second outboard trailing-edge break (straight kink-to-tip taper chord plus this offset; positive moves the trailing edge aft). Needs the second break span fraction."
+    )]
+    pub te_break_2_chord_offset_m: Option<f64>,
+
+    /// Local offsets of the drawn leading and trailing edges at chosen span stations.
+    #[serde(default, skip_serializing_if = "Vec::is_empty")]
+    #[config(
+        hidden,
+        help = "Optional stations that offset the drawn leading and trailing edges from their straight lines: an inboard trailing-edge break, a leading-edge fillet, a curved raked tip.",
+        long_help = "Optional stations that offset the drawn leading and trailing edges from the straight lines through the defining stations, metres, positive aft: an inboard trailing-edge break, a leading-edge fillet at the side of body, a curved raked tip. The wing's edges stay on their longest straight inboard runs, so a fillet is a blend body: its stations set the drawn area and the drawn blend, not the wing, the centre box or the tanks. The reference trapezoid and the published reference wing stay on the straight outboard lines."
+    )]
+    pub edge_stations: Vec<WingEdgeStation>,
+
     /// Which wing the reference area, span, MAC and MAC leading edge describe.
     #[serde(default, skip_serializing_if = "ReferenceWingConfig::is_default")]
     #[config(
         hidden,
-        help = "Reference-wing convention: Drawn (default) quotes S_ref, b_ref, MAC and the MAC leading edge on the drawn planform; Trapezoid quotes them on the manufacturer reference trapezoid made by extending the outboard panel leading and trailing edges to the centreline. Wetted area and the lattice panels always use the drawn planform. An optional published reference area is checked against the trapezoid (warning above 1 %)."
+        help = "Reference-wing convention: Drawn quotes S_ref, b_ref and MAC on the drawn planform; Trapezoid on the manufacturer reference trapezoid.",
+        long_help = "Reference-wing convention: Drawn (default) quotes S_ref, b_ref, MAC and the MAC leading edge on the drawn planform; Trapezoid quotes them on the manufacturer reference trapezoid made by extending the outboard panel leading and trailing edges to the centreline. Wetted area and the lattice panels always use the drawn planform. An optional published reference area is checked against the trapezoid (warning above 1 %)."
     )]
     pub reference_wing: ReferenceWingConfig,
 
@@ -204,6 +274,14 @@ pub struct WingConfig {
         help = "Optional stations scaling the section thickness along the span so a thick root falls to a thin outer wing (see WingThicknessStation)."
     )]
     pub thickness_stations: Vec<WingThicknessStation>,
+
+    /// Interior span stations naming the section the loft carries there.
+    #[serde(default, skip_serializing_if = "Vec::is_empty")]
+    #[config(
+        hidden,
+        help = "Optional interior stations naming the wing section at each; the loft blends between them, with the root and tip airfoils at the ends (see WingSectionStation)."
+    )]
+    pub section_stations: Vec<WingSectionStation>,
 
     /// How the dihedral, twist and thickness stations are interpolated.
     #[serde(default, skip_serializing_if = "WingProfileInterpolation::is_linear")]
@@ -240,7 +318,8 @@ pub struct WingConfig {
     #[serde(default)]
     #[config(
         hidden,
-        help = "Declared section technology of the main wing (conventional or supercritical), which fixes the Korn technology factor: 0.87 conventional, 0.95 supercritical (Mason, Configuration Aerodynamics, ch. 7; Malone and Mason 1995)."
+        help = "Declared section generation of the main wing: conventional, peaky, supercritical or supercritical_advanced. It sets the compressibility-drag level of the wing.",
+        long_help = "Declared section generation of the main wing, which sets the crest-critical Mach increment of the Shevell-Kroo compressibility-drag method over its chart for peaky sections: conventional -0.04 (NACA 6-series era), peaky 0 (1960s jet transports), supercritical +0.035 (first flown from the middle of the 1970s to the end of the 1990s), supercritical_advanced +0.06 (first flown from 2000 on); Kroo, Aircraft Design: Synthesis and Analysis, sec. 4.3; Shevell 1980; Torenbeek 1982. Under Korn's relation it fixes the technology factor instead: 0.87 conventional and peaky, 0.95 supercritical (Mason, Configuration Aerodynamics, ch. 7)."
     )]
     pub airfoil_class: AirfoilClass,
 
@@ -259,6 +338,18 @@ pub struct WingConfig {
     )]
     pub korn_technology_factor_override: Option<f64>,
 
+    /// Which drag-divergence relation the wing takes (see
+    /// [`DragDivergenceLaw`]). `Auto` is the section-class rule; an explicit
+    /// law holds whatever the class. Not serialized while `Auto`.
+    #[serde(default, skip_serializing_if = "DragDivergenceLaw::is_auto")]
+    #[config(
+        options = DragDivergenceLaw,
+        label = "Drag-divergence law",
+        help = "Wing compressibility-drag method: auto and shevell take Shevell-Kroo, korn Korn's relation, torenbeek1048 Torenbeek's Eq. 10.48 (both with the Lock rise).",
+        long_help = "Method that gives the compressibility drag of the wing. Auto takes the Shevell-Kroo method: the crest-critical Mach number from the mean thickness ratio, lift coefficient and quarter-chord sweep with the increment of the declared section generation, the divergence Mach number M_cc (1.02 + 0.08 (1 - cos sweep)) and Shevell's drag curve 0.0019 cos^3 (M / M_cc)^14.641, which carries the drag creep below divergence (Kroo, Aircraft Design: Synthesis and Analysis, sec. 4.3; coefficients as in SUAVE). A wing with a Korn factor override takes Korn's relation with that factor. Shevell, korn and torenbeek1048 select one method whatever else is declared; korn (Mason, Configuration Aerodynamics, ch. 7) and torenbeek1048 (Advanced Aircraft Design, 2013, p. 302, M* = 0.935) give a drag-divergence Mach number that starts the Lock rise. Only Korn's relation has a Korn factor, and Eq. 10.48's M* is stated for supercritical sections only; both cases are reported as warnings."
+    )]
+    pub drag_divergence_law: DragDivergenceLaw,
+
     /// Optional user-defined stations lofted between the defining planform
     /// edges. Preset geometry remains locked by the application while this
     /// list is available for a clean-sheet/custom geometry configuration.
@@ -272,7 +363,8 @@ pub struct WingConfig {
     /// How many spanwise panels the whole wing semispan is meshed into.
     #[config(
         label = "Wing VLM panel count",
-        help = "Spanwise panels across the whole wing semispan for the vortex-lattice solver. This is an absolute count, not a count per section: a planform with a side-of-body station and a kink gets the same mesh density as one without, and adding a station no longer changes the panel count underneath a search. Every planform station (root, side-of-body, kink, tip) is always kept as a panel edge whatever the count, so refining the mesh never averages a kink away. The default of 24 is converged: a twelve-fold refinement moves the trimmed cruise attitude by 0.01 deg."
+        help = "Spanwise vortex-lattice panels across the whole wing semispan, as an absolute count. Every planform station stays a panel edge.",
+        long_help = "Spanwise panels across the whole wing semispan for the vortex-lattice solver. This is an absolute count, not a count per section: a planform with a side-of-body station and a kink gets the same mesh density as one without, and adding a station no longer changes the panel count underneath a search. Every planform station (root, side-of-body, kink, tip) is always kept as a panel edge whatever the count, so refining the mesh never averages a kink away. The default of 24 is converged: a twelve-fold refinement moves the trimmed cruise attitude by 0.01 deg."
     )]
     pub n_subdivisions: i64,
 }
@@ -307,16 +399,24 @@ impl Default for WingConfig {
             outboard_le_sweep_deg: None,
             inboard_le_sweep_deg: None,
             tip_rake_tip_chord_m: None,
+            tip_rake_reference_tip_chord_m: None,
             tip_rake_start_span_fraction: None,
+            te_break_span_fraction: None,
+            te_break_chord_offset_m: None,
+            te_break_2_span_fraction: None,
+            te_break_2_chord_offset_m: None,
+            edge_stations: Vec::new(),
             reference_wing: ReferenceWingConfig::default(),
             wingtip_device: None,
             dihedral_stations: Vec::new(),
             thickness_stations: Vec::new(),
+            section_stations: Vec::new(),
             wing_profile_interpolation: WingProfileInterpolation::Linear,
             root_airfoil: "SC2-0714".to_owned(),
             tip_airfoil: "naca2410".to_owned(),
             airfoil_class: AirfoilClass::Supercritical,
             korn_technology_factor_override: None,
+            drag_divergence_law: DragDivergenceLaw::Auto,
             custom_sections: Vec::new(),
             n_subdivisions: 24,
         }

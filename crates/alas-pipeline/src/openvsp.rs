@@ -47,7 +47,7 @@ use alas_exec::process::{
 use alas_geom::aircraft::airplane::Airplane;
 use alas_geom::aircraft::fuselage::Fuselage;
 use alas_geom::aircraft::wing::{Wing, WingXSec};
-use alas_perf::landing_gear::{size_landing_gear_with_group_stations, LandingGearLayout};
+use alas_perf::landing_gear::{size_landing_gear_at_design_state, LandingGearLayout};
 
 use crate::full_analysis::AnalysisReport;
 use crate::gear_stations::resolved_gear_stations;

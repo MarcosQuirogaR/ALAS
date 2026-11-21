@@ -599,7 +599,7 @@ fn a320() -> (&'static alas_config::presets::AircraftPreset, Fuselage) {
 
 #[test]
 fn loft_from_legacy_a320_stays_inside_the_design_tolerances() {
-    let (preset, legacy) = a320();
+    let (preset, _) = a320();
     let config = &preset.geometry.fuselage;
     let length = preset.design_vector.fuselage_length_m;
     let fit = from_legacy(config, length).unwrap();
@@ -617,7 +617,7 @@ fn loft_from_legacy_a320_stays_inside_the_design_tolerances() {
     // Fairness: absolute counts. Plan and keel are clean; the crown keeps two
     // faint sign changes (curvature radius above 30 m, millimetres of sag)
     // where the C2 rounding of the radome-to-windshield curvature step
-    // overshoots. Target was 0; see the lane report.
+    // overshoots. Target was 0;
     let fairness = loft.fairness();
     let count = |name: &str| fairness.line(name).unwrap().inflections;
     assert_eq!(count("plan"), 0, "{:?}", fairness.lines);
@@ -636,7 +636,16 @@ fn loft_from_legacy_a320_stays_inside_the_design_tolerances() {
     // Wetted area: exact loft vs exact legacy law vs legacy trapezoid.
     let exact = loft.wetted_area();
     let law = legacy_law_mesh_area(config, length);
-    let trapezoid = legacy.area_wetted();
+    // The same body as the loft was fitted to: the generated-law fuselage (the preset's own
+    // data-file loft, `legacy` above, is a different body and moves with every refit).
+    let trapezoid = {
+        let mut geometry = preset.geometry.clone();
+        geometry.fuselage.loft = None;
+        let plane = AircraftBuilder::new(Some(geometry))
+            .build(Some(&preset.design_vector), false)
+            .unwrap();
+        plane.fuselages[0].area_wetted()
+    };
     let base = loft.base_area();
     assert!(
         (exact - law).abs() / law < 0.01,
@@ -646,8 +655,9 @@ fn loft_from_legacy_a320_stays_inside_the_design_tolerances() {
         exact > trapezoid,
         "exact {exact} should exceed the trapezoid {trapezoid}"
     );
-    // Measured 2026-10-11: exact 412.53 m2, law mesh 412.42, trapezoid 407.80
-    // (+1.16 %, the axial slope the trapezoid omits plus the C2 rounding).
+    // Measured: exact 412.53 m2, law mesh 412.42, trapezoid 407.80
+    // (+1.16 %, the axial slope the trapezoid omits plus the C2 rounding); the same on the
+    // generated-law fuselage with the loft cleared: 412.530 / 407.800 = 1.0116.
     let ratio = exact / trapezoid;
     assert!(ratio > 1.005 && ratio < 1.02, "exact / trapezoid = {ratio}");
     assert!(base > 0.2 && base < 0.5, "tail base area {base}");

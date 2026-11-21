@@ -14,4 +14,4 @@ mod geometry;
 #[cfg(test)]
 mod tests;
 
-pub use figure::figure_control_surfaces;
+pub use figure::{figure_control_surfaces, figure_control_surfaces_sized};

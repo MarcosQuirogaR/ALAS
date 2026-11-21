@@ -2,8 +2,8 @@
 // Copyright (C) 2026 Marcos Quiroga Rodriguez
 
 use super::metrics::{
-    fuel_margin_rows, mass_metrics, mass_triplet_kg, mtow_band_row, payload_summary_metrics,
-    static_margin_rows, takeoff_mass_margin, takeoff_mass_rows,
+    fuel_margin_rows, mass_metrics, mass_triplet_kg, mtow_band_row, neutral_point_pct_mac,
+    payload_summary_metrics, static_margin_rows, takeoff_mass_margin, takeoff_mass_rows,
 };
 use super::propulsion::{
     localized_propulsion_label, propulsion_metric_card, propulsion_summary_entries,
@@ -14,6 +14,9 @@ use alas_payload::layout::{LayoutSummary, PassengerSummary, PayloadLayout};
 use alas_pipeline::feasibility::MissionFuelStatus;
 
 use egui::{Context, FontFamily, RawInput, Shape};
+
+#[path = "../../../../../alas-testkit/fixtures/open_ground.rs"]
+mod open_ground;
 
 fn collect_text_families(shape: &Shape, families: &mut Vec<(String, FontFamily)>) {
     match shape {
@@ -48,10 +51,12 @@ fn propulsion_cards_follow_the_proportional_ui_font_family() {
         collect_text_families(&shape.shape, &mut families);
     }
 
-    for label in ["Thermal efficiency (eta_t)", "\u{03b7}\u{209c} = 0.42"] {
+    // The label's `eta_t` is drawn as notation (a Greek letter with a
+    // subscript run), so the label is found by its prose.
+    for label in ["Thermal efficiency", "\u{03b7}\u{209c} = 0.42"] {
         let family = families
             .iter()
-            .find(|(text, _)| text == label)
+            .find(|(text, _)| text.starts_with(label))
             .unwrap_or_else(|| panic!("missing rendered summary text: {label}"))
             .1
             .clone();
@@ -66,6 +71,8 @@ fn passenger_layout() -> PayloadLayout {
         total_mass: 21_000.0,
         cg_x: 10.0,
         cg_y: 0.0,
+        balance: None,
+        all_coach_capacity: None,
         summary: LayoutSummary::Passenger(Box::new(PassengerSummary {
             total_pax: 204,
             seated_pax: 198,
@@ -75,6 +82,7 @@ fn passenger_layout() -> PayloadLayout {
             galleys: 3,
             accessible_lavatories: 1,
             wheelchair_stowages: 1,
+            dropped_monuments: Vec::new(),
             exit_type: "A",
             exit_pairs: 4,
             exit_capacity: 220,
@@ -90,6 +98,7 @@ fn passenger_layout() -> PayloadLayout {
             hold_capacity_t: 8.0,
             hold_used_t: 3.5,
             hold_ulds: 5,
+            hold_capacity: alas_payload::cargo::CargoCapacity::default(),
             forward_hold_baggage_fraction: 0.55,
             hold_compartment_masses_kg: vec![
                 ("Forward hold".to_owned(), 1.9),
@@ -102,6 +111,7 @@ fn passenger_layout() -> PayloadLayout {
             deck_utilization: vec![("main", 0.82)],
             cg_pct_mac: 25.4,
             double_deck: false,
+            min_cabin_crew: 0,
         })),
     }
 }
@@ -152,6 +162,16 @@ fn static_margins_are_shown_together_in_percent_mac_with_an_explicit_missing_cas
     let rows = static_margin_rows(Some(0.052), None);
     assert_eq!(rows[1].0, "Static margin (optimized)");
     assert_eq!(rows[1].1, "No optimized design in this run");
+}
+
+#[test]
+fn neutral_point_stations_are_shown_as_percent_mac_from_the_mac_leading_edge() {
+    // A station a quarter chord behind the MAC leading edge is 25 % MAC.
+    assert!((neutral_point_pct_mac(10.0, 8.0, 8.0) - 25.0).abs() < 1e-12);
+    // Ahead of the leading edge is negative.
+    assert!((neutral_point_pct_mac(7.0, 8.0, 8.0) + 12.5).abs() < 1e-12);
+    // No chord, no percentage.
+    assert!(neutral_point_pct_mac(10.0, 8.0, 0.0).is_nan());
 }
 
 #[test]
@@ -287,6 +307,10 @@ fn seeded_a220(mode: alas_config::MtowSizing) -> alas_pipeline::PipelineResult {
         .try_into()
         .unwrap_or(1);
     config.structures.enabled = false;
+    // Open ground at the preset's own departure: no curated survey
+    // certifies a take-off obstacle clearance, so no candidate at EVRA is
+    // feasible (see the fixture's documentation).
+    open_ground::open_ground_at_own_departure(&mut config);
     // The checks are about numbers flowing consistently between stages, not
     // about any aerodynamic value, so the run uses the draft analysis
     // resolution (only its five resolution fields, leaving tuned assumptions
@@ -439,13 +463,13 @@ fn propulsion_summary_uses_existing_spanish_cycle_labels() {
 
 #[test]
 fn incomplete_snapshots_never_receive_a_feasibility_verdict() {
-    assert_eq!(status_banner_title(false, 0, 0), "Assessment incomplete");
-    assert_ne!(
-        status_banner_title(false, 0, 0),
-        "Feasible under implemented checks"
-    );
-    assert_eq!(
-        status_banner_title(true, 0, 0),
-        "Feasible under implemented checks"
-    );
+    use alas_pipeline::DeliveryVerdict;
+    for verdict in [
+        DeliveryVerdict::AcceptedFeasible,
+        DeliveryVerdict::DiagnosticIncumbent,
+        DeliveryVerdict::NotAcceptedUnverifiedMission,
+    ] {
+        assert_eq!(status_banner_title(false, verdict), "Assessment incomplete");
+        assert_eq!(status_banner_title(true, verdict), verdict.label());
+    }
 }

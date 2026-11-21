@@ -16,7 +16,7 @@
 //! | Fuselage + paint (eqs. 56, 68) | `fuselage` |
 //! | Installed propulsion + **nacelles** (eqs. 73-92, 136) | `propulsion` |
 //! | Systems and equipment less furnishings (eq. 138) | `systems` |
-//! | Furnishings `WFURN` (regional turboprop: Torenbeek group less the other eight terms) + operating items `WOPIT` (eqs. 138, 140) | `furnishings` |
+//! | Furnishings `WFURN` (regional turboprop: Torenbeek group less the other eight terms; executive jet: Torenbeek Table 8-12) + operating items `WOPIT` (eqs. 138, 140) | `furnishings` |
 //! | Empty-mass margin `WMARG` (eq. 139) | `systems` |
 //!
 //! **Nacelles are charged to `propulsion` and to nothing else.** FLOPS prints
@@ -32,9 +32,10 @@ use alas_config::{
 use alas_geom::aircraft::airplane::Airplane;
 
 use crate::flops_transport::{
-    evaluate_airframe_product, evaluate_product_at_design_gross_mass, FlopsAirframeBreakdown,
-    FlopsAirframeEvaluation, FlopsAirframeRequest, FlopsAirframeSelection, FlopsTransportBreakdown,
-    FlopsTransportEvaluation, FlopsTransportInputs, PartialFlopsTransportBreakdown,
+    estimate_flops_transport, evaluate_airframe_product, evaluate_product_at_design_gross_mass,
+    FlopsAirframeBreakdown, FlopsAirframeEvaluation, FlopsAirframeRequest, FlopsAirframeSelection,
+    FlopsTransportBreakdown, FlopsTransportEvaluation, FlopsTransportInputs,
+    FlopsTransportUnverifiedReason, PartialFlopsTransportBreakdown,
 };
 
 use super::{ComponentMassError, MassBreakdown, OEW_KEYS};
@@ -46,7 +47,7 @@ use super::{ComponentMassError, MassBreakdown, OEW_KEYS};
 /// from the configuration rather than from what was evaluated. Returning them
 /// together is what lets the item-level statement be built from the same
 /// evaluation the breakdown came from instead of a second, independent one.
-#[derive(Debug, Clone, PartialEq)]
+#[derive(serde::Serialize, serde::Deserialize, Debug, Clone, PartialEq)]
 pub struct FlopsMassBuildup {
     /// The eight operating-empty slots plus payload and the fuel remainder.
     pub masses: MassBreakdown,
@@ -120,7 +121,7 @@ pub(super) fn build_pure_flops(
     // The systems group reads the same design gross mass as the airframe:
     // a declared `flops_structure.design_gross_mass_kg` pins both, otherwise
     // both size at the takeoff-mass requirement of the case being evaluated.
-    let (groups, inputs, provenance) = match evaluate_product_at_design_gross_mass(
+    let (mut groups, mut inputs, provenance) = match evaluate_product_at_design_gross_mass(
         plane,
         requirements,
         geometry,
@@ -129,12 +130,13 @@ pub(super) fn build_pure_flops(
         &mass_model.flops_transport,
         &mass_model.flops_turboprop,
         mass_model.flops_structure.design_gross_mass_kg,
+        mass_model.flops_structure.military_cargo_floor,
     ) {
         FlopsTransportEvaluation::Verified {
             inputs,
             provenance,
             breakdown,
-        } => (breakdown, inputs, provenance),
+        } => (breakdown, *inputs, provenance),
         FlopsTransportEvaluation::Unverified { reasons, partial } => {
             return Err(ComponentMassError::FlopsUnverified {
                 reasons,
@@ -146,7 +148,7 @@ pub(super) fn build_pure_flops(
     // Both groups, always. The detailed wing method needs the systems group
     // for its pod inertia relief, which is why the systems buildup is
     // evaluated first and handed in rather than recomputed.
-    let airframe = match evaluate_airframe_product(&FlopsAirframeRequest {
+    let mut airframe = match evaluate_airframe_product(&FlopsAirframeRequest {
         plane,
         requirements,
         geometry,
@@ -158,6 +160,10 @@ pub(super) fn build_pure_flops(
             structure: true,
             propulsion: true,
         },
+        main_deck_freighter: crate::flops_transport::military_cargo::carries_main_deck_freight(
+            requirements,
+            cabin,
+        ),
     }) {
         FlopsAirframeEvaluation::Verified(airframe) => airframe,
         FlopsAirframeEvaluation::Unverified { reasons } => {
@@ -167,6 +173,18 @@ pub(super) fn build_pure_flops(
             });
         }
     };
+    // A military transport's fuselage-mounted gear is priced by the Beltramo
+    // military class relation instead of equations 63-64 (`military_gear`).
+    crate::flops_transport::military_gear::apply_military_gear(
+        &mut airframe,
+        cabin,
+        geometry,
+        crate::flops_transport::military_gear::MilitaryGearFeatures {
+            carbon_brakes: mass_model.flops_structure.main_gear_carbon_brakes,
+            low_pressure_tyres: mass_model.flops_structure.main_gear_low_pressure_tyres,
+            kneeling_main_gear: mass_model.flops_structure.main_gear_kneeling,
+        },
+    );
 
     // Asking for both groups and being handed one would mean the evaluator
     // reported success for a selection it did not honour. Refuse rather than
@@ -176,6 +194,27 @@ pub(super) fn build_pure_flops(
     let Some(structure) = airframe.structure else {
         return Err(ComponentMassError::FlopsIncompleteAirframe);
     };
+    // A civil main-deck freighter's doors, freight floor and handling system
+    // sit where the hardware is, not at the group stations.
+    if crate::flops_transport::military_cargo::carries_main_deck_freight(requirements, cabin) {
+        use crate::flops_transport::{main_deck_freight, military_cargo};
+        groups.main_deck_freight =
+            crate::flops_transport::product::primary_fuselage(plane).and_then(|fuselage| {
+                main_deck_freight::main_deck_freight_placement(
+                    fuselage,
+                    geometry,
+                    cabin,
+                    structure.fuselage_kg,
+                    military_cargo::MAIN_DECK_CARGO_DOOR_FUSELAGE_FRACTION,
+                    crate::flops_transport::structure::pressurized_fuselage::cabin_pressure_differential_pa(
+                        mass_model
+                            .flops_structure
+                            .maximum_operating_altitude_m
+                            .unwrap_or(requirements.cruise_altitude_m),
+                    ),
+                )
+            });
+    }
     let propulsion_without_nacelles_kg = match (
         airframe.propulsion.as_ref(),
         airframe.turboprop_propulsion.as_ref(),
@@ -186,6 +225,47 @@ pub(super) fn build_pure_flops(
             return Err(ComponentMassError::FlopsIncompleteAirframe)
         }
     };
+
+    // Torenbeek's executive flight-deck term (1982, Table 8-12, p. 291) reads
+    // the delivery empty mass this buildup produces, so it is iterated to its
+    // fixed point (d term / d W_DE is about 0.009). The airframe reads none of
+    // the furnishings and is not re-evaluated.
+    if inputs.executive_cabin.is_some() {
+        let airframe_kg = structure.wing.total_kg
+            + structure.horizontal_tail_kg
+            + structure.vertical_tail_kg
+            + structure.fuselage_kg
+            + structure.paint_kg
+            + structure.main_gear_kg
+            + structure.nose_gear_kg
+            + structure.nacelle_kg
+            + propulsion_without_nacelles_kg;
+        let margin = 1.0
+            + mass_model
+                .flops_structure
+                .empty_mass_margin_fraction
+                .max(0.0);
+        let freight = groups.main_deck_freight.take();
+        for _ in 0..8 {
+            let empty_kg = margin * (airframe_kg + groups.systems.total_kg);
+            let previous = inputs
+                .executive_cabin
+                .and_then(|cabin| cabin.delivery_empty_mass_kg);
+            if previous.is_some_and(|kg| (kg - empty_kg).abs() < 1e-9) {
+                break;
+            }
+            if let Some(cabin) = inputs.executive_cabin.as_mut() {
+                cabin.delivery_empty_mass_kg = Some(empty_kg);
+            }
+            groups = estimate_flops_transport(&inputs).map_err(|_| {
+                ComponentMassError::FlopsUnverified {
+                    reasons: vec![FlopsTransportUnverifiedReason::InvalidResolvedInput],
+                    partial: Box::new(PartialFlopsTransportBreakdown::default()),
+                }
+            })?;
+        }
+        groups.main_deck_freight = freight;
+    }
 
     let mut masses = MassBreakdown {
         wing: structure.wing.total_kg,
@@ -279,6 +359,7 @@ mod tests {
         let mass_model = MassModelConfig {
             mass_architecture: MassArchitecture::PureFlopsTransportV1,
             flops_transport: FlopsTransportConfig {
+                manual_cabin_inputs: false,
                 maximum_mach: Some(0.89),
                 design_range_nmi: Some(7_000.0),
                 flight_crew_count: Some(2),
@@ -294,11 +375,14 @@ mod tests {
                 fuel_tank_count: Some(6),
                 maximum_fuel_capacity_kg: Some(220_000.0),
                 apu_installed: true,
+                bleed_air_system: true,
                 containerized_cargo_kg: Some(0.0),
                 cargo_loading: Some(alas_config::CargoHoldLoading::Containerized),
                 containerized_baggage_fraction: None,
                 cabin_equipment_method: alas_config::CabinEquipmentMethod::FlopsTransportV1,
                 haul_class: None,
+                executive_cabin: None,
+                all_coach_passenger_count: None,
                 provenance: FlopsTransportProvenance {
                     mission: provenance(),
                     cabin: provenance(),

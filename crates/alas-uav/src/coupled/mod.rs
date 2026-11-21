@@ -16,7 +16,7 @@
 //!
 //! Ground effect on the take-off roll uses Raymer Eq. 12.60 (the default of
 //! `perf::Airframe`).  Mass and CG come from the tree overrides until the
-//! airframe lane lands; the fuselage envelope and wheels come from [`hull::Hull`].
+//! airframe module lands; the fuselage envelope and wheels come from [`hull::Hull`].
 //!
 //! # Status
 //!

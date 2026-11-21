@@ -6,8 +6,8 @@
 
 //! Rayleigh-versus-MSC/NASTRAN-95 normal-mode frequencies and spanwise shapes.
 //!
-//! Each solver's modes are paired to the analytical trial modes by a
-//! deterministic one-to-one frequency assignment, not by list position. A
+//! Each solver's modes are paired to the analytical trial modes by MAC (a
+//! greedy one-to-one assignment on modal assurance, falling back to frequency when no shapes exist), not by list position. A
 //! real finite-element solve may contain torsional or local-panel modes that
 //! have no Rayleigh counterpart.
 
@@ -213,6 +213,280 @@ pub fn match_frequency_indices(
     matches
 }
 
+/// A pairing is called a match only at or above this modal assurance
+/// criterion. MAC = (a.b)^2 / ((a.a)(b.b)) is 1 for identical shapes up to
+/// scale and sign and 0 for orthogonal shapes; 0.8 is the customary floor for
+/// "same mode" in test/analysis correlation.
+pub const MAC_PASS: f64 = 0.8;
+
+/// A solver mode is paired to a beam mode only at or above this MAC. A solver
+/// mode whose MAC with *every* beam mode is below it is drawn as a local /
+/// chordwise / torsion-dominated mode instead of being forced onto the beam
+/// mode that happens to be least wrong.
+pub const MAC_PAIRING_FLOOR: f64 = 0.5;
+
+/// A solver mode is torsion-dominated when the peak front/rear half-difference
+/// of its spar z, `twist * c / 2` with `c` the spar-to-spar distance, exceeds
+/// the peak bending deflection `w` by this ratio: 1.0 means equal tip
+/// contributions. It is a physical equal-contribution point, not a value tuned
+/// per preset.
+pub const TORSION_RATIO_LIMIT: f64 = 1.0;
+
+/// Colours of the local-mode curves are not used any more: local and
+/// torsion-dominated modes are listed as text, not drawn.
+const CAPTION_NORMALISATION: &str = "Bending w = mean of the front- and rear-spar z (elastic axis taken at the midpoint between the spars), divided by max |w| along the span and sign-flipped so the tip is positive. Markers are mesh stations.";
+const CAPTION_NORMALISATION_FRONT_ONLY: &str = "Solver shapes: out-of-plane z along the front-spar line, divided by max |z| along the spar and sign-flipped so the tip is positive.";
+const CAPTION_MAC: &str = "MAC = (a.b)^2 / ((a.a)(b.b)) between a solver bending shape and a Rayleigh beam mode. A mode with MAC < 0.5 against every beam mode, or torsion-dominated, is listed below and not paired.";
+const CAPTION_TORSION: &str = "Twist = (z_front - z_rear) / (x_rear - x_front). Torsion-dominated when twist*c/2 / w > 1.0 (peaks over the span, c = spar-to-spar distance), i.e. the front/rear difference exceeds the bending.";
+const CAPTION_NO_TORSION: &str = "No torsion reference: the solver gave front-spar z only, so twist and twist*c/2 / w are not evaluated.";
+
+/// Bending/torsion view of one solver's modes.
+struct ModeView {
+    /// Per mode, the bending shape: `w = (z_front + z_rear) / 2` when both
+    /// spars were exported, else the front-spar shape of the reader.
+    w: Vec<Vec<f64>>,
+    /// Per mode, `peak|z_front - z_rear| / 2 / peak|w|` (`twist*c/2 / w`).
+    /// `None` when no rear-spar data exist.
+    torsion_ratio: Vec<Option<f64>>,
+    /// Whether front and rear spars were both available.
+    decomposed: bool,
+}
+
+fn mode_view(modes: &alas_struct::nastran::ModesResult) -> ModeView {
+    let n = modes.mode_shapes.len();
+    let decomposed = n > 0
+        && modes.spar_z_front.len() == n
+        && modes.spar_z_rear.len() == n
+        && modes
+            .spar_z_front
+            .iter()
+            .zip(&modes.spar_z_rear)
+            .all(|(f, r)| f.len() == r.len());
+    if !decomposed {
+        return ModeView {
+            w: modes.mode_shapes.clone(),
+            torsion_ratio: vec![None; n],
+            decomposed: false,
+        };
+    }
+    let mut w = Vec::with_capacity(n);
+    let mut torsion_ratio = Vec::with_capacity(n);
+    for (front, rear) in modes.spar_z_front.iter().zip(&modes.spar_z_rear) {
+        let mean: Vec<f64> = front.iter().zip(rear).map(|(f, r)| 0.5 * (f + r)).collect();
+        let peak = |values: &mut dyn Iterator<Item = f64>| {
+            values
+                .filter(|v| v.is_finite())
+                .map(f64::abs)
+                .fold(0.0, f64::max)
+        };
+        let w_peak = peak(&mut mean.iter().copied());
+        let half_diff = peak(&mut front.iter().zip(rear).map(|(f, r)| 0.5 * (f - r)));
+        torsion_ratio.push(if w_peak > 0.0 {
+            Some(half_diff / w_peak)
+        } else if half_diff > 0.0 {
+            Some(f64::INFINITY)
+        } else {
+            None
+        });
+        w.push(mean);
+    }
+    ModeView {
+        w,
+        torsion_ratio,
+        decomposed,
+    }
+}
+
+/// A solver mode with no beam counterpart.
+#[derive(Debug, Clone, Copy)]
+struct LocalMode {
+    /// Index into the solver's frequency and shape lists.
+    solver_index: usize,
+    /// Its highest MAC against any beam mode, if one could be computed.
+    best_mac: Option<f64>,
+    /// `twist*c/2 / w` when it exceeds [`TORSION_RATIO_LIMIT`]: the mode is
+    /// torsion-dominated rather than merely unmatched.
+    torsion_ratio: Option<f64>,
+}
+
+/// Analytical-to-solver mode pairing with the evidence it rests on.
+#[derive(Debug, Clone)]
+struct ModePairing {
+    /// Per analytical mode, the paired solver mode index.
+    matches: Vec<Option<usize>>,
+    /// Per analytical mode, the MAC of that pair. `None` when the pairing was
+    /// made on frequency alone because the solver reported no shapes.
+    mac: Vec<Option<f64>>,
+    /// Solver modes that are torsion-dominated or whose MAC with every beam
+    /// mode is below [`MAC_PAIRING_FLOOR`].
+    local: Vec<LocalMode>,
+}
+
+impl ModePairing {
+    fn by_mac(&self) -> bool {
+        self.mac.iter().any(Option::is_some)
+    }
+
+    fn failing(&self) -> usize {
+        self.mac
+            .iter()
+            .flatten()
+            .filter(|mac| **mac < MAC_PASS)
+            .count()
+    }
+
+    fn paired(&self) -> usize {
+        self.matches.iter().flatten().count()
+    }
+}
+
+/// Trapezoid-weighted inner product of two shapes on common stations.
+fn weighted_dot(weights: &[f64], a: &[f64], b: &[f64]) -> f64 {
+    weights
+        .iter()
+        .zip(a.iter().zip(b))
+        .map(|(w, (x, y))| w * x * y)
+        .sum()
+}
+
+/// Modal assurance criterion of two shapes sampled at `stations`.
+fn mac_on_stations(stations: &[f64], a: &[f64], b: &[f64]) -> Option<f64> {
+    let n = stations.len().min(a.len()).min(b.len());
+    if n < 2 {
+        return None;
+    }
+    let weights: Vec<f64> = (0..n)
+        .map(|i| {
+            let lo = if i == 0 { stations[0] } else { stations[i - 1] };
+            let hi = if i + 1 == n {
+                stations[n - 1]
+            } else {
+                stations[i + 1]
+            };
+            0.5 * (hi - lo).abs()
+        })
+        .collect();
+    let (a, b) = (&a[..n], &b[..n]);
+    let (ab, aa, bb) = (
+        weighted_dot(&weights, a, b),
+        weighted_dot(&weights, a, a),
+        weighted_dot(&weights, b, b),
+    );
+    let mac = ab * ab / (aa * bb);
+    mac.is_finite().then_some(mac)
+}
+
+/// Pair each analytical mode with the solver mode of highest MAC, using each
+/// solver mode at most once (greedy on descending MAC, ties to the lowest
+/// indices). Solver shapes are compared with the analytical shapes
+/// interpolated onto the solver's own stations. Without solver shapes the
+/// pairing falls back to the frequency assignment and carries no MAC.
+fn pair_modes(
+    analysis: &alas_struct::analytical::StructuralAnalysisReport,
+    modes: Option<&alas_struct::nastran::ModesResult>,
+    solver_frequencies: &[f64],
+) -> ModePairing {
+    let n = analysis.modal.frequencies_hz.len();
+    let by_frequency = || ModePairing {
+        matches: match_frequency_indices(&analysis.modal.frequencies_hz, solver_frequencies),
+        mac: vec![None; n],
+        local: Vec::new(),
+    };
+    let Some(modes) = modes else {
+        return by_frequency();
+    };
+    let Some(stations) = modes.mode_shape_y_m.as_ref() else {
+        return by_frequency();
+    };
+    let view = mode_view(modes);
+    let mut candidates: Vec<(f64, usize, usize)> = Vec::new();
+    for (i, shape) in analysis.modal.mode_shapes.iter().enumerate().take(n) {
+        let reference: Vec<f64> = stations
+            .iter()
+            .map(|&y| interpolate_shape(&analysis.y, shape, y).unwrap_or(f64::NAN))
+            .collect();
+        for (j, solver_shape) in view.w.iter().enumerate() {
+            let pairs: Vec<(f64, f64, f64)> = stations
+                .iter()
+                .zip(reference.iter().zip(solver_shape))
+                .filter(|(y, (r, s))| y.is_finite() && r.is_finite() && s.is_finite())
+                .map(|(y, (r, s))| (*y, *r, *s))
+                .collect();
+            let ys: Vec<f64> = pairs.iter().map(|p| p.0).collect();
+            let rs: Vec<f64> = pairs.iter().map(|p| p.1).collect();
+            let ss: Vec<f64> = pairs.iter().map(|p| p.2).collect();
+            if let Some(mac) = mac_on_stations(&ys, &rs, &ss) {
+                candidates.push((mac, i, j));
+            }
+        }
+    }
+    if candidates.is_empty() {
+        return by_frequency();
+    }
+    candidates.sort_by(|a, b| b.0.total_cmp(&a.0).then(a.1.cmp(&b.1)).then(a.2.cmp(&b.2)));
+    let mut matches = vec![None; n];
+    let mut mac = vec![None; n];
+    let mut used = std::collections::BTreeSet::new();
+    let mut best_by_solver: std::collections::BTreeMap<usize, f64> = Default::default();
+    for &(value, _, j) in &candidates {
+        let best = best_by_solver.entry(j).or_insert(value);
+        *best = best.max(value);
+    }
+    let torsion_of = |j: usize| {
+        view.torsion_ratio
+            .get(j)
+            .copied()
+            .flatten()
+            .filter(|ratio| *ratio > TORSION_RATIO_LIMIT)
+    };
+    for (value, i, j) in candidates {
+        if value >= MAC_PAIRING_FLOOR
+            && torsion_of(j).is_none()
+            && matches[i].is_none()
+            && used.insert(j)
+        {
+            matches[i] = Some(j);
+            mac[i] = Some(value);
+        }
+    }
+    let local = (0..view.w.len())
+        .filter_map(|solver_index| {
+            let best_mac = best_by_solver.get(&solver_index).copied();
+            let torsion_ratio = torsion_of(solver_index);
+            (torsion_ratio.is_some() || best_mac.is_some_and(|mac| mac < MAC_PAIRING_FLOOR))
+                .then_some(LocalMode {
+                    solver_index,
+                    best_mac,
+                    torsion_ratio,
+                })
+        })
+        .collect();
+    ModePairing {
+        matches,
+        mac,
+        local,
+    }
+}
+
+/// Legend label for a solver's frequency bars, stating what the pairing is.
+fn pairing_label(solver: &str, pairing: &ModePairing) -> String {
+    if !pairing.by_mac() {
+        return format!("{solver} (paired by frequency only: no mode shapes, unverified)");
+    }
+    let failing = pairing.failing();
+    if failing == 0 {
+        format!(
+            "{solver} (paired by MAC, all {} >= {MAC_PASS:.2})",
+            pairing.paired()
+        )
+    } else {
+        format!(
+            "{solver} (paired by MAC, {failing} of {} below {MAC_PASS:.2})",
+            pairing.paired()
+        )
+    }
+}
+
 /// Natural frequencies and their Rayleigh/MSC/NASTRAN-95 mode-shape comparison.
 pub fn figure_structures_modes(
     result: Option<&StructuralAnalysisResult>,
@@ -260,12 +534,29 @@ pub fn figure_structures_modes(
     // like a sign error while it is actually a mode-identity error.  The
     // assignment is one-to-one and deterministic; a sign flip is applied only
     // after this pairing has been selected.
-    let msc_matches = match_frequency_indices(&analysis.modal.frequencies_hz, msc_frequencies);
-    let n95_matches = match_frequency_indices(&analysis.modal.frequencies_hz, n95_frequencies);
+    let msc_pairing = pair_modes(analysis, msc_modes.filter(|_| has_msc), msc_frequencies);
+    let n95_pairing = pair_modes(analysis, n95_modes.filter(|_| has_n95), n95_frequencies);
+    let msc_view = msc_modes.filter(|_| has_msc).map(mode_view);
+    let n95_view = n95_modes.filter(|_| has_n95).map(mode_view);
+    let decomposed = msc_view.iter().chain(n95_view.iter()).any(|v| v.decomposed);
+    let msc_name = if msc_modes.is_some_and(|_| {
+        result
+            .nastran
+            .as_ref()
+            .is_some_and(|n| n.solver_is_nastran95)
+    }) {
+        "NASTRAN-95"
+    } else if has_n95 {
+        "MSC NASTRAN"
+    } else {
+        "NASTRAN"
+    };
+    let msc_matches = msc_pairing.matches.clone();
+    let n95_matches = n95_pairing.matches.clone();
     let msc_shape_available = has_matched_shape(msc_modes, &msc_matches);
     let n95_shape_available = has_matched_shape(n95_modes, &n95_matches);
 
-    let mut scene = Scene::new(1600.0, 550.0, Some(Color::from_hex(pal.bg)));
+    let mut scene = Scene::new(1600.0, 585.0, Some(Color::from_hex(pal.bg)));
     scene.title = Some("Structural normal modes".to_owned());
     draw_title(&mut scene, "Structural normal modes", pal);
     scene.suppress_derived_title();
@@ -319,6 +610,14 @@ pub fn figure_structures_modes(
                 msc_frequencies[*msc_index].max(0.0),
                 Fill::new(Color::rgba(214, 39, 40, 224)),
             );
+            annotate_mac(
+                &mut scene,
+                &frequency_axes,
+                right + bar_width / 2.0,
+                msc_frequencies[*msc_index],
+                msc_pairing.mac[index],
+                pal,
+            );
         }
         if let Some(Some(n95_index)) = n95_matches.get(index) {
             let local_left = group_left + bar_width * (1.0 + usize::from(has_msc) as f64);
@@ -329,6 +628,14 @@ pub fn figure_structures_modes(
                 local_left + bar_width,
                 n95_frequencies[*n95_index].max(0.0),
                 Fill::new(Color::rgba(255, 127, 14, 224)),
+            );
+            annotate_mac(
+                &mut scene,
+                &frequency_axes,
+                local_left + bar_width / 2.0,
+                n95_frequencies[*n95_index],
+                n95_pairing.mac[index],
+                pal,
             );
         }
     }
@@ -344,17 +651,13 @@ pub fn figure_structures_modes(
     )];
     if has_msc {
         entries.push((
-            if has_n95 {
-                "MSC NASTRAN SOL 103 (one-to-one frequency match)".to_owned()
-            } else {
-                "NASTRAN SOL 103 (one-to-one frequency match)".to_owned()
-            },
+            pairing_label(&format!("{msc_name} SOL 103"), &msc_pairing),
             LegendMarker::Patch(Color::from_hex(RED)),
         ));
     }
     if has_n95 {
         entries.push((
-            "NASTRAN-95 SOL 103 (one-to-one frequency match)".to_owned(),
+            pairing_label("NASTRAN-95 SOL 103", &n95_pairing),
             LegendMarker::Patch(Color::from_hex(ORANGE)),
         ));
     }
@@ -394,10 +697,9 @@ pub fn figure_structures_modes(
         if let (Some(modes), Some(Some(msc_index))) = (msc_modes, msc_matches.get(index)) {
             if let (Some(stations), Some(nastran_shape)) = (
                 modes.mode_shape_y_m.as_ref(),
-                modes.mode_shapes.get(*msc_index),
+                msc_view.as_ref().and_then(|view| view.w.get(*msc_index)),
             ) {
-                let aligned_shape =
-                    aligned_display_shape_at_stations(&analysis.y, shape, stations, nastran_shape);
+                let aligned_shape = display_shape(stations, nastran_shape);
                 let points: Vec<(f64, f64)> = stations
                     .iter()
                     .copied()
@@ -412,15 +714,15 @@ pub fn figure_structures_modes(
                     // distinguishable without relying only on colour.
                     Stroke::new(color, 2.0),
                 );
+                draw_station_markers(&mut scene, &nastran_axes, &points, color);
             }
         }
         if let (Some(modes), Some(Some(n95_index))) = (n95_modes, n95_matches.get(index)) {
             if let (Some(stations), Some(n95_shape)) = (
                 modes.mode_shape_y_m.as_ref(),
-                modes.mode_shapes.get(*n95_index),
+                n95_view.as_ref().and_then(|view| view.w.get(*n95_index)),
             ) {
-                let aligned_shape =
-                    aligned_display_shape_at_stations(&analysis.y, shape, stations, n95_shape);
+                let aligned_shape = display_shape(stations, n95_shape);
                 let points: Vec<(f64, f64)> = stations
                     .iter()
                     .copied()
@@ -435,6 +737,7 @@ pub fn figure_structures_modes(
                     // visible instead of silently looking like MSC only.
                     Stroke::dashed(color, 2.0, 2.0, 2.0),
                 );
+                draw_station_markers(&mut scene, &nastran_axes, &points, color);
             }
         }
         let rayleigh_label = format!("Mode {}: {frequency:.2} Hz", index + 1);
@@ -445,6 +748,39 @@ pub fn figure_structures_modes(
             Stroke::dashed(color, 2.0, 6.0, 4.0),
             pal,
         );
+    }
+    // Torsion-dominated and unmatched modes are listed as text, not drawn.
+    let mut local_lines: Vec<String> = Vec::new();
+    for (solver_name, pairing, frequencies) in [
+        (msc_name, &msc_pairing, msc_frequencies),
+        ("NASTRAN-95", &n95_pairing, n95_frequencies),
+    ] {
+        if std::ptr::eq(frequencies, n95_frequencies) && !has_n95 {
+            continue;
+        }
+        if std::ptr::eq(frequencies, msc_frequencies) && !has_msc {
+            continue;
+        }
+        for local in &pairing.local {
+            let frequency = frequencies
+                .get(local.solver_index)
+                .copied()
+                .unwrap_or(f64::NAN);
+            let mac = local
+                .best_mac
+                .map_or("n/a".to_owned(), |mac| format!("{mac:.2}"));
+            local_lines.push(match local.torsion_ratio {
+                Some(ratio) if ratio.is_finite() => format!(
+                    "{solver_name} {frequency:.2} Hz: torsion-dominated, twist*c/2 / w = {ratio:.2} (MAC {mac})"
+                ),
+                Some(_) => format!(
+                    "{solver_name} {frequency:.2} Hz: torsion-dominated, twist*c/2 / w = inf (MAC {mac})"
+                ),
+                None => format!(
+                    "{solver_name} {frequency:.2} Hz: local / chordwise, no beam counterpart (MAC {mac})"
+                ),
+            });
+        }
     }
     add_zero_line(&mut scene, &rayleigh_axes, pal);
     add_zero_line(&mut scene, &nastran_axes, pal);
@@ -469,6 +805,10 @@ pub fn figure_structures_modes(
                     m.error.as_deref().unwrap_or("unknown error")
                 ),
                 ResultStatus::NotRun => "NASTRAN SOL 103 was not run for this design.".to_owned(),
+                ResultStatus::NotConfigured => format!(
+                    "NASTRAN SOL 103 is not configured: {}",
+                    m.error.as_deref().unwrap_or("backend missing")
+                ),
                 ResultStatus::Ok => {
                     "NASTRAN SOL 103 returned no elastic mode frequencies.".to_owned()
                 }
@@ -482,6 +822,10 @@ pub fn figure_structures_modes(
                 ResultStatus::NotRun => {
                     "NASTRAN-95 SOL 103 was not run for this design.".to_owned()
                 }
+                ResultStatus::NotConfigured => format!(
+                    "NASTRAN-95 SOL 103 is not configured: {}",
+                    m.error.as_deref().unwrap_or("backend missing")
+                ),
                 ResultStatus::Ok => {
                     "NASTRAN-95 SOL 103 returned no elastic mode frequencies.".to_owned()
                 }
@@ -503,7 +847,7 @@ pub fn figure_structures_modes(
     let mut solver_entries = Vec::new();
     if msc_shape_available {
         solver_entries.push((
-            "MSC NASTRAN - solid line".to_owned(),
+            format!("{msc_name} - solid line"),
             LegendMarker::Line(Stroke::new(Color::from_hex(pal.tick), 2.0)),
         ));
     }
@@ -528,7 +872,62 @@ pub fn figure_structures_modes(
             8.0,
         );
     }
+    // Torsion-dominated and unmatched modes: a compact two-column list.
+    let mut caption_top = 524.0;
+    for (k, line) in local_lines.iter().enumerate() {
+        let (column, row) = (k % 2, k / 2);
+        scene.add(SceneElement::Text {
+            text: line.clone(),
+            pos: [
+                rects[0].0 + 750.0 * column as f64,
+                caption_top + 14.0 * row as f64,
+            ],
+            font_size: 8.0,
+            color: Color::from_hex(pal.tick),
+            align: TextAlign::Left,
+            baseline: TextBaseline::Top,
+            angle_deg: 0.0,
+            bold: false,
+        });
+    }
+    if !local_lines.is_empty() {
+        caption_top += 14.0 * local_lines.len().div_ceil(2) as f64 + 8.0;
+    }
+    let caption_lines: Vec<&str> = if decomposed {
+        vec![CAPTION_NORMALISATION, CAPTION_MAC, CAPTION_TORSION]
+    } else {
+        vec![
+            CAPTION_NORMALISATION_FRONT_ONLY,
+            CAPTION_MAC,
+            CAPTION_NO_TORSION,
+        ]
+    };
+    for (line, text) in caption_lines.iter().copied().enumerate() {
+        scene.add(SceneElement::Text {
+            text: text.to_owned(),
+            pos: [rects[0].0, caption_top + 17.0 * line as f64],
+            font_size: 9.0,
+            color: Color::from_hex(pal.tick),
+            align: TextAlign::Left,
+            baseline: TextBaseline::Top,
+            angle_deg: 0.0,
+            bold: false,
+        });
+    }
+    scene.height = caption_top + 17.0 * 3.0 + 6.0;
     scene
+}
+
+/// Small filled circles at the mesh stations a shape is sampled at.
+fn draw_station_markers(scene: &mut Scene, axes: &Axes2D, points: &[(f64, f64)], color: Color) {
+    for &(y, value) in points {
+        scene.add(SceneElement::Circle {
+            center: axes.map_point(y, value),
+            radius: 2.2,
+            fill: Some(Fill::new(color)),
+            stroke: None,
+        });
+    }
 }
 
 fn wrap_text(text: &str, max_chars: usize) -> String {
@@ -571,77 +970,44 @@ fn span_range(values: &[f64]) -> (f64, f64) {
     }
 }
 
-const MODE_SIGN_EPS: f64 = 1.0e-12;
+const MODE_SIGN_EPS: f64 = 1.0e-9;
 
-/// Align a solver's displayed out-of-plane mode shape with its matched
-/// Rayleigh mode. Both vectors are compared in their physical spanwise
-/// coordinate, and both use the third displacement component (`T3`, the
-/// out-of-plane `z` component). Normal-mode eigenvectors have an arbitrary
-/// global sign, so this changes neither frequency, shape magnitude, nor
-/// normalization.
-///
-/// The endpoint is selected by the largest finite solver station and the
-/// Rayleigh shape is linearly interpolated there. If that endpoint is
-/// effectively zero or unavailable, a finite-vector correlation over the
-/// stations common to both grids supplies a deterministic fallback instead of
-/// forcing a sign from numerical noise. A shape with no common finite samples
-/// is left unchanged.
-fn aligned_display_shape_at_stations(
-    reference_y: &[f64],
-    reference: &[f64],
-    candidate_y: &[f64],
-    candidate: &[f64],
-) -> Vec<f64> {
-    let sign = mode_sign_at_stations(reference_y, reference, candidate_y, candidate);
-    candidate.iter().map(|value| value * sign).collect()
-}
-
-fn mode_sign_at_stations(
-    reference_y: &[f64],
-    reference: &[f64],
-    candidate_y: &[f64],
-    candidate: &[f64],
-) -> f64 {
-    let endpoint = candidate_y
+/// The shape as drawn: divided by its largest finite |z| along the spar and
+/// sign-flipped so the value at the largest-y station (the tip) is positive.
+/// Normal-mode eigenvectors have an arbitrary global sign and scale, so this
+/// changes neither frequency nor shape. When the tip is effectively zero the
+/// sign is taken from the largest-magnitude sample instead, so the result is
+/// still deterministic. A shape with no finite non-zero sample is returned
+/// unchanged (non-finite values stay non-finite and are not drawn).
+fn display_shape(stations: &[f64], shape: &[f64]) -> Vec<f64> {
+    let peak = shape
         .iter()
         .copied()
-        .zip(candidate.iter().copied())
+        .filter(|value| value.is_finite())
+        .map(f64::abs)
+        .fold(0.0, f64::max);
+    if peak <= 0.0 {
+        return shape.to_vec();
+    }
+    let tip = stations
+        .iter()
+        .copied()
+        .zip(shape.iter().copied())
         .filter(|(y, value)| y.is_finite() && value.is_finite())
-        .max_by(|(left_y, _), (right_y, _)| left_y.total_cmp(right_y));
-    if let Some((candidate_endpoint_y, candidate_endpoint)) = endpoint {
-        if candidate_endpoint.abs() > MODE_SIGN_EPS {
-            if let Some(reference_endpoint) =
-                interpolate_shape(reference_y, reference, candidate_endpoint_y)
-            {
-                if reference_endpoint.abs() > MODE_SIGN_EPS {
-                    return if reference_endpoint.signum() == candidate_endpoint.signum() {
-                        1.0
-                    } else {
-                        -1.0
-                    };
-                }
-            }
-        }
-    }
-
-    let correlation = candidate_y
-        .iter()
-        .copied()
-        .zip(candidate.iter().copied())
-        .filter_map(|(y, candidate_value)| {
-            if !y.is_finite() || !candidate_value.is_finite() {
-                return None;
-            }
-            interpolate_shape(reference_y, reference, y)
-                .filter(|reference_value| reference_value.is_finite())
-                .map(|reference_value| reference_value * candidate_value)
-        })
-        .sum::<f64>();
-    if correlation.is_finite() && correlation < -MODE_SIGN_EPS {
-        -1.0
+        .max_by(|(left, _), (right, _)| left.total_cmp(right))
+        .map(|(_, value)| value / peak)
+        .unwrap_or(0.0);
+    let sign = if tip.abs() > MODE_SIGN_EPS {
+        tip.signum()
     } else {
-        1.0
-    }
+        shape
+            .iter()
+            .copied()
+            .filter(|value| value.is_finite())
+            .max_by(|a, b| a.abs().total_cmp(&b.abs()))
+            .map_or(1.0, f64::signum)
+    };
+    shape.iter().map(|value| sign * value / peak).collect()
 }
 
 /// Interpolate a finite shape at a span station without extrapolating beyond
@@ -703,6 +1069,32 @@ fn has_matched_shape(
                 == 2
         })
     })
+}
+
+/// Write the pair's MAC above its bar, in the failure red below [`MAC_PASS`].
+fn annotate_mac(
+    scene: &mut Scene,
+    axes: &Axes2D,
+    x: f64,
+    frequency_hz: f64,
+    mac: Option<f64>,
+    pal: &crate::theme::Palette,
+) {
+    let Some(mac) = mac else {
+        return;
+    };
+    let failing = mac < MAC_PASS;
+    let [px, py] = axes.map_point(x, frequency_hz.max(0.0));
+    scene.add(SceneElement::Text {
+        text: format!("MAC {mac:.2}"),
+        pos: [px, py - 3.0],
+        font_size: 7.0,
+        color: Color::from_hex(if failing { "#c0392b" } else { pal.tick }),
+        align: TextAlign::Center,
+        baseline: TextBaseline::Bottom,
+        angle_deg: 0.0,
+        bold: failing,
+    });
 }
 
 fn add_panel_title(scene: &mut Scene, axes: &Axes2D, title: &str, pal: &crate::theme::Palette) {
@@ -850,36 +1242,169 @@ mod tests {
     }
 
     #[test]
-    fn matched_solver_shapes_flip_as_a_whole_to_match_the_rayleigh_endpoint() {
-        let stations = [0.0, 1.0, 2.0];
-        let reference = [0.0, 0.4, 1.0];
-        let candidate = [0.0, -0.4, -1.0];
+    fn mac_pairing_skips_a_torsional_mode_that_frequency_would_pick() {
+        let y = vec![0.0, 1.0, 2.0, 3.0];
+        let analysis = StructuralAnalysisReport {
+            y: y.clone(),
+            ei_nm2: Vec::new(),
+            load_cases: Vec::new(),
+            modal: ModalResult {
+                frequencies_hz: vec![10.0],
+                mode_shapes: vec![vec![0.0, 0.1, 0.4, 1.0]],
+            },
+        };
+        // Mode 0 is closest in frequency but has a zigzag shape; mode 1 is
+        // the bending mode.
+        let modes = ModesResult {
+            status: ResultStatus::Ok,
+            frequencies_hz: vec![9.9, 14.0],
+            mode_shapes: vec![vec![0.0, 1.0, -1.0, 0.5], vec![0.0, -0.1, -0.4, -1.0]],
+            mode_shape_y_m: Some(y),
+            ..Default::default()
+        };
+        let pairing = pair_modes(&analysis, Some(&modes), &modes.frequencies_hz);
+        assert_eq!(pairing.matches, vec![Some(1)]);
+        assert!(pairing.mac[0].unwrap() > 0.99);
         assert_eq!(
-            aligned_display_shape_at_stations(&stations, &reference, &stations, &candidate),
-            reference.to_vec()
+            pairing_label("FE", &pairing),
+            "FE (paired by MAC, all 1 >= 0.80)"
         );
     }
 
     #[test]
-    fn zero_endpoint_uses_finite_vector_correlation_for_sign_alignment() {
-        let stations = [0.0, 1.0, 2.0];
-        let reference = [0.5, 0.0, 0.0];
-        let candidate = [-0.5, 0.0, 0.0];
-        assert_eq!(
-            aligned_display_shape_at_stations(&stations, &reference, &stations, &candidate),
-            reference.to_vec()
-        );
+    fn without_shapes_the_pairing_says_it_is_unverified() {
+        let analysis = StructuralAnalysisReport {
+            y: vec![0.0, 1.0],
+            ei_nm2: Vec::new(),
+            load_cases: Vec::new(),
+            modal: ModalResult {
+                frequencies_hz: vec![10.0],
+                mode_shapes: vec![vec![0.0, 1.0]],
+            },
+        };
+        let pairing = pair_modes(&analysis, None, &[10.5]);
+        assert_eq!(pairing.matches, vec![Some(0)]);
+        assert!(!pairing.by_mac());
+        assert!(pairing_label("FE", &pairing).contains("unverified"));
     }
 
     #[test]
-    fn sign_alignment_interpolates_the_rayleigh_endpoint_on_a_different_grid() {
-        let reference_y = [0.0, 2.0];
-        let candidate_y = [0.0, 1.0, 2.0];
-        let reference = [0.0, 1.0];
-        let candidate = [0.0, -0.5, -1.0];
+    fn display_shape_is_peak_normalised_with_a_positive_tip() {
+        let stations = [0.0, 1.0, 2.0];
         assert_eq!(
-            aligned_display_shape_at_stations(&reference_y, &reference, &candidate_y, &candidate),
+            display_shape(&stations, &[0.0, -2.0, -4.0]),
             vec![0.0, 0.5, 1.0]
         );
+        assert_eq!(
+            display_shape(&stations, &[0.0, 0.3, 0.1]),
+            vec![0.0, 1.0, 0.1 / 0.3]
+        );
+        // Zero tip: the largest-magnitude sample is made positive.
+        assert_eq!(
+            display_shape(&stations, &[0.0, -1.0, 0.0]),
+            vec![0.0, 1.0, 0.0]
+        );
+    }
+
+    fn local_mode_fixture() -> (StructuralAnalysisReport, ModesResult) {
+        let y = vec![0.0, 1.0, 2.0, 3.0];
+        let analysis = StructuralAnalysisReport {
+            y: y.clone(),
+            ei_nm2: Vec::new(),
+            load_cases: Vec::new(),
+            modal: ModalResult {
+                frequencies_hz: vec![10.0],
+                mode_shapes: vec![vec![0.0, 0.1, 0.4, 1.0]],
+            },
+        };
+        // Mode 0: bending-free zigzag (low MAC). Mode 1: beam bending. Mode 2:
+        // front and rear spars move in antiphase (twist), no mean deflection
+        // beyond a small residue.
+        let bend = vec![0.0, -0.1, -0.4, -1.0];
+        let zig = vec![0.0, 1.0, -1.0, 0.0];
+        let twist_front = vec![0.0, 0.5, 1.0, 1.5];
+        let twist_rear: Vec<f64> = twist_front.iter().map(|v| -v).collect();
+        let modes = ModesResult {
+            status: ResultStatus::Ok,
+            frequencies_hz: vec![9.9, 14.0, 20.0],
+            mode_shapes: vec![zig.clone(), bend.clone(), twist_front.clone()],
+            mode_shape_y_m: Some(y),
+            spar_z_front: vec![zig.clone(), bend.clone(), twist_front],
+            spar_z_rear: vec![zig, bend, twist_rear],
+            spar_chord_m: Some(vec![1.0; 4]),
+            ..Default::default()
+        };
+        (analysis, modes)
+    }
+
+    #[test]
+    fn bending_is_the_spar_mean_and_torsion_dominance_is_the_half_difference_ratio() {
+        let (_, modes) = local_mode_fixture();
+        let view = mode_view(&modes);
+        assert!(view.decomposed);
+        assert!(view.torsion_ratio[1].unwrap() < 1.0e-12);
+        assert!(
+            view.torsion_ratio[2].unwrap() > 1.0e6 || view.torsion_ratio[2] == Some(f64::INFINITY)
+        );
+    }
+
+    #[test]
+    fn low_mac_and_torsion_dominated_modes_are_listed_and_not_paired() {
+        let (analysis, modes) = local_mode_fixture();
+        let pairing = pair_modes(&analysis, Some(&modes), &modes.frequencies_hz);
+        assert_eq!(pairing.matches, vec![Some(1)]);
+        let local: Vec<usize> = pairing.local.iter().map(|l| l.solver_index).collect();
+        assert_eq!(local, vec![0, 2]);
+        assert!(pairing.local[0].torsion_ratio.is_none());
+        assert!(pairing.local[1].torsion_ratio.is_some());
+    }
+
+    #[test]
+    fn local_modes_are_labelled_and_the_caption_states_the_torsion_definition() {
+        let (analysis, modes) = local_mode_fixture();
+        let result = StructuralAnalysisResult {
+            status: "ok".to_owned(),
+            analysis: Some(analysis),
+            nastran95: Some(NastranResults {
+                modes,
+                solver_is_nastran95: true,
+                ..Default::default()
+            }),
+            ..Default::default()
+        };
+        let scene = figure_structures_modes(Some(&result), Some("light"));
+        let has = |needle: &str| {
+            scene.elements.iter().any(|element| {
+                matches!(element, SceneElement::Text { text, .. } if text.contains(needle))
+            })
+        };
+        assert!(has(
+            "NASTRAN-95 9.90 Hz: local / chordwise, no beam counterpart (MAC 0."
+        ));
+        assert!(has(
+            "NASTRAN-95 20.00 Hz: torsion-dominated, twist*c/2 / w = "
+        ));
+        assert!(has("twist*c/2 / w > 1.0"));
+        assert!(has("midpoint between the spars"));
+    }
+
+    #[test]
+    fn front_spar_only_results_say_there_is_no_torsion_reference() {
+        let (analysis, mut modes) = local_mode_fixture();
+        modes.spar_z_front.clear();
+        modes.spar_z_rear.clear();
+        let result = StructuralAnalysisResult {
+            status: "ok".to_owned(),
+            analysis: Some(analysis),
+            nastran95: Some(NastranResults {
+                modes,
+                ..Default::default()
+            }),
+            ..Default::default()
+        };
+        let scene = figure_structures_modes(Some(&result), Some("light"));
+        assert!(scene.elements.iter().any(|element| {
+            matches!(element, SceneElement::Text { text, .. } if text.contains("No torsion reference"))
+        }));
     }
 }

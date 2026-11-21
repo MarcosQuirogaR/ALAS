@@ -246,6 +246,7 @@ fn parse_dat_record(entries: &[(usize, String, String)]) -> Result<CustomAirport
         runway_lengths_m,
         declared_toda_m: parse_optional_number("declared_toda_m")?,
         declared_lda_m: parse_optional_number("declared_lda_m")?,
+        departure_surveys: Vec::new(),
         provenance: AirportProvenance {
             kind: AirportProvenanceKind::UserEntered,
             source: values.get("source").map(|(_, value)| (*value).clone()),

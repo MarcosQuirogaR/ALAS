@@ -60,9 +60,16 @@ const MAX_LOG_STEP: f64 = std::f64::consts::LN_2;
 /// A `(V_H, V_V)` pair.
 type TailVolumes = (f64, f64);
 
-/// Nominal `(V_H, V_V)` of every registered preset, built once.
-fn nominal_volumes(preset: &str) -> Option<TailVolumes> {
-    static NOMINALS: OnceLock<Vec<(&'static str, Option<TailVolumes>)>> = OnceLock::new();
+/// A nominal `(V_H, V_V)` pair with its mean aerodynamic chord (m).
+type NominalTailEntry = (TailVolumes, f64);
+
+/// One registered preset's name with its nominal, if its aircraft builds.
+type NominalRecord = (&'static str, Option<NominalTailEntry>);
+
+/// Nominal `(V_H, V_V)` and mean aerodynamic chord (m) of every registered
+/// preset, built once.
+fn nominals(preset: &str) -> Option<NominalTailEntry> {
+    static NOMINALS: OnceLock<Vec<NominalRecord>> = OnceLock::new();
     NOMINALS
         .get_or_init(|| {
             alas_config::presets::registry()
@@ -72,7 +79,9 @@ fn nominal_volumes(preset: &str) -> Option<TailVolumes> {
                         .build(Some(&registered.design_vector), false)
                         .ok();
                     let volumes = plane.and_then(|plane| match tail_volume_coefficients(&plane) {
-                        (Some(vh), Some(vv)) if vh > 0.0 && vv > 0.0 => Some((vh, vv)),
+                        (Some(vh), Some(vv)) if vh > 0.0 && vv > 0.0 => {
+                            Some(((vh, vv), plane.c_ref))
+                        }
                         _ => None,
                     });
                     (registered.name, volumes)
@@ -84,11 +93,36 @@ fn nominal_volumes(preset: &str) -> Option<TailVolumes> {
         .and_then(|(_, volumes)| *volumes)
 }
 
+/// The tailplane volume a candidate whose mean aerodynamic chord is `mac_m`
+/// must carry, for the registered `nominal_h` at the registered chord
+/// `nominal_mac_m`.
+///
+/// `V_H = S_H l_H / (S c)` holds the tailplane's moment against the wing's
+/// own chord. The centre-of-gravity travel a registered fuselage loads is a
+/// length, not a share of the wing chord, and both the stability margin and
+/// the trim moment over that travel scale with `S_H l_H / S` (Torenbeek,
+/// *Synthesis of Subsonic Airplane Design*, 1982, ch. 9, the tailplane
+/// area against the centre-of-gravity range in the scissor diagram). A
+/// candidate with a shorter chord therefore keeps `S_H l_H / S`, which is
+/// `V_H c`: its volume coefficient rises by the chord ratio. A longer chord
+/// keeps the registered coefficient. Measured without it: the B747-400
+/// search shortened the chord 10 % and the tailplane lost 19 % of its area.
+fn tailplane_volume_target(nominal_h: f64, nominal_mac_m: f64, mac_m: f64) -> f64 {
+    let ratio = nominal_mac_m / mac_m;
+    // The registered wing itself, to round-off, keeps its coefficient
+    // exactly.
+    if ratio.is_finite() && ratio > 1.0 + 1.0e-9 {
+        nominal_h * ratio
+    } else {
+        nominal_h
+    }
+}
+
 /// Whether `config` asks for tail auto-sizing: a reference adaptation of a
 /// registered aircraft whose tail volumes are known.
-fn targets(config: &AlasConfig) -> Option<TailVolumes> {
+fn targets(config: &AlasConfig) -> Option<NominalTailEntry> {
     (config.optimizer.design_space.mode == DesignMode::ReferenceAdaptation)
-        .then(|| nominal_volumes(&config.preset))
+        .then(|| nominals(&config.preset))
         .flatten()
 }
 
@@ -150,10 +184,11 @@ fn solve_log_secant(mut f: impl FnMut(f64) -> Option<f64>, start: f64, target: f
 fn solve(
     config: &AlasConfig,
     dv: &DesignVector,
-    (target_h, target_v): (f64, f64),
+    ((nominal_h, target_v), nominal_mac_m): (TailVolumes, f64),
 ) -> Option<TailSizing> {
     let builder = AircraftBuilder::new(Some(config.geometry.clone()));
     let mut reference = builder.build(Some(dv), false).ok()?;
+    let target_h = tailplane_volume_target(nominal_h, nominal_mac_m, reference.c_ref);
     let main_wing = reference.wings.first()?.clone();
     reference.wings = vec![main_wing; 3];
     // The tail scales only move the tail planforms, so the airfoil and the
@@ -197,6 +232,7 @@ fn solve(
     Some(TailSizing {
         tail_scale,
         vstab_scale_ratio: fin_scale / tail_scale,
+        wing_incidence_deg: None,
     })
 }
 
@@ -219,9 +255,7 @@ pub(crate) fn apply(
     let Some(volumes) = targets(config) else {
         return Ok(());
     };
-    let scales = solve(config, dv, volumes).ok_or(CandidateFailure {
-        reason: "geometry_build",
-    })?;
+    let scales = solve(config, dv, volumes).ok_or(CandidateFailure::new("geometry_build"))?;
     scales.apply_to(&mut config.geometry.empennage, dv);
     Ok(())
 }
@@ -243,6 +277,7 @@ pub(crate) fn fin_scale_ratio(
     dv: &DesignVector,
 ) -> f64 {
     let fin_root_chord = plane.wings.get(2).and_then(|fin| {
+        let fin = fin.reference_planform();
         let (root, tip) = (fin.xsecs.first()?, fin.xsecs.last()?);
         let height = tip.xyz_le[2] - root.xyz_le[2];
         (height > 0.0).then(|| {

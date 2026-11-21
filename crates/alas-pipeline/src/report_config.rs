@@ -22,7 +22,8 @@
 
 use std::borrow::Cow;
 
-use alas_config::{airports, AlasConfig};
+use alas_config::airports::Airport;
+use alas_config::AlasConfig;
 use alas_opt::mdo::{
     evaluate_vmc, performance_with_vmc, resolve_improved_climb, EngineOutModel,
     ImprovedClimbInputs, VmcInputs, VmcOutcome, YawAirframe,
@@ -30,6 +31,55 @@ use alas_opt::mdo::{
 use alas_perf::performance::ImprovedClimbSelection;
 
 use crate::full_analysis::AnalysisReport;
+
+/// `config` with the computed sea-level airborne minimum control speed at
+/// MTOW in `landing_gear.rotation_minimum_control_speed_m_s`, the floor of the
+/// forward-CG rotation speed (CS 25.107(e)(1)(ii)); a registered aircraft's
+/// speed is capped at its declared `VMC / VSR` as in the speed schedule
+/// (`alas_opt::mdo::evaluate_vmc`). Borrowed unchanged when the yaw balance
+/// did not resolve, or when the computed `VMCA` does not validate against a
+/// published value ([`vmca_validates`]): an unvalidated yaw balance must not
+/// move the forward-CG lines.
+pub fn config_with_rotation_vmc<'a>(
+    config: &'a AlasConfig,
+    vmc_at_mtow: &VmcOutcome,
+) -> Cow<'a, AlasConfig> {
+    let Ok(assessment) = vmc_at_mtow.at_sea_level.as_ref() else {
+        return Cow::Borrowed(config);
+    };
+    let declared = config.performance.vmc_vstall_factor;
+    let speed = if vmc_at_mtow.registered && assessment.vmc_over_vsr > declared {
+        declared * assessment.vsr_m_s
+    } else {
+        assessment.vmca_m_s
+    };
+    if !(speed.is_finite() && speed > 0.0) {
+        return Cow::Borrowed(config);
+    }
+    if !vmca_validates(config, assessment.vmca_m_s) {
+        return Cow::Borrowed(config);
+    }
+    let mut resolved = config.clone();
+    resolved.landing_gear.rotation_minimum_control_speed_m_s = Some(speed);
+    Cow::Owned(resolved)
+}
+
+/// Largest relative difference between the computed and the published
+/// sea-level `VMCA` for which the computed value is taken as validated.
+pub const VMCA_VALIDATION_TOLERANCE: f64 = 0.05;
+
+/// Whether the computed sea-level `VMCA` (m/s) validates against the type's
+/// published one (`landing_gear.published_vmca_m_s`) within
+/// [`VMCA_VALIDATION_TOLERANCE`]. A type with no published value does not
+/// validate, so its forward rotation line does not take the computed floor.
+pub fn vmca_validates(config: &AlasConfig, computed_vmca_m_s: f64) -> bool {
+    match config.landing_gear.published_vmca_m_s {
+        Some(published) if published > 0.0 && computed_vmca_m_s.is_finite() => {
+            (computed_vmca_m_s / published - 1.0).abs() <= VMCA_VALIDATION_TOLERANCE
+        }
+        _ => false,
+    }
+}
 
 /// `config` with the maximum lift coefficients the analysed candidate was
 /// sized with, or the borrowed original when it kept the declared ones (or
@@ -54,7 +104,29 @@ pub fn evaluate_report_vmc(
     landing_mass_kg: f64,
     wing_area_m2: f64,
 ) -> VmcOutcome {
-    let departure = airports::get(&config.departure_airport).ok();
+    evaluate_report_vmc_at(
+        config,
+        report,
+        None,
+        takeoff_mass_kg,
+        landing_mass_kg,
+        wing_area_m2,
+    )
+}
+
+/// [`evaluate_report_vmc`] at `airport`, the aerodrome the speeds are flown at,
+/// instead of the configured departure (`None` keeps the departure): `VMCA`
+/// depends on the thrust of the operating engine, which follows the density and
+/// temperature of the field.
+pub fn evaluate_report_vmc_at(
+    config: &AlasConfig,
+    report: &AnalysisReport,
+    airport: Option<&Airport>,
+    takeoff_mass_kg: f64,
+    landing_mass_kg: f64,
+    wing_area_m2: f64,
+) -> VmcOutcome {
+    let departure = airport.or_else(|| config.departure_airport_record().ok());
     let artifacts = report.fuel.artifacts(config, &report.design);
     // An unavailable drag table leaves the feathered-propeller drag unknown,
     // which the evaluation reports as an unavailable `VMC` (the declared
@@ -71,6 +143,7 @@ pub fn evaluate_report_vmc(
         plane: &report.airplane,
         cg_x_m: report.physical_cg[0],
         takeoff_mass_kg,
+        minimum_mass_kg: crate::quick_analysis::report_oew_kg(report),
         landing_mass_kg,
         s_ref_m2: wing_area_m2,
         static_per_engine_n: None,
@@ -106,10 +179,71 @@ pub fn resolve_report<'a>(
     landing_mass_kg: f64,
     wing_area_m2: f64,
 ) -> ReportResolution<'a> {
+    resolve_report_at(
+        config,
+        report,
+        None,
+        takeoff_mass_kg,
+        landing_mass_kg,
+        wing_area_m2,
+    )
+}
+
+/// [`resolve_report`] with the improved-climb `V2` resolved at `airport`, the
+/// aerodrome the speeds are flown at, instead of the configured departure
+/// (`None` keeps the departure). The second-segment margin depends on the
+/// air density and temperature of the field, so a field evaluated at another
+/// aerodrome (the ISA sea-level reference, a figure of a different airport)
+/// must not fly the speed the departure needs.
+pub fn resolve_report_at<'a>(
+    config: &'a AlasConfig,
+    report: &AnalysisReport,
+    airport: Option<&Airport>,
+    takeoff_mass_kg: f64,
+    landing_mass_kg: f64,
+    wing_area_m2: f64,
+) -> ReportResolution<'a> {
+    resolve_report_at_flap(
+        config,
+        report,
+        airport,
+        None,
+        takeoff_mass_kg,
+        landing_mass_kg,
+        wing_area_m2,
+    )
+}
+
+/// [`resolve_report_at`] flown at take-off flap `flap` (one of
+/// `alas_config::presets::takeoff_flap_settings` of `config`) instead of the
+/// configured one. The setting is applied after the candidate's `CLmax`
+/// scaling, as the ratio of its `CLmax_TO` to the configured one, so the
+/// scaling stands; `VMC` and the improved-climb `V2` then follow the setting.
+pub fn resolve_report_at_flap<'a>(
+    config: &'a AlasConfig,
+    report: &AnalysisReport,
+    airport: Option<&Airport>,
+    flap: Option<&alas_config::presets::TakeoffFlapSetting>,
+    takeoff_mass_kg: f64,
+    landing_mass_kg: f64,
+    wing_area_m2: f64,
+) -> ReportResolution<'a> {
     let scaled = config_with_geometry_clmax(config, report);
-    let vmc = evaluate_report_vmc(
+    let scaled = match flap {
+        Some(setting) => {
+            let ratio = setting.cl_max_to / config.performance.cl_max_to;
+            let mut flown = scaled.into_owned();
+            flown.performance.cl_max_to *= ratio;
+            flown.performance.oei_climb_delta_cd = setting.oei_climb_delta_cd;
+            flown.performance.takeoff_flap_deflection_deg = Some(setting.deflection_deg);
+            Cow::Owned(flown)
+        }
+        None => scaled,
+    };
+    let vmc = evaluate_report_vmc_at(
         &scaled,
         report,
+        airport,
         takeoff_mass_kg,
         landing_mass_kg,
         wing_area_m2,
@@ -130,7 +264,8 @@ pub fn resolve_report<'a>(
         Cow::Owned(resolved) => Cow::Owned(resolved),
         Cow::Borrowed(_) => scaled,
     };
-    let (config, improved_climb) = improved_climb(with_vmc, report, takeoff_mass_kg, wing_area_m2);
+    let (config, improved_climb) =
+        improved_climb(with_vmc, report, airport, takeoff_mass_kg, wing_area_m2);
     ReportResolution {
         config,
         vmc,
@@ -144,12 +279,13 @@ pub fn resolve_report<'a>(
 fn improved_climb<'a>(
     config: Cow<'a, AlasConfig>,
     report: &AnalysisReport,
+    airport: Option<&Airport>,
     takeoff_mass_kg: f64,
     wing_area_m2: f64,
 ) -> (Cow<'a, AlasConfig>, Option<ImprovedClimbSelection>) {
     let engine = &config.geometry.engine;
     let n_engines = engine.spanwise_positions_m.len();
-    let departure = airports::get(&config.departure_airport).ok();
+    let departure = airport.or_else(|| config.departure_airport_record().ok());
     let artifacts = report.fuel.artifacts(&config, &report.design).ok();
     let model = EngineOutModel::new(
         &config,
@@ -179,6 +315,11 @@ fn improved_climb<'a>(
             s_ref_m2: wing_area_m2,
             drag: &artifacts.drag,
             installed_tw_sls: installed_tw,
+            aspect_ratio: alas_opt::mdo::climb_out_aspect_ratio(
+                &config,
+                report.airplane.b_ref,
+                report.airplane.s_ref,
+            ),
         },
     );
     match resolved {
@@ -206,6 +347,27 @@ pub fn config_for_report<'a>(
     )
     .config
 }
+
+/// [`config_for_report`] with the improved-climb `V2` resolved at `airport`
+/// ([`resolve_report_at`]): the configuration for a field evaluated there.
+pub fn config_for_report_at<'a>(
+    config: &'a AlasConfig,
+    report: &AnalysisReport,
+    airport: &Airport,
+    takeoff_mass_kg: f64,
+    landing_mass_kg: f64,
+    wing_area_m2: f64,
+) -> Cow<'a, AlasConfig> {
+    resolve_report_at(
+        config,
+        report,
+        Some(airport),
+        takeoff_mass_kg,
+        landing_mass_kg,
+        wing_area_m2,
+    )
+    .config
+}
 // A test builds curated presets, so a failed unwrap is the assertion failing.
 #[allow(clippy::unwrap_used, clippy::expect_used)]
 #[cfg(test)]
@@ -219,6 +381,38 @@ mod tests {
         FullAnalysis::new(config.clone())
             .run(design, true)
             .unwrap_or_else(|error| panic!("report: {error}"))
+    }
+
+    #[test]
+    fn the_improved_climb_speed_is_resolved_at_the_aerodrome_the_field_is_flown_at() {
+        // The registered A320 at MTOW needs the improved-climb
+        // V2 at its 610 m departure (ISA), not at ISA sea level, where the
+        // second segment has more thrust margin; a field evaluated at sea
+        // level must not fly the departure's speed.
+        let config = AlasConfig::from_value(&serde_json::json!({"preset": "A320-200"})).unwrap();
+        let design = config.configured_nominal_design();
+        let report = report(&config, &design);
+        // With the Raymer flap drag and the flap span loading the A320 meets the gradient at
+        // the schedule speed at MTOW, so the mass is raised until the 610 m departure first
+        // needs a higher speed.
+        let area = report.airplane.s_ref;
+        let mut mass = config.requirements.mtow_kg;
+        let at = |elevation_m: f64, mass: f64| {
+            let landing = config.landing_mass_limit_kg(mass);
+            let airport = Airport::custom("field", elevation_m, 10_000.0, 10_000.0, 0.0, 0.0, 0.0);
+            resolve_report_at(&config, &report, Some(&airport), mass, landing, area)
+                .improved_climb
+                .expect("jet selection")
+        };
+        let mut scale = 1.0;
+        while !at(609.6, mass).improved && scale < 1.6 {
+            scale += 0.02;
+            mass = scale * config.requirements.mtow_kg;
+        }
+        let (sea, high) = (at(0.0, mass), at(609.6, mass));
+        assert!(!sea.improved, "{sea:?}");
+        assert!(high.improved, "{high:?}");
+        assert!(high.v2_over_vsr > sea.v2_over_vsr);
     }
 
     #[test]
@@ -348,53 +542,84 @@ mod tests {
     }
 
     #[test]
-    fn a_second_segment_that_no_speed_meets_keeps_the_schedule_speed_and_is_flagged() {
-        // The B787-9 at 1.2 MTOW misses the gradient at the schedule speed and
-        // at the best-climb speed too: the schedule stands (no field charge)
-        // and the selection records that improved climb cannot meet it.
+    fn a_second_segment_that_no_speed_meets_flies_the_best_climb_speed_and_is_flagged() {
+        // The B787-9 above 1.2 MTOW (raised until it misses) the gradient at the schedule speed and
+        // at the best-climb speed too: the best-climb speed is flown and charged
+        // (continuous with the meeting case) and the selection records that
+        // improved climb cannot meet it.
         let config = AlasConfig::from_value(&serde_json::json!({"preset": "B787-9"})).unwrap();
         let design = config.configured_nominal_design();
         let analysis = report(&config, &design);
-        let mass = 1.2 * config.requirements.mtow_kg;
-        let resolution = resolve_report(
-            &config,
-            &analysis,
-            mass,
-            config.landing_mass_limit_kg(mass),
-            analysis.airplane.s_ref,
-        );
+        let resolve = |scale: f64| {
+            let mass = scale * config.requirements.mtow_kg;
+            resolve_report(
+                &config,
+                &analysis,
+                mass,
+                config.landing_mass_limit_kg(mass),
+                analysis.airplane.s_ref,
+            )
+        };
+        // The mass is raised until no speed meets the gradient.
+        let mut scale = 1.2;
+        let mut resolution = resolve(scale);
+        while resolution.improved_climb.is_some_and(|s| s.meets) && scale < 2.0 {
+            scale += 0.05;
+            resolution = resolve(scale);
+        }
         let selection = resolution.improved_climb.expect("jet selection");
         assert!(selection.improved && !selection.meets, "{selection:?}");
         assert!(selection.v2_over_vsr > 1.3 && selection.required < selection.required_at_schedule);
-        assert!(resolution
-            .config
-            .performance
-            .improved_climb_v2_over_vsr
-            .is_none());
         assert_eq!(
-            resolution.config.performance.improved_climb_field_factor(),
-            1.0
+            resolution.config.performance.improved_climb_v2_over_vsr,
+            Some(selection.v2_over_vsr)
         );
+        assert!(resolution.config.performance.improved_climb_field_factor() > 1.0);
         // The A320 flies the CS 25.107 schedule (1.13 VSR; the yaw-balance VMC
-        // lifts it to about 1.16): at MTOW it needs a speed above the schedule
-        // to meet the CS 25.121(b) gradient and a speed below the best-climb
-        // limit meets it.
+        // lifts it to about 1.16): once the mass is raised until it first needs a speed
+        // above the schedule, a speed below the best-climb limit meets the CS 25.121(b)
+        // gradient. (At MTOW it meets it at the schedule speed.)
         let a320 = AlasConfig::from_value(&serde_json::json!({"preset": "A320-200"})).unwrap();
         let design = a320.configured_nominal_design();
         let analysis = report(&a320, &design);
-        let mass = a320.requirements.mtow_kg;
-        let resolution = resolve_report(
-            &a320,
-            &analysis,
-            mass,
-            a320.landing_mass_limit_kg(mass),
-            analysis.airplane.s_ref,
-        );
+        let resolve = |scale: f64| {
+            let mass = scale * a320.requirements.mtow_kg;
+            resolve_report(
+                &a320,
+                &analysis,
+                mass,
+                a320.landing_mass_limit_kg(mass),
+                analysis.airplane.s_ref,
+            )
+        };
+        let mut scale = 1.0;
+        let mut resolution = resolve(scale);
+        while !resolution.improved_climb.is_some_and(|s| s.improved) && scale < 1.6 {
+            scale += 0.02;
+            resolution = resolve(scale);
+        }
         let selection = resolution.improved_climb.expect("selection");
         assert!(selection.improved && selection.meets, "{selection:?}");
         assert!(
             selection.v2_over_vsr > selection.schedule_v2_over_vsr && selection.v2_over_vsr < 1.30,
             "{selection:?}"
         );
+    }
+
+    #[test]
+    fn the_rotation_vmc_floor_needs_a_validated_vmca() {
+        let a320 = AlasConfig::from_value(&serde_json::json!({"preset": "A320-200"})).unwrap();
+        let published = a320
+            .landing_gear
+            .published_vmca_m_s
+            .expect("A320 VMCA 110 kt");
+        assert!(vmca_validates(&a320, published * 1.04));
+        assert!(vmca_validates(&a320, published * 0.96));
+        assert!(!vmca_validates(&a320, published * 1.06));
+        assert!(!vmca_validates(&a320, published * 0.87));
+        assert!(!vmca_validates(&a320, f64::NAN));
+        let b747 = AlasConfig::from_value(&serde_json::json!({"preset": "B747-400"})).unwrap();
+        assert!(b747.landing_gear.published_vmca_m_s.is_none());
+        assert!(!vmca_validates(&b747, 68.1));
     }
 }

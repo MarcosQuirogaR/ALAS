@@ -38,6 +38,7 @@ pub(super) fn show_aux_preset_picker(state: &mut AppState, ui: &mut Ui, kind: Pr
         ui.label(RichText::new(tr("Preset:")).strong());
         let mut apply = None;
         ComboBox::from_id_salt(format!("aux_preset::{}", kind.code()))
+            .icon(crate::combo_icon::down_arrow)
             .selected_text(display)
             .show_ui(ui, |ui| {
                 for (name, display) in &names {

@@ -31,6 +31,7 @@
 /assets/navdata/
 /assets/textures/*
 !/assets/textures/
+!/assets/textures/earth_blue_marble.png
 !/assets/textures/natural_earth_110m_land.geojson
 !/assets/textures/README.md
 
@@ -63,8 +64,7 @@
 # Timestamp file OpenVSP writes into its working directory.
 /.vsptime
 
-# Local working state and internal reports. Never part of the project.
-/.agent/
-/handoff.md
-/docs/research/
 
+# Local working state. Never part of the project.
+/.agent/
+/docs/research/

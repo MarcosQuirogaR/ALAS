@@ -16,11 +16,13 @@
 //! center of gravity are unchanged and only the carried mass falls to the
 //! limit. The offloaded mass is returned so the report can state it.
 //!
-//! An explicitly requested load is never reduced, consistent with the layout
-//! itself: revenue belly freight (`belly_cargo_kg > 0`) and a freighter
-//! deck are deliberate load cases, and a zero-fuel mass they take above the
-//! published maximum is reported by the feasibility check rather than
-//! removed here.
+//! Explicitly requested revenue belly freight (`belly_cargo_kg > 0`) is a
+//! deliberate load case and is never reduced here; a zero-fuel mass it takes
+//! above the published maximum is reported by the feasibility check. A
+//! freighter deck is bounded where it is laid out: the layout engine
+//! (`alas_payload::cargo::engine`) loads the net cargo whose gross mass,
+//! container tare included, meets the structural payload limit it is handed,
+//! so a freighter layout reaches this module already within the limit.
 
 use alas_payload::layout::{mass_properties, LayoutSummary, PayloadLayout};
 

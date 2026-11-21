@@ -30,7 +30,7 @@ fn selected_mses_stage_reports_an_unresolved_installation_per_finalist() {
     assert!(candidates[0]
         .mses_error
         .as_deref()
-        .is_some_and(|message| message.contains("Setup > External Tools")));
+        .is_some_and(|message| message.contains("Workspace > External Tools")));
     assert!(candidates[1].mses_status.is_none());
 }
 
@@ -85,7 +85,7 @@ fn a_completed_run_does_not_report_itself_cancelled() {
 }
 
 #[test]
-fn bounded_scheduler_caps_concurrency_and_honors_coordinator_cancellation() {
+fn bounded_scheduler_caps_concurrency_and_honors_cancellation() {
     let active = Arc::new(AtomicUsize::new(0));
     let maximum = Arc::new(AtomicUsize::new(0));
     let cancellation = Arc::new(AtomicBool::new(false));

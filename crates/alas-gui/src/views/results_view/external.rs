@@ -136,10 +136,27 @@ pub(super) fn classify_structures(
 }
 
 /// Classify the Patran deformation-render export.
+/// FLOWUnsteady follows the runtime classes, except that a quasi-steady
+/// rigid-wake polar is never shown as the free-wake result.
+pub(super) fn classify_flowunsteady(
+    status: &str,
+    reduced_fidelity: bool,
+) -> (ToolStatusClass, &'static str) {
+    let runtime = classify_runtime(status);
+    if reduced_fidelity && runtime.0 == ToolStatusClass::Success {
+        return (
+            ToolStatusClass::Warning,
+            "Completed, reduced fidelity (quasi-steady wake)",
+        );
+    }
+    runtime
+}
+
 pub(super) fn classify_patran(status: &str) -> (ToolStatusClass, &'static str) {
     match status {
         "ok" => (ToolStatusClass::Success, "Renders exported"),
         "not_run" => (ToolStatusClass::Skipped, "Not requested"),
+        "not_configured" => (ToolStatusClass::Unavailable, "Installation not found"),
         _ => (ToolStatusClass::Failure, "Export failed"),
     }
 }
@@ -200,11 +217,14 @@ pub(super) fn tool_statuses(result: &PipelineResult) -> Vec<ToolStatus> {
     let flowunsteady = result.flowunsteady_result.as_ref().map_or_else(
         || skipped("FLOWUnsteady"),
         |value| {
-            runtime_status(
+            let mut status = runtime_status(
                 "FLOWUnsteady",
                 value.status.as_str(),
                 value.error.as_deref(),
-            )
+            );
+            (status.class, status.label) =
+                classify_flowunsteady(value.status.as_str(), value.is_reduced_fidelity());
+            status
         },
     );
     let mses = result.mses_result.as_ref().map_or_else(
@@ -328,9 +348,28 @@ fn show_tool_status_card(ui: &mut Ui, status: &ToolStatus) {
 #[cfg(test)]
 mod tests {
     use super::{
-        classify_mses, classify_openvsp, classify_patran, classify_runtime, classify_structures,
-        ToolStatusClass,
+        classify_flowunsteady, classify_mses, classify_openvsp, classify_patran, classify_runtime,
+        classify_structures, ToolStatusClass,
     };
+
+    #[test]
+    fn a_quasi_steady_flowunsteady_polar_is_never_shown_as_the_free_wake_success() {
+        assert_eq!(
+            classify_flowunsteady("completed_comparable", false).0,
+            ToolStatusClass::Success
+        );
+        assert_eq!(
+            classify_flowunsteady("completed_comparable", true),
+            (
+                ToolStatusClass::Warning,
+                "Completed, reduced fidelity (quasi-steady wake)"
+            )
+        );
+        assert_eq!(
+            classify_flowunsteady("timed_out", true).0,
+            ToolStatusClass::Failure
+        );
+    }
 
     #[test]
     fn runtime_statuses_distinguish_success_warning_failure_and_unavailable() {

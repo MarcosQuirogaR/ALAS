@@ -43,7 +43,7 @@ pub(super) fn open_core_words(configured: Option<&str>, maximum: u64) -> Result<
     })?;
     if words == 0 || words > maximum {
         return Err(format!(
-            "NASTRAN-95 OCMEM must be between 1 and {maximum} words for this local build, got {words}. Rebuild nastran.exe with a larger COMMON /ZZZZZZ/ allocation to run a larger mesh."
+            "NASTRAN-95 OCMEM must be between 1 and {maximum} words for this local build, got {words}. Rebuild the solver with a larger COMMON /ZZZZZZ/ allocation to run a larger mesh."
         ));
     }
     Ok(words.to_string())

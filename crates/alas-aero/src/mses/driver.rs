@@ -28,7 +28,7 @@ use super::exec::{self, RunError, WorkDir};
 use super::{
     classify_requested_points, deck, parse, MsesConvergedCheckpoint, MsesOsmapStatus,
     MsesPointClass, MsesPolarPointDiagnostic, MsesPolarPointStatus, MsesPolarResult,
-    MsesPressureResult, MsesSolverAttempt, MsesStatus,
+    MsesPressureResult, MsesSolverAttempt, MsesStatus, MsesSweepStop,
 };
 use alas_config::MsesConfig;
 use alas_geom::aircraft::airfoil::Airfoil;

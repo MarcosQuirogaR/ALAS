@@ -6,16 +6,22 @@
 //! the density ratio, the four constraint curves, and the assembled chart.
 //!
 //! Every quantity is closed-form `f64` arithmetic: the atmospheric constants
-//! reach through `Atmosphere::new` (the same fitted model `alas-prop::cycle`
-//! checks at this tier), everything else is algebra over its result, so the
-//! surface is checked at `Tier::Closed`. The
-//! design point is an `Option` on both sides, so its `None` branch is a real
-//! assertion rather than a number.
+//! reach through `Atmosphere::new`, everything else is algebra over its
+//! result, so the surface is checked at `Tier::Closed`. The design point is an
+//! `Option` on both sides, so its `None` branch is a real assertion rather
+//! than a number.
+//!
+//! The cruise constraint's fixture was generated with the reference's fitted
+//! atmosphere, which the product's U.S. Standard Atmosphere, 1976 differs
+//! from, and records the cruise altitude rather than the state it returned;
+//! `tw_cruise_constraint_matches_the_fixture` recovers the dynamic pressure
+//! from the fixture's own result, see `recorded_dynamic_pressure`.
 
 #![cfg_attr(test, allow(clippy::unwrap_used, clippy::expect_used))]
 
 mod perf_support;
 
+use alas_atmo::{Atmosphere, GAMMA_AIR};
 use alas_config::airports::Airport;
 use alas_perf::performance::{
     build_matching_chart, density_ratio, tw_cruise_constraint, tw_oei_climb_constraint,
@@ -53,26 +59,78 @@ fn density_ratio_matches_the_fixture() {
     c.finish();
 }
 
+/// The altitude at which the product's atmosphere has the static pressure
+/// `pressure_pa`, by bisection on the monotone pressure of the standard
+/// atmosphere (m, geopotential, between -1 km and 20 km).
+fn altitude_of_pressure(pressure_pa: f64) -> f64 {
+    let (mut low, mut high) = (-1000.0_f64, 20_000.0_f64);
+    for _ in 0..200 {
+        let middle = 0.5 * (low + high);
+        if Atmosphere::new(middle).pressure() > pressure_pa {
+            low = middle;
+        } else {
+            high = middle;
+        }
+    }
+    0.5 * (low + high)
+}
+
+/// The cruise dynamic pressure the reference used, from the fixture's own
+/// result.
+///
+/// The fixture was generated with the reference's fitted atmosphere, which
+/// differs from the U.S. Standard Atmosphere, 1976 the product evaluates (by
+/// 0.05 % to 0.15 % in pressure and 1.5 % to 1.9 % in temperature near 11 km),
+/// and records the cruise altitude, not the state it returned. The constraint
+/// reads the atmosphere only through `q = rho (M a)^2 / 2 = gamma p M^2 / 2`.
+/// For any two wing loadings the recorded `T/W0 = (q CD0 / (W/S) + k (W/S) /
+/// q) / eta` is a linear 2 x 2 system in `q` and `1 / q`; the third recorded
+/// loading is then a check that the fixture is of that form.
+fn recorded_dynamic_pressure(case: &TwCruiseCase) -> f64 {
+    let rhs = |i: usize| case.expected[i] * case.thrust_lapse;
+    let a = |i: usize| [case.cd0 / case.ws_pa[i], case.k * case.ws_pa[i]];
+    let (r0, r1) = (a(0), a(1));
+    let det = r0[0] * r1[1] - r0[1] * r1[0];
+    let q = (rhs(0) * r1[1] - r0[1] * rhs(1)) / det;
+    let inverse_q = (r0[0] * rhs(1) - rhs(0) * r1[0]) / det;
+    assert!(
+        (q * inverse_q - 1.0).abs() < 1e-9,
+        "the recorded constraint is not of the form (q CD0/ws + k ws/q)/eta"
+    );
+    q
+}
+
+#[derive(Deserialize)]
+struct TwCruiseCase {
+    ws_pa: Vec<f64>,
+    cd0: f64,
+    k: f64,
+    cruise_mach: f64,
+    cruise_altitude_m: f64,
+    thrust_lapse: f64,
+    expected: Vec<f64>,
+}
+
 #[test]
 fn tw_cruise_constraint_matches_the_fixture() {
-    #[derive(Deserialize)]
-    struct Case {
-        ws_pa: Vec<f64>,
-        cd0: f64,
-        k: f64,
-        cruise_mach: f64,
-        cruise_altitude_m: f64,
-        thrust_lapse: f64,
-        expected: Vec<f64>,
-    }
     let mut c = Comparison::new("alas-perf::performance::tw_cruise_constraint", Tier::Closed);
-    for (i, case) in section::<Case>("tw_cruise").iter().enumerate() {
+    for (i, case) in section::<TwCruiseCase>("tw_cruise").iter().enumerate() {
+        // The product's atmosphere at the pressure the reference's had at the
+        // cruise altitude, so that the dynamic pressure is the reference's.
+        let q = recorded_dynamic_pressure(case);
+        let pressure = 2.0 * q / (GAMMA_AIR * case.cruise_mach.powi(2));
+        let standard = Atmosphere::new(case.cruise_altitude_m).pressure();
+        assert!(
+            (pressure / standard - 1.0).abs() < 3e-3,
+            "case{i}: the recorded pressure {pressure} Pa is not that of {} m",
+            case.cruise_altitude_m
+        );
         let got = tw_cruise_constraint(
             &case.ws_pa,
             case.cd0,
             case.k,
             case.cruise_mach,
-            case.cruise_altitude_m,
+            altitude_of_pressure(pressure),
             case.thrust_lapse,
         );
         compare_arrays(&mut c, &format!("case{i}"), &got, &case.expected);

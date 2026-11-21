@@ -34,15 +34,12 @@ pub struct AppState {
     /// The edited configuration as a value tree: the single source of truth (module doc).
     pub config_values: Value,
     /// Memo behind [`Self::typed_config`]: the content fingerprint
-    /// `config_values` had when `AlasConfig` was last decoded from it, paired
-    /// with the decoded result. `config_values` is mutated directly all over
-    /// the crate, not through a single setter, so this is validated by
-    /// content (a cheap hash of the tree) on every read rather than by a
-    /// hand-maintained revision counter, which a single missed bump at any
-    /// mutation site would silently desynchronize. `RefCell` because
-    /// `typed_config` takes `&self`: most of its ~60 call sites only read
-    /// the configuration.
+    /// `config_values` had when `AlasConfig` was last decoded, with the
+    /// result. `config_values` is mutated directly all over the crate, so the
+    /// memo is validated by content on every read; the fingerprint itself is
+    /// memoized per frame and edit revision in `fingerprint_memo`.
     pub(crate) typed_config_memo: std::cell::RefCell<Option<(u64, Arc<AlasConfig>)>>,
+    pub(crate) fingerprint_memo: crate::state::state_memo::FingerprintMemo,
     /// Memo behind [`crate::config_edit_design_space::AppState::enforce_design_space_fixed_variables`]:
     /// the `(config_fingerprint, design_values_fingerprint)` pair the design
     /// space was already an enforced fixed point for. The function is
@@ -57,12 +54,16 @@ pub struct AppState {
     /// the scene it produced. `build_page_preview` can run a full mass
     /// analysis for some preview ids (`quick_preview_report`), so an
     /// Advanced form page must not rerun it merely because egui repainted.
-    pub(crate) page_preview_cache: std::cell::RefCell<Option<(u64, Arc<Scene>)>>,
+    pub(crate) page_preview_cache:
+        std::cell::RefCell<std::collections::HashMap<String, (u64, Arc<Scene>)>>,
     /// The structure, labels, kinds and bounds every form is rendered from.
     /// Computed once from the defaults, since only the values change.
     pub schema: Node,
     /// The registry key of the aircraft preset last loaded.
     pub active_preset: String,
+    /// The configuration right after the preset named here finished loading:
+    /// the value a form compares with for "Modified" (see `views::form::baseline`).
+    pub(crate) loaded_baseline: Option<(String, u64, Value)>,
     /// Every aircraft preset, as `(registry key, display name)`.
     pub preset_names: Vec<(String, String)>,
     /// Every selectable engine name.
@@ -96,6 +97,15 @@ pub struct AppState {
     pub language: Language,
     /// Whether the right-hand live-preview dock is open.
     pub preview_open: bool,
+    /// How the live-preview dock framed its aircraft (`None` until measured).
+    pub preview_fit: Option<crate::sandbox::scene::LivePreviewFit>,
+    /// The dock preview's pan on top of its fit, canvas units.
+    pub preview_pan: (f64, f64),
+    /// The pitch the dock chose for its pane while the camera is untouched
+    /// (a tall pane tilts the default view so the aircraft fills more of it).
+    pub preview_auto_pitch: Option<f64>,
+    /// Shell-wide UI state: detail level, search, Files page, starting point.
+    pub shell: crate::shell_ui::ShellUi,
     /// Whether the navigation rail is pinned open and reserves layout space.
     pub nav_pinned: bool,
     /// Whether the unpinned navigation overlay is currently open from hover.
@@ -132,10 +142,8 @@ pub struct AppState {
     pub run_started: Option<Instant>,
     /// The most recent pipeline snapshot or finished pipeline result.
     pub pipeline_result: Option<PipelineResult>,
-    /// Whether `pipeline_result` is the final result of a successfully
-    /// completed pipeline run. Snapshots published before downstream stages
-    /// finish deliberately keep this false, even though their figures are
-    /// safe to display.
+    /// Whether `pipeline_result` is the final result of a completed run;
+    /// snapshots published before downstream stages finish keep this false.
     pub pipeline_result_complete: bool,
     /// The design values on the form when `pipeline_result` was started; a
     /// later edit makes the run's report stale for the previews.
@@ -173,6 +181,8 @@ pub struct AppState {
     pub navdata_download_cancel: Arc<AtomicBool>,
     /// Background state for the optional OpenVSP preview-runtime installer.
     pub openvsp_runtime_setup: crate::openvsp_runtime_setup::OpenVspRuntimeSetup,
+    /// Background state for the "Install all" external-tools flow.
+    pub tool_installer: crate::tool_installer::ToolInstaller,
     /// The flag that asks a running pipeline to stop.
     pub cancel_flag: Arc<AtomicBool>,
     /// Whether the user has already requested cancellation for this run.
@@ -203,8 +213,9 @@ pub struct AppState {
     pub validation_findings: Vec<ValidationIssue>,
     /// The preview figure selected in the dock's exterior tab.
     pub selected_preview_id: String,
-    /// The rendered preview scene.
-    pub preview_scene: Option<Scene>,
+    /// The rendered preview scene, already adjusted for the dock tab it was
+    /// built for; shared with the dock rather than copied each frame.
+    pub preview_scene: Option<Arc<Scene>>,
     /// Monotonic generation of the live preview scene and camera projection.
     pub preview_scene_revision: u64,
     /// The active discipline tab in the results gallery ("summary" or a
@@ -232,11 +243,13 @@ pub struct AppState {
     /// (non-orbiting) result card pass `SceneView::cache_revision` instead of
     /// falling back to hashing the whole scene graph every frame.
     pub result_figure_cache: BTreeMap<String, (Option<Arc<Scene>>, u64)>,
-    /// Monotonic source for `result_figure_cache` revisions. Never reset, so
-    /// a revision number is never reused for two different scene contents
-    /// even across a cache clear, which would otherwise let a stale cached
-    /// GPU texture (keyed by revision) match a fresh, different scene.
+    /// Monotonic source for `result_figure_cache` revisions; never reset, so a
+    /// revision is never reused (a stale GPU texture must not match a new scene).
     pub result_figure_revision_counter: u64,
+    /// Worker threads that build result figures off the UI thread.
+    pub(crate) figure_jobs: crate::figure_jobs::FigureJobs,
+    /// Worker threads that build page previews off the UI thread.
+    pub(crate) preview_jobs: std::cell::RefCell<crate::preview_jobs::PreviewJobs>,
     /// The path the config Load/Save actions read and write.
     pub config_path: String,
     /// Dialog, "My aircraft" and import-note state of the file features.
@@ -259,10 +272,6 @@ pub struct AppState {
     pub walkthrough_targets: BTreeMap<TourTarget, egui::Rect>,
     /// Shell state to restore when the walkthrough closes.
     pub walkthrough_restore: Option<WalkthroughRestore>,
-    /// Whether the advanced walkthrough guide is open.
-    pub show_advanced_guide: bool,
-    /// The advanced guide's active chapter index.
-    pub guide_chapter: usize,
     /// Detached External Tools manager; opened once independently of the tour.
     pub show_tool_intro: bool,
     /// Selected settings view, or `None` for the acquisition overview.
@@ -287,7 +296,7 @@ pub struct AppState {
     /// The Add-ons page: discovered add-ons, settings and the last run.
     pub addons: crate::addons::AddonsPanel,
     /// The clean-sheet sandbox session and workspace mode.
-    pub sandbox: crate::sandbox::SandboxSession,
+    pub sandbox: Box<crate::sandbox::SandboxSession>,
     /// Frames remaining for the fixed-length boot splash (nothing is awaited).
     pub boot_frames_remaining: u32,
 }
@@ -303,195 +312,19 @@ pub(crate) const ONBOARDING_MARKER_FILE: &str = "onboarding-seen";
 /// dismissed independently of each other.
 pub(crate) const EXTERNAL_TOOLS_INTRO_MARKER_FILE: &str = "external-tools-intro-seen";
 
+/// File in the per-user data folder that exists while the navigation is
+/// pinned: it starts collapsed unless the user pinned it in an earlier session.
+const NAV_PINNED_MARKER_FILE: &str = "nav-pinned";
+
+impl AppState {
+    /// The file whose existence records a pinned navigation.
+    pub(crate) fn nav_pinned_marker(&self) -> std::path::PathBuf {
+        self.data_dir().join(NAV_PINNED_MARKER_FILE)
+    }
+}
+
 /// The maximum retained run-log lines. A long optimization emits one line per
 /// progress update; nobody scrolls back through thousands of superseded lines.
 pub(crate) const MAX_LOG_LINES: usize = 1500;
 
-impl Default for AppState {
-    fn default() -> Self {
-        let tool_locator = ToolLocator::for_current_process();
-        let tool_preferences = tool_locator.load_preferences();
-        let data_dir = tool_locator.user_data_root().to_path_buf();
-        let mut config = AlasConfig::default();
-        crate::config_edit::apply_interactive_solver(&mut config);
-        apply_tool_preferences(&mut config, &tool_preferences);
-        let schema = config.schema();
-        let config_values = crate::config_edit::full_config_values(&config);
-
-        let preset_names = presets::display_names()
-            .into_iter()
-            .map(|(name, display)| (name.to_owned(), display.to_owned()))
-            .collect();
-        let engine_names = engines::available().iter().map(|s| s.to_string()).collect();
-        let airport_names = airports::database_with_custom()
-            .iter()
-            .map(|a| a.name.clone())
-            .collect();
-
-        let mut design_values = BTreeMap::new();
-        let mut bounds = BTreeMap::new();
-        for spec in alas_config::DESIGN_VARIABLE_SPECS {
-            design_values.insert(spec.name.to_owned(), spec.default);
-            bounds.insert(spec.name.to_owned(), (spec.lower, spec.upper));
-        }
-
-        let findings = validate(&config);
-
-        // A desktop shortcut commonly starts in a read-only installation
-        // directory (or in `C:\Windows\System32`).  Keep the GUI's default
-        // artifact tree in the same per-user data root used for preferences;
-        // development checkouts still resolve to their existing `outputs`
-        // directory when it is present.  The CLI retains its explicit
-        // working-directory default because its output path is a command-line
-        // contract.
-        let pipeline_options = PipelineOptions {
-            output_dir: Some(tool_locator.resolve_data_path(Path::new("outputs"))),
-            ..PipelineOptions::default()
-        };
-        let cfd = crate::cfd::AirfoilCfdState::new(&tool_locator);
-
-        let mut state = Self {
-            config_values,
-            typed_config_memo: std::cell::RefCell::new(None),
-            design_space_enforcement_memo: None,
-            clean_sheet_brief_fingerprint: None,
-            page_preview_cache: std::cell::RefCell::new(None),
-            schema,
-            active_preset: String::new(),
-            preset_names,
-            engine_names,
-            airport_names,
-            custom_airport_draft: crate::airport_editor::CustomAirportDraft::default(),
-            custom_airport_window: crate::views::airport_window::CustomAirportWindow::default(),
-            custom_airport_file_path: data_dir.join("alas-airports.json").display().to_string(),
-            custom_airport_status: None,
-            custom_airfoil_file_path: "custom-airfoil.dat".to_owned(),
-            custom_airfoil_status: None,
-            design_values,
-            bounds,
-            selected_aux_preset: BTreeMap::new(),
-            active_page: "inputs".to_owned(),
-            theme: AppTheme::Dark,
-            language: Language::En,
-            preview_open: true,
-            nav_pinned: false,
-            nav_hover_open: false,
-            reduced_animations: false,
-            zoom: 1.0,
-            zoom_auto: true,
-            preview_tab: PreviewTab::Exterior,
-            preview_cameras: BTreeMap::new(),
-            result_cameras: BTreeMap::new(),
-            run_options: RunOptions::default(),
-            pipeline_options,
-            is_running: false,
-            status_message: "Ready.".to_owned(),
-            parameter_feedback: None,
-            path_picker: None,
-            stage: String::new(),
-            run_started: None,
-            pipeline_result: None,
-            pipeline_result_complete: false,
-            pipeline_result_design_values: None,
-            pipeline_result_form_config: None,
-            mission_profile_manual_edit: false,
-            mission_profile_route_signature: String::new(),
-            mission_profile_regeneration_prompt: false,
-            mission_profile_retained_validation: None,
-            mission_profile_window:
-                crate::views::mission_profile_inputs::MissionProfileWindow::default(),
-            run_identity: 0,
-            worker_rx: None,
-            navdata_download_rx: None,
-            navdata_download_in_progress: false,
-            navdata_download_feedback: None,
-            navdata_download_cancel: Arc::new(AtomicBool::new(false)),
-            openvsp_runtime_setup: crate::openvsp_runtime_setup::OpenVspRuntimeSetup::default(),
-            cancel_flag: Arc::new(AtomicBool::new(false)),
-            cancellation_requested: false,
-            run_events: Vec::new(),
-            logs: vec![LogLine {
-                text: "ALAS initialized.".to_owned(),
-                kind: LogKind::Info,
-                elapsed: None,
-                run_id: 0,
-            }],
-            run_log_search: String::new(),
-            run_log_show_info: true,
-            run_log_show_warn: true,
-            run_log_show_error: true,
-            run_log_export_status: None,
-            run_log_tab: RunLogTab::Console,
-            run_log_height: 220.0,
-            run_log_open: false,
-            synced_cruise_mach: None,
-            validation_findings: findings,
-            selected_preview_id: "exterior_3d".to_owned(),
-            preview_scene: None,
-            preview_scene_revision: 0,
-            results_tab: "summary".to_owned(),
-            selected_solver_view: SolverResultView::Vlm,
-            selected_result_id: "polar_comparison".to_owned(),
-            result_scene: None,
-            view_states: BTreeMap::new(),
-            patran_textures: BTreeMap::new(),
-            result_figure_cache: BTreeMap::new(),
-            result_figure_revision_counter: 0,
-            config_path: data_dir.join("alas-config.json").display().to_string(),
-            files: crate::user_files::UserFilesState::default(),
-            tool_locator,
-            tool_preferences,
-            show_about: false,
-            show_storage: false,
-            show_view_panel: false,
-            show_walkthrough: false,
-            walkthrough_step: 0,
-            walkthrough_targets: BTreeMap::new(),
-            walkthrough_restore: None,
-            show_advanced_guide: false,
-            guide_chapter: 0,
-            show_tool_intro: false,
-            tool_intro_selected_config: None,
-            tool_intro_download_all_consent: false,
-            tool_intro_navdata_consent: false,
-            tool_intro_openvsp_preview_consent: false,
-            screening: crate::screening::ScreeningState::default(),
-            cfd,
-            uav: crate::uav::UavWorkflowState::default(),
-            addons: crate::addons::AddonsPanel::default(),
-            sandbox: crate::sandbox::SandboxSession::default(),
-            boot_frames_remaining: 40,
-        };
-
-        // Load the first registered preset at startup rather than starting
-        // from bare `AlasConfig::default()` values.
-        if let Some((first, _)) = state.preset_names.first().cloned() {
-            state.load_preset(&first);
-        } else {
-            state.update_preview_scene();
-        }
-
-        // Show the tour on a launch that has never seen it, and mark it seen
-        // right away: "seen" flips on first display rather than on completion.
-        let onboarding_marker = state
-            .tool_locator
-            .preferences_path()
-            .with_file_name(ONBOARDING_MARKER_FILE);
-        if first_start_marker_gate(&onboarding_marker) {
-            state.begin_walkthrough();
-        }
-
-        // Independent first-start gate: a user who dismisses or skips the
-        // walkthrough above must still see, once, what external tools ALAS
-        // can use and whether any of them can be fetched automatically.
-        let tool_intro_marker = state
-            .tool_locator
-            .preferences_path()
-            .with_file_name(EXTERNAL_TOOLS_INTRO_MARKER_FILE);
-        if first_start_marker_gate(&tool_intro_marker) {
-            state.show_tool_intro = true;
-        }
-
-        state
-    }
-}
+mod defaults;

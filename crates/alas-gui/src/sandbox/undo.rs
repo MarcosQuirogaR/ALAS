@@ -14,8 +14,37 @@ use std::collections::BTreeMap;
 
 use serde_json::Value;
 
+/// Whether two configuration values are equal when an object member that is
+/// `null` counts as absent: a form that draws an optional field writes its
+/// empty value as `null`, which changes nothing about the case.
+fn same_ignoring_nulls(a: &Value, b: &Value) -> bool {
+    match (a, b) {
+        (Value::Object(x), Value::Object(y)) => {
+            let present = |m: &'_ serde_json::Map<String, Value>| {
+                m.iter().filter(|(_, v)| !v.is_null()).count()
+            };
+            present(x) == present(y)
+                && x.iter().filter(|(_, v)| !v.is_null()).all(|(k, v)| {
+                    y.get(k).is_some_and(|w| same_ignoring_nulls(v, w))
+                })
+        }
+        (Value::Array(x), Value::Array(y)) => {
+            x.len() == y.len() && x.iter().zip(y).all(|(p, q)| same_ignoring_nulls(p, q))
+        }
+        _ => a == b,
+    }
+}
+
+impl PartialEq for EditSnapshot {
+    fn eq(&self, other: &Self) -> bool {
+        self.design_values == other.design_values
+            && (self.config_values == other.config_values
+                || same_ignoring_nulls(&self.config_values, &other.config_values))
+    }
+}
+
 /// The editable state one undo step restores.
-#[derive(Debug, Clone, PartialEq)]
+#[derive(Debug, Clone)]
 pub struct EditSnapshot {
     /// The configuration edit buffer.
     pub config_values: Value,

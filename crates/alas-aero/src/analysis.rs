@@ -34,6 +34,12 @@
 //! this module's entry points apply it and all three do so at the last step,
 //! which is what keeps that property visible.
 //!
+//! The factor is upstream's swept two-dimensional one ([`swept_pg_beta`]) on
+//! the frozen reference path only. Product analyses relabel with the inverse
+//! of the finite-wing slope ratio of [`lift_slope`], the rule the tail-wake
+//! attitude and the gust load factor also use; the report polar and the
+//! cruise trim solved on the stretched lattice need no relabel at all.
+//!
 //! # Scope
 //!
 //! [`AeroAnalysis::trimmed_performance`] takes a `StabilityTrimResult`
@@ -44,9 +50,30 @@
 //! reads three numbers off a type takes three numbers, rather than inverting
 //! the phase order to name the type.
 
+mod downwash;
+pub use downwash::AfterbodyFlow;
+mod installation;
+pub mod lift_slope;
+pub use installation::{
+    installation_induced_drag, installed_span_efficiency, wing_lift_coefficient, EngineInstallation,
+};
 mod parasite;
+mod parasite_items;
+pub mod parasite_obert;
+pub mod parasite_poll;
 mod performance;
+mod polar_sweep;
+mod tail_efficiency;
+mod tail_wake;
+pub use tail_efficiency::{
+    apply_tail_efficiency, physical_tail_efficiency, resolve_tail_efficiency, TailEfficiency,
+    TailEfficiencySource,
+};
+pub use tail_wake::{wake_dynamic_pressure_ratio, TailWake};
+mod buffet;
+mod buffet_table;
 mod thickness;
+mod upsweep_attitude;
 mod wave;
 mod wetted;
 
@@ -59,9 +86,22 @@ use alas_config::physics::DragModelConfig;
 use alas_geom::aircraft::airplane::Airplane;
 use alas_geom::aircraft::fuselage::Fuselage;
 
-pub use parasite::{ParasiteBreakdown, ParasiteComponent};
+pub use buffet::{
+    strip_onset_cl_n, table_cell_section, BuffetEstimate, BuffetOnset, BuffetStrip,
+    BuffetUnavailable, SweepLine, BUFFET_PRE_SHOCK_MACH,
+};
+pub use buffet_table::{shipped_tables, BuffetTables, FamilyTable, TableLookup};
+pub use parasite::{ParasiteBreakdown, ParasiteComponent, SkinFriction};
+pub use parasite_items::{
+    base_drag_area, upsweep_drag_area, upsweep_frontal_cd, wing_body_fairing_area, AftBody,
+    DragAreaItem, WingPosition, PYLON_WETTED_FRACTION, UPSWEEP_ITEM,
+};
 pub use performance::{
     PolarSweep, QuickPerformance, TrimPoint, TrimmedInviscid, TrimmedPerformance,
+};
+pub use wave::{
+    DivergenceLaw, DRAG_DIVERGENCE_MACH_RMS_ERROR, SHEVELL_KROO_DIVERGENCE_SCATTER,
+    SUPERCRITICAL_M_STAR,
 };
 
 /// The thickness-to-chord [`AeroAnalysis::section_thickness`] answers when
@@ -196,7 +236,26 @@ pub struct AeroAnalysis<'a> {
     /// running its own `area_weighted_thickness` pass, since the two would
     /// otherwise compute the identical value from the identical wing.
     wing_thickness_cache: OnceLock<Vec<f64>>,
+    /// Cached Korn section thickness, `analysis::wave`'s outboard-window
+    /// mean t/c; geometry-only like the caches above.
+    korn_thickness_cache: OnceLock<f64>,
+    /// Cached plane-only inputs of [`Self::korn_sweep_deg`]: the outboard
+    /// wing's `(mid, quarter)` chord-line slopes and the outboard-window
+    /// quarter- and mid-chord slopes. Geometry-only like the thickness cache
+    /// above (the same `OutboardWing` pass). The wave drag reads the sweep at
+    /// every (Mach, CL) node and cell check of the drag table, and each
+    /// uncached read re-sampled the outboard sections' thickness.
+    korn_sweep_cache: OnceLock<wave::KornSweepGeometry>,
+    /// Cached afterbody flow-angle model ([`Self::afterbody_flow`]);
+    /// geometry-only like the above.
+    afterbody_flow_cache: OnceLock<downwash::AfterbodyFlow>,
     /// Exact lattice and wake reuse across trimmed operating points.
+    ///
+    /// The mutex is held across a whole lattice assembly (mesh, fill and
+    /// factorization). That costs nothing while one thread drives the
+    /// analysis and its clones, which is how every caller uses it; sharing
+    /// one cache between threads that assemble concurrently would serialize
+    /// them on this lock.
     vlm_cache: Arc<Mutex<crate::vlm::VlmGeometryCache>>,
 }
 
@@ -216,10 +275,41 @@ impl Clone for AeroAnalysis<'_> {
             frozen_wave_drag: self.frozen_wave_drag,
             section_thickness_cache: OnceLock::new(),
             wing_thickness_cache: OnceLock::new(),
+            korn_thickness_cache: OnceLock::new(),
+            korn_sweep_cache: OnceLock::new(),
+            afterbody_flow_cache: OnceLock::new(),
             vlm_cache: Arc::default(),
         }
     }
 }
+
+/// Induced drag of a non-optimum wing twist, per unit `CL^2`.
+///
+/// Jenkinson, Simpkin and Rhodes, *Civil Jet Aircraft Design* (1999), Ch. 8,
+/// p. 179: the twist and section distribution along the span is not known at
+/// the project stage, "however, a contribution is appropriate as the final
+/// wing shape will include such distributions", between 0.0003 and 0.0005,
+/// "with a value of 0.0004 being suitable for conventional civil turbofan
+/// layouts"; p. 180 carries it in the lift-dependent drag as
+/// `dCD/dCL^2 = C1 C2/(pi A) + 0.0004 + 0.15 CD0`.
+///
+/// It stands in for the wake energy of the zero-lift (basic) span loading of
+/// the trimmed lattice. A preset declares its twist as three angles (root,
+/// break, tip), unsourced for most types, and the lattice carries them
+/// rigidly at every lift: the basic loading they produce costs 9 to 24 drag
+/// counts at any lift coefficient on the jet transports (A320-200 16, B747-400
+/// 12, B787-9 17, A350-900 23), where the flight-test drag polars leave room
+/// for none of it. At CL 0.5 below the drag rise the trimmed table with that
+/// term read 8.5 % above the A320-200 polar (E. Obert, *Aerodynamic Design of
+/// Transport Aircraft*, 2009, Fig. 24.123, p. 260), 6.6 % above the 747-100
+/// (Fig. 24.78, p. 241) and 9.5 % above the DC-10-30 (Fig. 24.26, p. 209),
+/// while its slope against `CL^2` already sat on the flight-test correlation
+/// `1/(pi A e) = 1.02/(pi A) + 0.0075 to 0.0090` (Obert, Fig. 40.36, p. 542).
+/// A wing in service is twisted, and deflects under load, to fly close to its
+/// best span loading in cruise; the lattice keeps the lift-proportional
+/// (additional) loading and the trim load, and the twist enters as the
+/// handbook allowance.
+pub const NON_OPTIMUM_TWIST_DRAG_FACTOR: f64 = 4.0e-4;
 
 impl<'a> AeroAnalysis<'a> {
     /// A new analysis of `plane` at `sweep_deg`, each configuration group
@@ -241,6 +331,9 @@ impl<'a> AeroAnalysis<'a> {
             frozen_wave_drag: false,
             section_thickness_cache: OnceLock::new(),
             wing_thickness_cache: OnceLock::new(),
+            korn_thickness_cache: OnceLock::new(),
+            korn_sweep_cache: OnceLock::new(),
+            afterbody_flow_cache: OnceLock::new(),
             vlm_cache: Arc::default(),
         }
     }
@@ -346,6 +439,15 @@ impl<'a> AeroAnalysis<'a> {
         }
     }
 
+    /// The non-optimum-twist allowance in effect, per unit `CL^2`:
+    /// [`NON_OPTIMUM_TWIST_DRAG_FACTOR`] on the product path, `None` on the
+    /// frozen reference paths, whose fixtures carry the lattice's own
+    /// zero-lift loading.
+    pub fn non_optimum_twist_drag_factor(&self) -> Option<f64> {
+        (!self.reference_compatibility && !self.frozen_wave_drag)
+            .then_some(NON_OPTIMUM_TWIST_DRAG_FACTOR)
+    }
+
     /// A body's streamwise length, from the x of its first station to the x
     /// of its last.
     fn body_length(fuselage: &Fuselage) -> f64 {
@@ -379,6 +481,8 @@ impl<'a> AeroAnalysis<'a> {
             self.parasite_drag(mach, altitude_m, cl, Some(&atmosphere), Some(thickness));
         DragComponents {
             cd_parasite,
+            // On the whole profile drag, upsweep included (Jenkinson 1999,
+            // pp. 179-180).
             cd_viscous_lift: self.lift_dependent_viscous_drag(cd_parasite, cl),
             cd_induced,
             cd_wave: self.wave_drag(mach, cl, self.reference_compatibility.then_some(thickness)),
@@ -392,6 +496,7 @@ impl<'a> AeroAnalysis<'a> {
 #[cfg(test)]
 mod tests {
     use super::*;
+    use crate::vlm::VlmSystem;
     use alas_geom::aircraft::airfoil::Airfoil;
     use alas_geom::aircraft::fuselage::FuselageXSec;
     use alas_geom::aircraft::wing::{Wing, WingXSec};
@@ -598,7 +703,7 @@ mod tests {
     }
 
     #[test]
-    fn each_tail_surface_uses_its_own_thickness_and_sweep() {
+    fn each_tail_surface_uses_its_own_thickness_and_the_printed_form_factor() {
         let make_plane = |tip_x: f64, airfoil_name: &str| {
             let mut plane = probe();
             plane.wings.push(tail(tip_x, airfoil_name));
@@ -613,20 +718,29 @@ mod tests {
         let thick_unswept = drag(&make_plane(0.0, "naca0018"));
         let thin_swept = drag(&make_plane(12.0, "naca0006"));
 
+        // Thickness enters through the exposed wetted area; the jet build-up
+        // takes Poll and Schumann's printed tail form factor (Eqs. B-8 and
+        // B-10), which carries no sweep term.
         assert!(
             thick_unswept > thin_unswept,
-            "tail thickness must affect its parasite form factor"
+            "tail thickness must affect its parasite drag"
         );
         assert!(
-            (thin_swept - thin_unswept).abs() > 1e-10,
-            "tail sweep must affect its parasite form factor"
+            (thin_swept - thin_unswept).abs() < 1e-12,
+            "the printed tail form factor holds no sweep term"
         );
     }
 
     #[test]
     fn wave_drag_is_zero_below_the_onset_mach_whatever_the_lift() {
         let plane = probe();
-        let analysis = AeroAnalysis::new(&plane, 32.0, None, None, None);
+        // The Lock rise of the selectable relations; Shevell's curve has no onset.
+        let lock_rise = {
+            let mut geometry = alas_config::GeometryConfig::default();
+            geometry.wing.drag_divergence_law = alas_config::DragDivergenceLaw::Torenbeek1048;
+            Some(geometry)
+        };
+        let analysis = AeroAnalysis::new(&plane, 32.0, lock_rise, None, None);
         let onset = analysis.drag.wave_drag_onset_mach;
         assert_eq!(analysis.wave_drag(onset - 1e-9, 5.0, None), 0.0);
     }
@@ -645,13 +759,17 @@ mod tests {
     #[test]
     fn configured_wave_rise_preserves_drag_divergence_slope() {
         let plane = probe();
-        let mut analysis = AeroAnalysis::new(&plane, 32.0, None, None, None);
+        let lock_rise = {
+            let mut geometry = alas_config::GeometryConfig::default();
+            geometry.wing.drag_divergence_law = alas_config::DragDivergenceLaw::Torenbeek1048;
+            Some(geometry)
+        };
+        let mut analysis = AeroAnalysis::new(&plane, 32.0, lock_rise, None, None);
         let cl = 0.5;
         let thickness = analysis.section_thickness();
-        let cos_sweep = analysis.sweep_deg.to_radians().cos();
-        let mach_dd = analysis.korn_technology_factor() / cos_sweep
-            - thickness / cos_sweep.powi(2)
-            - cl / (10.0 * cos_sweep.powi(3));
+        // M_dd reads the Korn sweep of the outboard wing, not the constructor
+        // sweep; it does not depend on the rise coefficient.
+        let (mach_dd, _) = analysis.korn_mach_numbers(cl, Some(thickness));
         for coefficient in [10.0, 20.0, 40.0] {
             analysis.drag.wave_drag_coefficient = coefficient;
             let h = 1e-5;
@@ -675,5 +793,107 @@ mod tests {
             assert!(parasite.is_finite(), "parasite drag at Mach {mach}");
             assert!(wave.is_finite() && wave >= 0.0, "wave drag at Mach {mach}");
         }
+    }
+    /// A Goethert stretch written out here (`alas-stab` is above this crate):
+    /// x stations, chords and the moment reference divided by `beta`.
+    fn stretched(plane: &Airplane, beta: f64) -> Airplane {
+        let mut out = plane.clone();
+        for wing in &mut out.wings {
+            for xsec in &mut wing.xsecs {
+                xsec.xyz_le[0] /= beta;
+                xsec.chord /= beta;
+            }
+        }
+        out.xyz_ref[0] /= beta;
+        out
+    }
+
+    #[test]
+    fn the_stretched_sweep_is_compressible_at_the_true_angle_with_a_scaled_moment() {
+        let plane = probe();
+        let analysis = AeroAnalysis::new(&plane, 32.0, None, None, None);
+        let (mach, altitude) = (0.78, 11_000.0);
+        let beta = (1.0_f64 - mach * mach).sqrt();
+        let physical = VlmSystem::assemble(&plane, 4, 2).unwrap();
+        let incompressible = analysis
+            .run_sweep_with_system(&physical, mach, altitude)
+            .unwrap();
+        let wing_plane = stretched(&plane, beta);
+        let system = VlmSystem::assemble(&wing_plane, 4, 2).unwrap();
+        let compressible = analysis
+            .run_stretched_sweep_with_system(&system, mach, altitude, beta)
+            .unwrap();
+        let unscaled = analysis
+            .run_stretched_sweep_with_system(&system, mach, altitude, 1.0)
+            .unwrap();
+        for (scaled, raw) in compressible.cm.iter().zip(&unscaled.cm) {
+            assert!((scaled - beta * raw).abs() < 1e-15);
+        }
+        assert_eq!(compressible.compressible_mach, Some(mach));
+        assert_eq!(incompressible.compressible_mach, None);
+        // The reporting axis is the geometric one: no relabel.
+        assert_eq!(compressible.alpha_deg, compressible.geometric_alpha_deg);
+        // Same angle range, with more points (the lift spacing of the
+        // incompressible schedule is kept at the larger compressible slope).
+        assert!(compressible.geometric_alpha_deg.len() > incompressible.geometric_alpha_deg.len());
+        assert_eq!(
+            compressible.geometric_alpha_deg.first(),
+            incompressible.geometric_alpha_deg.first()
+        );
+        assert_eq!(
+            compressible.geometric_alpha_deg.last(),
+            incompressible.geometric_alpha_deg.last()
+        );
+        // Compressible lift is larger at every positive lift (Prandtl-Glauert).
+        let last = compressible.cl.len() - 1;
+        assert!(compressible.cl[last] > 1.1 * incompressible.cl[incompressible.cl.len() - 1]);
+        // Every column is evaluated at the compressible lift.
+        for k in 0..=last {
+            let total =
+                compressible.cd_induced[k] + compressible.cd_parasite[k] + compressible.cd_wave[k];
+            assert!((total - compressible.cd[k]).abs() < 1e-12);
+            assert!(
+                (compressible.l_over_d[k] - compressible.cl[k] / compressible.cd[k]).abs() < 1e-9
+            );
+        }
+    }
+
+    #[test]
+    fn the_stretched_sweep_with_beta_one_is_the_incompressible_sweep_columns() {
+        let plane = probe();
+        let analysis = AeroAnalysis::new(&plane, 32.0, None, None, None);
+        let physical = VlmSystem::assemble(&plane, 4, 2).unwrap();
+        // The system's first solve is direct and its later ones superposed;
+        // a first sweep leaves every solve of the compared ones superposed.
+        analysis.run_sweep_with_system(&physical, 0.2, 0.0).unwrap();
+        let incompressible = analysis.run_sweep_with_system(&physical, 0.2, 0.0).unwrap();
+        // The same schedule with an identity stretch and density: every
+        // column, drag included, is the incompressible sweep's, to the bit.
+        let identity = analysis
+            .solve_schedule(&physical, 0.2, 0.0, 1.0, 1.0)
+            .unwrap();
+        assert_eq!(
+            identity.geometric_alpha_deg,
+            incompressible.geometric_alpha_deg
+        );
+        assert_eq!(identity.cl, incompressible.cl);
+        assert_eq!(identity.cm, incompressible.cm);
+        assert_eq!(identity.cd, incompressible.cd);
+        assert_eq!(identity.cd_induced, incompressible.cd_induced);
+        // The public stretched entry point only adds the Mach flag and the
+        // denser schedule: same range, lift linear in the angle.
+        let stretched = analysis
+            .run_stretched_sweep_with_system(&physical, 0.2, 0.0, 1.0)
+            .unwrap();
+        assert_eq!(stretched.compressible_mach, Some(0.2));
+        assert!(stretched.geometric_alpha_deg.len() >= identity.geometric_alpha_deg.len());
+        assert_eq!(
+            stretched.geometric_alpha_deg.first(),
+            identity.geometric_alpha_deg.first()
+        );
+        assert_eq!(
+            stretched.geometric_alpha_deg.last(),
+            identity.geometric_alpha_deg.last()
+        );
     }
 }

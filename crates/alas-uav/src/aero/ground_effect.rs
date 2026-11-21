@@ -1,7 +1,7 @@
 // SPDX-License-Identifier: AGPL-3.0-or-later
 // Copyright (C) 2026 Marcos Quiroga Rodriguez
 
-//! Ground effect for take-off and landing (UAV-PLAN 3.1 item 7).
+//! Ground effect for take-off and landing.
 //!
 //! `h` is the height of the wing quarter-chord above the ground plane, `b`
 //! the span, both in metres; `h/b >= 0`.  The induced-drag reduction factor

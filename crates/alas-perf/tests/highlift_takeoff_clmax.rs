@@ -1,8 +1,7 @@
 // SPDX-License-Identifier: AGPL-3.0-or-later
 // Copyright (C) 2026 Marcos Quiroga Rodriguez
 
-//! The declared-high-lift CLmax_TO of the registered jets (fix lane CLmax-TO,
-//! 2026-10-16): consistency with the Raymer Eq. 12.21 forms of
+//! The declared-high-lift CLmax_TO of the registered jets: consistency with the Raymer Eq. 12.21 forms of
 //! `alas_perf::performance::clmax`, and the landing value of the same method
 //! against the Vref-recovered `cl_max_land` of each preset.
 //!
@@ -50,16 +49,17 @@ fn the_declared_system_reproduces_the_raymer_increment_forms() {
         };
         assert_eq!(parts.takeoff_share, share, "{}", system.preset_name);
         let increment = match parts.landing_anchor {
-            Some(anchor) => anchor - parts.clean - parts.leading_edge,
+            Some(anchor) => (anchor - parts.clean - parts.leading_edge).max(0.0),
             None => parts.flap_landing,
         };
         assert!(
             (parts.takeoff() - (parts.clean + share * increment + parts.leading_edge)).abs()
                 < 1e-12
         );
+        // Anchored on the published approach speed, else on the pooled slatted law.
         assert_eq!(
-            parts.landing_anchor.is_some(),
-            presets::published_landing_reference(system.preset_name).is_some(),
+            parts.landing_anchor,
+            Some(preset.performance.as_ref().unwrap().cl_max_land),
             "{}",
             system.preset_name
         );

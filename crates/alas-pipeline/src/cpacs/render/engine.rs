@@ -66,12 +66,20 @@ pub(super) fn write_engine_definition(xml: &mut String, config: &AlasConfig) {
     let _ = writeln!(xml, "    </engines>");
 }
 
-/// Emit quantities that CPACS 3.5's jet-engine analysis fields cannot encode.
+/// Whether [`write_toolspecific_propulsion`] has anything to record.
+pub(super) fn has_toolspecific_propulsion(config: &AlasConfig) -> bool {
+    matches!(
+        config.geometry.engine.active_model(),
+        Ok(ActiveEngineModel::Turboprop(_))
+    )
+}
+
+/// Emit, as a `<tool>`, quantities that CPACS 3.5's jet-engine analysis fields
+/// cannot encode.
 pub(super) fn write_toolspecific_propulsion(xml: &mut String, config: &AlasConfig) {
     let Ok(ActiveEngineModel::Turboprop(spec)) = config.geometry.engine.active_model() else {
         return;
     };
-    let _ = writeln!(xml, "  <toolspecific>");
     let _ = writeln!(xml, "    <tool>");
     write_text(xml, 6, "name", "ALAS propulsion");
     write_text(xml, 6, "version", "1.0");
@@ -124,5 +132,4 @@ pub(super) fn write_toolspecific_propulsion(xml: &mut String, config: &AlasConfi
     write_number_element(xml, 8, "reductionRatio", spec.reduction_ratio);
     let _ = writeln!(xml, "      </propulsion>");
     let _ = writeln!(xml, "    </tool>");
-    let _ = writeln!(xml, "  </toolspecific>");
 }

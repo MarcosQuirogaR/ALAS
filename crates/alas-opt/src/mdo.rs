@@ -17,21 +17,26 @@
 
 mod build;
 pub mod cabin_sync;
+pub mod cg_trim_drag;
 mod cost;
 pub mod cruise_mass;
 pub mod drag_table;
-mod engine;
+pub mod engine;
 mod mda;
 pub mod mission_model;
 mod mtow_modes;
 mod nominal_cache;
+mod nominal_design;
 mod offdesign;
 pub mod payload_limit;
 pub mod propulsion;
 mod range;
+pub mod registered_area;
 mod residuals;
 mod residuals_buffet;
 mod residuals_geometry;
+mod residuals_hold_clearance;
+mod residuals_lateral;
 mod residuals_layout;
 mod residuals_performance;
 mod residuals_vmc;
@@ -42,10 +47,18 @@ pub mod structural_feasibility;
 mod tail_sizing;
 mod tanks;
 mod trim;
+#[cfg(test)]
+mod trim_blend_tests;
 mod types;
+pub(crate) mod wing_position;
+pub(crate) use engine::sizing::MATCH_TOLERANCE as ENGINE_MATCH_TOLERANCE;
+pub(crate) use engine::sizing::SEARCH_AIM_BAND as ENGINE_SEARCH_AIM_BAND;
 pub use mission_model::SegmentMissionModel;
-pub use mtow_modes::MtowPlanOutcome;
-pub use offdesign::OffDesignFlight;
+pub(crate) use nominal_design::canonical_nominal_design;
+pub use nominal_design::{canonicalize_design, configured_nominal_design, resolve_tail_sizing};
+pub use registered_area::{
+    registered_wing_area, wing_area_upper_m2, RegisteredWingArea, REGISTERED_WING_AREA_FRACTION,
+};
 pub use residuals::reporting_relative_balance;
 pub(crate) use residuals_layout::TE_ANGLE_LIMIT_DEG;
 pub use residuals_performance::certification::{
@@ -61,129 +74,44 @@ pub use residuals_performance::improved_climb::{
     resolve_improved_climb, top_of_climb, ImprovedClimbInputs, TopOfClimb, TOC_LEVEL_TOLERANCE_M,
     TOC_TOLERANCE_M_S,
 };
+pub use residuals_performance::net_path::{
+    climb_out_aspect_ratio, EngineFailureClass, V2ClimbOutPolar,
+};
 pub use residuals_performance::oei_deck::{
     second_segment_evidence, EngineOutCondition, EngineOutModel, EngineOutPoint, EngineOutRating,
     SecondSegmentEvidence, TrimDragBasis, YawAirframe,
 };
-pub use residuals_performance::takeoff_field::{field_polar, jet_takeoff_field, JetFieldInputs};
+pub use residuals_performance::takeoff_field::{
+    field_polar, jet_takeoff_field, jet_takeoff_field_breakdown, longest_on_ground_planes,
+    with_jet_field_inputs, JetFieldInputs,
+};
 pub use residuals_performance::thrust_uncertainty::{
     takeoff_thrust_scatter, thrust_scatter, ScatterBasis, ThrustAssessment, ThrustMessage,
     ThrustVerdict,
 };
 pub use residuals_vmc::{
-    evaluate_vmc, performance_with_vmc, CrosswindAssessment, VmcAssessment, VmcFailure, VmcInputs,
-    VmcOutcome, CROSSWIND_DESIGN_M_S,
+    design_crosswind_m_s, evaluate_vmc, performance_with_vmc, CrosswindAssessment, VmcAssessment,
+    VmcFailure, VmcInputs, VmcOutcome, CROSSWIND_CAP_M_S, CROSSWIND_MINIMUM_M_S,
 };
 pub use sizing::candidate_model::{
     baseline_closure_config, baseline_fuel_artifacts, candidate_mission_model,
 };
-pub use sizing::planned_mission::{plan_for_mission, solve_planned_dispatch, PlannedTrips};
+pub use sizing::memo::{run_scope as sizing_memo_scope, RunScope as SizingMemoScope};
+pub use sizing::planned_mission::{
+    plan_for_mission, solve_planned_dispatch, solve_planned_dispatch_with_plan, PlannedTrips,
+};
 pub use tanks::{usable_fuel_capacity, UsableCapacityBasis, UsableFuelCapacity};
 pub use types::{
     CandidateAssessment, CandidateDrag, CandidateFuelArtifacts, ConstraintFamily,
     ConstraintResidual, DeckKey, ExternalPolar, PolarConditionTolerance, ProductStateProvenance,
     ResidualRole, ResolvedProductState, SizedCandidate, SizingControls, SizingWork,
 };
+pub use {mda::SizingMapJump, mtow_modes::MtowPlanOutcome, offdesign::OffDesignFlight};
 
 use alas_config::design_variables::DesignVector;
 use alas_config::AlasConfig;
 
 use crate::objective::DesignObjective;
-
-/// Resolve a deterministic nominal vector for a product design space.
-///
-/// Clean-sheet passenger studies with cabin-derived fuselage length need the
-/// same one-dimensional sizing solve before bounds are handed to the search;
-/// otherwise the search would evaluate one body length and return another in
-/// its best-design vector. Other modes return the supplied nominal intact.
-///
-/// A derived clean-sheet start places its wing on the estimated fuselage
-/// (see [`alas_config::clean_sheet`]); once the cabin has sized the actual
-/// body, that start's wing is placed on it at the same class station.
-pub(crate) fn canonical_nominal_design(
-    config: &AlasConfig,
-    nominal: DesignVector,
-) -> Result<DesignVector, String> {
-    let mut design = canonicalize_design(config, nominal)?;
-    let explicit_shift = config
-        .optimizer
-        .design_space
-        .initial_design
-        .contains_key("wing_x_shift_m");
-    if config.derives_clean_sheet_start()
-        && !explicit_shift
-        && nominal.same_geometry(&config.configured_nominal_design())
-    {
-        if let Some(shift_m) = config.clean_sheet_wing_x_shift_m(&design) {
-            // An explicit wing-shift bound still holds the re-placed wing.
-            let bounds = config.optimizer.design_space.bounds.get("wing_x_shift_m");
-            design.wing_x_shift_m = bounds.map_or(shift_m, |&(lower, upper)| {
-                shift_m.clamp(lower, upper.max(lower))
-            });
-        }
-    }
-    Ok(config.band_design(design))
-}
-
-/// The vector a run that supplies no design starts from, materialized as the
-/// evaluator builds it: [`AlasConfig::configured_nominal_design`] through
-/// [`canonical_nominal_design`].
-///
-/// # Errors
-///
-/// When the cabin-derived fuselage cannot be sized.
-pub fn configured_nominal_design(config: &AlasConfig) -> Result<DesignVector, String> {
-    canonical_nominal_design(config, config.configured_nominal_design())
-}
-
-/// Materialize the design vector that the production evaluator actually
-/// builds for a candidate.
-///
-/// In a clean-sheet passenger study the fuselage length is derived from the
-/// cabin load case.  Keeping this operation at the public pipeline boundary
-/// prevents a no-optimization run (or a downstream export) from publishing
-/// the unsized default vector while the evaluator silently builds a different
-/// fuselage.  Other design modes preserve the caller's vector verbatim.
-pub fn canonicalize_design(
-    config: &AlasConfig,
-    mut design: DesignVector,
-) -> Result<DesignVector, String> {
-    if !config.optimizer.design_space.sizes_fuselage_from_cabin()
-        || config.requirements.aircraft_type == "cargo"
-    {
-        return Ok(design);
-    }
-    let mut materialized = config.clone();
-    crate::objective::apply_candidate_payload_load_case(&mut materialized, &design)
-        .map_err(|error| format!("cabin load case cannot be materialized: {error}"))?;
-    build::size_fuselage_from_cabin(&materialized, &mut design)
-        .map_err(|failure| format!("fuselage cannot be sized from cabin: {}", failure.reason))?;
-    Ok(design)
-}
-
-/// The design vector and tail sizing the evaluator builds a candidate with,
-/// without evaluating it: the candidate payload load case, the cabin-derived
-/// fuselage unless `preserve_explicit_fuselage_length`, and a reference
-/// adaptation's tail sizing, through the very function the evaluator's
-/// geometry build calls. An external aerodynamic model can then draw the
-/// tail the coupled assessment will size, mass and trim.
-///
-/// # Errors
-///
-/// The candidate failure reason when those steps reject the vector.
-pub fn resolve_tail_sizing(
-    config: &AlasConfig,
-    design: &DesignVector,
-    preserve_explicit_fuselage_length: bool,
-) -> Result<(DesignVector, alas_config::TailSizing), String> {
-    let (_, resolved, sizing) = build::resolve_before_build(
-        config,
-        &design.to_array(),
-        preserve_explicit_fuselage_length,
-    )
-    .map_err(|failure| failure.reason.to_owned())?;
-    Ok((resolved, sizing))
-}
 
 /// Evaluate a mission-sized objective for candidate design vector `x`,
 /// recording the result into `objective`'s history and returning the scalar
@@ -225,7 +153,7 @@ pub fn evaluate_mission_sized_with_assessment(
         return (cost, None);
     }
     let resolved = objective.config.at_band_mass(DesignVector::band_mass_of(x));
-    let outcome = residuals::gear_placement::size_with_main_gear_placement(
+    let outcome = engine::sizing::size_candidate(
         &resolved,
         x,
         None,
@@ -438,7 +366,7 @@ fn assess_with(
         .map_err(|_| "design_space".to_owned())?;
     let weights = objective.config.optimizer.weights.clone();
     let resolved = objective.config.at_band_mass(DesignVector::band_mass_of(x));
-    match residuals::gear_placement::size_with_main_gear_placement(
+    match engine::sizing::size_candidate(
         &resolved,
         x,
         polar,
@@ -459,7 +387,7 @@ fn assess_with(
             );
             Ok(cost::assemble(outcome, config, residuals))
         }
-        Err(failure) => Err(failure.reason.to_owned()),
+        Err(failure) => Err(failure.to_string()),
     }
 }
 
@@ -477,7 +405,7 @@ pub fn rebuild_airplane(
     sizing: &alas_config::TailSizing,
 ) -> Result<alas_geom::aircraft::airplane::Airplane, String> {
     build::rebuild_airplane(config, dv, sizing)
-        .map_err(|failure| format!("geometry build failed: {}", failure.reason))
+        .map_err(|failure| format!("geometry build failed: {failure}"))
 }
 
 /// The design recorded for a candidate, or `None` when its vector does not

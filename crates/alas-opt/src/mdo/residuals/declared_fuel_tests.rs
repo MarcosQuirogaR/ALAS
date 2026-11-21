@@ -68,27 +68,30 @@ fn the_nominal_passes_on_every_preset_with_the_published_figures_as_context() {
 }
 
 #[test]
-fn a_candidate_that_shrinks_the_tanks_below_the_nominal_fails() {
+fn a_candidate_whose_tanks_cannot_hold_the_mission_fuel_fails_and_the_registered_tanks_are_context()
+{
     let config = config("A320-200", "reference_adaptation");
     let mut outcome = sized(&config);
-    let nominal = find(&outcome, &config, "fuel_capacity_declared")
-        .unwrap()
-        .limit;
-    // The short route needs a small fraction of the tanks, so the route fuel
-    // check alone cannot notice a wing that shrinks them.
-    assert!(outcome.sized.ramp_fuel_kg < 0.25 * nominal);
-    outcome.sized.usable_capacity_kg = 0.95 * nominal;
-    let shrunk = find(&outcome, &config, "fuel_capacity_declared").unwrap();
-    assert!(shrunk.normalized_violation > 0.0);
-    outcome.sized.usable_capacity_kg = 1.05 * nominal;
-    let grown = find(&outcome, &config, "fuel_capacity_declared").unwrap();
-    assert_eq!(grown.normalized_violation, 0.0);
+    let declared = find(&outcome, &config, "fuel_capacity_declared").unwrap();
+    // Under the fixed requirement the route is the only required mission:
+    // the limit is its ramp fuel (taxi + trip + reserves), not the
+    // registered tank volume.
+    assert_eq!(declared.limit, outcome.sized.ramp_fuel_kg);
+    let nominal = find(&outcome, &config, "fuel_capacity_nominal").unwrap();
+    assert_eq!(nominal.role, ResidualRole::Diagnostic);
+    assert!(nominal.limit > declared.limit);
+    let required_kg = declared.limit;
+    outcome.sized.usable_capacity_kg = 0.95 * required_kg;
+    let short = find(&outcome, &config, "fuel_capacity_declared").unwrap();
+    assert!(short.normalized_violation > 0.0);
+    outcome.sized.usable_capacity_kg = 1.05 * required_kg;
+    let enough = find(&outcome, &config, "fuel_capacity_declared").unwrap();
+    assert_eq!(enough.normalized_violation, 0.0);
 }
 
 #[test]
-fn a_design_mission_sets_the_requirement_and_the_nominal_capacity_is_the_fallback() {
+fn a_design_mission_and_its_off_design_route_both_bound_the_required_fuel() {
     use alas_config::MtowSizing;
-    let mut nominal_capacity = None;
     for sizing in [MtowSizing::FixedRequirement, MtowSizing::PayloadAdjusted] {
         let mut config = config("A320-200", "reference_adaptation");
         config.optimizer.objective.mtow_sizing = sizing;
@@ -100,28 +103,27 @@ fn a_design_mission_sets_the_requirement_and_the_nominal_capacity_is_the_fallbac
             sizing == MtowSizing::PayloadAdjusted,
             "{sizing:?}"
         );
-        if outcome.plan.design_mission.is_some() {
-            // The tanks must hold the design mission's reserve-inclusive
-            // takeoff fuel, and the route check adds the taxi-out on top.
-            assert_eq!(declared.limit, sized.design_mission_fuel_kg, "{sizing:?}");
-            assert!(sized.design_mission_fuel_kg > sized.design_mission_trip_fuel_kg);
-            assert!(sized.ramp_fuel_kg >= sized.design_mission_fuel_kg);
-        } else {
-            nominal_capacity = Some(declared.limit);
-        }
-        // Both requirements are held against the dispatch capacity.
-        let capacity_kg = sized.usable_capacity_kg;
+        let route_kg = sized
+            .mtow
+            .offdesign
+            .as_ref()
+            .filter(|flight| {
+                matches!(
+                    flight.dispatch.status,
+                    alas_mass::dispatch::DispatchStatus::Converged
+                )
+            })
+            .map(|flight| flight.dispatch.plan.ramp_fuel_kg());
+        assert_eq!(route_kg.is_some(), outcome.plan.design_mission.is_some());
+        let expected = route_kg.map_or(sized.ramp_fuel_kg, |kg| kg.max(sized.ramp_fuel_kg));
+        assert_eq!(declared.limit, expected, "{sizing:?}");
+        assert!(declared.limit >= sized.ramp_fuel_kg);
         assert_eq!(
             declared.normalized_violation > 0.0,
-            capacity_kg < declared.limit,
+            sized.usable_capacity_kg < declared.limit,
             "{sizing:?}"
         );
     }
-    // The fixed requirement closes on the route, so it keeps the fallback,
-    // which is the preset's own modelled capacity.
-    let fallback = nominal_capacity.expect("the fixed requirement has no design mission");
-    let preset = sized(&config("A320-200", "reference_adaptation"));
-    assert!((fallback - preset.sized.usable_capacity_kg).abs() < 1e-6);
 }
 
 #[test]

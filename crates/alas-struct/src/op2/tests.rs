@@ -186,23 +186,10 @@ fn msc_oes_reports_bar_and_triangle_records_before_reading_cquad4_corners() {
     assert_eq!(table.data.len(), 20);
     assert_eq!(table.data[0][7], 7.0);
     assert_eq!(table.data[1][7], 17.0);
-    assert_eq!(
-        parsed.unread_result_tables,
-        [
-            UnreadResultTable::ElementStress {
-                name: "OES1X1".to_owned(),
-                subcase: 1,
-                element_type: 34,
-                num_wide: 16,
-            },
-            UnreadResultTable::ElementStress {
-                name: "OES1X1".to_owned(),
-                subcase: 1,
-                element_type: 74,
-                num_wide: 17,
-            },
-        ]
-    );
+    // The bar and triangle records are decoded by their own layouts.
+    assert!(parsed.unread_result_tables.is_empty());
+    assert_eq!(parsed.cbar_axial_stress.get(&1).map(Vec::len), Some(1));
+    assert_eq!(parsed.ctria3_stress.get(&1).map(|t| t.data.len()), Some(2));
 }
 
 #[test]

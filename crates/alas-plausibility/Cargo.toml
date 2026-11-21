@@ -1,0 +1,22 @@
+[package]
+name = "alas-plausibility"
+description = "Automated plausibility tier: generic engineering sanity rules over a pipeline result, usable by the product (CLI and MCP server) and by the acceptance suite."
+version.workspace = true
+edition.workspace = true
+license.workspace = true
+authors.workspace = true
+rust-version.workspace = true
+
+[dependencies]
+alas-config = { path = "../alas-config" }
+alas-mass = { path = "../alas-mass" }
+alas-mission = { path = "../alas-mission" }
+alas-opt = { path = "../alas-opt" }
+alas-payload = { path = "../alas-payload" }
+alas-perf = { path = "../alas-perf" }
+alas-pipeline = { path = "../alas-pipeline" }
+alas-report = { path = "../alas-report" }
+serde_json = { workspace = true }
+
+[lints]
+workspace = true

@@ -117,6 +117,8 @@ pub struct LandingGearStationPositions {
     /// For multi-bogie layouts (e.g. A380, A340), this is the wheel-count-weighted
     /// centroid across all main-gear struts if valid, or unweighted mean for missing counts.
     /// If rejected, this holds the fallback primary station. Check `resolution` for validity.
+    /// It is the static reaction station only; the airframe pitches on the runway about
+    /// [`Self::rotation_pivot_x_m`].
     pub x_mlg_m: f64,
     /// Main-gear station for each configured strut, in layout order.
     pub main_gear_x_m: Vec<f64>,
@@ -145,6 +147,14 @@ impl LandingGearStationPositions {
     /// Effective longitudinal wheelbase from nose gear to the effective main gear centroid, m.
     pub fn effective_wheelbase_m(&self) -> f64 {
         self.x_mlg_m - self.x_nlg_m
+    }
+
+    /// The station the airframe pitches nose up about on the runway, m:
+    /// [`rotation_pivot_station`] of [`Self::main_gear_x_m`], falling back to
+    /// [`Self::x_mlg_m`]. The tail-scrape (tail-down) angle, the tip-back
+    /// angle and limit, the lift-off attitude and the ground pose all use it.
+    pub fn rotation_pivot_x_m(&self) -> f64 {
+        rotation_pivot_station(&self.main_gear_x_m, self.x_mlg_m)
     }
 
     /// Whether the effective main-gear station resolution succeeded without rejection.
@@ -285,6 +295,31 @@ impl EffectiveGearStationExt for Result<ValidGearStation, GearStationRejection> 
     }
 }
 
+/// The rotation pivot of a main-gear layout, m: the most aft finite strut
+/// station of `main_gear_x_m`, or `fallback_m` when there is none.
+///
+/// Pitching nose up on the runway unloads every main-gear leg ahead of the
+/// aft-most one, so the tail-down (tail-scrape) attitude, the tip-back angle
+/// and the lift-off pitch are taken about it. The wheel-count-weighted
+/// [`effective_main_gear_station`] is the static reaction station: on the
+/// A340-300 it is 32.25 m, while the centre gear stands at 33.04 m, level
+/// with the rear axle of the 1.981 m wing bogie about its 32.05 m leg (Airbus
+/// A340-200/-300 Aircraft Characteristics, Dec 01/25, Figure
+/// 7-2-0-991-029-A01 sheet 1: centre gear 26.372 m aft of the 6.67 m nose
+/// gear). A station here is a leg: a tilting bogie pitches the airframe about
+/// its pivot while both axles carry load, and about its rear axle once the
+/// forward axle lifts; the configuration holds no bogie wheelbase, so the leg
+/// station is the pivot.
+#[must_use]
+pub fn rotation_pivot_station(main_gear_x_m: &[f64], fallback_m: f64) -> f64 {
+    main_gear_x_m
+        .iter()
+        .copied()
+        .filter(|x| x.is_finite())
+        .reduce(f64::max)
+        .unwrap_or(fallback_m)
+}
+
 /// Compute the effective longitudinal main-gear station across multiple struts,
 /// returning a typed resolution outcome [`EffectiveMainGearStation`].
 ///
@@ -397,5 +432,41 @@ pub fn effective_main_gear_station(
                 strut_count: stations.len(),
             })
         }
+    }
+}
+
+#[cfg(test)]
+mod rotation_pivot_tests {
+    use super::*;
+
+    fn positions(
+        main_gear_x_m: Vec<f64>,
+        bogie_wheels: Option<&[i64]>,
+    ) -> LandingGearStationPositions {
+        let resolution = effective_main_gear_station(&main_gear_x_m, bogie_wheels);
+        LandingGearStationPositions {
+            x_nlg_m: 6.67,
+            x_mlg_m: resolution.primary_station_ignoring_rejection(),
+            main_gear_x_m,
+            source_scaled: true,
+            derived: false,
+            resolution,
+        }
+    }
+
+    #[test]
+    fn the_rotation_pivot_is_the_most_aft_main_gear_station_not_the_reaction_centroid() {
+        // A340-300: wing legs 32.05 m (4 wheels each), centre gear 33.04 m
+        // (2 wheels): reactions at the 32.248 m centroid, pivot at 33.04 m.
+        let a340 = positions(vec![32.05, 32.05, 33.04], Some(&[4, 4, 2]));
+        assert!((a340.x_mlg_m - 32.248).abs() < 1e-12, "{}", a340.x_mlg_m);
+        assert_eq!(a340.rotation_pivot_x_m(), 33.04);
+        // Order does not matter, and a uniform group pivots on its own station.
+        assert_eq!(rotation_pivot_station(&[33.04, 32.05, 32.05], 0.0), 33.04);
+        assert_eq!(positions(vec![12.5, 12.5], None).rotation_pivot_x_m(), 12.5);
+        // No finite strut station: the fallback; a non-finite one is skipped.
+        assert_eq!(rotation_pivot_station(&[], 17.71), 17.71);
+        assert_eq!(rotation_pivot_station(&[f64::NAN, 18.0], 17.0), 18.0);
+        assert_eq!(rotation_pivot_station(&[f64::NAN], 17.0), 17.0);
     }
 }

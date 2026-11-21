@@ -310,6 +310,11 @@ pub enum TankLayoutError {
         /// How far short of the request the state's fuel fell, kg.
         shortfall_kg: f64,
     },
+    /// A tank operation named a tank the layout does not have.
+    UnknownTank {
+        /// The id that was asked for.
+        id: String,
+    },
 }
 
 impl fmt::Display for TankLayoutError {
@@ -391,6 +396,7 @@ impl fmt::Display for TankLayoutError {
                     "burn exceeds the fuel state by {shortfall_kg} kg"
                 )
             }
+            Self::UnknownTank { id } => write!(formatter, "the layout has no tank {id}"),
         }
     }
 }

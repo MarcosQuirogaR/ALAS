@@ -25,7 +25,7 @@ pub const CL_FEASIBILITY_TOL: f64 = 0.02;
 /// as a universal probability.  ALAS therefore uses a deliberately
 /// conservative, model-facing floor: values below five percent are diagnostic
 /// extrapolations and cannot enter an aerodynamic ranking.  The raw minimum
-/// is retained on every successful result so a later campaign can audit the
+/// is retained on every successful result so a later campaign can examine the
 /// sensitivity without rerunning the model.
 pub const MIN_NEURALFOIL_ANALYSIS_CONFIDENCE: f64 = 0.05;
 

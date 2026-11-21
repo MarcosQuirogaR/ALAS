@@ -13,7 +13,6 @@
 //! uses the longest entered physical runway as its conservative available
 //! distance when no externally declared operational distances are present.
 
-use alas_config::airport_io::AirportProvenanceKind;
 use egui::{vec2, Context, RichText, Ui, ViewportBuilder};
 
 use crate::native_viewport::show_compact_native_viewport;
@@ -72,204 +71,154 @@ pub(crate) fn show_custom_airport_window(state: &mut AppState, ctx: &Context) {
     }
 }
 
-/// The editor body: entry fields, save actions, file import/export, and the
-/// registry with its provenance and missing-declaration status.
+/// How long the "Saved" confirmation stays, in seconds.
+const SAVED_NOTICE_SECONDS: f64 = 4.0;
+
+/// The editor body: entry fields with inline errors, the save actions, and
+/// the link to the Library, where airports are loaded, renamed, exported and
+/// deleted like every other saved item.
 fn show_custom_airport_editor(state: &mut AppState, ui: &mut Ui) {
+    use crate::airport_editor::DraftField as F;
+
     ui.heading(tr("Custom airport"));
     ui.add_space(6.0);
+    // A form nobody has typed into yet shows no errors; once any field has
+    // text, every empty or invalid field is outlined with its message.
+    let show_errors = !state.custom_airport_draft.is_pristine();
+    let error = |field: F| {
+        show_errors
+            .then(|| state.custom_airport_draft.field_error(field))
+            .flatten()
+    };
+    let [icao, name, lat, lon, isa, alt, runways] = [
+        F::Icao,
+        F::Name,
+        F::Latitude,
+        F::Longitude,
+        F::IsaDelta,
+        F::Altitude,
+        F::Runways,
+    ]
+    .map(error);
+    let valid = state.custom_airport_draft.is_valid();
+    let draft = &mut state.custom_airport_draft;
     crate::theme::card_frame(ui).show(ui, |ui| {
         ui.set_min_width(ui.available_width());
         if ui.available_width() >= 600.0 {
             ui.columns(2, |columns| {
-                airport_draft_text(
-                    &mut columns[0],
-                    "ICAO",
-                    &mut state.custom_airport_draft.icao,
-                );
+                airport_draft_text(&mut columns[0], "ICAO", &mut draft.icao, icao.as_deref());
                 airport_draft_text(
                     &mut columns[0],
                     "Latitude deg",
-                    &mut state.custom_airport_draft.latitude_deg,
+                    &mut draft.latitude_deg,
+                    lat.as_deref(),
                 );
                 airport_draft_text(
                     &mut columns[0],
                     "ISA delta C",
-                    &mut state.custom_airport_draft.isa_delta_c,
+                    &mut draft.isa_delta_c,
+                    isa.as_deref(),
                 );
                 airport_draft_text(
                     &mut columns[0],
                     "Runway lengths m",
-                    &mut state.custom_airport_draft.runway_lengths_m,
+                    &mut draft.runway_lengths_m,
+                    runways.as_deref(),
                 );
 
-                airport_draft_text(
-                    &mut columns[1],
-                    "Name",
-                    &mut state.custom_airport_draft.name,
-                );
+                airport_draft_text(&mut columns[1], "Name", &mut draft.name, name.as_deref());
                 airport_draft_text(
                     &mut columns[1],
                     "Longitude deg",
-                    &mut state.custom_airport_draft.longitude_deg,
+                    &mut draft.longitude_deg,
+                    lon.as_deref(),
                 );
                 airport_draft_text(
                     &mut columns[1],
                     "Altitude m",
-                    &mut state.custom_airport_draft.altitude_m,
+                    &mut draft.altitude_m,
+                    alt.as_deref(),
                 );
             });
         } else {
-            airport_draft_text(ui, "ICAO", &mut state.custom_airport_draft.icao);
-            airport_draft_text(ui, "Name", &mut state.custom_airport_draft.name);
-            airport_draft_text(
-                ui,
-                "Latitude deg",
-                &mut state.custom_airport_draft.latitude_deg,
-            );
+            airport_draft_text(ui, "ICAO", &mut draft.icao, icao.as_deref());
+            airport_draft_text(ui, "Name", &mut draft.name, name.as_deref());
+            airport_draft_text(ui, "Latitude deg", &mut draft.latitude_deg, lat.as_deref());
             airport_draft_text(
                 ui,
                 "Longitude deg",
-                &mut state.custom_airport_draft.longitude_deg,
+                &mut draft.longitude_deg,
+                lon.as_deref(),
             );
-            airport_draft_text(
-                ui,
-                "ISA delta C",
-                &mut state.custom_airport_draft.isa_delta_c,
-            );
-            airport_draft_text(ui, "Altitude m", &mut state.custom_airport_draft.altitude_m);
+            airport_draft_text(ui, "ISA delta C", &mut draft.isa_delta_c, isa.as_deref());
+            airport_draft_text(ui, "Altitude m", &mut draft.altitude_m, alt.as_deref());
             airport_draft_text(
                 ui,
                 "Runway lengths m",
-                &mut state.custom_airport_draft.runway_lengths_m,
+                &mut draft.runway_lengths_m,
+                runways.as_deref(),
             );
         }
     });
 
     ui.add_space(8.0);
+    let now = ui.input(|input| input.time);
+    let saved_id = egui::Id::new("custom_airport_saved_at");
     ui.horizontal_wrapped(|ui| {
+        let disabled_hint = tr("Fix the highlighted fields to enable saving.");
         if let Some((key, label)) = state.custom_airport_window.target.clone() {
             if ui
-                .button(tr_fields(
-                    "Save and use for {field}",
-                    &[("field", label.clone())],
-                ))
+                .add_enabled(
+                    valid,
+                    egui::Button::new(tr_fields(
+                        "Save and use for {field}",
+                        &[("field", label.clone())],
+                    )),
+                )
+                .on_disabled_hover_text(disabled_hint.clone())
                 .clicked()
             {
                 save_and_assign(state, &key, &label);
             }
         }
         if ui
-            .button(tr("Save custom airport"))
+            .add_enabled(valid, egui::Button::new(tr("Save custom airport")))
             .on_hover_text(tr("Registers the airport without changing the route."))
+            .on_disabled_hover_text(disabled_hint)
+            .clicked()
+            && state.save_custom_airport().is_some()
+        {
+            ui.ctx().data_mut(|data| data.insert_temp(saved_id, now));
+        }
+        let saved_at: Option<f64> = ui.ctx().data(|data| data.get_temp(saved_id));
+        if saved_at.is_some_and(|at| now - at < SAVED_NOTICE_SECONDS) {
+            ui.label(
+                RichText::new(format!("{} \u{2713}", tr("Saved")))
+                    .color(egui::Color32::from_rgb(63, 185, 80))
+                    .strong(),
+            );
+            ui.ctx()
+                .request_repaint_after(std::time::Duration::from_millis(500));
+        }
+        if ui
+            .button(tr("Open Library..."))
+            .on_hover_text(tr(
+                "Load, rename, show in folder, export, import or delete saved airports.",
+            ))
             .clicked()
         {
-            state.save_custom_airport();
-        }
-    });
-    ui.add_space(8.0);
-    crate::theme::card_frame(ui).show(ui, |ui| {
-        ui.set_min_width(ui.available_width());
-        ui.label(RichText::new(tr("Import / export path")).strong());
-        ui.add_sized(
-            [ui.available_width(), ui.spacing().interact_size.y],
-            egui::TextEdit::singleline(&mut state.custom_airport_file_path),
-        );
-        ui.horizontal_wrapped(|ui| {
-            let data = state.data_dir();
-            let current = state.custom_airport_file_path.clone();
-            let filters = vec![(
-                "Airport files".to_owned(),
-                vec!["json".to_owned(), "dat".to_owned()],
-            )];
-            let import_filters = filters.clone();
-            let import_current = current.clone();
-            let import_data = data.clone();
-            crate::file_dialog::browse_button(
+            crate::library_window::open_raised(
                 state,
-                ui,
-                crate::file_dialog::DialogTarget::AirportImport,
-                |_| {
-                    crate::file_dialog::spec(
-                        crate::file_dialog::DialogKind::OpenFile,
-                        "Import airports",
-                        &import_current,
-                        &import_data,
-                        None,
-                        import_filters,
-                    )
-                },
-            )
-            .on_hover_text(tr("Choose an airport file and import it immediately."));
-            if ui.button(tr("Import airports")).clicked() {
-                state.import_custom_airports();
-            }
-            let name = std::path::Path::new(&current)
-                .file_name()
-                .map(|name| name.to_string_lossy().into_owned())
-                .unwrap_or_else(|| "alas-airports.json".to_owned());
-            if ui
-                .add_enabled(
-                    !state.file_dialog_pending(&crate::file_dialog::DialogTarget::AirportExport),
-                    egui::Button::new(tr("Export to...")),
-                )
-                .clicked()
-            {
-                let dialog = crate::file_dialog::spec(
-                    crate::file_dialog::DialogKind::SaveFile,
-                    "Export airports",
-                    &current,
-                    &data,
-                    Some(&name),
-                    filters,
-                );
-                state.begin_file_dialog(crate::file_dialog::DialogTarget::AirportExport, dialog);
-            }
-            if ui.button(tr("Export airports")).clicked() {
-                state.export_custom_airports();
-            }
-        });
+                ui.ctx(),
+                crate::library_window::LibraryTab::Airports,
+            );
+        }
     });
     if let Some(status) = &state.custom_airport_status {
         ui.label(RichText::new(status).weak().small());
     }
     if let Some(note) = &state.files.airport_import_note {
         ui.label(RichText::new(note).strong().small());
-    }
-
-    let custom = alas_config::airport_io::registered_custom_airports();
-    if !custom.is_empty() {
-        ui.separator();
-        ui.label(RichText::new(tr("Registered custom airports")).strong());
-        for airport in custom {
-            let runway_length = airport
-                .runway_lengths_m
-                .iter()
-                .copied()
-                .filter(|length| length.is_finite() && *length > 0.0)
-                .fold(0.0, f64::max);
-            ui.horizontal_wrapped(|ui| {
-                ui.label(format!(
-                    "{} - {} ({runway_length:.0} m, {:.0} m elev., ISA {:+.1} C) [{}]",
-                    airport.icao,
-                    airport.name,
-                    airport.altitude_m,
-                    airport.isa_delta_c,
-                    tr(airport_provenance_label(airport.provenance.kind))
-                ));
-                if ui
-                    .small_button(tr("Show values"))
-                    .on_hover_text(tr("Load this airport into the entry fields above."))
-                    .clicked()
-                {
-                    state.custom_airport_draft =
-                        crate::airport_editor::CustomAirportDraft::from_airport(&airport);
-                    state.files.airport_import_note =
-                        airport.provenance.source.as_ref().map(|source| {
-                            format!("{} {source}", tr("Values of the record imported from"))
-                        });
-                }
-            });
-        }
     }
 }
 
@@ -298,21 +247,21 @@ fn save_and_assign(state: &mut AppState, key: &str, label: &str) {
     state.custom_airport_window.target = None;
 }
 
-fn airport_provenance_label(kind: AirportProvenanceKind) -> &'static str {
-    match kind {
-        AirportProvenanceKind::UserEntered => "user entered",
-        AirportProvenanceKind::DatImport => "DAT import",
-        AirportProvenanceKind::JsonImport => "JSON import",
-        AirportProvenanceKind::Workspace => "workspace",
-    }
-}
-
-fn airport_draft_text(ui: &mut Ui, label: &str, value: &mut String) {
+fn airport_draft_text(ui: &mut Ui, label: &str, value: &mut String, error: Option<&str>) {
     ui.label(tr(label));
-    ui.add_sized(
+    let response = ui.add_sized(
         [ui.available_width(), ui.spacing().interact_size.y],
         egui::TextEdit::singleline(value),
     );
+    if let Some(message) = error {
+        let red = egui::Color32::from_rgb(229, 83, 75);
+        ui.painter().rect_stroke(
+            response.rect.expand(1.0),
+            3.0,
+            egui::Stroke::new(1.5_f32, red),
+        );
+        ui.label(RichText::new(message).color(red).small());
+    }
 }
 
 #[cfg(test)]

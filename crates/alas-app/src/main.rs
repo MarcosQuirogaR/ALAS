@@ -16,9 +16,6 @@ use std::process::ExitCode;
 fn main() -> ExitCode {
     let args: Vec<String> = env::args().skip(1).collect();
     let code = alas_app::cli::run_cli(&args);
-    if code == 0 {
-        ExitCode::SUCCESS
-    } else {
-        ExitCode::FAILURE
-    }
+    // The documented codes (0, 1, 2, 3) reach the caller unchanged.
+    u8::try_from(code).map_or(ExitCode::FAILURE, ExitCode::from)
 }

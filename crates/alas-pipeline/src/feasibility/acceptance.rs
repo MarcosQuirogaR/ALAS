@@ -60,6 +60,13 @@ pub enum DesignProvenance {
         /// Registered preset name.
         preset: String,
     },
+    /// A reference adaptation that moved the registered aircraft's design
+    /// vector: a modified derivative of `preset`, which asserts nothing about
+    /// the real aeroplane.
+    AdaptedReference {
+        /// Registered preset the design was adapted from.
+        preset: String,
+    },
     /// A design vector that differs from any registered one: a clean-sheet or
     /// optimized result, which asserts nothing about a real aeroplane.
     CleanSheet {
@@ -76,6 +83,11 @@ impl DesignProvenance {
             return Self::CleanSheet { derived_from: None };
         };
         if !design.same_geometry(&preset.design_vector) {
+            if config.optimizer.design_space.mode == alas_config::DesignMode::ReferenceAdaptation {
+                return Self::AdaptedReference {
+                    preset: preset.name.to_owned(),
+                };
+            }
             return Self::CleanSheet {
                 derived_from: Some(preset.name.to_owned()),
             };
@@ -109,31 +121,14 @@ impl DesignProvenance {
         match self {
             Self::CalibratedReference { .. } => "calibrated reference preset",
             Self::NotionalReference { .. } => "notional reference preset",
+            Self::AdaptedReference { .. } => "adapted reference result",
             Self::CleanSheet { .. } => "clean-sheet result",
         }
     }
 }
 
-/// How the run that produced the result ended.
-///
-/// Supplied by the caller because the pipeline result alone cannot say it: a
-/// cancelled or budget-exhausted search still returns its incumbent.
-#[derive(Debug, Clone, PartialEq, Eq, Default)]
-pub enum RunCompletion {
-    /// The run ran to its own stated completion.
-    #[default]
-    Completed,
-    /// The run finished without meeting its convergence criterion.
-    NotConverged {
-        /// What did not converge, in the producer's own words.
-        detail: String,
-    },
-    /// The run was cancelled or stopped by a guard before completing.
-    Cancelled {
-        /// Why it stopped, in the producer's own words.
-        detail: String,
-    },
-}
+mod completion;
+pub use completion::RunCompletion;
 
 /// One reason a result may not be presented as an accepted feasible success.
 #[derive(Debug, Clone, PartialEq)]
@@ -202,6 +197,9 @@ impl DeliveryBlocker {
                     format!("run: did not converge ({detail})")
                 }
                 RunCompletion::Cancelled { detail } => format!("run: cancelled ({detail})"),
+                RunCompletion::InProgress => {
+                    "run: still in progress; feasibility is not assessed yet".to_owned()
+                }
             },
         }
     }
@@ -214,7 +212,8 @@ pub enum DeliveryVerdict {
     /// limits, the run completed, and any claim about a real aeroplane is
     /// backed by a registered design mission.
     AcceptedFeasible,
-    /// Physically infeasible, or produced by a run that did not complete.
+    /// Physically infeasible, or produced by a run that was cancelled or is
+    /// still running.
     /// Usable as an optimization incumbent and as a diagnostic; never as a
     /// success.
     DiagnosticIncumbent,
@@ -266,8 +265,27 @@ impl DeliveryClassification {
         report: &FeasibilityReport,
         completion: &RunCompletion,
     ) -> Self {
+        Self::classify_with_mission_gap(
+            config,
+            design,
+            report,
+            completion,
+            mission_evidence_gap(config),
+        )
+    }
+
+    /// [`Self::classify`] with the preset's mission gap supplied, so the rule
+    /// can be exercised against a preset state the registry does not hold.
+    fn classify_with_mission_gap(
+        config: &AlasConfig,
+        design: &DesignVector,
+        report: &FeasibilityReport,
+        completion: &RunCompletion,
+        mission_gap: Option<Vec<MissingDesignMissionDatum>>,
+    ) -> Self {
         let provenance = DesignProvenance::of(config, design);
         let mut blockers = Vec::new();
+        let mut advisories_early = Vec::new();
 
         for finding in &report.findings {
             if finding.severity == FindingSeverity::Error {
@@ -281,13 +299,24 @@ impl DeliveryClassification {
                 });
             }
         }
-        if *completion != RunCompletion::Completed {
-            blockers.push(DeliveryBlocker::RunIncomplete {
-                completion: completion.clone(),
-            });
+        // A search that stopped on its clock or its rejection cap before its
+        // candidate plan ended still delivers a design the reporting analysis
+        // verified: convergence is not a delivery criterion (the search's
+        // convergence indicator reports how far its best was still moving),
+        // so the early stop travels as an advisory. A cancelled or still
+        // running search delivers nothing verified and blocks.
+        match completion {
+            RunCompletion::Completed => {}
+            RunCompletion::NotConverged { detail } => advisories_early.push(format!(
+                "the search stopped before its candidate plan ended ({detail}); the delivered design is its best verified at reporting fidelity"
+            )),
+            RunCompletion::Cancelled { .. } | RunCompletion::InProgress => {
+                blockers.push(DeliveryBlocker::RunIncomplete {
+                    completion: completion.clone(),
+                });
+            }
         }
 
-        let mission_gap = mission_evidence_gap(config);
         let mission_unverified = mission_gap.is_some();
         if let Some(missing) = mission_gap {
             if provenance.requires_source_backed_mission() {
@@ -295,7 +324,7 @@ impl DeliveryClassification {
             }
         }
 
-        let mut advisories = Vec::new();
+        let mut advisories = advisories_early;
         if mission_unverified && !provenance.requires_source_backed_mission() {
             advisories.push(
                 "no source-backed design mission is registered for the aircraft this design was \
@@ -376,14 +405,37 @@ impl DeliveryClassification {
 /// is the honest reading of "nothing registered" and not an empty list that
 /// could be mistaken for "nothing missing".
 fn mission_evidence_gap(config: &AlasConfig) -> Option<Vec<MissingDesignMissionDatum>> {
-    let Ok(preset) = presets::get(&config.preset) else {
-        return Some(ALL_MISSION_DATA.to_vec());
-    };
+    presets::get(&config.preset).map_or_else(
+        |_| Some(ALL_MISSION_DATA.to_vec()),
+        preset_mission_evidence_gap,
+    )
+}
+
+/// [`mission_evidence_gap`] for one preset.
+fn preset_mission_evidence_gap(
+    preset: &alas_config::AircraftPreset,
+) -> Option<Vec<MissingDesignMissionDatum>> {
     if matches!(
         preset.reference.design_mission_evidence,
         DesignMissionEvidence::SourceBacked(_)
     ) {
         return None;
+    }
+    // Per-datum provenance: a complete set that clears every promotion bar
+    // (tier, exact variant, stated conditions) closes the gap; a partly
+    // registered set reports only the data it still refuses.
+    let provenance = &preset.reference.mission_provenance;
+    if provenance.admits_source_backed_promotion() {
+        return None;
+    }
+    if *provenance != alas_config::DesignMissionProvenanceSet::default() {
+        return Some(
+            provenance
+                .refusals()
+                .into_iter()
+                .map(alas_config::MissionPromotionRefusal::datum)
+                .collect(),
+        );
     }
     let rows = &preset.reference.partial_design_mission_evidence;
     if rows.is_empty() {
@@ -415,6 +467,17 @@ mod tests {
     fn config(preset: &str) -> AlasConfig {
         AlasConfig::from_value(&serde_json::json!({ "preset": preset }))
             .unwrap_or_else(|error| panic!("{error}"))
+    }
+
+    /// The mission gap of the A320-200 with its registered provenance
+    /// withdrawn: the state of a preset that has no sourced mission.
+    fn unregistered_gap() -> Option<Vec<MissingDesignMissionDatum>> {
+        let mut preset = presets::get("A320-200")
+            .unwrap_or_else(|error| panic!("{error}"))
+            .clone();
+        preset.reference.mission_provenance = alas_config::DesignMissionProvenanceSet::default();
+        preset.reference.partial_design_mission_evidence.clear();
+        preset_mission_evidence_gap(&preset)
     }
 
     fn registered_design(preset: &str) -> DesignVector {
@@ -468,17 +531,19 @@ mod tests {
     }
 
     /// The second half of the same rule: feasibility alone does not accept a
-    /// reference aircraft. Every registered preset is `Unverified` today, so
-    /// a finding-free A320-200 is still not a success.
+    /// reference aircraft. A preset with no registered mission provenance is
+    /// `Unverified`, so a finding-free A320-200 without its provenance is
+    /// still not a success.
     #[test]
     fn a_feasible_but_unverified_calibrated_preset_cannot_produce_a_success_label() {
         let config = config("A320-200");
         let design = registered_design("A320-200");
-        let classification = DeliveryClassification::classify(
+        let classification = DeliveryClassification::classify_with_mission_gap(
             &config,
             &design,
             &FeasibilityReport::default(),
             &RunCompletion::Completed,
+            unregistered_gap(),
         );
 
         assert_eq!(
@@ -491,6 +556,32 @@ mod tests {
             classification.blockers[0],
             DeliveryBlocker::DesignMissionUnverified { .. }
         ));
+    }
+
+    /// A preset whose four mission data each carry a manufacturer-tier,
+    /// exact-variant, conditioned source is not blocked on its mission; one
+    /// without such rows keeps all four missing.
+    #[test]
+    fn a_preset_with_four_sourced_mission_data_has_no_mission_blocker() {
+        for &name in MISSION_REGISTERED {
+            assert!(
+                mission_evidence_gap(&config(name)).is_none(),
+                "{name} registers a complete sourced mission"
+            );
+            let classification = DeliveryClassification::classify(
+                &config(name),
+                &registered_design(name),
+                &FeasibilityReport::default(),
+                &RunCompletion::Completed,
+            );
+            assert!(
+                classification.is_success(),
+                "{name}: {:?}",
+                classification.blockers
+            );
+        }
+        let unregistered = unregistered_gap().expect("no provenance, no mission");
+        assert_eq!(unregistered.len(), 4);
     }
 
     /// AVE is not a real aeroplane, but it is still delivered as a named
@@ -512,28 +603,31 @@ mod tests {
             }
         );
         assert!(classification.provenance.requires_source_backed_mission());
-        assert!(!classification.is_success());
+        // Its design requirement is the registered source of the mission, so
+        // the mission blocker is closed; a finding-free AVE is accepted.
+        assert!(classification.is_success(), "{:?}", classification.blockers);
     }
 
-    /// A modified design vector is a clean-sheet result: it claims nothing
+    /// A modified design vector is an adapted reference result: it claims nothing
     /// about the A320-200 and is judged on its own feasibility, with the
     /// missing mission evidence carried as an advisory rather than dropped.
     #[test]
-    fn a_modified_design_is_a_clean_sheet_result_and_may_be_accepted_on_feasibility() {
+    fn a_modified_design_is_an_adapted_result_and_may_be_accepted_on_feasibility() {
         let config = config("A320-200");
         let mut design = registered_design("A320-200");
         design.span_m += 1.0;
-        let classification = DeliveryClassification::classify(
+        let classification = DeliveryClassification::classify_with_mission_gap(
             &config,
             &design,
             &FeasibilityReport::default(),
             &RunCompletion::Completed,
+            unregistered_gap(),
         );
 
         assert_eq!(
             classification.provenance,
-            DesignProvenance::CleanSheet {
-                derived_from: Some("A320-200".to_owned())
+            DesignProvenance::AdaptedReference {
+                preset: "A320-200".to_owned()
             }
         );
         assert_eq!(classification.verdict, DeliveryVerdict::AcceptedFeasible);
@@ -543,11 +637,37 @@ mod tests {
         assert!(classification.advisories[0].contains("physical-feasibility statement only"));
     }
 
-    /// A run that did not complete cannot be accepted even when the result it
-    /// returned carries no finding: the incumbent is a snapshot, not a
-    /// converged answer.
+    /// A reference adaptation that moved the vector is labelled a derivative
+    /// of its registered aircraft, not a clean sheet; a clean-sheet run that
+    /// starts from the same preset is a clean-sheet result.
     #[test]
-    fn a_cancelled_or_unconverged_run_cannot_produce_a_success_label() {
+    fn a_moved_reference_adaptation_is_an_adapted_reference_and_a_clean_sheet_is_not() {
+        let mut adapted = config("ATR72-600");
+        adapted.optimizer.design_space.mode = alas_config::DesignMode::ReferenceAdaptation;
+        let mut design = registered_design("ATR72-600");
+        design.span_m += 1.0;
+        let provenance = DesignProvenance::of(&adapted, &design);
+        assert_eq!(
+            provenance,
+            DesignProvenance::AdaptedReference {
+                preset: "ATR72-600".to_owned()
+            }
+        );
+        assert_eq!(provenance.label(), "adapted reference result");
+        assert!(!provenance.requires_source_backed_mission());
+        let mut clean = adapted;
+        clean.optimizer.design_space.mode = alas_config::DesignMode::CleanSheet;
+        assert_eq!(
+            DesignProvenance::of(&clean, &design).label(),
+            "clean-sheet result"
+        );
+    }
+
+    /// A cancelled or still running search cannot be accepted even when the
+    /// result it returned carries no finding: the incumbent is a snapshot
+    /// nobody verified.
+    #[test]
+    fn a_cancelled_or_running_search_cannot_produce_a_success_label() {
         let config = config("A320-200");
         let mut design = registered_design("A320-200");
         design.span_m += 1.0;
@@ -555,9 +675,7 @@ mod tests {
             RunCompletion::Cancelled {
                 detail: "480 s guard".to_owned(),
             },
-            RunCompletion::NotConverged {
-                detail: "evaluation budget exhausted".to_owned(),
-            },
+            RunCompletion::InProgress,
         ] {
             let classification = DeliveryClassification::classify(
                 &config,
@@ -576,6 +694,30 @@ mod tests {
                 .iter()
                 .any(|blocker| matches!(blocker, DeliveryBlocker::RunIncomplete { .. })));
         }
+    }
+
+    /// A search stopped on its clock before its plan ended delivers a
+    /// feasible verified design: the early stop is an advisory, not a
+    /// blocker (convergence is not required).
+    #[test]
+    fn a_search_stopped_early_with_a_feasible_verified_design_is_delivered() {
+        let config = config("A320-200");
+        let mut design = registered_design("A320-200");
+        design.span_m += 1.0;
+        let classification = DeliveryClassification::classify(
+            &config,
+            &design,
+            &FeasibilityReport::default(),
+            &RunCompletion::NotConverged {
+                detail: "search termination: time_budget".to_owned(),
+            },
+        );
+        assert_eq!(classification.verdict, DeliveryVerdict::AcceptedFeasible);
+        assert!(classification.is_success());
+        assert!(classification
+            .advisories
+            .iter()
+            .any(|advisory| advisory.contains("time_budget")));
     }
 
     /// A warning-severity finding is reported but does not block delivery;
@@ -656,8 +798,8 @@ mod tests {
 
         assert_eq!(
             classification.provenance,
-            DesignProvenance::CleanSheet {
-                derived_from: Some("AVE".to_owned())
+            DesignProvenance::AdaptedReference {
+                preset: "AVE".to_owned()
             }
         );
         assert_eq!(classification.verdict, DeliveryVerdict::DiagnosticIncumbent);
@@ -669,26 +811,39 @@ mod tests {
         assert!(classification.render().contains("mass coordinates:"));
     }
 
-    /// Every registered preset reports a mission gap today, and a preset with
-    /// partial rows still reports the data those rows leave missing rather
-    /// than an empty list.
+    /// Every registered preset carries a sourced design mission, and a preset
+    /// whose provenance and partial rows are withdrawn reports all four data
+    /// missing rather than an empty list.
     #[test]
-    fn every_registered_preset_still_reports_a_design_mission_gap() {
+    fn every_registered_preset_carries_a_mission_and_an_empty_set_reports_all_four() {
         for name in presets::available() {
-            let gap = mission_evidence_gap(&config(name))
-                .unwrap_or_else(|| panic!("{name} must still report a mission gap"));
             assert!(
-                gap.contains(&MissingDesignMissionDatum::Payload)
-                    && gap.contains(&MissingDesignMissionDatum::Profile)
-                    && gap.contains(&MissingDesignMissionDatum::ReserveFuel),
-                "{name} reported {gap:?}"
+                MISSION_REGISTERED.contains(&name),
+                "{name} has no registered design-mission provenance"
             );
         }
-        // The A220-300 and the ATR 72-600 register an advertised range, so
-        // range alone is not in their gap; nothing else has moved.
-        let a220 = mission_evidence_gap(&config("A220-300")).expect("A220-300 gap");
-        assert!(!a220.contains(&MissingDesignMissionDatum::Range));
-        let ave = mission_evidence_gap(&config("AVE")).expect("AVE gap");
-        assert_eq!(ave.len(), 4);
+        assert_eq!(unregistered_gap(), Some(ALL_MISSION_DATA.to_vec()));
     }
+
+    /// Presets whose four mission data are registered through
+    /// `mission_provenance` (manufacturer charts, the AVE design requirement,
+    /// the C295 payload-defined mission, and the regulation or cited standard
+    /// for reserves the chart does not print).
+    const MISSION_REGISTERED: &[&str] = &[
+        "A220-300",
+        "A320-200",
+        "A340-300",
+        "A350-900",
+        "A380-800",
+        "A400M",
+        "ATR72-600",
+        "AVE",
+        "B747-400",
+        "B787-9",
+        "C295",
+        "C919",
+        "DC-10",
+        "E195-E2",
+        "LJ60",
+    ];
 }

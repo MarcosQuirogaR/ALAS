@@ -79,4 +79,7 @@ pub struct MassBalanceAssessment {
     pub ledger_items: Vec<LedgerItemSummary>,
     /// Lumped-model takeoff centre of gravity, percent MAC, for comparison.
     pub lumped_takeoff_cg_pct_mac: f64,
+    /// The mass and centre of gravity through a flown mission plan, when the
+    /// run flew one.
+    pub history: Option<super::MissionHistory>,
 }

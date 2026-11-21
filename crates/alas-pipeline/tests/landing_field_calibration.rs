@@ -3,11 +3,11 @@
 
 //! The landing-field-length model against the certified values of eight jets.
 //!
-//! The model is the Torenbeek (2013) air, flare and braked-run segment model
-//! (Eqs. 9.21-9.24) with the mean deceleration selected by the declared
-//! main-gear truck (p. 274, ESDU 84040 statistics); no coefficient is fitted
-//! to these aircraft. Two of the eight lie outside +-10 % (B787-9 and C919)
-//! and are bounded here at their present residual, not tuned.
+//! The model is the certification segment model (FAA AC 25-7D 4.11 air distance
+//! and transition) with the mean deceleration selected by the declared
+//! main-gear truck (Torenbeek 2013 p. 274); no coefficient is fitted
+//! to these aircraft. The requirement is +-10 % on all eight; a second test
+//! bounds the residual of each jet from above only, so it can shrink freely.
 //! Conditions: ISA, sea level, dry, MLW, zero wind; certified field length =
 //! 25.125 demonstrated distance / 0.6.
 
@@ -21,7 +21,7 @@ use alas_pipeline::field_performance::{calculate, dry_landing_distance_share};
 
 /// (preset, certified LFL m at the preset MLW, Vref m/s at the preset MLW).
 /// Sources are the manufacturers' airport-planning documents recorded in
-/// `refs/*.json` (2026-10-07): A220 ACP 013 Fig 7, A320 AC Rev 46 3-4-1,
+/// `refs/*.json`: A220 ACP 013 Fig 7, A320 AC Rev 46 3-4-1,
 /// A340 3-4-1, A380 3-4-1, B747-400 ACAP, B787-9 ACAP, DC-10 ACAP 3.4/3.5,
 /// C919 ACAP R9 DM 03-04/03-05. A340/A380 Vref is the published 138 kt at the
 /// family MLW (192 t / 395 t) scaled by sqrt(m/m_source) to the preset MLW.
@@ -60,32 +60,46 @@ fn model(name: &str) -> (f64, f64, f64, f64) {
     )
 }
 
+/// Relative error of the model field length against the certified one.
+fn residuals() -> Vec<(&'static str, f64)> {
+    CERTIFIED
+        .iter()
+        .map(|&(name, lfl, _)| (name, model(name).0 / lfl - 1.0))
+        .collect()
+}
+
 #[test]
-fn landing_field_length_residuals_on_the_certified_jets() {
-    // B787-9 (+18.5 %) and C919 (-14.7 %, full-flap value) are the documented
-    // outliers: the same Vref and truck class give no sourced discriminator
-    // for their certified lengths. Every other jet is within +-10 %.
-    let mut within = 0;
-    for (name, lfl, _) in CERTIFIED {
-        let (model_lfl, _, _, _) = model(name);
-        let error = model_lfl / lfl - 1.0;
-        match name {
-            "B787-9" => assert!(error > 0.10 && error < 0.22, "{name}: {error:+.3}"),
-            "C919" => assert!(error < -0.10 && error > -0.20, "{name}: {error:+.3}"),
-            _ => {
-                assert!(
-                    error.abs() < 0.10,
-                    "{name}: LFL {model_lfl:.0} vs {lfl:.0} m"
-                );
-                within += 1;
-            }
-        }
+fn landing_field_length_is_within_ten_percent_on_the_certified_jets() {
+    let outside: Vec<String> = residuals()
+        .into_iter()
+        .filter(|(_, error)| error.is_nan() || error.abs() >= 0.10)
+        .map(|(name, error)| format!("{name}: {error:+.3}"))
+        .collect();
+    assert!(
+        outside.is_empty(),
+        "landing field length outside +-10 % of the certified value: {outside:?}"
+    );
+}
+
+/// The residual of a jet may shrink but not grow: 10 % for every jet, except
+/// the two the model does not yet reproduce, held at 22 % (B787-9, model
+/// long) and 20 % (C919, model short at its full-flap value).
+#[test]
+fn landing_field_length_residuals_do_not_grow() {
+    for (name, error) in residuals() {
+        let bound = match name {
+            "B787-9" => 0.22,
+            "C919" => 0.20,
+            _ => 0.10,
+        };
+        assert!(error.abs() < bound, "{name}: {error:+.3} against {bound}");
     }
-    assert_eq!(within, 6);
 }
 
 /// The model must order the eight jets by field length like the certified
-/// values do (Spearman rank correlation).
+/// values do: a Spearman rank correlation above 0.738, the two-sided 5 %
+/// critical value for eight pairs, below which the agreement is not
+/// distinguishable from chance.
 #[test]
 fn model_orders_the_certified_jets_by_landing_field_length() {
     let rank = |values: &[f64]| -> Vec<f64> {
@@ -100,7 +114,7 @@ fn model_orders_the_certified_jets_by_landing_field_length() {
     let n = a.len() as f64;
     let d2: f64 = a.iter().zip(&b).map(|(x, y)| (x - y).powi(2)).sum();
     let rho = 1.0 - 6.0 * d2 / (n * (n * n - 1.0));
-    assert!(rho > 0.5, "Spearman rank correlation {rho:.2}");
+    assert!(rho > 0.738, "Spearman rank correlation {rho:.2}");
 }
 
 /// Model against the chart value for all twelve presets, with the chart's own
@@ -158,10 +172,14 @@ fn lfl_table() {
     }
 }
 
-/// The E195-E2 has no published Vref (class CLmax_land) and its spec-sheet
+/// The E195-E2 Vref is the FAA Aircraft Characteristics Database approach
+/// speed (136 kt at 54,000 kg, no Embraer Vref is published) and its spec-sheet
 /// length (1,290 m, MLW 54,000 kg, ISA, sea level) does not state its
-/// factoring; read as demonstrated / 0.6 like the other charts, the model is
-/// within +-10 % (APM factored distance 1,323 m).
+/// factoring; it is read as demonstrated / 0.6 like the other charts. The
+/// model is outside the +-10 % band: +15.8 % against the spec sheet and
+/// +12.6 % against the APM factored distance (1,323 m). This test stays red as
+/// the tracking test of the open landing-distance defect (a sourced
+/// stopping discriminator beyond Vref and truck type, applied to all jets).
 #[test]
 fn the_e195_e2_is_within_ten_percent_of_its_spec_sheet() {
     let (lfl, _, mlw, _) = model("E195-E2");

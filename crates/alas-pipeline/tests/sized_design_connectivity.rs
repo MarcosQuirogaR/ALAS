@@ -18,6 +18,9 @@
 #![allow(clippy::unwrap_used, clippy::expect_used)]
 
 use alas_config::AlasConfig;
+
+#[path = "../../alas-testkit/fixtures/open_ground.rs"]
+mod open_ground;
 use alas_pipeline::{
     design_mass_config, design_vn_diagram, design_vn_mass_kg, DesignPipeline, LoadCaseSelection,
     PipelineOptions, PipelineResult, RunEnvironment,
@@ -38,6 +41,10 @@ fn seeded_a220_config() -> AlasConfig {
         .try_into()
         .unwrap_or(1);
     config.structures.enabled = false;
+    // Open ground at the preset's own departure: no curated survey
+    // certifies a take-off obstacle clearance, so no candidate at EVRA is
+    // feasible (see the fixture's documentation).
+    open_ground::open_ground_at_own_departure(&mut config);
     // Only the five resolution fields of the draft preset, so no tuned
     // assumption in the analysis configuration is overwritten.
     let draft = &alas_config::fidelity_presets::get("draft")
@@ -111,9 +118,8 @@ fn hard_mtow_finalist_keeps_declared_mass_and_replays_as_hard_feasible() {
     assert!(replay.sized.takeoff_mass_kg <= mtow_kg);
     // The published report and the replay are two evaluations of one design
     // (zero-fuel mass plus the tank-limited fuel); they agree to rounding, not
-    // always bit for bit (TOFL lane 2026-10-16: 67339.07054988155 against
-    // 67339.0705498737 kg, 1e-13 relative, after the finalist moved with the
-    // CS 25.113 field constraint).
+    // always bit for bit (67339.07054988155 against
+    // 67339.0705498737 kg, 1e-13 relative, with the CS 25.113 field constraint).
     let published = report.sized_takeoff_mass_kg().expect("sized mass");
     assert!((published / load.takeoff_mass_kg - 1.0).abs() < 1e-11);
     assert_eq!(
@@ -203,33 +209,48 @@ fn report_load_case_flies_the_route_and_reports_the_design_mission() {
     assert_eq!(design.takeoff_mass_kg, sized.takeoff_mass_kg);
     assert_eq!(design.trip_fuel_kg, sized.trip_fuel_kg);
     assert_eq!(design.range_m, sized.design_range_m);
-    // The route is flown off-design: a longer route needs a heavier takeoff
-    // and more trip fuel than the design mission, a shorter one less.
-    //
-    // Without airway data (a CI runner has none) the planner falls back to the
-    // great circle, which is the design mission itself to rounding. The
-    // route is then the design mission, not a longer or shorter one, and the
-    // two agree to the mission-model resolution instead of by a sign.
-    let route_is_design_mission = (case.route_distance_m - design.range_m).abs() <= 1.0;
-    if route_is_design_mission {
-        assert!((case.plan.trip.kg - design.trip_fuel_kg).abs() <= 1.0e-3 * design.trip_fuel_kg);
-        assert!(
-            (load_case.takeoff_mass_kg - design.takeoff_mass_kg).abs()
-                <= 1.0e-3 * design.takeoff_mass_kg
-        );
-        assert!(case.reserve_margin_kg >= 0.0 && case.shortfall_kg == 0.0);
-        return;
+    // The route is flown off-design (an airway, not the still-air design range), and it is the
+    // route the run reports: the flown route and the shown route are one.
+    if let Some(route) = &result.route {
+        assert_eq!(case.route_distance_m, route.total_distance_m());
     }
-    let longer = case.route_distance_m > design.range_m;
-    assert_eq!(
-        case.plan.trip.kg > design.trip_fuel_kg,
-        longer,
+    //
+    // Without airway data (a CI runner has none) the planner falls back to the great circle,
+    // which is the design mission itself to rounding: the checks below then compare the same
+    // distance, and hold with a zero route offset.
+    // Off the design range (or on it) the policy is sized on the flown mission (sizing loop): the plan's trip fuel is the trip the native flight burned, scaled
+    // pass by pass (`NativeScales`, damping 0.8) to within the sizing tolerance, not the
+    // closure's priced trip. The sign of "longer route, more trip fuel than the design mission"
+    // therefore compares the flown trip with the priced one and is not a property of the route:
+    // on this A220 the native flight burns 3.6 to 4 % less than the segment model prices for the
+    // same route at every sizing pass (pass 0: priced 1,568 kg, flown 1,508 kg for the 473 km
+    // route; design mission 1,526 kg for 466 km), so a route 1.6 % longer takes off lighter.
+    let native = case
+        .native_check
+        .expect("the flown trip is recorded on the policy load case")
+        .native_trip_fuel_kg;
+    assert!(
+        (case.plan.trip.kg - native).abs() <= 5.0e-3 * native,
+        "plan trip {} kg vs flown trip {native} kg",
+        case.plan.trip.kg
+    );
+    // The two mission models still agree to their model-form band: trip fuel per metre of route
+    // within 10 % of the design mission's (measured -4.1 %), and the takeoff mass within 1 %.
+    let flown_per_m = case.plan.trip.kg / case.route_distance_m;
+    let design_per_m = design.trip_fuel_kg / design.range_m;
+    assert!(
+        (flown_per_m / design_per_m - 1.0).abs() < 0.10,
         "route {} m trip {} kg vs design {} m trip {} kg",
         case.route_distance_m,
         case.plan.trip.kg,
         design.range_m,
         design.trip_fuel_kg
     );
-    assert_eq!(load_case.takeoff_mass_kg > design.takeoff_mass_kg, longer);
+    assert!(
+        (load_case.takeoff_mass_kg / design.takeoff_mass_kg - 1.0).abs() < 0.01,
+        "flown takeoff mass {} kg vs design {} kg",
+        load_case.takeoff_mass_kg,
+        design.takeoff_mass_kg
+    );
     assert!(case.reserve_margin_kg >= 0.0 && case.shortfall_kg == 0.0);
 }

@@ -141,6 +141,21 @@ mod tests {
     }
 
     #[test]
+    fn no_translation_has_a_stray_backslash_before_an_accented_letter() {
+        // A doubled escape in the JSON decodes to a literal backslash on screen.
+        for (key, value) in desktop_catalog() {
+            let mut previous = None;
+            for character in value.chars() {
+                assert!(
+                    !(previous == Some('\\') && !character.is_ascii()),
+                    "stray backslash in the translation of {key:?}"
+                );
+                previous = Some(character);
+            }
+        }
+    }
+
+    #[test]
     fn install_leaves_an_uncatalogued_string_in_english() {
         let _registry_guard = crate::registry_test_guard();
         crate::reset_registry_for_test();
@@ -275,5 +290,35 @@ mod tests {
         ] {
             assert!(catalog[key].ends_with(unit), "{key}");
         }
+    }
+}
+
+#[cfg(test)]
+mod catalog_conflict_tests {
+    use super::*;
+
+    /// Keys whose native-shell wording deliberately replaces the reference
+    /// catalog's (the native value is the one installed).
+    const NATIVE_REFINEMENTS: [&str; 8] = [
+        "Aileron chord fraction",
+        "Business",
+        "Cargo",
+        "Economy",
+        "First",
+        "Passenger",
+        "Premium",
+        "Tail airfoil section",
+    ];
+
+    #[test]
+    fn a_key_in_two_catalogs_has_one_translation_unless_it_is_a_listed_refinement() {
+        let native = native_desktop_catalog();
+        let mut conflicts: Vec<&str> = catalog()
+            .iter()
+            .filter(|(key, value)| native.get(*key).is_some_and(|other| other != *value))
+            .map(|(key, _)| key.as_str())
+            .collect();
+        conflicts.sort_unstable();
+        assert_eq!(conflicts, NATIVE_REFINEMENTS);
     }
 }

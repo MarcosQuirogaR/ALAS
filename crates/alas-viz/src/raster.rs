@@ -11,7 +11,6 @@
 use alas_fonts::{
     MATH_FONT_BYTES, MONOSPACE_FONT_BYTES, PROPORTIONAL_FAMILY, PROPORTIONAL_FONT_BYTES,
 };
-use alas_report::earth_texture::earth_texture_png;
 use alas_report::scene::{Camera3D, SceneElement};
 use alas_report::{render_svg, Scene};
 use rayon::prelude::*;
@@ -134,6 +133,102 @@ pub fn render_scene_textures_rgba_scaled(scene: &Scene, scale: f64) -> Option<Ra
     draw_embedded_textures(scene, &mut pixmap, scale);
     draw_spherical_textures(scene, &mut pixmap, scale);
     Some(Ok((width, height, pixmap.data().to_vec())))
+}
+
+/// Pixel density at which [`with_embedded_globe_textures`] rasterizes a globe for a vector export.
+pub const EXPORT_GLOBE_SCALE: f64 = 1.5;
+
+/// A copy of `scene` in which every bundled-texture globe is followed by its rasterized disc as
+/// an embedded PNG `Image`, so a standalone SVG export shows the Earth instead of the bare
+/// silhouette the vector writer can draw. The disc is drawn at `scale` pixels per scene unit,
+/// cropped to the globe's own clip rectangle, and keeps its place in the paint order (routes and
+/// labels stay above it). A scene without such a globe is returned unchanged.
+pub fn with_embedded_globe_textures(scene: &Scene, scale: f64) -> Scene {
+    use base64::Engine as _;
+    let scale = scale.max(0.5);
+    let mut out = scene.clone();
+    let Some(texture) = blue_marble_texture() else {
+        return out;
+    };
+    let width = (scene.width.max(1.0) * scale).round() as u32;
+    let height = (scene.height.max(1.0) * scale).round() as u32;
+    let mut elements = Vec::with_capacity(scene.elements.len() + 1);
+    for element in &scene.elements {
+        elements.push(element.clone());
+        let SceneElement::SphericalImage {
+            source,
+            center,
+            radius,
+            camera,
+            mirror_longitude,
+            clip,
+        } = element
+        else {
+            continue;
+        };
+        if source != "embedded://nasa-blue-marble" || !radius.is_finite() || *radius <= 0.0 {
+            continue;
+        }
+        let Some(mut canvas) = tiny_skia::Pixmap::new(width, height) else {
+            continue;
+        };
+        draw_equirectangular_sphere(
+            &mut canvas,
+            texture.as_ref(),
+            SpherePlacement {
+                center: *center,
+                radius: *radius,
+                clip: *clip,
+            },
+            *camera,
+            *mirror_longitude,
+            scale,
+        );
+        // The painted region: the disc's bounding box inside the clip rectangle and the canvas.
+        let (mut left, mut top, mut right, mut bottom) = (
+            center[0] - radius,
+            center[1] - radius,
+            center[0] + radius,
+            center[1] + radius,
+        );
+        if let Some([x, y, w, h]) = clip.filter(|c| c.iter().all(|v| v.is_finite())) {
+            left = left.max(x);
+            top = top.max(y);
+            right = right.min(x + w);
+            bottom = bottom.min(y + h);
+        }
+        let px_left = (left * scale).floor().max(0.0) as i32;
+        let px_top = (top * scale).floor().max(0.0) as i32;
+        let px_right = ((right * scale).ceil() as i64).clamp(0, i64::from(width)) as i32;
+        let px_bottom = ((bottom * scale).ceil() as i64).clamp(0, i64::from(height)) as i32;
+        let (w_px, h_px) = (px_right - px_left, px_bottom - px_top);
+        if w_px <= 0 || h_px <= 0 {
+            continue;
+        }
+        let Some(rect) = tiny_skia::IntRect::from_xywh(px_left, px_top, w_px as u32, h_px as u32)
+        else {
+            continue;
+        };
+        let Some(tile) = canvas.clone_rect(rect) else {
+            continue;
+        };
+        let Ok(png) = tile.encode_png() else {
+            continue;
+        };
+        elements.push(SceneElement::Image {
+            source: format!(
+                "data:image/png;base64,{}",
+                base64::engine::general_purpose::STANDARD.encode(png)
+            ),
+            x: f64::from(px_left) / scale,
+            y: f64::from(px_top) / scale,
+            width: f64::from(w_px) / scale,
+            height: f64::from(h_px) / scale,
+            source_rect: None,
+        });
+    }
+    out.elements = elements;
+    out
 }
 
 fn draw_spherical_textures(scene: &Scene, destination: &mut tiny_skia::Pixmap, scale: f64) {
@@ -394,14 +489,10 @@ fn bundled_font_database() -> resvg::usvg::fontdb::Database {
     database
 }
 
-/// The optional Earth texture (`ALAS_EARTH_TEXTURE`). `None` leaves the plain
-/// vector globe and flat map without a texture layer.
 fn blue_marble_texture() -> Option<&'static tiny_skia::Pixmap> {
     static TEXTURE: OnceLock<Option<tiny_skia::Pixmap>> = OnceLock::new();
     TEXTURE
-        .get_or_init(|| {
-            earth_texture_png().and_then(|bytes| tiny_skia::Pixmap::decode_png(bytes).ok())
-        })
+        .get_or_init(|| tiny_skia::Pixmap::decode_png(alas_report::svg::BLUE_MARBLE_PNG).ok())
         .as_ref()
 }
 
@@ -412,20 +503,7 @@ mod tests {
         render_scene_textures_rgba_scaled, source_longitude, sphere_sample_direction,
     };
     use alas_fonts::{MATH_FAMILY, MONOSPACE_FAMILY, PROPORTIONAL_FAMILY};
-    use alas_report::earth_texture::earth_texture_png;
     use alas_report::scene::{Camera3D, Color, Scene, SceneElement, TextAlign, TextBaseline};
-
-    /// Texture-dependent checks run only when ALAS_EARTH_TEXTURE names a PNG.
-    fn skip_without_earth_texture() -> bool {
-        if earth_texture_png().is_some() {
-            return false;
-        }
-        true
-    }
-
-    fn earth_texture_bytes() -> &'static [u8] {
-        earth_texture_png().unwrap_or(&[])
-    }
 
     const ENGINEERING_GLYPH_CORPUS: &str = concat!(
         "\u{03B1}\u{03B7}\u{03C1}\u{03C3}\u{03C9}\u{1E41}",
@@ -518,10 +596,51 @@ mod tests {
     }
 
     #[test]
-    fn a_clipped_sphere_paints_inside_its_figure_area_only() {
-        if skip_without_earth_texture() {
-            return;
+    fn an_embedded_globe_is_a_png_image_cropped_to_its_clip_and_painted_in_place() {
+        use super::with_embedded_globe_textures;
+        let mut scene = Scene::new(80.0, 80.0, None);
+        scene.add(SceneElement::SphericalImage {
+            source: "embedded://nasa-blue-marble".to_owned(),
+            center: [40.0, 40.0],
+            radius: 70.0,
+            camera: Camera3D::front(),
+            mirror_longitude: false,
+            clip: Some([20.0, 25.0, 40.0, 30.0]),
+        });
+        scene.add(SceneElement::Text {
+            text: "above the globe".to_owned(),
+            pos: [10.0, 10.0],
+            font_size: 9.0,
+            color: Color::rgb(255, 255, 255),
+            align: TextAlign::Left,
+            baseline: TextBaseline::Top,
+            angle_deg: 0.0,
+            bold: false,
+        });
+        let embedded = with_embedded_globe_textures(&scene, 2.0);
+        assert_eq!(embedded.elements.len(), 3);
+        match &embedded.elements[1] {
+            SceneElement::Image {
+                source,
+                x,
+                y,
+                width,
+                height,
+                ..
+            } => {
+                assert!(source.starts_with("data:image/png;base64,"));
+                assert_eq!((*x, *y, *width, *height), (20.0, 25.0, 40.0, 30.0));
+            }
+            other => panic!("the texture must follow the globe, got {other:?}"),
         }
+        assert!(matches!(embedded.elements[2], SceneElement::Text { .. }));
+        // A scene without a globe is returned as it was.
+        let plain = Scene::new(10.0, 10.0, None);
+        assert_eq!(with_embedded_globe_textures(&plain, 2.0), plain);
+    }
+
+    #[test]
+    fn a_clipped_sphere_paints_inside_its_figure_area_only() {
         let mut scene = Scene::new(80.0, 80.0, None);
         scene.add(SceneElement::SphericalImage {
             source: "embedded://nasa-blue-marble".to_owned(),
@@ -550,9 +669,6 @@ mod tests {
 
     #[test]
     fn the_texture_layer_alone_matches_the_full_raster_of_a_texture_only_scene() {
-        if skip_without_earth_texture() {
-            return;
-        }
         let mut scene = Scene::new(65.0, 65.0, None);
         scene.add(SceneElement::SphericalImage {
             source: "embedded://nasa-blue-marble".to_owned(),
@@ -603,9 +719,6 @@ mod tests {
 
     #[test]
     fn embedded_earth_texture_survives_static_rasterization() {
-        if skip_without_earth_texture() {
-            return;
-        }
         let mut scene = Scene::new(64.0, 32.0, Some(Color::rgb(0, 0, 0)));
         scene.add(SceneElement::Image {
             source: "embedded://nasa-blue-marble".to_owned(),
@@ -622,21 +735,17 @@ mod tests {
     }
 
     #[test]
-    fn configured_earth_texture_is_equirectangular() {
-        if skip_without_earth_texture() {
-            return;
-        }
-        let texture =
-            tiny_skia::Pixmap::decode_png(earth_texture_bytes()).expect("configured Earth texture");
+    fn bundled_earth_texture_is_the_high_detail_asset() {
+        let texture = tiny_skia::Pixmap::decode_png(include_bytes!(
+            "../../../assets/textures/earth_blue_marble.png"
+        ))
+        .expect("bundled Earth texture");
 
-        assert_eq!(texture.width(), 2 * texture.height());
+        assert_eq!((texture.width(), texture.height()), (4096, 2048));
     }
 
     #[test]
     fn equirectangular_earth_sphere_places_greenwich_at_the_front_view_center() {
-        if skip_without_earth_texture() {
-            return;
-        }
         let mut scene = Scene::new(65.0, 65.0, Some(Color::rgb(0, 0, 0)));
         scene.add(SceneElement::SphericalImage {
             source: "embedded://nasa-blue-marble".to_owned(),
@@ -648,8 +757,10 @@ mod tests {
         });
 
         let (_, _, pixels) = render_scene_rgba(&scene).expect("Earth sphere rasterization");
-        let texture =
-            tiny_skia::Pixmap::decode_png(earth_texture_bytes()).expect("configured Earth texture");
+        let texture = tiny_skia::Pixmap::decode_png(include_bytes!(
+            "../../../assets/textures/earth_blue_marble.png"
+        ))
+        .expect("bundled Earth texture");
         let x = (texture.width() - 1) / 2 + 1;
         let y = (texture.height() - 1) / 2 + 1;
         let texture_pixel = &texture.data()[((y * texture.width() + x) * 4) as usize..][..4];
@@ -677,9 +788,6 @@ mod tests {
 
     #[test]
     fn embedded_earth_crop_stays_inside_its_declared_panel() {
-        if skip_without_earth_texture() {
-            return;
-        }
         let mut scene = Scene::new(80.0, 48.0, Some(Color::rgb(0, 0, 0)));
         scene.add(SceneElement::Image {
             source: "embedded://nasa-blue-marble".to_owned(),
@@ -698,9 +806,6 @@ mod tests {
 
     #[test]
     fn exported_svg_embeds_and_rasterizes_the_earth_crop() {
-        if skip_without_earth_texture() {
-            return;
-        }
         let mut scene = Scene::new(80.0, 48.0, Some(Color::rgb(0, 0, 0)));
         scene.add(SceneElement::Image {
             source: "embedded://nasa-blue-marble".to_owned(),

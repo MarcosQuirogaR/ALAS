@@ -49,6 +49,32 @@ def default_bash(project: Path) -> Path | None:
     return candidate if candidate.is_file() else None
 
 
+def run_bounded(command: list[str], timeout_s: float) -> subprocess.CompletedProcess:
+    """Run ``command`` and kill its whole process tree when it exceeds ``timeout_s``."""
+    process = subprocess.Popen(
+        command,
+        stdout=subprocess.PIPE,
+        stderr=subprocess.PIPE,
+        text=True,
+        encoding="utf-8",
+        errors="replace",
+    )
+    try:
+        stdout, stderr = process.communicate(timeout=timeout_s)
+    except subprocess.TimeoutExpired:
+        if os.name == "nt":
+            subprocess.run(
+                ["taskkill", "/F", "/T", "/PID", str(process.pid)],
+                check=False,
+                capture_output=True,
+            )
+        else:
+            process.kill()
+        process.communicate()
+        raise SystemExit(f"{command[0]} did not finish within {timeout_s:g} s and was stopped")
+    return subprocess.CompletedProcess(command, process.returncode, stdout, stderr)
+
+
 def parser() -> argparse.ArgumentParser:
     result = argparse.ArgumentParser(description=__doc__)
     result.add_argument("case_dir", type=Path)
@@ -88,6 +114,12 @@ def parser() -> argparse.ArgumentParser:
         default=0.0,
         help="absolute pressure reference for compressible gauge-pressure contours",
     )
+    result.add_argument(
+        "--timeout-s",
+        type=float,
+        default=120.0,
+        help="seconds each external step (paraFoam, pvpython) may run before it is stopped",
+    )
     return result
 
 
@@ -123,14 +155,7 @@ def main() -> int:
         + shlex.quote(msys_path(case))
         + " -touch"
     )
-    parafoam_result = subprocess.run(
-        [str(bash), "-lc", parafoam_command],
-        check=False,
-        capture_output=True,
-        text=True,
-        encoding="utf-8",
-        errors="replace",
-    )
+    parafoam_result = run_bounded([str(bash), "-lc", parafoam_command], args.timeout_s)
     marker = case / f"{case.name}.foam"
     if not marker.is_file():
         # The ALAS GUI uses this stable fallback marker when it opens a case
@@ -155,14 +180,7 @@ def main() -> int:
     if args.compressible:
         render_command.append("--compressible")
         render_command.extend(["--pressure-reference-pa", f"{args.pressure_reference_pa:.16e}"])
-    render_result = subprocess.run(
-        render_command,
-        check=False,
-        capture_output=True,
-        text=True,
-        encoding="utf-8",
-        errors="replace",
-    )
+    render_result = run_bounded(render_command, args.timeout_s)
 
     output = case / "postProcessing" / "alas-field-figures"
     output.mkdir(parents=True, exist_ok=True)

@@ -30,7 +30,7 @@
 //! running mass. It is a contraction - more relief gives a lighter box, which
 //! gives less relief - and converges to well inside a kilogram.
 //!
-//! [`size_wingbox_reference_compatibility`] keeps the frozen no-relief,
+//! `size_wingbox_reference_compatibility` keeps the frozen no-relief,
 //! whole-chord law the parity fixtures pin.
 //!
 //! None of these entry points says what loading envelope it sized to.
@@ -45,11 +45,14 @@ use alas_config::materials::MaterialSpec;
 use alas_config::{DesignRequirements, StructuresConfig};
 use alas_geom::wing_structure::WingStructureGeometry;
 
+#[cfg(any(test, feature = "parity-reference"))]
 use crate::loads::WingInertiaRelief;
 use crate::tanks;
 
 mod arc_mass;
+mod bracket;
 mod cap_search;
+mod cover_shape;
 pub mod envelope;
 mod fatigue;
 mod law;
@@ -57,6 +60,7 @@ pub mod panel;
 mod product_strength;
 mod scoped;
 pub(crate) mod section;
+pub(crate) mod shear_flex;
 mod solve;
 mod stiffness;
 mod stiffness_distribution;
@@ -64,6 +68,7 @@ pub(crate) mod swept;
 mod torque_cases;
 mod types;
 mod web;
+mod web_bracket;
 
 pub use envelope::CaseSet;
 pub use scoped::{size_wingbox_with_scope, SizedWingbox, WingFuelRelief};
@@ -73,8 +78,11 @@ pub use types::{
     MassBreakdown, SparSizing, WingboxSizing, MARGIN_NUMERICAL_ZERO,
 };
 
+use law::linspace;
+#[cfg(any(test, feature = "parity-reference"))]
+use law::SizingLaw;
 pub(crate) use law::{gradient_unit, trapezoid};
-use law::{linspace, SizingLaw};
+#[cfg(any(test, feature = "parity-reference"))]
 use solve::size_wingbox_with_law;
 
 /// Maximum relieved-load passes; the solve exits early on verified closure.
@@ -86,8 +94,11 @@ use solve::size_wingbox_with_law;
 pub const RELIEF_PASSES: usize = 64;
 
 /// Relative change in total box mass below which the relieved-load fixed point
-/// is taken as converged.
-const RELIEF_TOLERANCE: f64 = 1.0e-9;
+/// is taken as converged: 1e-5 of the box mass, 0.05 kg on an A320-200 box
+/// and 0.3 kg on an A380-800 one, four orders under the 0.1 % to which mass
+/// results are compared. The gauge searches it iterates resolve two orders
+/// finer (`product_strength`), so the fixed point cannot cycle on their step.
+const RELIEF_TOLERANCE: f64 = 1.0e-5;
 
 /// Size the wingbox directly from strength: `size_wingbox`.
 ///
@@ -105,7 +116,7 @@ const RELIEF_TOLERANCE: f64 = 1.0e-9;
 /// the aircraft's powerplant layout, or its manufacturer-published wing-tank
 /// capacity, should use [`size_wingbox_with_wing_carried_mass`] instead.
 ///
-/// See [`size_wingbox_reference_compatibility`] for the frozen law.
+/// See `size_wingbox_reference_compatibility` for the frozen law.
 #[allow(clippy::too_many_arguments)] // mirrors upstream's own signature
 pub fn size_wingbox(
     wsg: &WingStructureGeometry,
@@ -226,7 +237,15 @@ pub fn size_wingbox_with_torque_sources(
     let (front, rear) = box_chord_band(wsg);
     let fuel = match integral_fuel_kg_m {
         Some(declared) if declared.len() == n => declared.to_vec(),
-        _ => tanks::integral_fuel_running_mass_kg_m(wsg, &y, front, rear),
+        // No distribution supplied: the reference estimate at the reference
+        // density. Product callers always supply one.
+        _ => tanks::integral_fuel_running_mass_kg_m(
+            wsg,
+            &y,
+            front,
+            rear,
+            tanks::JET_FUEL_DENSITY_KG_M3,
+        ),
     };
 
     scoped::solve_relieved(
@@ -256,7 +275,9 @@ pub fn size_wingbox_with_torque_sources(
 /// carries no inertia relief and charges skin and rib area over the whole
 /// chord rather than over the box. Product callers use [`size_wingbox`], whose
 /// result the mass reconciliation gate accepts only with non-negative margins.
-#[allow(clippy::too_many_arguments)] // mirrors upstream's own signature
+#[cfg(any(test, feature = "parity-reference"))]
+// Mirrors upstream's own signature.
+#[allow(clippy::too_many_arguments)]
 pub fn size_wingbox_reference_compatibility(
     wsg: &WingStructureGeometry,
     cfg: &StructuresConfig,
@@ -321,7 +342,7 @@ pub fn box_running_mass_kg_m(
     let n = sizing.chord.len();
     let skin_width = (rear - front).max(0.0);
     let mut running: Vec<f64> = (0..n)
-        .map(|j| 2.0 * skin_width * sizing.chord[j] * sizing.t_skin * skin_mat.rho_kg_m3)
+        .map(|j| 2.0 * skin_width * sizing.chord[j] * sizing.skin_at(j) * skin_mat.rho_kg_m3)
         .collect();
     for spar in &sizing.spars {
         for (j, (mass, (&h, &a))) in running
@@ -432,6 +453,9 @@ mod tests {
         let mut sizing = WingboxSizing {
             y_stations: vec![0.0, 35.875],
             axis_cos: Vec::new(),
+            cover_shape: Vec::new(),
+            cover_depth_m: Vec::new(),
+            cover_shear_flow_n_per_m: Vec::new(),
             num_ribs: 25,
             rib_spacing_m: 0.96738451494986,
             ..test_sizing()
@@ -448,6 +472,9 @@ mod tests {
         let sizing = WingboxSizing {
             y_stations: vec![4.0, 14.0],
             axis_cos: Vec::new(),
+            cover_shape: Vec::new(),
+            cover_depth_m: Vec::new(),
+            cover_shear_flow_n_per_m: Vec::new(),
             num_ribs: 6,
             rib_spacing_m: 2.0,
             ..test_sizing()
@@ -701,11 +728,12 @@ mod tests {
         let frozen = size_wingbox_reference_compatibility(&wsg, &cfg, &req, al, al, al, al);
         // The spars sit at 0.25 and 0.70, so the cover is 45 % of the chord
         // the frozen law charges. Skin is linear in that width.
-        let expected = 2.0
-            * 0.45
-            * cfg.t_skin_min_m
-            * al.rho_kg_m3
-            * trapezoid(&product.chord, &product.y_stations);
+        // Each station carries its own sized gauge, never below the minimum.
+        assert!(product.skin_gauge_m.iter().all(|&t| t >= cfg.t_skin_min_m));
+        let area: Vec<f64> = (0..product.chord.len())
+            .map(|j| product.chord[j] * product.skin_at(j))
+            .collect();
+        let expected = 2.0 * 0.45 * al.rho_kg_m3 * trapezoid(&area, &product.y_stations);
         assert!((product.mass_breakdown_kg.skin - expected).abs() < 1e-9);
         // Ribs are the section area between the spars rather than the whole
         // aerofoil, which is a smaller share but not a fixed one.
@@ -761,7 +789,13 @@ mod tests {
         let (wsg, cfg, req, al) = probe_case();
         let sized = size_wingbox(&wsg, &cfg, &req, al, al, al, al);
         let (front, rear) = box_chord_band(&wsg);
-        let fuel = tanks::integral_fuel_running_mass_kg_m(&wsg, &sized.y_stations, front, rear);
+        let fuel = tanks::integral_fuel_running_mass_kg_m(
+            &wsg,
+            &sized.y_stations,
+            front,
+            rear,
+            tanks::JET_FUEL_DENSITY_KG_M3,
+        );
         let structure = box_running_mass_kg_m(&sized, al, al, al, front, rear);
         let relief = WingInertiaRelief {
             running_mass_kg_m: fuel.iter().zip(&structure).map(|(&f, &s)| f + s).collect(),
@@ -819,11 +853,15 @@ mod tests {
         WingboxSizing {
             y_stations: vec![0.0, 35.875],
             axis_cos: Vec::new(),
+            cover_shape: Vec::new(),
+            cover_depth_m: Vec::new(),
+            cover_shear_flow_n_per_m: Vec::new(),
             eta_stations: vec![0.0, 1.0],
             chord: vec![1.0, 1.0],
             spar_fracs: vec![0.25, 0.75],
             spars: Vec::new(),
             t_skin: 0.01,
+            skin_gauge_m: Vec::new(),
             num_ribs: 2,
             rib_spacing_m: 1.0,
             mass_breakdown_kg: MassBreakdown {

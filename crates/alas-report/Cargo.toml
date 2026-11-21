@@ -9,6 +9,7 @@ rust-version.workspace = true
 
 [dependencies]
 alas-math = { path = "../alas-math" }
+alas-units = { path = "../alas-units" }
 alas-config = { path = "../alas-config" }
 alas-geom = { path = "../alas-geom" }
 alas-atmo = { path = "../alas-atmo" }

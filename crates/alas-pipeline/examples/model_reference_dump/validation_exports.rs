@@ -76,7 +76,7 @@ pub(super) fn cg_limits(feasibility: &FeasibilityReport) -> Value {
     });
     let model = feasibility.model_cg.as_ref();
     json!({
-        "coordinate_frame": "% MAC of the manufacturer planning frame (published MAC leading edge and chord)",
+        "coordinate_frame": "loading_envelope and model_* limits: % MAC of plane.mac_frame() (reference MAC when the geometry sets one; its LEMAC and chord are cg.mac_frame_*), NOT cg.model_lemac_from_nose_m / model_mac_m (the integrated planform MAC); planning_*: the manufacturer planning frame",
         "planning_status": format!("{:?}", planning.planning_status),
         "planning_cg_pct_mac": planning.cg_pct_mac,
         "planning_forward_limit_pct_mac": planning.forward_limit_pct_mac,
@@ -113,6 +113,7 @@ pub(super) fn reference_block_fuel(config: &AlasConfig, report: &AnalysisReport)
                 "reserve_fuel_kg": fuel.reserve_fuel_kg,
                 "takeoff_mass_kg": fuel.takeoff_mass_kg,
                 "zero_fuel_mass_kg": fuel.zero_fuel_mass_kg,
+                "offloaded_payload_kg": fuel.offloaded_payload_kg,
                 "converged": fuel.converged,
                 "dispatch_status": fuel.status,
                 "shortfall_kg": fuel.shortfall_kg,
@@ -122,4 +123,36 @@ pub(super) fn reference_block_fuel(config: &AlasConfig, report: &AnalysisReport)
         out.insert(id.to_owned(), value);
     }
     Value::Object(out)
+}
+
+/// The tip-back basis the gear layout is judged on and its provenance, from
+/// the same feasibility assessment the report uses.
+pub(super) fn tip_back_basis(
+    config: &AlasConfig,
+    design: &alas_config::DesignVector,
+    report: &AnalysisReport,
+) -> (alas_perf::landing_gear::geometry::TipBackBasis, Value) {
+    let feasibility =
+        alas_pipeline::feasibility::assess_physical_feasibility(config, design, report, None);
+    let Some(model_cg) = feasibility.model_cg.as_ref() else {
+        return (Default::default(), json!(null));
+    };
+    match alas_pipeline::feasibility::tip_back_basis(
+        report,
+        model_cg,
+        feasibility.operational_envelope.as_ref(),
+    ) {
+        Some((basis, reachable)) => (
+            basis,
+            json!({
+                "governing_kind": reachable.kind,
+                "governing_mass_kg": reachable.mass_kg,
+                "governing_x_m": reachable.x_m,
+                "governing_pct_mac_model_frame": reachable.pct_mac,
+                "cg_height_m": reachable.cg_height_m,
+                "frame": "plane.mac_frame() (cg.mac_frame_lemac_m, cg.mac_frame_chord_m)",
+            }),
+        ),
+        None => (Default::default(), json!(null)),
+    }
 }

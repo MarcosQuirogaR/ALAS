@@ -31,12 +31,13 @@ use alas_prop::mission_turbofan::{
 use alas_prop::system::{
     FailureState, FlightCondition, LegacyTurbofanModel, ModelIdentity, ModelProvenance,
     OperatingMode, PropulsionDemand, PropulsionInstallation, PropulsionLoads,
-    PropulsionOrchestrator, PropulsionRating, PropulsionRequest, PropulsionResult, PropulsionState,
-    ResourceKind,
+    PropulsionOrchestrator, PropulsionPoint, PropulsionRating, PropulsionRequest, PropulsionState,
 };
 use alas_prop::turboprop::{Atr72TurbopropSystem, Pw127m568fModel};
 
 /// Metres per second to feet per minute (empirical climb schedule).
+mod inverse;
+
 const METRES_PER_SECOND_TO_FEET_PER_MINUTE: f64 = 196.850_393_700_787_4;
 
 /// Ratio tolerance on the inverse thrust solve.
@@ -95,6 +96,22 @@ pub enum DeckError {
         /// Altitude of the request, m.
         altitude_m: f64,
     },
+    /// The rating-fraction inverse ended without a point inside its thrust
+    /// tolerance: the final bracket is wider in thrust than the tolerance
+    /// band, so the map jumps across the request or the solve ran out of
+    /// iterations. No rating fraction is known to deliver the thrust.
+    RatingSolveNotConverged {
+        /// Required installed thrust, N.
+        required_n: f64,
+        /// Thrust at the lower end of the final bracket, N.
+        low_thrust_n: f64,
+        /// Thrust at the upper end of the final bracket, N.
+        high_thrust_n: f64,
+        /// Rating fraction at the lower end of the final bracket.
+        low_fraction: f64,
+        /// Rating fraction at the upper end of the final bracket.
+        high_fraction: f64,
+    },
 }
 
 impl fmt::Display for DeckError {
@@ -109,6 +126,16 @@ impl fmt::Display for DeckError {
             } => write!(
                 formatter,
                 "thrust deficit at {altitude_m:.0} m: {required_n:.0} N required, {available_n:.0} N available at {rating:?}"
+            ),
+            Self::RatingSolveNotConverged {
+                required_n,
+                low_thrust_n,
+                high_thrust_n,
+                low_fraction,
+                high_fraction,
+            } => write!(
+                formatter,
+                "propulsion deck: rating solve did not converge on {required_n:.1} N: the map steps from {low_thrust_n:.1} N to {high_thrust_n:.1} N between fractions {low_fraction:.12} and {high_fraction:.12}"
             ),
         }
     }
@@ -269,11 +296,49 @@ impl PropulsionDeck {
         flight: FlightCondition,
         rating: PropulsionRating,
     ) -> Result<OperatingPoint, DeckError> {
-        let result = self.evaluate(flight, PropulsionDemand::Rating(rating))?;
+        self.rated_point_with_loads(flight, rating, PropulsionLoads::default())
+    }
+
+    /// [`Self::rated_point`] with customer `loads` (system totals): bleed at
+    /// the take-off rating costs thrust, at every rating it costs fuel.
+    ///
+    /// # Errors
+    ///
+    /// [`DeckError::Model`] when the model rejects the condition or loads.
+    pub fn rated_point_with_loads(
+        &self,
+        flight: FlightCondition,
+        rating: PropulsionRating,
+        loads: PropulsionLoads,
+    ) -> Result<OperatingPoint, DeckError> {
+        let result = self.evaluate_loaded(flight, PropulsionDemand::Rating(rating), loads)?;
         Ok(OperatingPoint {
             thrust_n: result.body_force_n[0],
             fuel_flow_kg_s: jet_a_mass_flow(&result)?,
             rating_fraction: 1.0,
+            rating,
+            limit: ThrustLimit::Unlimited,
+        })
+    }
+
+    /// The operating point at `fraction` of the force available at `rating`: the deck's own
+    /// rated-fraction demand, the point the native mission books for a command that is a share of
+    /// that rating (a take-off-rated leg).
+    ///
+    /// # Errors
+    ///
+    /// [`DeckError::Model`] when the model rejects the condition or the fraction.
+    pub fn rated_fraction_point(
+        &self,
+        flight: FlightCondition,
+        rating: PropulsionRating,
+        fraction: f64,
+    ) -> Result<OperatingPoint, DeckError> {
+        let result = self.evaluate(flight, PropulsionDemand::RatedFraction { rating, fraction })?;
+        Ok(OperatingPoint {
+            thrust_n: result.body_force_n[0],
+            fuel_flow_kg_s: jet_a_mass_flow(&result)?,
+            rating_fraction: fraction,
             rating,
             limit: ThrustLimit::Unlimited,
         })
@@ -344,6 +409,24 @@ impl PropulsionDeck {
         };
         if required_n <= idle.thrust_n {
             return Ok(idle);
+        }
+        if required_n < 0.0 {
+            // Net drag between the idle point and zero force: the normalized
+            // command cannot ask for it, and the fuel there is the idle flow
+            // (the deck's fuel never falls under it). The deck's own fuel at
+            // zero command is that same idle flow (its floor), so there is no
+            // higher flow to interpolate towards; a real engine delivering
+            // less drag than idle burns more than idle fuel, and the deck has
+            // no fuel-against-thrust relation between its idle line and its
+            // lowest running point to say how much (open: needs engine
+            // idle/part-power fuel data).
+            return Ok(OperatingPoint {
+                thrust_n: required_n,
+                fuel_flow_kg_s: idle.fuel_flow_kg_s,
+                rating_fraction: 0.0,
+                rating: cap,
+                limit: ThrustLimit::Unlimited,
+            });
         }
         let ceiling = match known_ceiling {
             Some(point) => point,
@@ -432,170 +515,43 @@ impl PropulsionDeck {
         })
     }
 
-    /// Bracketed inverse of the rating-fraction thrust map.
-    ///
-    /// The turbofan deck is linear in the fraction, so the first secant
-    /// guess is exact there; the turboprop's propeller surrogate is smooth
-    /// and monotone, so regula falsi with a stagnation safeguard converges in
-    /// a few evaluations.
-    ///
-    /// The safeguard is the Illinois down-weighting, and it is load-bearing.
-    /// Plain regula falsi retains one endpoint indefinitely on a convex map,
-    /// so the bracket shrinks only through the moving side; the earlier form
-    /// of this solver additionally clamped each iterate 5 % inside the
-    /// bracket, capping the per-iteration contraction at 0.95. On the PW127M
-    /// the two together meant every off-rating request ran the full
-    /// [`THRUST_SOLVE_MAX_ITERATIONS`] and left through the terminal linear
-    /// interpolation rather than converging: measured at **171 us per
-    /// `at_thrust` call against 3.2 us per `rated_point`**, about 54 deck
-    /// evaluations each time, which made one coupled ATR leg 167 ms against
-    /// the A320-200's 0.6 ms. Halving the retained endpoint's residual after
-    /// it is retained twice restores superlinear convergence, so the solve
-    /// reaches the 1e-6 relative thrust tolerance, usually *inside* it rather
-    /// than falling out of the loop, in a handful of evaluations. The deck,
-    /// the rating map and the tolerance are unchanged by this.
-    fn solve_fraction(
-        &self,
-        flight: FlightCondition,
-        required_n: f64,
-        cap: PropulsionRating,
-        ceiling: OperatingPoint,
-    ) -> Result<OperatingPoint, DeckError> {
-        let point_at = |fraction: f64| -> Result<OperatingPoint, DeckError> {
-            let result = self.evaluate(
-                flight,
-                PropulsionDemand::RatedFraction {
-                    rating: cap,
-                    fraction,
-                },
-            )?;
-            Ok(OperatingPoint {
-                thrust_n: result.body_force_n[0],
-                fuel_flow_kg_s: jet_a_mass_flow(&result)?,
-                rating_fraction: fraction,
-                rating: cap,
-                limit: ThrustLimit::Unlimited,
-            })
-        };
-        let tolerance_n = THRUST_SOLVE_RELATIVE_TOLERANCE * required_n.abs().max(1.0);
-        let mut low_fraction = 0.0;
-        let mut low = point_at(0.0)?;
-        let mut high_fraction = 1.0;
-        let mut high = ceiling;
-        if !(low.thrust_n <= required_n && required_n <= high.thrust_n) {
-            return Err(DeckError::Model(format!(
-                "rating map does not bracket {required_n:.1} N ({:.1}..{:.1} N)",
-                low.thrust_n, high.thrust_n
-            )));
-        }
-        // Residuals carried separately from the bracket points: the Illinois
-        // safeguard down-weights the *retained* side's residual to move the
-        // next iterate off it, while the monotonicity check below must still
-        // compare against the deck's real thrust and fuel flow.
-        let mut low_residual = low.thrust_n - required_n;
-        let mut high_residual = high.thrust_n - required_n;
-        let mut low_retained = 0_u32;
-        let mut high_retained = 0_u32;
-        for _ in 0..THRUST_SOLVE_MAX_ITERATIONS {
-            let span = high_residual - low_residual;
-            let secant = if span > 0.0 {
-                low_fraction - low_residual / span * (high_fraction - low_fraction)
-            } else {
-                0.5 * (low_fraction + high_fraction)
-            };
-            // Keep the iterate strictly inside the bracket so a flat map
-            // cannot pin it to an endpoint. The margin is the smallest that
-            // does that.
-            let width = high_fraction - low_fraction;
-            let fraction = secant
-                .max(low_fraction + 1.0e-6 * width)
-                .min(high_fraction - 1.0e-6 * width);
-            let point = point_at(fraction)?;
-            // The rating map must be monotone in both thrust and fuel flow
-            // inside the bracket; a deck that is not is an invalid off-design
-            // evaluation, not a root to close on numerically.
-            let thrust_tolerance = 1.0e-9 * ceiling.thrust_n.abs().max(1.0);
-            let flow_tolerance = 1.0e-9 * ceiling.fuel_flow_kg_s.abs().max(1.0e-6);
-            if point.thrust_n < low.thrust_n - thrust_tolerance
-                || point.thrust_n > high.thrust_n + thrust_tolerance
-                || point.fuel_flow_kg_s < low.fuel_flow_kg_s - flow_tolerance
-                || point.fuel_flow_kg_s > high.fuel_flow_kg_s + flow_tolerance
-            {
-                return Err(DeckError::Model(format!(
-                    "rating map is not monotone at fraction {fraction:.4}: {:.1} N / {:.5} kg/s between ({:.1} N / {:.5} kg/s) and ({:.1} N / {:.5} kg/s)",
-                    point.thrust_n,
-                    point.fuel_flow_kg_s,
-                    low.thrust_n,
-                    low.fuel_flow_kg_s,
-                    high.thrust_n,
-                    high.fuel_flow_kg_s
-                )));
-            }
-            if (point.thrust_n - required_n).abs() <= tolerance_n {
-                return Ok(point);
-            }
-            if point.thrust_n < required_n {
-                low_fraction = fraction;
-                low_residual = point.thrust_n - required_n;
-                low = point;
-                low_retained = 0;
-                high_retained += 1;
-                if high_retained >= 2 {
-                    high_residual *= 0.5;
-                }
-            } else {
-                high_fraction = fraction;
-                high_residual = point.thrust_n - required_n;
-                high = point;
-                high_retained = 0;
-                low_retained += 1;
-                if low_retained >= 2 {
-                    low_residual *= 0.5;
-                }
-            }
-            if high_fraction - low_fraction < 1.0e-12 {
-                break;
-            }
-        }
-        // Linear interpolation across the final bracket: within tolerance of
-        // both bracket ends for any monotone map this narrow.
-        let span = high.thrust_n - low.thrust_n;
-        let weight = if span > 0.0 {
-            ((required_n - low.thrust_n) / span).clamp(0.0, 1.0)
-        } else {
-            0.5
-        };
-        Ok(OperatingPoint {
-            thrust_n: required_n,
-            fuel_flow_kg_s: low.fuel_flow_kg_s
-                + weight * (high.fuel_flow_kg_s - low.fuel_flow_kg_s),
-            rating_fraction: low_fraction + weight * (high_fraction - low_fraction),
-            rating: cap,
-            limit: ThrustLimit::Unlimited,
-        })
-    }
-
     fn evaluate(
         &self,
         flight: FlightCondition,
         demand: PropulsionDemand,
-    ) -> Result<PropulsionResult, DeckError> {
+    ) -> Result<PropulsionPoint, DeckError> {
+        self.evaluate_loaded(flight, demand, PropulsionLoads::default())
+    }
+
+    fn evaluate_loaded(
+        &self,
+        flight: FlightCondition,
+        demand: PropulsionDemand,
+        loads: PropulsionLoads,
+    ) -> Result<PropulsionPoint, DeckError> {
         self.evaluations.fetch_add(1, Ordering::Relaxed);
         let request = PropulsionRequest {
             flight,
             demand,
             mode: OperatingMode::Normal,
             failure: FailureState::None,
-            loads: PropulsionLoads::default(),
+            loads,
             state: PropulsionState::default(),
             time_step_s: None,
         };
         let result = self
             .orchestrator
-            .evaluate(&request)
+            .evaluate_point(&request)
             .map_err(|error| DeckError::Model(error.to_string()))?;
         let thrust_n = result.body_force_n[0];
-        if !thrust_n.is_finite() || thrust_n < 0.0 {
+        // Net flight-idle thrust is negative where the inlet ram drag exceeds
+        // the idle gross thrust (low height, high Mach number); no other
+        // demand may return a negative force.
+        let idle = matches!(
+            demand,
+            PropulsionDemand::Rating(PropulsionRating::FlightIdle)
+        );
+        if !thrust_n.is_finite() || (thrust_n < 0.0 && !idle) {
             return Err(DeckError::Model(format!(
                 "thrust {thrust_n} N at {:.0} m / M{:.3} is not usable",
                 flight.altitude_m, flight.mach
@@ -605,12 +561,9 @@ impl PropulsionDeck {
     }
 }
 
-fn jet_a_mass_flow(result: &PropulsionResult) -> Result<f64, DeckError> {
+fn jet_a_mass_flow(result: &PropulsionPoint) -> Result<f64, DeckError> {
     let flow = result
-        .resource_flows
-        .iter()
-        .find(|flow| flow.resource == ResourceKind::JetA)
-        .and_then(|flow| flow.mass_flow_kg_s)
+        .jet_a_mass_flow_kg_s
         .ok_or_else(|| DeckError::Model("no Jet-A mass-flow result".to_owned()))?;
     if !flow.is_finite() || flow < 0.0 {
         return Err(DeckError::Model(format!(
@@ -709,7 +662,6 @@ pub fn product_orchestrator(
                     cruise_reference_tsfc_kg_kgf_h: payload.cruise_tsfc_kg_kgf_hr,
                     part_power_fuel_flow_ratios: payload.part_power_fuel_flow_ratios,
                     max_climb_rate_ft_min,
-                    flight_idle_fraction: 0.07,
                     flat_rating_temperature_k: payload.flat_rating_temperature_k,
                     cruise_reference_is_engine_datum: payload.off_design.is_engine_datum(),
                     cruise_reference_is_maximum_climb: payload.off_design.is_maximum_climb_datum(),
@@ -770,6 +722,28 @@ pub fn turboprop_unit_model(payload: &alas_config::TurbopropEngineSpec) -> Pw127
         reference_psfc_kg_kwh: payload.maximum_cruise_fuel_flow_kg_h
             / (alas_config::TurbopropEngineSpec::FUEL_FLOW_REFERENCE_ENGINES as f64
                 * payload.maximum_cruise_shaft_power_kw),
+        // The flat-rating corners and the lapse exponent are the engine's
+        // own catalogue values (see `power_lapse_source`).
+        takeoff_flat_rating_temperature_k: payload.takeoff_flat_rating_temperature_k,
+        maximum_continuous_flat_rating_temperature_k: payload
+            .maximum_continuous_flat_rating_temperature_k,
+        power_lapse_density_exponent: payload.power_lapse_density_exponent,
+        // The ram factor and the lapse fit's speed schedule (see
+        // `ram_power_source`).
+        ram_power_exponent: payload.ram_power_exponent,
+        power_lapse_fit_reference_true_airspeed_m_s: payload
+            .power_lapse_fit_reference_true_airspeed_m_s,
+        rating_temperature_limit_k: payload.rating_temperature_limit_k,
+        // The PSFC the model burns is the engine's own (see `psfc_source`).
+        psfc_reference_kg_kwh: payload.psfc_reference_kg_kwh,
+        psfc_reference_temperature_k: payload.psfc_reference_temperature_k,
+        // The flat-rating corners per rating (see `power_lapse_source`).
+        thermodynamic_power_w: payload.thermodynamic_shaft_power_kw * 1_000.0,
+        // The propeller's own measured compressibility class when the
+        // catalogue states one (see `propeller_compressibility_source`).
+        tip_mach_loss_coefficient: payload
+            .propeller_tip_mach_loss_coefficient
+            .unwrap_or(Pw127m568fModel::default().tip_mach_loss_coefficient),
         ..Pw127m568fModel::default()
     }
 }
@@ -815,9 +789,42 @@ mod tests {
         let idle_cruise = deck.idle_point(cruise).unwrap();
         assert!(toga_sl.thrust_n > climb_cruise.thrust_n);
         assert!(climb_cruise.thrust_n > idle_cruise.thrust_n);
-        assert!(idle_cruise.thrust_n > 0.0);
+        // At FL360-class cruise height the ram drag all but cancels the idle
+        // gross thrust: the net force is within a percent of the rated static
+        // thrust of zero.
+        assert!(idle_cruise.thrust_n.abs() < 0.02 * toga_sl.thrust_n);
         assert!(toga_sl.fuel_flow_kg_s > climb_cruise.fuel_flow_kg_s);
         assert!(climb_cruise.fuel_flow_kg_s > idle_cruise.fuel_flow_kg_s);
+    }
+
+    #[test]
+    fn a_true_airspeed_from_the_aerodynamic_atmosphere_is_rated_at_its_own_mach() {
+        // The aerodynamic side forms the true airspeed of a commanded Mach
+        // with `Atmosphere::new`; the deck converts it back with its own
+        // atmosphere call. Both are one model, so the Mach, the density and
+        // the temperature the engine is rated at are the commanded ones.
+        let deck = default_deck();
+        for altitude_m in [
+            1_500.0, 7_620.0, 9_600.0, 10_668.0, 11_000.0, 11_278.0, 12_497.0,
+        ] {
+            for mach in [0.45, 0.78, 0.85] {
+                let air = alas_atmo::Atmosphere::new(altitude_m);
+                let tas_m_s = mach * air.speed_of_sound();
+                let flight = deck
+                    .flight_condition(altitude_m, tas_m_s, 9.80665, 0.0)
+                    .unwrap();
+                assert!(
+                    (flight.mach - mach).abs() < 1.0e-14,
+                    "{altitude_m} m: Mach {mach} rated at {}",
+                    flight.mach
+                );
+                assert_eq!(flight.density_kg_m3, air.density());
+                assert_eq!(flight.temperature_k, air.temperature());
+                assert_eq!(flight.pressure_pa, air.pressure());
+                assert_eq!(flight.speed_of_sound_m_s, air.speed_of_sound());
+                assert_eq!(flight.dynamic_viscosity_pa_s, air.dynamic_viscosity());
+            }
+        }
     }
 
     #[test]
@@ -846,10 +853,24 @@ mod tests {
             PropulsionRating::MaximumClimb,
         );
         assert!(matches!(deficit, Err(DeckError::ThrustDeficit { .. })));
+        // A request below the (net, possibly negative) idle thrust is the
+        // idle floor; one just above it is delivered exactly, on the idle
+        // fuel flow or more.
+        let floor = deck.idle_point(cruise).unwrap();
         let idle = deck
-            .at_thrust(cruise, 1.0, PropulsionRating::MaximumClimb)
+            .at_thrust(cruise, floor.thrust_n - 1.0, PropulsionRating::MaximumClimb)
             .unwrap();
         assert_eq!(idle.limit, ThrustLimit::IdleFloor);
+        let above = deck
+            .at_thrust(
+                cruise,
+                floor.thrust_n + 1_000.0,
+                PropulsionRating::MaximumClimb,
+            )
+            .unwrap();
+        assert_eq!(above.limit, ThrustLimit::Unlimited);
+        assert!((above.thrust_n - floor.thrust_n - 1_000.0).abs() < 1.0e-3);
+        assert!(above.fuel_flow_kg_s >= floor.fuel_flow_kg_s);
     }
 
     #[test]
@@ -980,6 +1001,65 @@ mod tests {
                     deck.normalizing_rating(),
                     rated.thrust_n
                 );
+            }
+        }
+    }
+
+    /// Torenbeek, Synthesis of Subsonic Airplane Design (1982), Sec. 5.4.3,
+    /// eq. (5-70), p. 165: where no structural or thermal limitation holds
+    /// the power up to some altitude, a turboprop's power at altitude over
+    /// its sea-level power, "for a given rating and Mach number", is
+    /// `sigma^n` with n "generally between .7 and .8". Read at a fixed Mach
+    /// above every corner, each catalogue turboprop's maximum-continuous
+    /// line lapses inside that band: the PW100 records' 275 kt fit, which
+    /// takes no ram factor (0.728 at any speed), and the TP400-D6's
+    /// thermodynamic line with the PW120 ram factor taken relative to that
+    /// schedule (0.752 to 0.762 here, the schedule's own ram growth with
+    /// falling temperature divided out). The levels are above the altitude
+    /// where the TP400-D6 maximum-continuous line leaves its cap at Mach 0.72
+    /// (about 6,800 m with the ram factor) and the power stays above the
+    /// 0.15 floor.
+    #[test]
+    fn every_catalogue_turboprop_lapses_inside_the_class_band_at_fixed_mach() {
+        use alas_prop::turboprop::Pw127mRating;
+        for name in ["PW127M", "PW127G", "TP400-D6"] {
+            let spec = alas_config::engines::get(name)
+                .unwrap_or_else(|error| panic!("{name}: {error}"))
+                .turboprop
+                .clone()
+                .unwrap_or_else(|| panic!("{name}: no turboprop record"));
+            let model = turboprop_unit_model(&spec);
+            let power_w = |altitude_m: f64, mach: f64| {
+                let air = alas_atmo::Atmosphere::new(altitude_m);
+                model.maximum_continuous_power_w
+                    * model.power_lapse_fraction_in_flight(
+                        Pw127mRating::MaximumContinuous,
+                        air.density(),
+                        mach * air.speed_of_sound(),
+                        air.temperature(),
+                    )
+            };
+            for mach in [0.4, 0.55, 0.72] {
+                for (low_m, high_m) in [
+                    (8_000.0, 11_000.0),
+                    (8_000.0, 12_000.0),
+                    (9_000.0, 11_278.0),
+                ] {
+                    let high = power_w(high_m, mach);
+                    let low = power_w(low_m, mach);
+                    assert!(low < model.maximum_continuous_power_w, "{name} {mach} {low_m}");
+                    assert!(
+                        high > 0.15 * model.maximum_continuous_power_w,
+                        "{name} {mach} {high_m}"
+                    );
+                    let sigma_ratio = alas_atmo::Atmosphere::new(high_m).density()
+                        / alas_atmo::Atmosphere::new(low_m).density();
+                    let exponent = (high / low).ln() / sigma_ratio.ln();
+                    assert!(
+                        (0.70..=0.80).contains(&exponent),
+                        "{name} at Mach {mach}, {low_m} to {high_m} m: n = {exponent}"
+                    );
+                }
             }
         }
     }

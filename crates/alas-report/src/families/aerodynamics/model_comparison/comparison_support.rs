@@ -27,6 +27,7 @@ const FOURIER_LIFTING_LINE_HARMONICS: usize = 12;
 
 mod classical;
 use classical::classical_zero_lift_angle_rad;
+pub(super) use classical::compressible_reference_map;
 
 pub(super) fn lifting_line_points(report: &AnalysisReport) -> Vec<LiftingLinePoint> {
     let Some(zero_lift_angle_rad) = classical_zero_lift_angle_rad(report) else {
@@ -233,7 +234,7 @@ pub(super) fn draw_avl_condition_panels(
         &format!("Lift cross-check: {condition}"),
         pal,
     );
-    lift_axes.draw_frame_with_labels(scene, pal, "alpha [deg]", "CL");
+    lift_axes.draw_frame_with_labels(scene, pal, "geometric alpha [deg]", "CL");
     let vlm_lift = comparison
         .coefficient_points
         .iter()
@@ -267,7 +268,7 @@ pub(super) fn draw_avl_condition_panels(
         ),
     );
     panel_title(scene, &moment_axes, "Pitching-moment cross-check", pal);
-    moment_axes.draw_frame_with_labels(scene, pal, "alpha [deg]", "Cm");
+    moment_axes.draw_frame_with_labels(scene, pal, "geometric alpha [deg]", "Cm");
     let vlm_moment = comparison
         .coefficient_points
         .iter()
@@ -305,7 +306,7 @@ pub(super) fn draw_avl_condition_panels(
     )
     .with_y_tick_decimals(2);
     panel_title(scene, &induced_axes, "Induced drag cross-check", pal);
-    induced_axes.draw_frame_with_labels(scene, pal, "alpha [deg]", "CDi");
+    induced_axes.draw_frame_with_labels(scene, pal, "geometric alpha [deg]", "CDi");
     let vlm = comparison
         .induced_drag_points
         .iter()
@@ -339,7 +340,7 @@ pub(super) fn draw_avl_condition_panels(
         ),
     );
     panel_title(scene, &efficiency_axes, "Span efficiency cross-check", pal);
-    efficiency_axes.draw_frame_with_labels(scene, pal, "alpha [deg]", "e");
+    efficiency_axes.draw_frame_with_labels(scene, pal, "geometric alpha [deg]", "e");
     if comparison.span_efficiency_points.is_empty() {
         scene.add(SceneElement::Text {
             text: "Span efficiency unavailable: no finite paired e values.".to_owned(),

@@ -90,7 +90,8 @@ fn sol111_config(config: &StructuresConfig) -> StructuresConfig {
     config.clone()
 }
 
-const NOT_CONFIGURED_MESSAGE: &str = "NASTRAN executable not configured (Setup > External Tools); \
+const NOT_CONFIGURED_MESSAGE: &str =
+    "NASTRAN executable not configured (Workspace > External Tools); \
      reporting analytical estimates only";
 
 /// Whether `message` is the "no solver configured" outcome: an optional tool

@@ -212,8 +212,11 @@ fn the_sandbox_route_fuel_is_the_full_analysis_route_fuel_on_every_preset() {
             &AtomicBool::new(false),
         );
         let outcome = |metric: QuickMetric| {
+            // The last event of a metric is its final value: the route fuel is published twice,
+            // the priced estimate at once and then the native flight's numbers.
             events
                 .iter()
+                .rev()
                 .find(|event| event.metric == metric)
                 .unwrap_or_else(|| panic!("{name}: {metric:?} is published"))
                 .outcome
@@ -235,6 +238,19 @@ fn the_sandbox_route_fuel_is_the_full_analysis_route_fuel_on_every_preset() {
             );
         };
 
+        assert!(
+            !sandbox.estimate,
+            "{name}: the flown numbers replaced the estimate"
+        );
+        let route_events: Vec<&QuickOutcome> = events
+            .iter()
+            .filter(|event| event.metric == QuickMetric::RouteFuelBurn)
+            .map(|event| &event.outcome)
+            .collect();
+        assert!(
+            matches!(route_events.first(), Some(QuickOutcome::Route(first)) if first.estimate),
+            "{name}: the priced estimate is shown first"
+        );
         let result = DesignPipeline::new(sandbox_config(&config))
             .run_with_environment_and_route(&options, &RunEnvironment::default(), None)
             .unwrap_or_else(|error| panic!("{name}: full analysis: {error}"));
@@ -285,19 +301,25 @@ fn the_sandbox_route_fuel_is_the_full_analysis_route_fuel_on_every_preset() {
         // the great circle, which is the design mission itself: the two block
         // fuels then agree to the mission-model resolution, not to a sign.
         const OFF_DESIGN_EXCESS: f64 = 1e-3;
+        // The design mission is priced on the segment model, so it is compared with the route priced
+        // on the same model (the estimate shown first); the flown route is compared with the full
+        // analysis above, to the same tight tolerance.
+        let Some(QuickOutcome::Route(priced)) = route_events.first() else {
+            panic!("{name}: the estimate");
+        };
         if sandbox.excess_over_great_circle() < OFF_DESIGN_EXCESS {
             assert!(
-                (sandbox.block_fuel_kg - design_block.achieved).abs()
+                (priced.block_fuel_kg - design_block.achieved).abs()
                     <= OFF_DESIGN_EXCESS * design_block.achieved + tolerance_kg,
                 "{name}: route {} kg on the design mission's {} kg",
-                sandbox.block_fuel_kg,
+                priced.block_fuel_kg,
                 design_block.achieved
             );
         } else {
             assert!(
-                sandbox.block_fuel_kg >= design_block.achieved - tolerance_kg,
+                priced.block_fuel_kg >= design_block.achieved - tolerance_kg,
                 "{name}: route {} kg over {:.0} km below the design mission's {} kg",
-                sandbox.block_fuel_kg,
+                priced.block_fuel_kg,
                 sandbox.route_distance_m / 1000.0,
                 design_block.achieved
             );

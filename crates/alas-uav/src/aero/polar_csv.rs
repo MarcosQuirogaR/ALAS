@@ -1,7 +1,7 @@
 // SPDX-License-Identifier: AGPL-3.0-or-later
 // Copyright (C) 2026 Marcos Quiroga Rodriguez
 
-//! Imported 2-D section polars (decision D7: NeuralFoil-native polars plus
+//! Imported 2-D section polars (NeuralFoil-native polars plus
 //! CSV import; no XFOIL/MSES integration).
 //!
 //! # Accepted text

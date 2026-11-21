@@ -325,6 +325,14 @@ mod tests {
         assert_eq!(a320.business_class_passenger_count, Some(0));
         assert_eq!(a320.tourist_class_passenger_count, Some(138));
         assert_eq!(a320.flight_attendant_count, Some(4));
+        let a350 = inputs_for("A350-900").expect("A350 FLOPS inputs").transport;
+        assert_eq!(a350.flight_attendant_count, Some(8));
+        // Type-certificate rows that cover the registered cabins: 290 seats
+        // in the 400-seat 787-9 row, 335 in the 375-seat A340-300 row.
+        let b787 = inputs_for("B787-9").expect("B787 FLOPS inputs").transport;
+        assert_eq!(b787.flight_attendant_count, Some(8));
+        let a340 = inputs_for("A340-300").expect("A340 FLOPS inputs").transport;
+        assert_eq!(a340.flight_attendant_count, Some(8));
 
         let b787 = inputs_for("B787-9").expect("B787 FLOPS inputs").transport;
         assert_eq!(b787.first_class_passenger_count, Some(0));
@@ -337,5 +345,34 @@ mod tests {
         assert_eq!(a340.first_class_passenger_count, Some(0));
         assert_eq!(a340.business_class_passenger_count, Some(0));
         assert_eq!(a340.tourist_class_passenger_count, Some(335));
+    }
+
+    /// The executive cabin method is chosen by the declared business-jet
+    /// class and nothing else, and it always comes with its declared interior.
+    #[test]
+    fn a_business_jet_takes_the_executive_cabin_with_its_declared_interior() {
+        use crate::presets::AircraftClass;
+        use crate::CabinEquipmentMethod;
+        for name in crate::presets::available() {
+            let Some(inputs) = inputs_for(name) else {
+                continue;
+            };
+            let preset = crate::presets::get(name).expect("preset");
+            let transport = inputs.transport;
+            let executive =
+                transport.cabin_equipment_method == CabinEquipmentMethod::ExecutiveJetV1;
+            assert_eq!(executive, preset.class == AircraftClass::BusinessJet, "{name}");
+            assert_eq!(transport.executive_cabin.is_some(), executive, "{name}");
+        }
+        let lj60 = inputs_for("LJ60").expect("LJ60 FLOPS inputs").transport;
+        let cabin = lj60.executive_cabin.expect("declared interior");
+        assert_eq!((cabin.snack_pantries, cabin.lavatories), (1, 1));
+        let lj60_preset = crate::presets::get("LJ60").expect("preset");
+        assert_eq!(
+            Some(i64::from(cabin.certified_passenger_count)),
+            lj60_preset.reference.certified_max_seats
+        );
+        assert!((cabin.passenger_compartment_length_m - 5.38).abs() < 1e-12);
+        assert!((cabin.maximum_operating_altitude_m - 15_544.8).abs() < 1e-9);
     }
 }

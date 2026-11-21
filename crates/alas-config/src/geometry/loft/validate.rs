@@ -113,6 +113,9 @@ pub enum LoftSpecError {
         /// What is wrong.
         reason: String,
     },
+    /// The optional APU cone is not usable.
+    #[error("apu_cone: {0}")]
+    ApuCone(String),
     /// The fairness budget is not usable.
     #[error("fairness budget tv_ratio_max {0} must be finite and at least 1")]
     Fairness(f64),
@@ -276,6 +279,26 @@ impl LoftSpec {
         if let Some(residual) = &self.residual {
             residual.validate(self.degree)?;
         }
+        if let Some(cone) = &self.apu_cone {
+            let positive = [
+                cone.length_m,
+                cone.base_width_m,
+                cone.base_height_m,
+                cone.tip_width_m,
+                cone.tip_height_m,
+            ];
+            if !(positive.iter().all(|v| v.is_finite() && *v >= 0.0)
+                && cone.length_m > 0.0
+                && cone.base_width_m > 0.0
+                && cone.base_height_m > 0.0
+                && cone.base_zc_m.is_finite()
+                && cone.tip_zc_m.is_finite()
+                && cone.tip_width_m <= cone.base_width_m
+                && cone.tip_height_m <= cone.base_height_m)
+            {
+                return Err(LoftSpecError::ApuCone(format!("{cone:?}")));
+            }
+        }
         check_range("A", &a, "A >= 0", |v| v >= -NEGATIVE_TOLERANCE)?;
         check_range("E", &e, "E >= 0", |v| v >= -NEGATIVE_TOLERANCE)?;
         check_range("zc", &zc, "finite", |_| true)?;
@@ -329,6 +352,28 @@ mod tests {
             "../../../tests/fixtures/loft_test_sphere.json"
         ))
         .unwrap()
+    }
+
+    #[test]
+    fn an_apu_cone_must_taper_and_have_positive_dimensions() {
+        let mut spec = sphere();
+        spec.apu_cone = Some(crate::geometry::loft::ApuConeSpec {
+            length_m: 1.0,
+            base_width_m: 0.4,
+            base_height_m: 0.4,
+            base_zc_m: 0.0,
+            tip_width_m: 0.0,
+            tip_height_m: 0.0,
+            tip_zc_m: 0.0,
+        });
+        assert!(spec.validate().is_ok());
+        let cone = spec.apu_cone.as_mut().unwrap();
+        cone.tip_width_m = 0.5;
+        assert!(matches!(rejected(&spec), LoftSpecError::ApuCone(_)));
+        let cone = spec.apu_cone.as_mut().unwrap();
+        cone.tip_width_m = 0.0;
+        cone.length_m = 0.0;
+        assert!(matches!(rejected(&spec), LoftSpecError::ApuCone(_)));
     }
 
     fn rejected(spec: &LoftSpec) -> LoftSpecError {

@@ -3,6 +3,9 @@
 
 use super::*;
 
+mod demand;
+mod domain;
+
 /// Active-limit label of a rating, identical to `format!("PW127M {rating:?}")`
 /// without formatting per call.
 pub(super) fn rating_limit_name(rating: Pw127mRating) -> &'static str {
@@ -135,69 +138,6 @@ impl Atr72TurbopropSystem {
         }
     }
 
-    fn rating_and_fraction(
-        &self,
-        demand: PropulsionDemand,
-        active_count: usize,
-    ) -> Result<(Pw127mRating, f64), PropulsionError> {
-        // The automatic reserve rating applies to exactly one engine
-        // inoperative; for the two-engine ATR that is one active unit.
-        let takeoff = if active_count + 1 == self.unit_count() {
-            Pw127mRating::MaximumTakeoffReserve
-        } else {
-            Pw127mRating::NormalTakeoff
-        };
-        match demand {
-            PropulsionDemand::NormalizedForce(value)
-                if value.is_finite() && (0.0..=1.0).contains(&value) =>
-            {
-                // A normalized throttle is a fraction of the maximum-climb
-                // force with all engines running (the turbofan deck's
-                // convention), not of the take-off rating: a full command in
-                // climb or cruise must not draw take-off power (PROP-13). The
-                // one-engine-inoperative case keeps the automatic reserve.
-                if active_count + 1 == self.unit_count() {
-                    Ok((takeoff, value))
-                } else {
-                    Ok((Pw127mRating::MaximumClimb, value))
-                }
-            }
-            PropulsionDemand::NormalizedForce(value) => Err(PropulsionError::InvalidInput {
-                field: "normalized propulsion demand",
-                value,
-            }),
-            PropulsionDemand::Rating(PropulsionRating::TakeoffGoAround) => Ok((takeoff, 1.0)),
-            PropulsionDemand::Rating(PropulsionRating::MaximumContinuous) => {
-                Ok((Pw127mRating::MaximumContinuous, 1.0))
-            }
-            PropulsionDemand::Rating(PropulsionRating::MaximumClimb) => {
-                Ok((Pw127mRating::MaximumClimb, 1.0))
-            }
-            PropulsionDemand::Rating(PropulsionRating::Cruise) => {
-                Ok((Pw127mRating::MaximumCruise, 1.0))
-            }
-            PropulsionDemand::Rating(PropulsionRating::FlightIdle) => {
-                Ok((Pw127mRating::FlightIdleSurrogate, 1.0))
-            }
-            PropulsionDemand::RatedFraction { rating, fraction }
-                if fraction.is_finite() && (0.0..=1.0).contains(&fraction) =>
-            {
-                let (rating, _) =
-                    self.rating_and_fraction(PropulsionDemand::Rating(rating), active_count)?;
-                Ok((rating, fraction))
-            }
-            PropulsionDemand::RatedFraction { fraction, .. } => {
-                Err(PropulsionError::InvalidInput {
-                    field: "rated force fraction",
-                    value: fraction,
-                })
-            }
-            PropulsionDemand::RequiredBodyForceN(_) => Err(PropulsionError::UnsupportedDemand(
-                "ATR turboprop surrogate has no inverse force solver",
-            )),
-        }
-    }
-
     pub(super) fn map_error(error: TurbopropError) -> PropulsionError {
         match error {
             TurbopropError::NonFinite(field) => PropulsionError::InvalidInput {
@@ -285,7 +225,6 @@ impl PropulsionSystemModel for Atr72TurbopropSystem {
                 return Ok(self.zero_result("propulsion shutdown commanded"));
             }
             OperatingMode::FlightIdle => TurbopropMode::FlightIdle,
-            other => return Err(PropulsionError::UnsupportedMode(other)),
         };
         let (rating, requested_fraction) =
             self.rating_and_fraction(request.demand, active.len())?;
@@ -402,6 +341,25 @@ impl PropulsionSystemModel for Atr72TurbopropSystem {
             torque += output.propeller_torque_n_m;
             power_residual += output.power_balance_residual_w;
         }
+        let mut idle_fuel_floor_raised = false;
+        if force_fraction.is_some() && mode == TurbopropMode::Governed {
+            // An engine that is running does not burn less than at flight idle. The governed
+            // solve of a small normalized force returns a shaft power below the idle surrogate's,
+            // so a descent flown at a near-zero command burned 0.2-0.3 kg/s where the same
+            // state at the flight-idle rating burns 0.4-0.6 kg/s (A400M, 28,000 to 10,000 ft:
+            // the native descent used 365 kg against the priced 614 kg). The force is untouched.
+            let mut idle_request = request.clone();
+            idle_request.demand = PropulsionDemand::Rating(PropulsionRating::FlightIdle);
+            idle_request.mode = OperatingMode::FlightIdle;
+            if let Some(idle_kg_s) = self
+                .evaluate(&idle_request)
+                .ok()
+                .and_then(|idle| idle.resource_flows.first().and_then(|f| f.mass_flow_kg_s))
+            {
+                idle_fuel_floor_raised = idle_kg_s > fuel_flow;
+                fuel_flow = fuel_flow.max(idle_kg_s);
+            }
+        }
         Ok(PropulsionResult {
             body_force_n: force,
             body_moment_nm: moment,
@@ -430,7 +388,12 @@ impl PropulsionSystemModel for Atr72TurbopropSystem {
                 value: power_residual,
                 unit: "W".to_owned(),
             }],
-            validity: Self::extrapolated(),
+            validity: self.evidence_validity(
+                &request.flight,
+                &output,
+                mode,
+                idle_fuel_floor_raised,
+            ),
             provenance: self.provenance.clone(),
             trace: None,
         })

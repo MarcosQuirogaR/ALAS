@@ -1,0 +1,106 @@
+// SPDX-License-Identifier: AGPL-3.0-or-later
+// Copyright (C) 2026 Marcos Quiroga Rodriguez
+
+//! Stable machine spellings of [`FindingCode`]; split from `types.rs` for the
+//! source-size budget, no behaviour change.
+
+use super::FindingCode;
+
+impl FindingCode {
+    /// Machine-stable spelling, for manifests, exports and the acceptance
+    /// record that has to name which check rejected a delivered design.
+    ///
+    /// These strings are an interface: a reader matching on one is entitled
+    /// to expect it not to change under them, so a rename of a variant must
+    /// keep its spelling here or be treated as a breaking change.
+    pub const fn as_str(self) -> &'static str {
+        match self {
+            Self::InvalidEnvelopeSpeedOrder => "invalid_envelope_speed_order",
+            Self::InvalidCruiseAerodynamics => "invalid_cruise_aerodynamics",
+            Self::NonPositiveFuel => "non_positive_fuel",
+            Self::TankLimitedTakeoffMass => "tank_limited_takeoff_mass",
+            Self::FuelCapacityUnavailable => "fuel_capacity_unavailable",
+            Self::CgEnvelopeViolation => "cg_envelope_violation",
+            Self::ModelCgAssessmentUnavailable => "model_cg_assessment_unavailable",
+            Self::ModelCgForwardRangeViolation => "model_cg_forward_range_violation",
+            Self::NoseGearStrengthViolation => "nose_gear_strength_violation",
+            Self::MainGearStrengthViolation => "main_gear_strength_violation",
+            Self::MinimumNoseGearLoadViolation => "minimum_nose_gear_load_violation",
+            Self::TipBackViolation => "tip_back_violation",
+            Self::TailScrapeViolation => "tail_scrape_violation",
+            Self::PublicPlanningCgEnvelopeViolation => "public_planning_cg_envelope_violation",
+            Self::TrimUnavailable => "trim_unavailable",
+            Self::InsufficientStaticMargin => "insufficient_static_margin",
+            Self::WingAreaLimit => "wing_area_limit",
+            Self::StructuralResponseUnavailable => "structural_response_unavailable",
+            Self::StructuralStrengthViolation => "structural_strength_violation",
+            Self::StructuralLinearModelDomain => "structural_linear_model_domain",
+            Self::AeroLinearModelDomain => "aero_linear_model_domain",
+            Self::DragDivergenceLawSelection => "drag_divergence_law_selection",
+            Self::TakeoffClimbOutPolarDomain => "takeoff_climb_out_polar_domain",
+            Self::StructuralFemModelDomain => "structural_fem_model_domain",
+            Self::StructuralSolverFailed => "structural_solver_failed",
+            Self::ReportedCruiseAttitudeOutsideWindow => "reported_cruise_attitude_outside_window",
+            Self::MissionUnavailable => "mission_unavailable",
+            Self::MissionNotConverged => "mission_not_converged",
+            Self::MissionPathFlownLevel => "mission_path_flown_level",
+            Self::MissionFirstClimbRefused => "mission_first_climb_refused",
+            Self::InvalidMissionFuelBurn => "invalid_mission_fuel_burn",
+            Self::MissionFuelShortfall => "mission_fuel_shortfall",
+            Self::InvalidCruiseForceBalance => "invalid_cruise_force_balance",
+            Self::EngineMassMismatch => "engine_mass_mismatch",
+            Self::EngineOversize => "engine_oversize",
+            Self::DeclaredCruiseLevelLowered => "declared_cruise_level_lowered",
+            Self::DeclaredCruiseLevelUnchecked => "declared_cruise_level_unchecked",
+            Self::GroundClearanceSampleAssumed => "ground_clearance_sample_assumed",
+            Self::ImprovedClimbV2 => "improved_climb_v2",
+            Self::TakeoffWeightLimited => "takeoff_weight_limited",
+            Self::MinimumControlSpeedViolation => "minimum_control_speed_violation",
+            Self::MinimumControlSpeedUnavailable => "minimum_control_speed_unavailable",
+            Self::CrosswindControlViolation => "crosswind_control_violation",
+            Self::DirectionalStabilityViolation => "directional_stability_violation",
+            Self::FieldPerformanceUnavailable => "field_performance_unavailable",
+            Self::FieldTakeoffDistanceViolation => "field_takeoff_distance_violation",
+            Self::TakeoffOverrideIgnored => "takeoff_override_ignored",
+            Self::LandingOverrideIgnored => "landing_override_ignored",
+            Self::StatedFieldLengthNotApplied => "stated_field_length_not_applied",
+            Self::FieldLandingDistanceViolation => "field_landing_distance_violation",
+            Self::LandingMassLimitViolation => "landing_mass_limit_violation",
+            Self::MassLimitHierarchyViolation => "mass_limit_hierarchy_violation",
+            Self::ThrustMarginViolation => "thrust_margin_violation",
+            Self::ThrustWithinChartScatter => "thrust_within_chart_scatter",
+            Self::MissionThrottleLimitViolation => "mission_throttle_limit_violation",
+            Self::PassengerCapacityShortfall => "passenger_capacity_shortfall",
+            Self::BaggageOverload => "baggage_overload",
+            Self::MonumentDropped => "monument_dropped",
+            Self::CargoCapacityShortfall => "cargo_capacity_shortfall",
+            Self::MaximumZeroFuelWeightViolation => "maximum_zero_fuel_weight_violation",
+            Self::MaximumZeroFuelWeightUndefined => "maximum_zero_fuel_weight_undefined",
+            Self::MaximumLandingWeightUndefined => "maximum_landing_weight_undefined",
+            Self::StructuralPayloadLimitViolation => "structural_payload_limit_violation",
+            Self::ReserveFuelShortfall => "reserve_fuel_shortfall",
+            Self::DispatchNotConverged => "dispatch_not_converged",
+            Self::FuelPolicyUnavailable => "fuel_policy_unavailable",
+            Self::MassLedgerUnavailable => "mass_ledger_unavailable",
+            Self::FuelTankLayoutUnavailable => "fuel_tank_layout_unavailable",
+            Self::MassModelDisagreement => "mass_model_disagreement",
+            Self::StructuralMassModelDifference => "structural_mass_model_difference",
+            Self::StructuralInventoryUnverified => "structural_inventory_unverified",
+            Self::MissionPlanOperationFailed => "mission_plan_operation_failed",
+            Self::PayloadAutoBalanceIncomplete => "payload_auto_balance_incomplete",
+            Self::MissionPlanMassLimitViolation => "mission_plan_mass_limit_violation",
+            Self::MissionPlanTrimUnsettled => "mission_plan_trim_unsettled",
+            Self::CpacsImportReading => "cpacs_import_reading",
+            Self::CruisePointOutsidePolar => "cruise_point_outside_polar",
+            Self::CruisePointUnpriced => "cruise_point_unpriced",
+            Self::CruisePointLevelUnplanned => "cruise_point_level_unplanned",
+            Self::PropulsionStationFallback => "propulsion_station_fallback",
+            Self::PropulsionStationUnknown => "propulsion_station_unknown",
+            Self::MinimumControlSpeedNotConverged => "minimum_control_speed_not_converged",
+            Self::StabilityReferenceBelowFloor => "stability_reference_below_floor",
+            Self::PropulsionDeckExtrapolated => "propulsion_deck_extrapolated",
+            Self::PropulsionDeckValidityUnknown => "propulsion_deck_validity_unknown",
+            Self::PropulsionCruiseTsfcNotPublished => "propulsion_cruise_tsfc_not_published",
+        }
+    }
+}

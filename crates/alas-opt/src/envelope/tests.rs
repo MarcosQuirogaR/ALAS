@@ -34,9 +34,19 @@ fn passing_physical_limits() -> PhysicalCgLimits {
         scissor_plot_fwd_pct_mac: 8.0,
         // `fwd_limit_pct_mac` is still governed by `MaxNoseLoadHandling`.
         rotation_fwd_pct_mac: 9.0,
+        takeoff_trim_fwd_pct_mac: f64::NEG_INFINITY,
+        clean_trim_fwd_pct_mac: f64::NEG_INFINITY,
+        landing_approach_fwd_pct_mac: f64::NEG_INFINITY,
+        landing_flare_fwd_pct_mac: f64::NEG_INFINITY,
         rotation_longitudinal_force_shift_pct_mac: 0.0,
         rotation_tail_lift_coefficient: -1.3,
+        rotation_stabilizer_nose_up_deg: None,
         landing_trim_fwd_pct_mac: 9.5,
+        iced_tail_fwd_pct_mac: 9.0,
+        landing_tail_lift_coefficient: -0.8,
+        landing_tail_trim_limited: false,
+        landing_tail_sourced: false,
+        landing_trim_condition: "design rule",
         usable_range_pct_mac: 80.0,
     }
 }
@@ -44,6 +54,7 @@ fn passing_physical_limits() -> PhysicalCgLimits {
 fn passing_inputs() -> LoadingConstraintInputs {
     LoadingConstraintInputs {
         state: ModelCgLoadingState::AnalyzedTakeoff,
+        scope: PhaseLimits::TAKEOFF,
         mass_kg: 100_000.0,
         cg_x_m: 10.0,
         cg_pct_mac: 25.0,
@@ -58,10 +69,12 @@ fn passing_inputs() -> LoadingConstraintInputs {
         capacity_basis_declared: true,
         minimum_nose_gear_load_fraction: 0.02,
         maximum_nose_gear_load_fraction: 0.20,
+        h_cg_m: 3.0,
         tip_back_angle_deg: 20.0,
         required_tip_back_deg: 15.0,
         scrape_angle_deg: None,
         required_rotation_angle_deg: 12.0,
+        tail_scrape_rejects: true,
         cg_range_pct_mac: 30.0,
     }
 }
@@ -262,7 +275,13 @@ fn preferred_static_margin_does_not_replace_the_physical_floor() {
         .expect("analyzed-TOW static constraint");
 
     assert!(!mtow_static_constraint.violated);
-    assert_eq!(mtow_static_constraint.limit, 0.05);
+    // The floor is the configured one or Torenbeek's 0.02 tail arms, whichever
+    // is larger, never the preferred margin.
+    assert_eq!(
+        mtow_static_constraint.limit,
+        assessment.minimum_physical_static_margin
+    );
+    assert!((0.05..0.20).contains(&mtow_static_constraint.limit));
     assert!(!assessment.target_static_margin.met_or_exceeded());
     assert_eq!(assessment.target_static_margin.target, 0.20);
 }
@@ -290,11 +309,102 @@ fn each_state_maps_to_its_phase_mechanisms() {
         rotation,
         landing_trim,
         static_margin,
+        clean_trim: static_margin,
     };
     assert_eq!(PhaseLimits::GROUND, phase(false, false, false));
     assert_eq!(PhaseLimits::TAKEOFF, phase(true, false, true));
     assert_eq!(PhaseLimits::FLIGHT, phase(false, true, true));
     assert_eq!(PhaseLimits::LANDING, phase(false, true, true));
+    assert_eq!(PhaseLimits::EN_ROUTE_ABOVE_MLW, phase(false, false, true));
+}
+
+/// The mass scoping against the design MLW. Rotation is a ground take-off
+/// event: it bounds the take-off state alone, at any mass. An en-route state
+/// heavier than the MLW cannot land, so it loses landing trim and gains no
+/// rotation boundary; at or below the MLW it keeps landing trim. The OEW and
+/// landing states keep their own phase at any mass.
+#[test]
+fn mass_scoping_drops_landing_trim_above_the_mlw_and_never_adds_rotation() {
+    let mlw_kg = 60_000.0;
+    let all_states = [
+        ModelCgLoadingState::OperatingEmpty,
+        ModelCgLoadingState::AnalyzedZeroFuel,
+        ModelCgLoadingState::OperationalMidMission,
+        ModelCgLoadingState::OperationalReserve,
+        ModelCgLoadingState::AnalyzedTakeoff,
+        ModelCgLoadingState::AnalyzedLanding,
+    ];
+    for mass_kg in [30_000.0, mlw_kg, 90_000.0] {
+        for state in all_states {
+            let scope = PhaseLimits::for_state_at_mass(state, mass_kg, mlw_kg);
+            assert_eq!(
+                scope.rotation,
+                state == ModelCgLoadingState::AnalyzedTakeoff,
+                "{state:?} at {mass_kg} kg"
+            );
+            assert_eq!(
+                scope.static_margin,
+                PhaseLimits::for_state(state).static_margin,
+                "{state:?} at {mass_kg} kg"
+            );
+        }
+    }
+    for state in [
+        ModelCgLoadingState::AnalyzedZeroFuel,
+        ModelCgLoadingState::OperationalMidMission,
+        ModelCgLoadingState::OperationalReserve,
+    ] {
+        for at_or_below in [30_000.0, mlw_kg] {
+            assert_eq!(
+                PhaseLimits::for_state_at_mass(state, at_or_below, mlw_kg),
+                PhaseLimits::FLIGHT,
+                "{state:?}"
+            );
+        }
+        assert_eq!(
+            PhaseLimits::for_state_at_mass(state, mlw_kg + 1.0, mlw_kg),
+            PhaseLimits::EN_ROUTE_ABOVE_MLW,
+            "{state:?}"
+        );
+    }
+    assert_eq!(
+        PhaseLimits::for_state_at_mass(ModelCgLoadingState::AnalyzedLanding, 90_000.0, mlw_kg),
+        PhaseLimits::LANDING
+    );
+    assert_eq!(
+        PhaseLimits::for_state_at_mass(ModelCgLoadingState::AnalyzedTakeoff, 30_000.0, mlw_kg),
+        PhaseLimits::TAKEOFF
+    );
+    assert_eq!(
+        PhaseLimits::for_state_at_mass(ModelCgLoadingState::OperatingEmpty, 90_000.0, mlw_kg),
+        PhaseLimits::GROUND
+    );
+
+    // Distinct forward candidates: rotation 14, landing trim 12, maximum nose
+    // load 10 %MAC. Each scope picks its own, and above the MLW only the
+    // ground maximum nose load is left (not the rotation boundary).
+    let limits = PhysicalCgLimits {
+        rotation_fwd_pct_mac: 14.0,
+        landing_trim_fwd_pct_mac: 12.0,
+        ..passing_physical_limits()
+    };
+    assert_eq!(
+        limits.fwd_for(PhaseLimits::TAKEOFF),
+        (14.0, ForwardLimitGovernance::RotationNoseWheelLiftoff)
+    );
+    assert_eq!(
+        limits.fwd_for(PhaseLimits::FLIGHT),
+        (12.0, ForwardLimitGovernance::LandingTrimDesignRule)
+    );
+    assert_eq!(
+        limits.fwd_for(PhaseLimits::EN_ROUTE_ABOVE_MLW),
+        (10.0, ForwardLimitGovernance::MaxNoseLoadHandling)
+    );
+    // The aft side is the in-flight one: the static-margin floor still bounds.
+    assert_eq!(
+        limits.aft_for(PhaseLimits::EN_ROUTE_ABOVE_MLW),
+        limits.aft_for(PhaseLimits::FLIGHT)
+    );
 }
 
 #[test]
@@ -330,8 +440,12 @@ fn a_ground_only_phase_keeps_gear_checks_and_excludes_flight_cg_checks() {
 }
 
 /// Per-state matrix on a real assessment with a landing state: every state
-/// carries its own phase-scoped limits, and its forward-limit constraint is
-/// gated against exactly that state's own forward limit.
+/// carries its own limits, scoped to its phase at its mass against the MLW
+/// (the declared one where there is one), and its forward-limit
+/// constraint is gated against exactly that state's own forward limit. Only
+/// the take-off state is bounded by rotation; an en-route state above the MLW
+/// is bounded by the ground maximum nose load, not by a rotation boundary at
+/// its own mass.
 #[test]
 fn every_state_is_gated_against_its_own_phase_scoped_limits() {
     let config = AlasConfig::default();
@@ -381,6 +495,8 @@ fn every_state_is_gated_against_its_own_phase_scoped_limits() {
         takeoff_cg_x_m: tow_x,
         takeoff_cg_z_m: tow_z,
         takeoff_pitch_inertia_kg_m2: f64::NAN,
+        oew_pitch_inertia_kg_m2: f64::NAN,
+        zero_fuel_pitch_inertia_kg_m2: f64::NAN,
     };
     let x_np = cg[0] + 0.10 * plane.c_ref;
     let landing = super::LedgerLandingState {
@@ -411,27 +527,54 @@ fn every_state_is_gated_against_its_own_phase_scoped_limits() {
     let names: Vec<_> = assessment.loading_states.iter().map(|s| s.state).collect();
     assert_eq!(names.last(), Some(&ModelCgLoadingState::AnalyzedLanding));
     assert_eq!(names.len(), without_landing.loading_states.len() + 1);
-    // The landing state changes neither the envelope-wide values nor any
-    // other state's verdicts.
+    // The landing state changes neither the envelope-wide values (forward
+    // limit, gear sizing) nor any other state's verdicts.
     assert_eq!(
         assessment.configured_forward_limit_pct_mac,
         without_landing.configured_forward_limit_pct_mac
+    );
+    assert_eq!(
+        assessment.gear_design_main_reaction_kg,
+        without_landing.gear_design_main_reaction_kg
     );
     assert_eq!(
         &assessment.loading_states[..names.len() - 1],
         &without_landing.loading_states[..]
     );
 
+    // One MLW: the configuration's own mode-aware landing-mass limit at its
+    // candidate MTOW, the one the mass model uses.
+    let design_landing_mass_kg = ledger_basis::maximum_landing_mass_kg(&config, tow_m);
+    assert_eq!(
+        design_landing_mass_kg,
+        config.landing_mass_limit_kg(config.requirements.mtow_kg)
+    );
+    assert_eq!(assessment.design_landing_mass_kg, design_landing_mass_kg);
+    assert_eq!(
+        without_landing.design_landing_mass_kg,
+        design_landing_mass_kg
+    );
     for state in &assessment.loading_states {
+        // The constraint set is the state's phase; the limits are that phase
+        // at the state's mass, and the state reports that scope.
         let phase = PhaseLimits::for_state(state.state);
+        let scope =
+            PhaseLimits::for_state_at_mass(state.state, state.mass_kg, design_landing_mass_kg);
+        assert_eq!(state.scope, scope, "{:?}", state.state);
+        assert_eq!(
+            scope.rotation,
+            state.state == ModelCgLoadingState::AnalyzedTakeoff,
+            "{:?}: only the take-off state is bounded by rotation",
+            state.state
+        );
         let limits = state.physical_limits;
         assert_eq!(
             limits,
-            limits.scoped(phase),
+            limits.scoped(scope),
             "{:?} limits are not scoped",
             state.state
         );
-        let (fwd, _) = limits.fwd_for(phase);
+        let (fwd, _) = limits.fwd_for(scope);
         assert_eq!(limits.fwd_limit_pct_mac, fwd);
         // The envelope-wide limit is at least as aft as every scoped one.
         assert!(limits.fwd_limit_pct_mac <= assessment.configured_forward_limit_pct_mac + 1.0e-9);
@@ -462,9 +605,58 @@ fn every_state_is_gated_against_its_own_phase_scoped_limits() {
             ModelCgLoadingState::OperatingEmpty => {
                 assert_eq!(limits.fwd_limit_pct_mac, limits.max_nose_load_fwd_pct_mac);
             }
+            _ if scope == PhaseLimits::EN_ROUTE_ABOVE_MLW => {
+                // Cannot land: no landing trim, and no rotation boundary at
+                // its own mass either.
+                assert!(state.mass_kg > design_landing_mass_kg);
+                assert_eq!(limits.fwd_limit_pct_mac, limits.max_nose_load_fwd_pct_mac);
+                assert_eq!(
+                    limits.fwd_limit_governance,
+                    ForwardLimitGovernance::MaxNoseLoadHandling
+                );
+            }
             _ => assert!(limits.fwd_limit_pct_mac >= limits.landing_trim_fwd_pct_mac - 1.0e-9),
         }
     }
+
+    // A declared MLW governs the gate, not the fraction: certified at the
+    // zero-fuel mass, every heavier en-route state cannot land and is bounded
+    // forward by the maximum nose load alone; the zero-fuel state at the MLW
+    // may still land.
+    let mut certified = config.clone();
+    certified.requirements.mlw_kg = Some(zfw_m);
+    let gated = super::assess_model_cg_envelope_with_ledger(
+        &plane,
+        basis,
+        x_np,
+        x_np,
+        plane.c_ref,
+        &certified,
+    )
+    .expect("assessment at a declared MLW");
+    assert_eq!(gated.design_landing_mass_kg, zfw_m);
+    let mut above = 0;
+    for state in &gated.loading_states {
+        let en_route = matches!(
+            state.state,
+            ModelCgLoadingState::OperationalMidMission | ModelCgLoadingState::OperationalReserve
+        );
+        if en_route && state.mass_kg > zfw_m * (1.0 + 1e-9) {
+            above += 1;
+            assert_eq!(
+                state.scope,
+                PhaseLimits::EN_ROUTE_ABOVE_MLW,
+                "{:?}",
+                state.state
+            );
+            let limits = state.physical_limits;
+            assert_eq!(limits.fwd_limit_pct_mac, limits.max_nose_load_fwd_pct_mac);
+        }
+        if state.state == ModelCgLoadingState::AnalyzedZeroFuel {
+            assert_eq!(state.scope, PhaseLimits::FLIGHT);
+        }
+    }
+    assert!(above >= 1, "no en-route state above the declared MLW");
 }
 
 /// Bare OEW must not fail `PhysicalForwardCgLimit`, a flight constraint,
@@ -626,7 +818,9 @@ fn oew_ground_reaction_violation_still_fails_the_envelope() {
 /// never consults `alas_mass::stations`, so this builds the same inputs
 /// for an aircraft whose main-gear station the station model refuses.
 #[allow(clippy::expect_used)]
-fn preset_case(preset: &str) -> (AlasConfig, Airplane, MassBreakdown, MassCoordinates, f64) {
+pub(super) fn preset_case(
+    preset: &str,
+) -> (AlasConfig, Airplane, MassBreakdown, MassCoordinates, f64) {
     let mut config = AlasConfig::from_value(&serde_json::json!({ "preset": preset }))
         .unwrap_or_else(|error| panic!("{error}"));
     if preset == "ATR72-600" {
@@ -714,6 +908,59 @@ fn the_a320_200_assessment_sizes_gear_at_mrw_not_mtow_alone() {
             "{constraint:?} limit {} should be a finite positive rated capacity",
             result.limit
         );
+    }
+}
+
+/// One MLW, mode-aware: the gate and the landing-trim evaluation take the
+/// configuration's own `landing_mass_limit_kg` at the candidate MTOW, the
+/// limit the mass model sizes the structure with. An A320-200 with a 90 t
+/// candidate keeps its certified 66,000 kg MLW as a fixed aircraft and takes
+/// its landing fraction (66,000/78,000) of the candidate as a clean sheet.
+#[test]
+fn the_gate_mlw_is_the_configurations_mode_aware_landing_mass_limit() {
+    use alas_config::DesignMode;
+    let (mut config, plane, masses, coordinates, cg_x) = preset_case("A320-200");
+    let x_np = cg_x + 0.10 * plane.c_ref;
+    config.requirements.mtow_kg = 90_000.0;
+    for (mode, expected_kg) in [
+        (DesignMode::BaselineSandbox, 66_000.0),
+        (DesignMode::ReferenceAdaptation, 66_000.0),
+        (DesignMode::CleanSheet, 90_000.0 * 66_000.0 / 78_000.0),
+    ] {
+        config.optimizer.design_space.mode = mode;
+        let assessment = assess_model_cg_envelope(
+            &plane,
+            &masses,
+            &coordinates,
+            cg_x,
+            x_np,
+            x_np,
+            plane.c_ref,
+            &config,
+        )
+        .unwrap_or_else(|error| panic!("{mode:?}: the A320-200 must be assessed: {error}"));
+        assert_eq!(
+            assessment.design_landing_mass_kg,
+            config.landing_mass_limit_kg(90_000.0),
+            "{mode:?}"
+        );
+        assert!(
+            (assessment.design_landing_mass_kg - expected_kg).abs() < 1e-6,
+            "{mode:?}: {}",
+            assessment.design_landing_mass_kg
+        );
+        for state in &assessment.loading_states {
+            assert_eq!(
+                state.scope,
+                PhaseLimits::for_state_at_mass(
+                    state.state,
+                    state.mass_kg,
+                    assessment.design_landing_mass_kg
+                ),
+                "{mode:?} {:?}",
+                state.state
+            );
+        }
     }
 }
 
@@ -966,14 +1213,14 @@ fn the_a320_200_aerodynamic_aft_limit_is_not_the_governing_one() {
         "main gear at {:.2} m against the published 17.71 m",
         to_m(assessment.main_gear_station_pct_mac)
     );
-    // The ground minimum-nose-load aft boundary at the 78,000 kg takeoff
-    // state reproduces the published aft CG there: 37.08 % MAC, linear
-    // between WV007 (77,400 kg, 37.5 %) and WV017 (78,400 kg, 36.8 %)
-    // [S Airbus A320 AC Jun 01/24, Figure 7-3-0-991-010-A01]. The band is
-    // the model-frame MAC/LEMAC residual (1 % MAC).
+    // The ground minimum-nose-load aft boundary is the class share (3.52 %,
+    // the lowest certified one), not the A320's own 7.0 % at the 78,000 kg
+    // takeoff state (37.08 % MAC, linear between WV007 and WV017 [S Airbus
+    // A320 AC Jun 01/24, Figure 7-3-0-991-010-A01]): finding F-NOSE-1, the
+    // ground limit lies more than 5 % MAC aft of the published aft CG.
     assert!(
-        (assessment.ground_aft_limit_pct_mac - 37.08).abs() < 1.0,
-        "ground aft limit {:.2} % MAC against the published 37.08 %",
+        assessment.ground_aft_limit_pct_mac > 37.08 + 5.0,
+        "finding F-NOSE-1 no longer holds: ground aft limit {:.2} % MAC against the published 37.08 %",
         assessment.ground_aft_limit_pct_mac
     );
     // The forward limit against the published 17 % MAC is its own test,
@@ -993,11 +1240,14 @@ fn the_a320_200_aerodynamic_aft_limit_is_not_the_governing_one() {
         "thrust and rolling-friction shift {shift} % MAC"
     );
     // By definition the aerodynamic aft limit is the critical neutral point
-    // less the physical static-margin floor.
+    // less the stability margin (the configured floor or 0.02 tail arms).
     let np_pct = 100.0 * (x_np - mac_frame.x_lemac_m) / plane.c_ref;
     assert!(
+        assessment.minimum_physical_static_margin >= config.requirements.min_physical_static_margin
+    );
+    assert!(
         (assessment.aerodynamic_aft_limit_pct_mac
-            - (np_pct - 100.0 * config.requirements.min_physical_static_margin))
+            - (np_pct - 100.0 * assessment.minimum_physical_static_margin))
             .abs()
             < 1.0e-6,
         "aerodynamic aft limit {:.3} % MAC, neutral point {np_pct:.3} % MAC",
@@ -1008,36 +1258,38 @@ fn the_a320_200_aerodynamic_aft_limit_is_not_the_governing_one() {
         assessment.configured_forward_limit_pct_mac < assessment.ground_aft_limit_pct_mac,
         "the usable CG range must be positive"
     );
-    // The ground minimum nose load governs at the 78,000 kg takeoff state:
-    // the published weight-variant splits (Airbus A320 AC Jun 01/24, Figure
-    // 7-3-0-991-010-A01) give 7.0 % there, between WV007 (77,400 kg,
-    // 37.5 % MAC) and WV017 (78,400 kg, 36.8 %). Tip-back, measured from the belly ground
-    // plane, sits aft of it. The overhang is measured against the
-    // aerodynamic boundary and is positive.
+    // With the class nose share the ground boundary lies aft of tip-back,
+    // measured from the belly ground plane, which governs. The overhang is
+    // measured against the aerodynamic boundary and is positive.
     let overhang = assessment.aft_limit_governance.overhang_pct_mac();
     assert!(
         matches!(
             assessment.aft_limit_governance,
-            AftCgLimitGovernance::GroundMinimumNoseLoad { .. }
+            AftCgLimitGovernance::TipBack { .. }
         ) && overhang > 0.0,
         "governance {:?}",
         assessment.aft_limit_governance
     );
     assert!(
-        assessment.worst_aft_limit_pct_mac > 36.8 && assessment.worst_aft_limit_pct_mac < 40.0,
-        "governing aft limit {:.2} % MAC against the published 36.8-40 % MAC",
-        assessment.worst_aft_limit_pct_mac
+        assessment.worst_aft_limit_pct_mac < assessment.ground_aft_limit_pct_mac,
+        "governing aft limit {:.2} % MAC against the ground limit {:.2} % MAC",
+        assessment.worst_aft_limit_pct_mac,
+        assessment.ground_aft_limit_pct_mac
     );
     // The scissor-plot estimate is diagnostic only and not a
     // governance candidate, so the governing forward limit need not
-    // (and, on this layout, does not) match it; the rotation criterion
-    // is more restrictive (more aft) than both the diagnostic scissor
-    // estimate and the maximum-nose-load-handling candidate here.
+    // (and, on this layout, does not) match it. With the Torenbeek
+    // wing/fuselage/nacelle terms on the lattice wing aerodynamic centre
+    // (eq. E-36) and the clean `C_L0` in eq. E-40 the landing-trim boundary
+    // sits aft of the maximum-nose-load-handling candidate and governs.
     assert!(
         assessment.configured_forward_limit_pct_mac > assessment.scissor_plot_fwd_limit_pct_mac
     );
     assert!(
-        assessment.configured_forward_limit_pct_mac > assessment.max_nose_load_fwd_limit_pct_mac
+        assessment.configured_forward_limit_pct_mac > assessment.max_nose_load_fwd_limit_pct_mac,
+        "forward {:.2} % MAC, nose load {:.2} % MAC",
+        assessment.configured_forward_limit_pct_mac,
+        assessment.max_nose_load_fwd_limit_pct_mac
     );
 
     assert!(assessment.governing_aft_limit_pct_mac() < assessment.aerodynamic_aft_limit_pct_mac);
@@ -1161,18 +1413,8 @@ fn the_ground_aft_boundary_is_the_state_nose_load_split_read_backwards() {
     );
     let wheelbase_m = stations.x_mlg_m - stations.x_nlg_m;
     // The top-level ground boundary is the analyzed takeoff state's, whose
-    // minimum is the published A320 nose share at that mass.
-    let takeoff_mass_kg = assessment
-        .loading_states
-        .iter()
-        .find(|state| state.state == ModelCgLoadingState::AnalyzedTakeoff)
-        .expect("a takeoff state")
-        .mass_kg;
-    let minimum_nose_fraction = ledger_basis::minimum_nose_gear_fraction(
-        &config,
-        ledger_basis::registered_aft_cg_nose_load(&config),
-        takeoff_mass_kg,
-    );
+    // minimum is the class nose share, the same for every aircraft.
+    let minimum_nose_fraction = config.mass_model.pct_load_nlg_min;
     let expected_pct_mac =
         100.0 * (stations.x_mlg_m - minimum_nose_fraction * wheelbase_m - x_mac_le) / mac;
     assert!(
@@ -1188,4 +1430,187 @@ fn the_ground_aft_boundary_is_the_state_nose_load_split_read_backwards() {
         (nose_fraction - minimum_nose_fraction).abs() < 1.0e-9,
         "{nose_fraction} against {minimum_nose_fraction}"
     );
+}
+
+/// A pure change of the reference frame (the published MAC and LEMAC, the
+/// built airplane unchanged) moves no physical CG boundary in metres: the
+/// wing-body centre, its moment and every ground boundary are stations and
+/// moments of the airplane, and only their %MAC changes. The aerodynamic aft
+/// boundary is left out: its static-margin floor is a fraction of the
+/// reference chord by definition.
+#[test]
+fn a_reference_frame_change_moves_no_physical_cg_limit_in_metres() {
+    let (config, plane, masses, coordinates, cg_x) = preset_case("B747-400");
+    let frame = plane.mac_frame().expect("a frame");
+    let mut moved = config.clone();
+    moved.geometry.wing.reference_wing.published_mac_m = Some(1.2 * frame.chord_m);
+    moved.geometry.wing.reference_wing.published_mac_le_x_m = Some(frame.x_lemac_m - 1.0);
+    let registered = alas_config::presets::get("B747-400").expect("a registered preset");
+    let other = AircraftBuilder::new(Some(moved.geometry.clone()))
+        .build(Some(&registered.design_vector), true)
+        .expect("the same aircraft builds");
+    // The frame lives on the main wing's reference datum; the lofted
+    // sections, the lattice and every other surface are the same.
+    assert_eq!(other.wings.len(), plane.wings.len());
+    for (wa, wb) in plane.wings.iter().zip(&other.wings) {
+        assert_eq!(
+            wa.xsecs, wb.xsecs,
+            "a frame change must not move the {} sections",
+            wa.name
+        );
+    }
+    assert_eq!(other.fuselages, plane.fuselages);
+    let other_frame = other.mac_frame().expect("a frame");
+    assert!(
+        (other_frame.chord_m - frame.chord_m).abs() > 1.0,
+        "{other_frame:?}"
+    );
+    assert!(
+        (other_frame.x_lemac_m - frame.x_lemac_m).abs() > 0.5,
+        "{other_frame:?}"
+    );
+    // The neutral point (clean, cruise and high-lift conditions, rigid: the
+    // flexibility trend is a fraction of the reference chord by its source)
+    // is a station of the airplane too.
+    let np = |plane: &Airplane| {
+        let input = alas_stab::neutral_point::NpConditionsInput {
+            high_lift: alas_stab::neutral_point::HighLiftDevices::declared(
+                config.performance.high_lift_chord_extension,
+                &config.control_surfaces,
+            ),
+            include_flexibility: false,
+            wing_stiffness: None,
+            tail_flexibility: None,
+            ..alas_stab::neutral_point::NpConditionsInput::default()
+        };
+        alas_stab::neutral_point::neutral_point_conditions(plane, &config.analysis, &input)
+            .expect("the B747-400 neutral point")
+    };
+    let (np_a, np_b) = (np(&plane), np(&other));
+    for (label, xa, xb) in [
+        ("clean", np_a.clean_low_speed, np_b.clean_low_speed),
+        ("cruise", np_a.cruise, np_b.cruise),
+        ("high lift", np_a.high_lift, np_b.high_lift),
+    ] {
+        assert!(
+            (xa - xb).abs() < 1.0e-6,
+            "{label} neutral point {xa:.4} m against {xb:.4} m"
+        );
+    }
+    let x_np = cg_x + 0.10 * frame.chord_m;
+    let assess = |plane: &Airplane, config: &AlasConfig| {
+        assess_model_cg_envelope(
+            plane,
+            &masses,
+            &coordinates,
+            cg_x,
+            x_np,
+            x_np,
+            plane.c_ref,
+            config,
+        )
+        .expect("the B747-400 is assessed")
+    };
+    let (a, b) = (assess(&plane, &config), assess(&other, &moved));
+    let metres = |f: alas_geom::aircraft::mac_frame::MacFrame, pct: f64| {
+        f.x_lemac_m + pct / 100.0 * f.chord_m
+    };
+    for (sa, sb) in a.loading_states.iter().zip(&b.loading_states) {
+        let (la, lb) = (&sa.physical_limits, &sb.physical_limits);
+        for (label, pa, pb) in [
+            ("forward", la.fwd_limit_pct_mac, lb.fwd_limit_pct_mac),
+            (
+                "landing trim",
+                la.landing_trim_fwd_pct_mac,
+                lb.landing_trim_fwd_pct_mac,
+            ),
+            ("rotation", la.rotation_fwd_pct_mac, lb.rotation_fwd_pct_mac),
+            (
+                "scissor",
+                la.scissor_plot_fwd_pct_mac,
+                lb.scissor_plot_fwd_pct_mac,
+            ),
+            (
+                "nose load",
+                la.max_nose_load_fwd_pct_mac,
+                lb.max_nose_load_fwd_pct_mac,
+            ),
+            ("ground aft", la.ground_aft_pct_mac, lb.ground_aft_pct_mac),
+            ("tip-back", la.tip_back_aft_pct_mac, lb.tip_back_aft_pct_mac),
+        ] {
+            if !(pa.is_finite() || pb.is_finite()) {
+                continue;
+            }
+            let (xa, xb) = (metres(frame, pa), metres(other_frame, pb));
+            assert!(
+                (xa - xb).abs() < 1.0e-6,
+                "{:?} {label}: {xa:.4} m against {xb:.4} m ({pa:.3} / {pb:.3} %MAC)",
+                sa.state
+            );
+        }
+    }
+}
+
+/// Each loading state's pitch inertia is its own composition about its own
+/// centre of gravity: exact at the ledger's three points, and at half the
+/// take-off fuel equal to the operating-empty tensor, the payload and half
+/// the fuel (half its own inertia) moved to that state's centre of gravity.
+#[test]
+fn the_state_pitch_inertia_composes_the_ledger_parts_about_the_state_cg() {
+    // Parts: (mass, x, z, own I_yy about the part's centroid).
+    let parts = [
+        (100.0, 10.0, 1.0, 5_000.0),
+        (30.0, 12.0, 1.5, 400.0),
+        (50.0, 9.0, 0.5, 800.0),
+    ];
+    let compose = |parts: &[(f64, f64, f64, f64)]| {
+        let mass: f64 = parts.iter().map(|p| p.0).sum();
+        let x = parts.iter().map(|p| p.0 * p.1).sum::<f64>() / mass;
+        let z = parts.iter().map(|p| p.0 * p.2).sum::<f64>() / mass;
+        let inertia: f64 = parts
+            .iter()
+            .map(|p| p.3 + p.0 * ((p.1 - x).powi(2) + (p.2 - z).powi(2)))
+            .sum();
+        (mass, x, z, inertia)
+    };
+    let oew = compose(&parts[..1]);
+    let zfw = compose(&parts[..2]);
+    let tow = compose(&parts);
+    let basis = super::LedgerLoadingBasis {
+        oew_mass_kg: oew.0,
+        oew_cg_x_m: oew.1,
+        oew_cg_z_m: oew.2,
+        zero_fuel_mass_kg: zfw.0,
+        zero_fuel_cg_x_m: zfw.1,
+        zero_fuel_cg_z_m: zfw.2,
+        takeoff_mass_kg: tow.0,
+        takeoff_cg_x_m: tow.1,
+        takeoff_cg_z_m: tow.2,
+        takeoff_pitch_inertia_kg_m2: tow.3,
+        oew_pitch_inertia_kg_m2: oew.3,
+        zero_fuel_pitch_inertia_kg_m2: zfw.3,
+    };
+    for point in [oew, zfw, tow] {
+        let inertia = basis.pitch_inertia_about_kg_m2(point.0, point.1, point.2);
+        assert!(
+            (inertia - point.3).abs() < 1e-9 * point.3,
+            "{inertia} vs {}",
+            point.3
+        );
+    }
+    let half = compose(&[parts[0], parts[1], (25.0, 9.0, 0.5, 400.0)]);
+    let inertia = basis.pitch_inertia_about_kg_m2(half.0, half.1, half.2);
+    assert!(
+        (inertia - half.3).abs() < 1e-9 * half.3,
+        "{inertia} vs {}",
+        half.3
+    );
+    // Without the empty and zero-fuel tensors: the take-off radius of
+    // gyration at the state's mass.
+    let lumped = super::LedgerLoadingBasis {
+        oew_pitch_inertia_kg_m2: f64::NAN,
+        ..basis
+    };
+    let scaled = lumped.pitch_inertia_about_kg_m2(half.0, half.1, half.2);
+    assert!((scaled - tow.3 / tow.0 * half.0).abs() < 1e-9 * scaled);
 }

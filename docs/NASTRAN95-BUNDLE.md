@@ -2,8 +2,10 @@
 
 NASTRAN-95 remains a separate NOSA 1.3 program launched by ALAS. It is not
 linked into, translated into, or relicensed as part of the AGPL application.
-The Windows package may aggregate a reviewed build beside `ALAS.exe` at
-`external tools/NASTRAN-95`.
+Both packages may aggregate a reviewed build beside the ALAS executable at
+`external tools/NASTRAN-95`: `build/bin/nastran.exe` with its GNU runtime DLLs on
+Windows, `build/bin/nastran` (GNU Fortran runtime linked statically) on Linux,
+built by `tools/nastran95/build-linux.sh` (see "Linux build" below).
 
 This is an engineering and release-control policy, not legal advice. Before a
 public release, counsel should confirm the provenance of the selected upstream
@@ -13,9 +15,12 @@ fork and the application of NOSA 1.3 to the intended distribution territory.
 
 The release task will not create an archive unless the staging directory has:
 
-- `build/bin/nastran.exe` and `nastran95-build.txt`;
+- `build/bin/nastran.exe` (Windows) or `build/bin/nastran` (Linux, executable bit set) and
+  `nastran95-build.txt`;
 - the `rf` tree, including `NASINFO`;
-- the required GNU Fortran runtime files and their licence notices in `runtime`;
+- the required GNU Fortran runtime files and their licence notices in `runtime`, with
+  `runtime/DEPENDENCIES.txt` listing exactly the libraries present (a Linux build whose
+  runtime is fully static lists none);
 - the filled-in NOSA licence as `LICENSE`;
 - `SOURCE-REVISION.txt`, identifying the immutable upstream revision and build;
 - `MODIFICATIONS.md`, recording every local change, date, originator, and the
@@ -115,3 +120,39 @@ The default `-O0` build and the packaged executable are unchanged. Adopting the
 whitelist build for the bundle still requires the SOL 101/103 regression on
 every production deck, the eigenvalue correlation, the repeatability check,
 and the NOSA source-archive obligations described above.
+
+## Linux build
+
+Status: **built and run locally, not yet in CI.** The recipe and the installer's
+`build_from_source` path (pinned source, `alas-local.patch`, closed-form check)
+build and pass on Windows (winlibs, static) and in WSL Ubuntu. Linux NASTRAN-95 may be described as available only after the first green
+`nastran95-linux.yml` run (run id: _pending_) including its closed-form check.
+
+`tools/nastran95/build-linux.sh [--out DIR] [--license FILE]` fetches the pinned
+upstream commit `060ed900db822745353fcce96bddc1565027e7db`, applies
+`tools/nastran95/alas-local.patch` (the `git diff` of `bin/nastrn.f` and
+`CMakeLists.txt` between that commit and the local sibling commit `4390bce`; every
+change in it is listed in `MODIFICATIONS.md`), builds `nastran` with GNU Fortran at
+the CMake defaults (`-O0`, `-fno-automatic`, 64,000,000-word open core) and links
+`libgfortran` and `libgcc` statically. Any other shared object the driver leaves
+(for example `libquadmath`) is copied into `runtime/` with its distribution licence
+notice and declared in `runtime/DEPENDENCIES.txt`. `source/NASTRAN-95-source.zip` is
+a `git archive` of the patched tree plus the recipe, and `SOURCE-REVISION.txt`
+carries its SHA-256; `nastran95-build.txt` records the compile and link command
+lines read back from the build system.
+
+At run time ALAS looks for `build/bin/nastran` (`Nastran95Solver::EXECUTABLE_NAME`),
+puts the selected runtime directory first on `LD_LIBRARY_PATH` (`PATH` on Windows)
+and launches the solver through `alas-exec`'s supervised spawn. On Linux that gives
+a process group, a tree kill on timeout or cancellation, and kill-on-parent-exit
+through a per-child `sh` watchdog (polls once a second, kills the child's group
+when ALAS is gone; up to about a second of lag, and no cover if the watchdog is
+killed as well; see `supervise.rs`). Its tests have so far only been compiled for Linux, not run.
+
+CI: `.github/workflows/nastran95-linux.yml` (manual only, until the NOSA decision; it uploads records and logs, not the solver) is meant to build on ubuntu-22.04 with GNU Fortran 11,
+rebuild and compare the source archive on that runner image, apply the
+`cargo xtask dist` staging contract, run the modes solve, and run the closed-form
+cantilever check (shell model against beam theory at four deck length units, 5 %
+tolerance on deflection and flange stress), which is the numerical validation of
+this compiler's build against beam theory; a golden regression (frozen decks, `golden/struct/nastran95_build_decks`, peaks in `golden/struct/nastran95_build.json`) compares it with the recorded Windows build. The filled-in NOSA agreement is a
+release-owner input (`--license`).

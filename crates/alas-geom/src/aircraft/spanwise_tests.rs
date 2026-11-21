@@ -258,7 +258,9 @@ fn a_vertical_fin_is_measured_by_its_own_span() {
 #[test]
 fn allocation_is_exact_and_deterministic() {
     let extents = [1.8_f64, 4.86, 11.34];
-    for panels in 3..64_usize {
+    // Up to the count at which the shortest section (10 % of the extent) reaches its panel cap of
+    // 20; beyond that the cap, not the even split, decides (see the test below).
+    for panels in 3..=60_usize {
         let counts = allocate(&extents, panels);
         assert_eq!(counts.iter().sum::<usize>(), panels);
         assert!(counts.iter().all(|&count| count >= 1));
@@ -271,6 +273,26 @@ fn allocation_is_exact_and_deterministic() {
         );
         assert!(high - low <= 1, "{counts:?} is not an even split");
     }
+}
+
+#[test]
+fn a_narrow_section_is_never_split_into_slivers_and_its_panels_go_elsewhere() {
+    // A 0.8 % section (the DC-10 rake) takes one panel, not two of 0.4 %; the rest of the budget
+    // is still spent, on the sections that can hold it.
+    let extents = [0.008_f64, 0.5, 0.492];
+    for panels in 3..40_usize {
+        let counts = allocate(&extents, panels);
+        assert_eq!(counts[0], 1, "{panels}: {counts:?}");
+        assert_eq!(counts.iter().sum::<usize>(), panels, "{counts:?}");
+        for (count, extent) in counts.iter().zip(extents) {
+            assert!(
+                extent / *count as f64 >= MIN_PANEL_EXTENT_FRACTION - 1.0e-9 || *count == 1,
+                "{counts:?}"
+            );
+        }
+    }
+    // When every section is full the total falls short rather than make slivers.
+    assert_eq!(allocate(&[1.0; 100], 1000), vec![2; 100]);
 }
 
 #[test]

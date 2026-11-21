@@ -400,6 +400,17 @@ pub enum VlmError {
     /// The dense solve produced non-finite residual or conditioning evidence.
     #[error("the VORLAX solve produced non-finite numerical diagnostics")]
     NonFiniteNumericalDiagnostics,
+    /// The dense solve does not reproduce its right-hand side: the
+    /// normalized residual is above the bound of a solved system.
+    #[error(
+        "the VORLAX solve left a normalized residual of {normalized_residual:.3e}, above the {limit:.3e} of a solved system"
+    )]
+    UnboundedResidual {
+        /// Normalized residual of the solve.
+        normalized_residual: f64,
+        /// The largest normalized residual that counts as a solution.
+        limit: f64,
+    },
     /// The translated kernel is valid only for finite subsonic Mach numbers.
     #[error("Mach {mach} is outside the translated subsonic VORLAX domain [0, 1)")]
     MachOutsideSubsonicDomain {

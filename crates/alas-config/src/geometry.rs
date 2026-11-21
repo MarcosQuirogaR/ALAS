@@ -18,18 +18,30 @@
 //!
 //! Lengths are metres and angles are degrees unless a field says otherwise.
 
+mod aft_fuselage_engine;
+mod cabin_section;
 mod centre_engine;
 mod empennage;
 mod engine;
+mod engine_mounting;
 mod frame;
 mod fuselage;
 pub mod loft;
 mod nacelle_model;
+mod tail_edges;
 mod wing;
 
-pub use centre_engine::CentreEngineInstallation;
+pub use aft_fuselage_engine::AftFuselageEngineInstallation;
+pub use cabin_section::{
+    CabinSectionConfig, CabinWidthsConfig, HoldSectionConfig, SECTION_DEPTH_SHARE,
+};
+pub use centre_engine::{CentreEngineInstallation, CentrePodStrut, FinAftFairing};
 pub use empennage::{EmpennageConfig, TailSizing};
-pub use engine::{ActiveEngineModel, EngineBindingError, EngineConfig};
+pub use engine::{
+    ActiveEngineModel, EngineBindingError, EngineConfig, EngineScaleError, SizedEngine,
+    ENGINE_DIAMETER_EXPONENT, ENGINE_LENGTH_EXPONENT, ENGINE_SCALE_SEARCH_BRACKET,
+    ENGINE_SCALE_VALIDITY_FRACTION, PROPELLER_DIAMETER_POWER_EXPONENT,
+};
 pub use frame::{BodyFuselageExtent, LongitudinalStationFrame, MacFrame};
 pub use fuselage::{
     AftBodyStation, BodyStation, FuselageConfig, FuselageSection, FuselageSectionError, NoseShape,
@@ -41,14 +53,19 @@ pub use loft::{
     LoftSpecError,
 };
 pub use nacelle_model::NacelleModel;
+pub use tail_edges::{
+    validate_tail_edge_stations, TailEdgeStation, TailEdgeStationError, VentralFinStation,
+    MAX_TAIL_EDGE_STATIONS, MIN_TAIL_EDGE_STATION_SPACING,
+};
 pub use wing::{
-    AirfoilClass, DeviceStation, InboardAerodynamicStation, MainWingPanel, MainWingStation,
-    MainWingStationKind, ProfileSpline, PublishedReference, ReferenceTrapezoid,
-    ReferenceWingConfig, ReferenceWingMode, RegisteredBasis, TransportPlanform,
-    TransportPlanformError, WingConfig, WingDihedralStation, WingHeights, WingProfileError,
-    WingProfileInterpolation, WingSection, WingSectionError, WingShape, WingThicknessStation,
-    WingtipDevice, WingtipDeviceError, WingtipDeviceKind, MAX_FLIGHT_TIP_RISE_SEMISPAN_FRACTION,
-    PUBLISHED_AREA_TOLERANCE,
+    AirfoilClass, DeviceStation, DivergenceRelation, DragDivergenceLaw, InboardAerodynamicStation,
+    InboardEdgeLine, InboardEdgeLines, MainWingPanel, MainWingStation, MainWingStationKind,
+    ProfileSpline, PublishedReference, ReferenceTrapezoid, ReferenceWingConfig, ReferenceWingMode,
+    RegisteredBasis, TransportPlanform, TransportPlanformError, WingConfig, WingDihedralStation,
+    WingEdgeStation, WingHeights, WingProfileError, WingProfileInterpolation, WingSection,
+    WingSectionError, WingSectionStation, WingShape, WingThicknessStation, WingtipDevice,
+    WingtipDeviceError, WingtipDeviceKind, WingtipPathStation, WingtipTeFlare, MAX_EDGE_STATIONS,
+    MAX_FLIGHT_TIP_RISE_SEMISPAN_FRACTION, PUBLISHED_AREA_TOLERANCE, STATION_SPAN_TOLERANCE,
 };
 
 use serde::{Deserialize, Serialize};
@@ -86,7 +103,7 @@ pub struct GeometryConfig {
     #[config(
         hidden,
         nested,
-        help = "Podded engine / nacelle placement, shape, and design parameters: edited on the dedicated 'Engine Designer' Advanced Settings tab, not here."
+        help = "Podded engine / nacelle placement, shape, and design parameters: edited in the Propulsion section under Aircraft > Advanced, not here."
     )]
     pub engine: EngineConfig,
 

@@ -5,8 +5,8 @@
 //!
 //! The pipeline holds large stack frames (full-analysis reports, FE and
 //! mission stages). The Windows main thread has a 1 MiB stack and Rust's
-//! default spawned thread 2 MiB; the clean-sheet runs overflowed the former
-//! (final pass 2026-10-16). Every thread that runs a pipeline, optimiser or
+//! default spawned thread 2 MiB; the clean-sheet runs overflowed the former.
+//! Every thread that runs a pipeline, optimiser or
 //! analysis uses [`ANALYSIS_STACK_BYTES`]. Stack memory is reserved address
 //! space, committed only when touched. The GUI event loop itself must stay on
 //! the main thread (winit), so only workers use these helpers.

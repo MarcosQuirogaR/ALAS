@@ -16,6 +16,7 @@ impl AppState {
     /// in-flight snapshot.
     pub fn set_completed_pipeline_result(&mut self, result: alas_pipeline::PipelineResult) {
         self.pipeline_result = Some(result);
+        self.clear_result_figures();
         self.pipeline_result_design_values = Some(self.design_values.clone());
         self.pipeline_result_form_config = self.typed_config();
         self.pipeline_result_complete = true;
@@ -24,6 +25,11 @@ impl AppState {
     /// Run once at successful completion. Build the same registry and cache
     /// keys used by the gallery, and decode external PNGs before claiming that
     /// their produced artifacts are ready. Diagnostics stay in the Run Log.
+    ///
+    /// This builds every figure on the calling thread. The desktop shell
+    /// queues the builds on the figure workers instead
+    /// ([`Self::begin_final_figure_check`]) and calls
+    /// [`Self::report_final_figure_check`] when the last one has arrived.
     pub(crate) fn verify_final_result_figures(&mut self) {
         if !self.pipeline_result_complete {
             return;
@@ -32,6 +38,27 @@ impl AppState {
             return;
         };
         let config = result.config.clone();
+        let theme = self.theme.figure_theme_name().to_owned();
+        for figure in alas_report::RESULT_FIGURES {
+            let key = self.gallery_figure_key(figure.id);
+            let camera = if result_3d::is_orbitable_result(figure.id) {
+                let camera_key = result_3d::result_camera_key(self.run_identity, figure.id);
+                Some(result_3d::result_camera(self, &camera_key))
+            } else {
+                None
+            };
+            let _ = self.cached_result_figure_with_camera(&key, figure.id, &config, &theme, camera);
+        }
+        self.report_final_figure_check();
+    }
+
+    /// The reconciliation itself, over the figures already in the cache: count
+    /// them, then check that every external image is the Patran image the
+    /// structures stage produced and decodes.
+    pub(crate) fn report_final_figure_check(&mut self) {
+        let Some(result) = &self.pipeline_result else {
+            return;
+        };
         let expected_patran = result
             .structural_result
             .as_ref()
@@ -44,25 +71,16 @@ impl AppState {
                     .collect::<BTreeSet<_>>()
             })
             .unwrap_or_default();
-        let theme = self.theme.figure_theme_name().to_owned();
-        let language = alas_i18n::get_language();
         let mut ready = 0;
         let mut unavailable = 0;
         let mut images = BTreeSet::new();
         let mut issues = Vec::new();
         for figure in alas_report::RESULT_FIGURES {
-            let key = format!(
-                "run={};solver={:?};theme={theme};language={language};figure={}",
-                self.run_identity, self.selected_solver_view, figure.id
-            );
-            let camera = if result_3d::is_orbitable_result(figure.id) {
-                let camera_key = result_3d::result_camera_key(self.run_identity, figure.id);
-                Some(result_3d::result_camera(self, &camera_key))
-            } else {
-                None
-            };
-            let Some(scene) =
-                self.cached_result_figure_with_camera(&key, figure.id, &config, &theme, camera)
+            let key = self.gallery_figure_key(figure.id);
+            let Some(scene) = self
+                .result_figure_cache
+                .get(&key)
+                .and_then(|(scene, _)| scene.clone())
             else {
                 unavailable += 1;
                 continue;

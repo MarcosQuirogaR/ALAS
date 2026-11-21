@@ -5,7 +5,7 @@
 //!
 //! Every discipline reads this object (the team reports show spans and masses
 //! drifting between sections of one report because there was no such object).
-//! It lives outside `AlasConfig` on purpose (decision D6): no parity ledger,
+//! It lives outside `AlasConfig` on purpose: no parity ledger,
 //! no Spanish-catalogue entry per field and no frozen-module budget churn;
 //! `inventory` is its own field inventory with units and ranges.
 //!

@@ -18,6 +18,7 @@
 #![cfg_attr(test, allow(clippy::unwrap_used, clippy::expect_used))]
 
 use alas_config::LandingGearConfig;
+use alas_perf::landing_gear::tires::{HEAVY, NARROWBODY, WIDEBODY};
 use alas_perf::landing_gear::{size_landing_gear, LandingGearLayout, TireSpec};
 use alas_testkit::{Comparison, Tier};
 use serde::Deserialize;
@@ -110,9 +111,39 @@ fn config_for(overrides: &Map<String, Value>) -> LandingGearConfig {
     cfg
 }
 
+/// The fixture's generic narrowbody tyre dimensions, `(diameter, width)` m.
+const FIXTURE_NARROWBODY_DIMENSIONS: (f64, f64) = (1.17, 0.44);
+
+/// G2C7: the narrowbody class tyre takes the outside diameter and section
+/// width of the 46x17.0R20 data-book entry whose rating it already carried
+/// (Goodyear Aircraft Tire Data Book 2022, Sec. 4F: 47.50 in, 17.70 in),
+/// where the Python-era fixture has the generic 1.17 m x 0.44 m. A deliberate
+/// data change, not a port difference: for a narrowbody tyre the dimensions
+/// are compared with the data-book values, and the wheel positions that
+/// follow them are the fixture's own positions rescaled about their strut
+/// (`planform_wheels`: lateral offsets are `1.6 w` multiples, fore/aft
+/// offsets `1.3 d` multiples), so the layout arithmetic is still checked
+/// against the reference.
+fn data_book_dimensions(tire: &TireRecord) -> Option<(f64, f64)> {
+    (tire.code == NARROWBODY.code).then(|| {
+        assert_eq!(
+            (tire.diameter_m, tire.width_m),
+            FIXTURE_NARROWBODY_DIMENSIONS,
+            "the fixture's narrowbody tyre is the generic class"
+        );
+        assert_eq!(
+            (NARROWBODY.diameter_m, NARROWBODY.width_m),
+            (1.2065, 0.4496)
+        );
+        (NARROWBODY.diameter_m, NARROWBODY.width_m)
+    })
+}
+
 fn compare_tire(comparison: &mut Comparison, label: &str, actual: TireSpec, expected: &TireRecord) {
     assert_eq!(actual.code, expected.code, "{label}: tire code");
     assert_eq!(actual.name, expected.name, "{label}: tire name");
+    let (diameter_m, width_m) =
+        data_book_dimensions(expected).unwrap_or((expected.diameter_m, expected.width_m));
     comparison.scalar(
         &format!("{label}: rated_load_kg"),
         actual.rated_load_kg,
@@ -121,18 +152,89 @@ fn compare_tire(comparison: &mut Comparison, label: &str, actual: TireSpec, expe
     comparison.scalar(
         &format!("{label}: diameter_m"),
         actual.diameter_m,
-        expected.diameter_m,
+        diameter_m,
     );
-    comparison.scalar(
-        &format!("{label}: width_m"),
-        actual.width_m,
-        expected.width_m,
+    comparison.scalar(&format!("{label}: width_m"), actual.width_m, width_m);
+}
+
+/// The fixture wheel `want`, with the G2C7 data-book tyre of its gear
+/// (`tire`) when that is the narrowbody class: `(x, y, diameter, width)`.
+fn expected_wheel(want: &WheelRecord, all: &[WheelRecord], tire: &TireRecord) -> [f64; 4] {
+    let Some((diameter_m, width_m)) = data_book_dimensions(tire) else {
+        return [want.x, want.y, want.diameter_m, want.width_m];
+    };
+    let strut: Vec<_> = all
+        .iter()
+        .filter(|w| w.strut_label == want.strut_label)
+        .collect();
+    let count = strut.len() as f64;
+    let centre_x = strut.iter().map(|w| w.x).sum::<f64>() / count;
+    let centre_y = strut.iter().map(|w| w.y).sum::<f64>() / count;
+    let (old_d, old_w) = FIXTURE_NARROWBODY_DIMENSIONS;
+    [
+        centre_x + (want.x - centre_x) * diameter_m / old_d,
+        centre_y + (want.y - centre_y) * width_m / old_w,
+        diameter_m,
+        width_m,
+    ]
+}
+
+/// Cases where the Python-era selection (`select_tire` on the unfactored
+/// per-wheel load) and the corrected one (TYRE107: the 1.07 design factor
+/// applies to the selection as well as to the overload flag) pick different
+/// classes, as `(case, gear, corrected class code)`. For such a gear the tire
+/// and everything derived from the tire (its capacity fraction, wheel
+/// dimensions and the wheel positions that follow the tire width) are not
+/// compared with the fixture; `assert_corrected_gear` asserts the closed-form
+/// corrected values instead.
+const TYRE107_CORRECTED: &[(&str, &str, &str)] = &[("heavy_body_gear", "mlg", "heavy")];
+
+fn corrected_class(case: &str, gear: &str) -> Option<&'static str> {
+    TYRE107_CORRECTED
+        .iter()
+        .find(|entry| entry.0 == case && entry.1 == gear)
+        .map(|entry| entry.2)
+}
+
+/// The corrected `heavy_body_gear` main gear in closed form: 24 wheels of the
+/// heavy class (rated 34,000 kg, 1.40 m x 0.56 m) carry the 22,944.5 kg
+/// per-wheel load times 1.07 = 24,551 kg, which the widebody class (24,000 kg)
+/// cannot, so the heavy class carries it; the strut label follows the same
+/// factored load (heavy: titanium truck beam).
+fn assert_corrected_gear(name: &str, mtow_kg: f64, got: &LandingGearLayout) {
+    assert_eq!(
+        got.mlg_tire.code, "heavy",
+        "{name}: mlg_tire corrected class"
+    );
+    assert_eq!(got.mlg_tire.rated_load_kg, HEAVY.rated_load_kg);
+    const { assert!(WIDEBODY.rated_load_kg < 24_551.0 && HEAVY.rated_load_kg > 24_551.0) };
+    // The main gear is covered with the 1.07 factor (the nose gear of this
+    // fixture is a separate matter).
+    assert!(
+        got.tire_load_ratios.main_static * 1.07 < 1.0,
+        "{name}: corrected main gear is not overloaded"
+    );
+    let wheels = got.wheels.iter().filter(|w| w.group != "NLG");
+    assert_eq!(wheels.clone().count(), 24, "{name}: main wheel count");
+    for wheel in wheels {
+        assert_eq!(wheel.diameter_m, HEAVY.diameter_m, "{name}: wheel diameter");
+        assert_eq!(wheel.width_m, HEAVY.width_m, "{name}: wheel width");
+    }
+    let expected_fraction = 24.0 * HEAVY.rated_load_kg / mtow_kg;
+    assert!(
+        (got.pct_load_mlg_max - expected_fraction).abs() < 1e-12,
+        "{name}: pct_load_mlg_max"
+    );
+    assert_eq!(
+        got.strut_material, "300M high-strength steel (titanium truck beam)",
+        "{name}: strut label follows the factored load"
     );
 }
 
 fn compare_layout(
     comparison: &mut Comparison,
     name: &str,
+    mtow_kg: f64,
     got: &LandingGearLayout,
     want: &LayoutRecord,
 ) {
@@ -143,25 +245,34 @@ fn compare_layout(
         got.wheels_per_mlg_strut, want.wheels_per_mlg_strut,
         "{name}: wheels_per_mlg_strut"
     );
-    assert_eq!(
-        got.strut_material, want.strut_material,
-        "{name}: strut_material"
-    );
+    if corrected_class(name, "mlg").is_none() {
+        assert_eq!(
+            got.strut_material, want.strut_material,
+            "{name}: strut_material"
+        );
+    }
     assert_eq!(got.turnover_ok, want.turnover_ok, "{name}: turnover_ok");
     assert_eq!(got.wheels.len(), want.wheels.len(), "{name}: wheel count");
 
-    compare_tire(
-        comparison,
-        &format!("{name}: nlg_tire"),
-        got.nlg_tire,
-        &want.nlg_tire,
-    );
-    compare_tire(
-        comparison,
-        &format!("{name}: mlg_tire"),
-        got.mlg_tire,
-        &want.mlg_tire,
-    );
+    if corrected_class(name, "mlg").is_some() {
+        assert_corrected_gear(name, mtow_kg, got);
+    }
+    let nlg_fixed = corrected_class(name, "nlg");
+    let mlg_fixed = corrected_class(name, "mlg");
+    for (gear, fixed, got_tire, want_tire) in [
+        ("nlg", nlg_fixed, got.nlg_tire, &want.nlg_tire),
+        ("mlg", mlg_fixed, got.mlg_tire, &want.mlg_tire),
+    ] {
+        match fixed {
+            Some(code) => assert_eq!(got_tire.code, code, "{name}: {gear}_tire corrected class"),
+            None => compare_tire(
+                comparison,
+                &format!("{name}: {gear}_tire"),
+                got_tire,
+                want_tire,
+            ),
+        }
+    }
 
     // Continuous outputs: closed tier.
     comparison.scalar(&format!("{name}: x_nlg"), got.x_nlg, want.x_nlg);
@@ -186,16 +297,20 @@ fn compare_layout(
         got.r_mlg_total_design_kg,
         want.r_mlg_total_design_kg,
     );
-    comparison.scalar(
-        &format!("{name}: pct_load_nlg_max"),
-        got.pct_load_nlg_max,
-        want.pct_load_nlg_max,
-    );
-    comparison.scalar(
-        &format!("{name}: pct_load_mlg_max"),
-        got.pct_load_mlg_max,
-        want.pct_load_mlg_max,
-    );
+    if nlg_fixed.is_none() {
+        comparison.scalar(
+            &format!("{name}: pct_load_nlg_max"),
+            got.pct_load_nlg_max,
+            want.pct_load_nlg_max,
+        );
+    }
+    if mlg_fixed.is_none() {
+        comparison.scalar(
+            &format!("{name}: pct_load_mlg_max"),
+            got.pct_load_mlg_max,
+            want.pct_load_mlg_max,
+        );
+    }
     comparison.scalar(
         &format!("{name}: turnover_angle_deg"),
         got.turnover_angle_deg,
@@ -208,18 +323,29 @@ fn compare_layout(
             got_w.strut_label, want_w.strut_label,
             "{name}: wheel[{i}] strut_label"
         );
-        comparison.scalar(&format!("{name}: wheel[{i}].x"), got_w.x, want_w.x);
-        comparison.scalar(&format!("{name}: wheel[{i}].y"), got_w.y, want_w.y);
-        comparison.scalar(
-            &format!("{name}: wheel[{i}].diameter_m"),
-            got_w.diameter_m,
-            want_w.diameter_m,
-        );
-        comparison.scalar(
-            &format!("{name}: wheel[{i}].width_m"),
-            got_w.width_m,
-            want_w.width_m,
-        );
+        let tire_corrected = match got_w.group {
+            "NLG" => nlg_fixed.is_some(),
+            _ => mlg_fixed.is_some(),
+        };
+        if !tire_corrected {
+            let tire = match got_w.group {
+                "NLG" => &want.nlg_tire,
+                _ => &want.mlg_tire,
+            };
+            let [x, y, diameter_m, width_m] = expected_wheel(want_w, &want.wheels, tire);
+            comparison.scalar(&format!("{name}: wheel[{i}].x"), got_w.x, x);
+            comparison.scalar(&format!("{name}: wheel[{i}].y"), got_w.y, y);
+            comparison.scalar(
+                &format!("{name}: wheel[{i}].diameter_m"),
+                got_w.diameter_m,
+                diameter_m,
+            );
+            comparison.scalar(
+                &format!("{name}: wheel[{i}].width_m"),
+                got_w.width_m,
+                width_m,
+            );
+        }
     }
 }
 
@@ -242,7 +368,13 @@ fn size_landing_gear_matches_the_fixture_across_weight_and_config_cases() {
             inputs.cg_height_estimate_m,
             &cfg,
         );
-        compare_layout(&mut comparison, &case.name, &layout, &case.layout);
+        compare_layout(
+            &mut comparison,
+            &case.name,
+            inputs.mtow_kg,
+            &layout,
+            &case.layout,
+        );
     }
     comparison.finish();
 }

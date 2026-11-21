@@ -31,6 +31,16 @@
 //! against the reference, and driven by the segment solver that lands later.
 
 use alas_math::{chebyshev_data, ChebyshevData, ChebyshevError};
+use std::cell::RefCell;
+
+thread_local! {
+    /// The dimensionless operators built so far on this thread, by
+    /// control-point count. They depend on the count alone, and a mission
+    /// asks for the same one or two counts for every segment and every
+    /// schedule-closure distance; a clone of the stored operators is the
+    /// same numbers as a rebuild.
+    static DIMENSIONLESS: RefCell<Vec<(i64, Differentials)>> = const { RefCell::new(Vec::new()) };
+}
 
 /// One set of pseudospectral operators over a node grid.
 ///
@@ -110,7 +120,8 @@ impl Numerics {
     /// [`alas_math::chebyshev_data`] at [`Self::number_control_points`].
     /// Upstream reshapes the node vector into a column here; the values are the
     /// same either way, so the grid is stored as the flat vector the operators
-    /// are indexed against.
+    /// are indexed against. Each thread builds the operators of a count once
+    /// and copies them afterwards.
     ///
     /// # Errors
     ///
@@ -119,11 +130,22 @@ impl Numerics {
     /// integration operator could not be built: the same two failures the
     /// kernel reports.
     pub fn initialize_differentials_dimensionless(&mut self) -> Result<(), ChebyshevError> {
+        let count = self.number_control_points;
+        let stored = DIMENSIONLESS.with_borrow(|built| {
+            built
+                .iter()
+                .find(|(built_count, _)| *built_count == count)
+                .map(|(_, operators)| operators.clone())
+        });
+        if let Some(operators) = stored {
+            self.dimensionless = operators;
+            return Ok(());
+        }
         let ChebyshevData {
             x,
             differentiation,
             integration,
-        } = chebyshev_data(self.number_control_points, true)?;
+        } = chebyshev_data(count, true)?;
 
         self.dimensionless.control_points = x;
         self.dimensionless.differentiate = differentiation;
@@ -131,6 +153,7 @@ impl Numerics {
         // which it always is here; an empty operator rather than a panic is the
         // library-safe answer to a `None` that cannot occur on this call.
         self.dimensionless.integrate = integration.unwrap_or_default();
+        DIMENSIONLESS.with_borrow_mut(|built| built.push((count, self.dimensionless.clone())));
         Ok(())
     }
 
@@ -159,9 +182,19 @@ impl Numerics {
         self.time
             .control_points
             .extend(self.dimensionless.control_points.iter().map(|&x| x * span));
+        // The time derivative does not exist on a zero span. Its operator is
+        // then scaled by infinity, stated here rather than left to a division
+        // by zero, so a consumer that reads it gets a non-finite result it
+        // cannot mistake for a rate. A constant-speed level leg of zero
+        // duration never reads it.
+        let rate_factor = if span == 0.0 {
+            f64::INFINITY
+        } else {
+            1.0 / span
+        };
         scale_into(
             &self.dimensionless.differentiate,
-            1.0 / span,
+            rate_factor,
             &mut self.time.differentiate,
         );
         scale_into(
@@ -237,6 +270,27 @@ mod tests {
             numerics.dimensionless.differentiate
         );
         assert_eq!(numerics.time.integrate, numerics.dimensionless.integrate);
+    }
+
+    #[test]
+    fn a_zero_time_span_has_no_derivative_operator_and_a_zero_integral() {
+        let mut numerics = Numerics::default();
+        numerics
+            .initialize_differentials_dimensionless()
+            .expect("positive control-point count");
+        numerics.update_differentials_time(&[10.0, 10.0]);
+        assert!(numerics
+            .time
+            .differentiate
+            .iter()
+            .flatten()
+            .all(|entry| !entry.is_finite()));
+        assert!(numerics
+            .time
+            .integrate
+            .iter()
+            .flatten()
+            .all(|entry| *entry == 0.0));
     }
 
     #[test]

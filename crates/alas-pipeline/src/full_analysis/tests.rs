@@ -1,7 +1,7 @@
 // SPDX-License-Identifier: AGPL-3.0-or-later
 // Copyright (C) 2026 Marcos Quiroga Rodriguez
 
-use super::{FullAnalysis, PolarFitStatus};
+use super::{FullAnalysis, PolarFit, PolarFitStatus};
 use alas_aero::analysis::PolarSweep;
 use alas_config::design_variables::DesignVector;
 use alas_config::{AlasConfig, AnalysisConfig};
@@ -12,6 +12,7 @@ fn sweep(cl: Vec<f64>, cd: Vec<f64>) -> PolarSweep {
     PolarSweep {
         alpha_deg: vec![0.0; n],
         geometric_alpha_deg: vec![0.0; n],
+        compressible_mach: None,
         cl,
         cd,
         cd_induced: vec![0.0; n],
@@ -20,6 +21,25 @@ fn sweep(cl: Vec<f64>, cd: Vec<f64>) -> PolarSweep {
         cm: vec![0.0; n],
         l_over_d: vec![0.0; n],
     }
+}
+
+#[test]
+fn a_retained_mass_model_does_not_change_the_wing_the_aerodynamics_sees() {
+    let preset = alas_config::presets::get("A320-200").expect("registered preset");
+    let product =
+        AlasConfig::from_value(&serde_json::json!({ "preset": "A320-200" })).expect("product case");
+    let retained = AlasConfig::from_value(&serde_json::json!({
+        "preset": "A320-200",
+        "mass_model": { "mass_architecture": "legacy_reference_compatible_comparison" }
+    }))
+    .expect("retained mass model case");
+    let area = |config: AlasConfig| {
+        FullAnalysis::new(config)
+            .run(&preset.design_vector, true)
+            .expect("the analysis runs")
+            .geometry_summary["wing_area_m2"]
+    };
+    assert_eq!(area(product), area(retained));
 }
 
 #[test]
@@ -83,8 +103,33 @@ fn a_product_report_carries_the_full_neutral_point_conditions_set() {
     assert!(reference_report.neutral_point_conditions.is_none());
 }
 
+fn assert_failed_fit_carries_no_coefficients(fit: &PolarFit) {
+    assert!(!fit.status.is_fitted());
+    assert!(fit.cd0.is_nan() && fit.c1.is_nan() && fit.k.is_nan() && fit.oswald_e.is_nan());
+    let json = serde_json::to_string(fit).expect("a failed fit serializes");
+    let read: PolarFit = serde_json::from_str(&json).expect("a failed fit reads back");
+    assert_eq!(read.status, fit.status);
+    assert!(read.cd0.is_nan() && read.k.is_nan());
+}
+
 #[test]
-fn degenerate_polar_fit_preserves_constants_with_explicit_status() {
+fn a_fit_with_non_positive_curvature_is_a_failed_fit() {
+    // Drag falling with lift squared: the solve succeeds with k < 0.
+    let fit = FullAnalysis::fit_polar_values(
+        &sweep(
+            vec![0.35, 0.45, 0.55, 0.65],
+            vec![0.030, 0.028, 0.025, 0.021],
+        ),
+        10.0,
+        &AnalysisConfig::default(),
+    );
+
+    assert_eq!(fit.status, PolarFitStatus::NonPhysicalCoefficients);
+    assert_failed_fit_carries_no_coefficients(&fit);
+}
+
+#[test]
+fn degenerate_polar_fit_carries_a_failed_status_and_no_coefficients() {
     let fit = FullAnalysis::fit_polar_values(
         &sweep(vec![0.0], vec![0.03]),
         10.0,
@@ -92,13 +137,12 @@ fn degenerate_polar_fit_preserves_constants_with_explicit_status() {
     );
 
     assert_eq!(fit.status, PolarFitStatus::FallbackInsufficientPoints);
-    assert_eq!(fit.status.as_str(), "fallback_insufficient_points");
-    assert_eq!(fit.cd0, 0.02);
-    assert_eq!(fit.k, 0.04);
+    assert_eq!(fit.status.as_str(), "failed_insufficient_points");
+    assert_failed_fit_carries_no_coefficients(&fit);
 }
 
 #[test]
-fn rank_deficient_polar_fit_preserves_constants_with_explicit_status() {
+fn rank_deficient_polar_fit_carries_a_failed_status_and_no_coefficients() {
     let fit = FullAnalysis::fit_polar_values(
         &sweep(vec![0.4, 0.4, 0.4], vec![0.03, 0.04, 0.05]),
         10.0,
@@ -106,13 +150,12 @@ fn rank_deficient_polar_fit_preserves_constants_with_explicit_status() {
     );
 
     assert_eq!(fit.status, PolarFitStatus::FallbackLeastSquaresFailure);
-    assert_eq!(fit.status.as_str(), "fallback_least_squares_failure");
-    assert_eq!(fit.cd0, 0.02);
-    assert_eq!(fit.k, 0.04);
+    assert_eq!(fit.status.as_str(), "failed_least_squares");
+    assert_failed_fit_carries_no_coefficients(&fit);
 }
 
 #[test]
-fn nonfinite_selected_polar_values_use_the_least_squares_fallback() {
+fn nonfinite_selected_polar_values_fail_the_fit() {
     for invalid_cd in [f64::NAN, f64::INFINITY] {
         let fit = FullAnalysis::fit_polar_values(
             &sweep(vec![0.35, 0.45, 0.55], vec![0.0249, invalid_cd, 0.0321]),
@@ -121,13 +164,12 @@ fn nonfinite_selected_polar_values_use_the_least_squares_fallback() {
         );
 
         assert_eq!(fit.status, PolarFitStatus::FallbackLeastSquaresFailure);
-        assert_eq!(fit.cd0, 0.02);
-        assert_eq!(fit.k, 0.04);
+        assert_failed_fit_carries_no_coefficients(&fit);
     }
 }
 
 #[test]
-fn nonfinite_least_squares_solution_uses_the_least_squares_fallback() {
+fn nonfinite_least_squares_solution_fails_the_fit() {
     let config = AnalysisConfig {
         polar_fit_cl_min: 0.0,
         polar_fit_cl_max: f64::MAX,
@@ -143,8 +185,7 @@ fn nonfinite_least_squares_solution_uses_the_least_squares_fallback() {
     );
 
     assert_eq!(fit.status, PolarFitStatus::FallbackLeastSquaresFailure);
-    assert_eq!(fit.cd0, 0.02);
-    assert_eq!(fit.k, 0.04);
+    assert_failed_fit_carries_no_coefficients(&fit);
 }
 
 #[test]
@@ -190,6 +231,31 @@ fn shifted_wake_polar_preserves_linear_term_and_induced_curvature() {
 }
 
 #[test]
+fn the_product_fit_leaves_the_wave_term_out() {
+    // A quartic rise above M_crit(CL) on the same parabola: the fit must not
+    // read it as lift-dependent drag, and must return the wave-free polar.
+    let ar = 10.0;
+    let k = 1.0 / (std::f64::consts::PI * ar * 0.8);
+    let cl = vec![0.32, 0.41, 0.5, 0.58];
+    let wave: Vec<f64> = cl
+        .iter()
+        .map(|cl| 20.0 * (0.85_f64 - (0.80 - 0.15 * cl)).max(0.0).powi(4))
+        .collect();
+    let clean: Vec<f64> = cl
+        .iter()
+        .map(|cl| 0.02 - 0.004 * cl + k * cl * cl)
+        .collect();
+    let total = clean.iter().zip(&wave).map(|(c, w)| c + w).collect();
+    let mut polar = sweep(cl, total);
+    polar.cd_wave = wave;
+    let fit = FullAnalysis::fit_polar_values(&polar, ar, &AnalysisConfig::default());
+    assert_eq!(fit.status, PolarFitStatus::Fitted);
+    assert!((fit.cd0 - 0.02).abs() < 1e-12);
+    assert!((fit.c1 + 0.004).abs() < 1e-11);
+    assert!((fit.oswald_e - 0.8).abs() < 1e-10);
+}
+
+#[test]
 fn successful_full_analysis_retains_the_detailed_payload_layout() {
     let report = FullAnalysis::new(AlasConfig::default())
         .run(&DesignVector::default(), false)
@@ -202,4 +268,37 @@ fn successful_full_analysis_retains_the_detailed_payload_layout() {
     assert!(layout.total_mass.is_finite());
     assert!(layout.cg_x.is_finite());
     assert!(layout.cg_y.is_finite());
+}
+
+/// The derived wing setting of a clean-sheet transport rotates the
+/// wing the sized report draws, but the published design vector keeps the
+/// caller's tip twist: the rotation rides in `TailSizing::wing_incidence_deg`.
+/// The search delivers `report.design` as its finalist and feeds it back; a
+/// rotated tip there, with the configuration's unrotated root and break, changed
+/// the washout of every rebuild (default design: tip -2.667 deg against 0).
+#[test]
+fn a_sized_report_publishes_the_design_vector_without_the_derived_wing_setting() {
+    // The wing setting is derived in the sizing closure; the mission and
+    // structures stages do not take part in it and only cost time here.
+    let mut config = AlasConfig::default();
+    config.mission.enabled = false;
+    config.structures.enabled = false;
+    let design = DesignVector::default();
+    let assessment =
+        alas_opt::assess_product_candidate(&config, &design).expect("candidate assessment");
+    let incidence = assessment
+        .sized
+        .fuel_artifacts
+        .tail_sizing
+        .wing_incidence_deg
+        .expect("the default clean-sheet transport derives its wing setting");
+    let report = FullAnalysis::new(config)
+        .run_sized_candidate(&assessment.resolved.design, &assessment.sized)
+        .expect("sized candidate report");
+    assert_eq!(
+        report.design.tip_twist_deg.to_bits(),
+        assessment.resolved.design.tip_twist_deg.to_bits()
+    );
+    // The drawn wing does carry the rotation.
+    assert!((incidence[2] - assessment.resolved.design.tip_twist_deg).abs() > 1e-6);
 }

@@ -3,7 +3,7 @@
 
 //! Viscous VLM: lattice circulation coupled to NeuralFoil section polars.
 //!
-//! # Method (modified-incidence fixed point, UAV-PLAN 3.1 items 1-4)
+//! # Method (modified-incidence fixed point)
 //!
 //! The production lattice (`alas-aero::vlm`) gives the inviscid circulation of
 //! the main wing.  For each spanwise strip `i` (chord `c_i`, width `w_i`):

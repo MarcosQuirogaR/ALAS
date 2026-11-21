@@ -5,8 +5,9 @@
 //!
 //! A saved aircraft is the complete current aircraft + mission configuration
 //! (the same workspace document the File menu writes) with a small header that
-//! gives it a user-chosen name. Files live in `my-aircraft/` under the per-user
-//! data folder, one file per saved variant, so one airframe can be stored
+//! gives it a user-chosen name. Files live in `library/my-aircraft/` under the
+//! per-user data folder (older versions used `my-aircraft/`; see
+//! [`migrate_legacy_aircraft`]), one file per saved variant, so one airframe can be stored
 //! several times for different missions. The files are plain JSON and can be
 //! exported to, or imported from, any path.
 //!
@@ -23,7 +24,9 @@ use serde_json::Value;
 use crate::file_dialog::FileDialogState;
 
 /// Sub-folder of the data folder holding saved aircraft.
-pub const MY_AIRCRAFT_DIR: &str = "my-aircraft";
+pub const MY_AIRCRAFT_DIR: &str = "library/my-aircraft";
+/// Where saved aircraft lived before they moved under `library/`.
+const LEGACY_AIRCRAFT_DIR: &str = "my-aircraft";
 /// Header key marking a file as a saved aircraft.
 const HEADER_KEY: &str = "alas_my_aircraft";
 /// Body key holding the workspace document.
@@ -70,8 +73,10 @@ pub struct UserFilesState {
     pub save_open: bool,
     /// Name typed in the save window.
     pub save_name: String,
-    /// Whether the manager window is open.
+    /// Whether the Library window (formerly the aircraft manager) is open.
     pub manager_open: bool,
+    /// State of the Library window tabs and rows.
+    pub library: crate::library_window::LibraryWindowState,
     /// Saved aircraft being renamed and the text typed so far.
     pub rename: Option<(PathBuf, String)>,
     /// Saved aircraft awaiting delete confirmation.
@@ -80,6 +85,13 @@ pub struct UserFilesState {
     pub status: Option<String>,
     /// "Imported from <file> at <time>" note for the airport editor.
     pub airport_import_note: Option<String>,
+    /// Whether the shell autosaves the case (only the real application does).
+    pub autosave_enabled: bool,
+    /// When the case first changed since the last autosave.
+    pub autosave_since: Option<std::time::Instant>,
+    /// Autosave slots left by an earlier session that were neither restored
+    /// nor dismissed: they are never overwritten until the user decides.
+    pub protected_slots: Vec<String>,
 }
 
 /// Seconds since the Unix epoch, or 0 if the clock is before it.
@@ -115,6 +127,35 @@ pub fn format_utc(unix: u64) -> String {
 /// The folder saved aircraft live in.
 pub fn aircraft_dir(data_dir: &Path) -> PathBuf {
     data_dir.join(MY_AIRCRAFT_DIR)
+}
+
+/// Move saved aircraft from the old `<root>/my-aircraft` folder into
+/// [`aircraft_dir`]. A file whose name is already taken in the new folder stays
+/// where it is (it is still listed by [`list_aircraft`]); the old folder is
+/// removed once empty. Idempotent and cheap when there is nothing to move.
+pub fn migrate_legacy_aircraft(data_dir: &Path) {
+    let legacy = data_dir.join(LEGACY_AIRCRAFT_DIR);
+    let Ok(entries) = fs::read_dir(&legacy) else {
+        return;
+    };
+    let target_dir = aircraft_dir(data_dir);
+    if fs::create_dir_all(&target_dir).is_err() {
+        return;
+    }
+    for path in entries.filter_map(Result::ok).map(|entry| entry.path()) {
+        let Some(name) = path.file_name() else {
+            continue;
+        };
+        let target = target_dir.join(name);
+        if !path.is_file() || target.exists() {
+            continue;
+        }
+        if fs::rename(&path, &target).is_err() && fs::copy(&path, &target).is_ok() {
+            let _ = fs::remove_file(&path);
+        }
+    }
+    // Fails (harmlessly) while files remain.
+    let _ = fs::remove_dir(&legacy);
 }
 
 /// A file-system-safe stem for a user name: ASCII letters, digits, `-`, `_`.
@@ -164,10 +205,13 @@ fn read_header(path: &Path) -> Result<AircraftHeader, String> {
 /// All saved aircraft in `data_dir`, sorted by name. Unreadable files are
 /// skipped so one damaged file never hides the others.
 pub fn list_aircraft(data_dir: &Path) -> Vec<UserAircraft> {
-    let Ok(entries) = fs::read_dir(aircraft_dir(data_dir)) else {
-        return Vec::new();
-    };
-    let mut found: Vec<UserAircraft> = entries
+    migrate_legacy_aircraft(data_dir);
+    let current = aircraft_dir(data_dir);
+    // Files the migration could not move are still read from the old folder.
+    let mut found: Vec<UserAircraft> = [current.clone(), data_dir.join(LEGACY_AIRCRAFT_DIR)]
+        .into_iter()
+        .filter_map(|dir| fs::read_dir(dir).ok())
+        .flatten()
         .filter_map(Result::ok)
         .map(|entry| entry.path())
         .filter(|path| path.extension().is_some_and(|ext| ext == "json"))
@@ -460,6 +504,31 @@ mod tests {
             saved["requirements"]["cruise_mach"]
         );
         assert_eq!(state.files.active_aircraft.as_deref(), Some("Short hop"));
+        let _ = fs::remove_dir_all(&dir);
+    }
+
+    #[test]
+    fn legacy_my_aircraft_folder_is_migrated_under_library() {
+        let dir = data_dir("migrate");
+        let state_doc = AppState::default().workspace_document();
+        let legacy = dir.join(LEGACY_AIRCRAFT_DIR);
+        let old = save_aircraft(&dir, "Old", "", &state_doc, 5).unwrap();
+        fs::create_dir_all(&legacy).unwrap();
+        let moved = legacy.join("old.json");
+        fs::rename(&old, &moved).unwrap();
+        // A clashing file name stays behind and is still listed.
+        fs::write(
+            aircraft_dir(&dir).join("old.json"),
+            fs::read(&moved).unwrap(),
+        )
+        .unwrap();
+        let listed = list_aircraft(&dir);
+        assert_eq!(listed.len(), 2);
+        fs::remove_file(aircraft_dir(&dir).join("old.json")).unwrap();
+        let listed = list_aircraft(&dir);
+        assert_eq!(listed.len(), 1);
+        assert!(listed[0].path.starts_with(aircraft_dir(&dir)));
+        assert!(!legacy.exists(), "the emptied legacy folder is removed");
         let _ = fs::remove_dir_all(&dir);
     }
 }

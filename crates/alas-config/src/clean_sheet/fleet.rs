@@ -24,7 +24,7 @@
 use std::sync::OnceLock;
 
 use crate::engines::PropulsionTechnology;
-use crate::presets::{registry, AircraftPreset};
+use crate::presets::{registry, AircraftClass, AircraftPreset};
 
 use super::planform::WingPlanformSummary;
 
@@ -84,8 +84,10 @@ struct Sample<'a> {
 fn measure() -> Option<FleetStatistics> {
     let samples: Vec<Sample<'_>> = registry()
         .iter()
+        // The fleet is the transport class the presets declare.
         .filter(|preset| {
             preset.geometry.engine.propulsion_technology == PropulsionTechnology::Turbofan
+                && preset.class == AircraftClass::Transport
         })
         .filter_map(|preset| {
             WingPlanformSummary::of(&preset.geometry.wing, &preset.design_vector)

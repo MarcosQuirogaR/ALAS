@@ -10,9 +10,9 @@ use crate::AnalysisReport;
 /// bought with span or aspect ratio is an upper bound.
 pub const AEROELASTIC_CAVEAT_TEXT: &str = "Span and aspect-ratio gains exclude aeroelastic penalties (flutter, aileron reversal); treat aspect-ratio increases above the reference aircraft as optimistic";
 
-/// The buffet margin's basis: a drag-divergence estimate, not a measured
-/// buffet boundary, so it only holds a design to its registered aircraft.
-pub const BUFFET_BASIS_TEXT: &str = "Korn-inverse estimate, not a buffet boundary; validated error against Fokker 100 flight test about 0.3-0.65 CL; it only holds the design to the registered aircraft's own margin";
+/// The buffet margin's basis: the certified-boundary estimate of
+/// `alas_aero::analysis::buffet` and its validated accuracy.
+pub const BUFFET_BASIS_TEXT: &str = "Certified boundary (0.25 g at the pilot's seat): 1.13 times the lift at which the first outboard wing strip reaches a pre-shock Mach number of 1.38 (section tables, strip loading from the lattice); within about 10 % of the published A320, 747-400 and DC-10 boundaries";
 
 /// Label of the aspect-ratio plausibility flag; its value is
 /// `result / reference`.
@@ -33,6 +33,16 @@ pub const ASPECT_RATIO_FLAG_FRACTION: f64 = 0.10;
 /// drag model is used further from its reference.
 pub const SWEEP_FLAG_DEG: f64 = 3.0;
 
+/// Label of the wing-position line; its value is `result / reference`, m,
+/// and the move between them. A redesign of a registered aircraft derives
+/// its wing position from its balance (`AlasConfig::derives_wing_position`),
+/// so the move is reported whenever it is not zero, never left implicit.
+pub const WING_POSITION_LABEL: &str = "Wing root shift, result / reference";
+
+/// Smallest wing move reported, m: below the 1 mm resolution of the
+/// position solve (`alas_opt` `wing_position`), the wing has not moved.
+const WING_POSITION_RESOLUTION_M: f64 = 1.0e-3;
+
 /// Aspect ratio and quarter-chord sweep of the delivered and baseline
 /// designs, from the geometry the reports were built on. Aspect ratio is
 /// the reports' `geometry_summary["aspect_ratio"]` (dimensionless); sweep is
@@ -48,6 +58,8 @@ pub struct GeometryComparison {
     pub baseline_sweep_deg: f64,
     /// Delivered quarter-chord sweep, degrees.
     pub winner_sweep_deg: f64,
+    /// Baseline and delivered `wing_x_shift_m`, m, positive aft.
+    pub wing_x_shift_m: (f64, f64),
 }
 
 impl GeometryComparison {
@@ -60,6 +72,7 @@ impl GeometryComparison {
             winner_aspect_ratio: report_aspect_ratio(winner)?,
             baseline_sweep_deg: report_quarter_chord_sweep_deg(baseline),
             winner_sweep_deg: report_quarter_chord_sweep_deg(winner),
+            wing_x_shift_m: (baseline.design.wing_x_shift_m, winner.design.wing_x_shift_m),
         })
     }
 
@@ -96,6 +109,14 @@ impl GeometryComparison {
                     "{:.2} / {:.2}",
                     self.winner_aspect_ratio, self.baseline_aspect_ratio
                 ),
+            ));
+        }
+        let (baseline_shift, winner_shift) = self.wing_x_shift_m;
+        let moved = winner_shift - baseline_shift;
+        if moved.abs() >= WING_POSITION_RESOLUTION_M {
+            lines.push((
+                WING_POSITION_LABEL,
+                format!("{winner_shift:+.3} m / {baseline_shift:+.3} m ({moved:+.3} m)"),
             ));
         }
         if self.sweep_below_reference() {

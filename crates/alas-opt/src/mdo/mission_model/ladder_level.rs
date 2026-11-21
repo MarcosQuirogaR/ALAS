@@ -2,7 +2,7 @@
 // Copyright (C) 2026 Marcos Quiroga Rodriguez
 
 //! The first level of a route-initialised cruise ladder, held to the planner's
-//! flyability rule (owner decision 2026-10-14, extended to the ladder).
+//! flyability rule, extended to the ladder.
 //!
 //! `alas_mission::configure_cruise_legs` moves the end of the initial climb to
 //! the first cruise level of the route (about FL370) and keeps the climb speeds

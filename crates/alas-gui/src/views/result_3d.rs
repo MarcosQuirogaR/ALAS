@@ -106,7 +106,7 @@ pub(crate) fn show_orbit_view(
             .cache_revision(cache_revision)
             .show_toolbar(false),
     );
-    let orbit_changed = handle_camera_response(state, &response, scene, camera_key);
+    let orbit_changed = handle_camera_response(state, &response, scene, camera_key, view_key);
     let scroll_y = response.ctx.input(|input| input.smooth_scroll_delta.y);
     let zoom_changed = should_apply_camera_zoom(maximized, response.hovered(), scroll_y);
     if zoom_changed {
@@ -141,20 +141,31 @@ fn handle_camera_response(
     response: &Response,
     scene: &Scene,
     camera_key: &str,
+    view_key: &str,
 ) -> bool {
-    // A double-click changes only the containing view.  Its pointer sequence
-    // must not also be interpreted as a final orbit gesture, otherwise a
-    // tiny click displacement changes the camera as fullscreen opens.
-    if !should_apply_orbit(
-        response.double_clicked(),
-        response.dragged_by(egui::PointerButton::Primary)
-            || response.dragged_by(egui::PointerButton::Middle),
-    ) {
-        return false;
+    // Shared mapping (see `nav_input`). The camera has no pan, so a pan and
+    // the middle-click re-centre move the canvas (the view state).
+    if crate::nav_input::pivot_clicked(response) {
+        crate::nav_input::recentre_canvas(state.view_state_mut(view_key.to_owned()), response);
     }
-    let delta = response.drag_motion();
+    let delta = match crate::nav_input::read(response) {
+        crate::nav_input::NavAction::Rotate(delta) => delta,
+        crate::nav_input::NavAction::Pan(delta) => {
+            crate::nav_input::pan_canvas(state.view_state_mut(view_key.to_owned()), delta);
+            return false;
+        }
+        _ => return false,
+    };
+    let pan = {
+        let v = state.view_state_mut(view_key.to_owned());
+        if v.auto_fit {
+            Vec2::ZERO
+        } else {
+            v.pan
+        }
+    };
     if is_route_camera_key(camera_key)
-        && apply_anchored_globe_drag(state, response, scene, camera_key, delta)
+        && apply_anchored_globe_drag(state, response, scene, camera_key, delta, pan)
     {
         return true;
     }
@@ -180,6 +191,7 @@ fn apply_anchored_globe_drag(
     scene: &Scene,
     camera_key: &str,
     delta: Vec2,
+    pan: Vec2,
 ) -> bool {
     if !delta.is_finite() || delta == vec2(0.0, 0.0) {
         return false;
@@ -187,7 +199,7 @@ fn apply_anchored_globe_drag(
     let Some(pointer) = response.interact_pointer_pos() else {
         return false;
     };
-    let transform = ViewportTransform::fit(scene.width, scene.height, response.rect);
+    let transform = ViewportTransform::fit(scene.width, scene.height, response.rect.translate(pan));
     let to = transform.to_canvas(pointer);
     let from = transform.to_canvas(pointer - delta);
     let camera = *state.result_camera_mut(camera_key);
@@ -197,6 +209,7 @@ fn apply_anchored_globe_drag(
         .apply_surface_anchored_drag(from, to, center, radius)
 }
 
+#[cfg(test)]
 fn should_apply_orbit(double_clicked: bool, dragged: bool) -> bool {
     dragged && !double_clicked
 }

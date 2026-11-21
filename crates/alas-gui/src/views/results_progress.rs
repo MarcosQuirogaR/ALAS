@@ -14,17 +14,26 @@ use egui::{RichText, Ui};
 use crate::state::AppState;
 use crate::views::tr;
 
-pub(super) fn show_progressive_results(state: &AppState, ui: &mut Ui) {
-    ui.centered_and_justified(|ui| {
-        ui.vertical_centered(|ui| {
-            ui.heading(tr("Results"));
-            ui.add_space(8.0);
-            let message = if state.is_running {
-                tr("Figures will appear here as each analysis stage finalizes.")
-            } else {
-                tr("Run the pipeline from Inputs to populate the Results gallery.")
-            };
-            ui.label(RichText::new(message).weak());
-        });
+pub(super) fn show_progressive_results(state: &mut AppState, ui: &mut Ui) {
+    ui.heading(tr("Results"));
+    ui.add_space(6.0);
+    crate::theme::card_frame(ui).show(ui, |ui| {
+        ui.set_min_width(ui.available_width());
+        if state.is_running {
+            ui.label(
+                RichText::new(tr(
+                    "Figures will appear here as each analysis stage finalizes.",
+                ))
+                .weak(),
+            );
+        } else {
+            // One line; the Run button of the bottom bar is the only one.
+            ui.horizontal_wrapped(|ui| {
+                ui.label(RichText::new(tr("No results yet")).strong());
+                ui.label(
+                    RichText::new(tr("Run the study to see its figures and tables here.")).weak(),
+                );
+            });
+        }
     });
 }

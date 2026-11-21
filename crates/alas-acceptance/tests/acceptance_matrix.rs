@@ -30,9 +30,105 @@ fn a380() -> &'static PresetAcceptanceResult {
     A380.get_or_init(|| evaluate_preset("A380-800").expect("A380 evaluation"))
 }
 
+/// The matrix over every registered preset, run once for the tests that read it.
+fn matrix() -> &'static alas_acceptance::matrix::AcceptanceMatrixReport {
+    static MATRIX: OnceLock<alas_acceptance::matrix::AcceptanceMatrixReport> = OnceLock::new();
+    MATRIX.get_or_init(run_acceptance_matrix)
+}
+
+/// Every registered preset is a certified or published aircraft, so each must
+/// pass the model's own hard physical checks.
 #[test]
-fn acceptance_matrix_evaluates_all_registered_presets() {
-    let report = run_acceptance_matrix();
+fn every_registered_preset_passes_its_physical_checks() {
+    let report = matrix();
+    let failed: Vec<_> = report
+        .presets
+        .iter()
+        .filter(|preset| !preset.physical_passed)
+        .map(|preset| (&preset.name, &preset.physical_findings))
+        .collect();
+    assert!(
+        report.all_physical_passed && failed.is_empty(),
+        "presets failing their physical checks: {failed:#?}"
+    );
+}
+
+/// Acceptance needs a flown, source-backed design mission per preset: the
+/// charted design point flown at the takeoff-mass limit under its stated
+/// reserves, with the closure converged, the fuel feasible and the flown range
+/// at the design payload inside the range cell's grade band (the AVE: at
+/// least its own requirement). Each miss is printed with its reasons.
+#[test]
+fn every_registered_preset_flies_a_source_backed_design_mission() {
+    let report = matrix();
+    let not_passed: Vec<_> = report
+        .presets
+        .iter()
+        .filter(|preset| {
+            !matches!(
+                preset.design_mission_status,
+                PresetDesignMissionStatus::Passed
+            )
+        })
+        .map(|preset| {
+            (
+                &preset.name,
+                preset.design_mission_status,
+                preset
+                    .design_mission
+                    .as_ref()
+                    .map(|grade| (grade.flown_range_nmi, grade.reasons.clone())),
+            )
+        })
+        .collect();
+    assert!(
+        report.all_design_missions_verified && not_passed.is_empty(),
+        "presets without a passed source-backed design mission: {not_passed:#?}"
+    );
+    assert!(report.all_passed);
+}
+
+/// Every registered preset declares a design point, so the matrix flies and
+/// grades every one: none is left NotEvaluated, and a graded mission carries
+/// the criterion it was held to.
+#[test]
+fn every_registered_preset_design_mission_is_flown_and_graded() {
+    let report = matrix();
+    for preset in &report.presets {
+        assert!(
+            matches!(
+                preset.design_mission_status,
+                PresetDesignMissionStatus::Passed | PresetDesignMissionStatus::Failed
+            ),
+            "{}: {:?}",
+            preset.name,
+            preset.design_mission_status
+        );
+        let grade = preset
+            .design_mission
+            .as_ref()
+            .unwrap_or_else(|| panic!("{}: no design-mission record", preset.name));
+        assert!(
+            grade.criterion.is_some(),
+            "{}: {:?}",
+            preset.name,
+            grade.reasons
+        );
+        assert_eq!(
+            grade.status == PresetDesignMissionStatus::Passed,
+            grade.closure_converged && grade.fuel_feasible && grade.range_accepted,
+            "{}",
+            preset.name
+        );
+    }
+}
+
+/// Execution only: every registered preset runs, its report is internally
+/// consistent and its figures are produced. This is not an acceptance
+/// statement; the two tests above are.
+#[test]
+fn execution_matrix_runs_all_registered_presets() {
+    let report = matrix();
     assert!(
         report.all_executed,
         "Every registered preset should execute"
@@ -48,7 +144,11 @@ fn acceptance_matrix_evaluates_all_registered_presets() {
     );
     assert_eq!(
         report.all_passed,
-        report.all_executed && report.all_physical_passed && report.all_design_missions_verified
+        report.all_executed
+            && report.all_physical_passed
+            && report.presets.iter().all(|preset| {
+                preset.design_mission_status == PresetDesignMissionStatus::Passed
+            })
     );
 
     for p in &report.presets {
@@ -61,12 +161,6 @@ fn acceptance_matrix_evaluates_all_registered_presets() {
             p.name
         );
         assert!(p.neutral_point_x > 0.0, "Positive NP for {}", p.name);
-        assert_eq!(
-            p.design_mission_status,
-            PresetDesignMissionStatus::Unverified,
-            "{} has no registered source-backed design mission",
-            p.name
-        );
         assert!(
             p.figure_scenes_count >= 8,
             "Generates at least 8 figure scenes for {}",
@@ -82,18 +176,6 @@ fn acceptance_matrix_evaluates_all_registered_presets() {
             p.name
         );
     }
-
-    for name in ["A220-300", "A320-200"] {
-        let result = report
-            .presets
-            .iter()
-            .find(|preset| preset.name == name)
-            .expect("narrowbody preset in acceptance matrix");
-        assert_eq!(
-            result.design_mission_status,
-            PresetDesignMissionStatus::Unverified
-        );
-    }
 }
 
 #[test]
@@ -107,10 +189,9 @@ fn public_planning_cg_uses_the_source_frame_without_becoming_a_certification_cla
     // so `place_baggage`'s trim loop can balance the aircraft at its
     // empty-aircraft CG and the A220 closes within its published planning
     // limit; the public-frame planning check below
-    // (`public_planning_cg_status`) stays clean. Tail scrape (6.66 deg here)
-    // is a diagnostic warning until the preset aft-fuselage contour is
-    // validated (`ModelCgConstraint::is_diagnostic`), so the A220 model
-    // envelope passes.
+    // (`public_planning_cg_status`) stays clean. Tail scrape is a hard
+    // limit and the A220 model clears its 10 deg required rotation attitude,
+    // so the model envelope passes.
     assert!(result.model_cg_envelope_ok);
     assert_eq!(
         result.public_planning_cg_status,
@@ -118,7 +199,7 @@ fn public_planning_cg_uses_the_source_frame_without_becoming_a_certification_cla
     );
     // The A220-300's PW1500G has no catalogue cruise datum, so its level-cruise thrust rests
     // on the Jenkinson chart correlation alone. The check judges the levels the mission plan
-    // flies (fix lane cruise-thrust-levels 2026-10-14): the plan starts the A220 at FL250, where
+    // flies: the plan starts the A220 at FL250, where
     // the 0.2440 required is 17.6 % below the 0.2963 available. Before, the design level FL370
     // at the mid-cruise weight (0.3086 required) was a 4.0 % shortfall inside the chart's
     // documented +-5.1 % scatter, a `ThrustWithinChartScatter` warning. No thrust finding now.
@@ -200,17 +281,18 @@ fn public_planning_cg_uses_the_source_frame_without_becoming_a_certification_cla
     // One mechanism guard: the model frame reads the detailed item ledger,
     // which places this loading state further aft than the lumped-station
     // model the public frame sums (the `MassModelDisagreement` finding). The
-    // offset is 3.9 %MAC today (0.148 m: the tank burn order leaves the 2969 kg
-    // flown fuel in the wing tanks, the ledger splits the gear and places the
-    // APU, avionics and flight crew where the lumped points are mid-cabin); the
-    // band is wide enough for mass-model changes and fails if the ledger
-    // preference or the frame mapping is lost. Both figures share one %MAC
-    // datum, the registered reference wing (LEMAC 16.5353 m, MAC 3.781 m): the
-    // delivered report's CPACS-canonicalised aircraft once dropped that
-    // reference and read 8.15 %MAC (LEMAC 0.160 m forward).
+    // offset is 1.40 %MAC with the lumped gear and
+    // furnishings/operating-item points at first moments of the ledger's own
+    // rows (it was 3.9 %MAC before that; its remaining split is not
+    // measured). The band fails if the ledger preference is lost (offset near
+    // 0) or the frame mapping is lost. Both figures share one %MAC datum, the
+    // registered reference wing (LEMAC 16.5353 m, MAC 3.781 m): the delivered
+    // report's CPACS-canonicalised aircraft once dropped that reference and
+    // read 4.2 %MAC high (LEMAC 0.160 m forward), which the upper bound
+    // catches above today's offset.
     let ledger_offset = result.model_cg_pct_mac - public_pct_mac;
     assert!(
-        (2.0..8.0).contains(&ledger_offset),
+        (0.7..4.0).contains(&ledger_offset),
         "ledger-minus-lumped CG offset {ledger_offset} %MAC"
     );
 
@@ -312,8 +394,13 @@ fn public_planning_cg_uses_the_source_frame_without_becoming_a_certification_cla
     // no preset needing investigation (the `all_physical_passed` flag of the
     // hand-built report above does not feed the count).
     assert!(text.contains("Physical Verdict: 0 preset finding(s) require investigation"));
-    assert!(text.contains("Design mission evidence:"));
-    assert!(text.contains("A220-300: UNVERIFIED - no source-backed mission registered"));
+    assert!(text.contains("Design missions (charted design point flown"));
+    // The A220 design mission is flown and graded against its range cell; the
+    // verdict is its own test's, this one only reads that it was printed.
+    assert!(
+        text.contains("A220-300: PASS - flown") || text.contains("A220-300: FAIL - "),
+        "{text}"
+    );
     assert!(text.contains("Interactive route diagnostics (not preset design-mission validation):"));
     assert!(text.contains("Acceptance Verdict: NOT PASSED - DESIGN MISSIONS ALSO UNVERIFIED"));
     assert!(text.contains("Cruise force-balance telemetry"));
@@ -379,6 +466,23 @@ fn a220_full_analysis_uses_registered_percent_capacity_before_mass_build() {
     assert_eq!(row_seats, summary.seated_pax);
 }
 
+/// The A380-800 is a certified aircraft: at its registered loading states the
+/// model CG envelope holds and no hard physical finding is raised.
+#[test]
+fn the_certified_a380_meets_its_model_cg_envelope() {
+    let result = a380();
+    assert!(result.execution_passed);
+    let errors: Vec<_> = result
+        .physical_findings
+        .iter()
+        .filter(|finding| finding.severity == alas_pipeline::FindingSeverity::Error)
+        .collect();
+    assert!(
+        result.model_cg_envelope_ok && errors.is_empty(),
+        "the certified A380-800 fails its model CG envelope: {errors:#?}"
+    );
+}
+
 #[test]
 fn a380_soft_static_margin_target_does_not_become_a_hard_model_constraint() {
     let result = a380();
@@ -432,9 +536,8 @@ fn a380_soft_static_margin_target_does_not_become_a_hard_model_constraint() {
         .collect();
     assert!(!stability_constraints.is_empty());
     // The hard floor decides, not the raised preference: a row is violated
-    // exactly when its own margin is under the floor. (With the registered 555
-    // seats the A380's zero-fuel and reserve rows read 0.046 and 0.048 against
-    // 0.05; at 535 seats none was under it.)
+    // exactly when its own margin is under the floor (the Torenbeek floor,
+    // max(5 %, 0.02 l_h / MAC)).
     let mut any_below_floor = false;
     for constraint in stability_constraints {
         assert_eq!(constraint.limit, result.model_cg_static_margin_floor);
@@ -460,7 +563,7 @@ fn a380_soft_static_margin_target_does_not_become_a_hard_model_constraint() {
     // 1 - (2 * 106920 + 2 * 160380) / 562000. This is a real model ground
     // constraint, independent of the soft static-margin target; retaining
     // the old whole-envelope PASS would hide it.
-    // Final re-pin 2026-10-14 (by probe, tree 12a0202b): the FE-wing lanes move
+    // The FE-wing results move
     // the A380 wing component centroid from 33.758 to 32.961 m (mass 63,258 kg
     // unchanged), which carries the zero-fuel CG from 43.8 to 42.5 % MAC and
     // lifts the analyzed ZFW nose-gear share from 0.0455 to 0.0509, above the
@@ -468,11 +571,8 @@ fn a380_soft_static_margin_target_does_not_become_a_hard_model_constraint() {
     // nose-load Error therefore no longer fires; the sourced limit stays the
     // gate, so the pin asserts that the shortfall is absent and every state
     // meets it (a reappearing shortfall fails here).
-    assert!(
-        result.model_cg_envelope_ok,
-        "the A380 loading states now meet the sourced nose-load minimum: {:?}",
-        result.physical_findings
-    );
+    // Whether the whole envelope is met is asserted by
+    // `the_certified_a380_meets_its_model_cg_envelope`.
     assert!(
         !result
             .physical_findings
@@ -486,14 +586,18 @@ fn a380_soft_static_margin_target_does_not_become_a_hard_model_constraint() {
         .iter()
         .map(|state| state.nose_gear_load_fraction)
         .fold(f64::INFINITY, f64::min);
+    // The sourced minimum nose-gear share, from the Airbus AC figure above:
+    // 1 - (2 * 106920 + 2 * 160380) / 562000.
+    let sourced_minimum = 1.0 - (2.0 * 106_920.0 + 2.0 * 160_380.0) / 562_000.0;
     assert!(
-        (nose_load_min - 0.0509).abs() < 0.001,
-        "minimum nose-gear share over the loading states {nose_load_min}"
+        nose_load_min >= sourced_minimum,
+        "minimum nose-gear share over the loading states {nose_load_min} is below the sourced \
+         minimum {sourced_minimum}"
     );
     // Geometry phase 1 (fitted aft fuselage loft and tailcone): the rotation clearance of the
-    // built A380 is 11.23 deg against the 10 deg required, so the tail-scrape warning of the
-    // earlier contour (below 10 deg) is no longer raised. The contour is still unvalidated
-    // (`ModelCgConstraint::is_diagnostic`), hence a pinned clearance rather than a claim.
+    // built A380 is 11.23 deg (11.27 deg with the refit tail cone) against the 10 deg required, so the tail-scrape warning of the
+    // earlier contour (below 10 deg) is no longer raised. The contour is still unvalidated,
+    // hence a pinned clearance rather than a claim.
     let scrape_states: Vec<_> = assessment
         .loading_states
         .iter()
@@ -503,7 +607,11 @@ fn a380_soft_static_margin_target_does_not_become_a_hard_model_constraint() {
     assert!(!scrape_states.is_empty());
     for constraint in scrape_states {
         assert!(!constraint.violated, "{constraint:?}");
-        assert!((constraint.actual - 11.227_610_719_083_504).abs() < 0.01);
+        assert!(
+            (constraint.actual - 11.271_381_325_572_001).abs() < 0.01,
+            "A380 tail-scrape clearance {} deg",
+            constraint.actual
+        );
         assert!((constraint.limit - 10.0).abs() < 0.01);
     }
     assert!(!result
@@ -550,7 +658,7 @@ fn a380_soft_static_margin_target_does_not_become_a_hard_model_constraint() {
             .all(|finding| finding.severity == alas_pipeline::FindingSeverity::Warning),
         "{forward_findings:?}"
     );
-    // Final re-pin 2026-10-14 (by probe): the zero-fuel point (42.5 % MAC) no
+    // The zero-fuel point (42.5 % MAC) no
     // longer lies aft of the 43.0 % MAC partial-loading limit, so the
     // "fuel-vector" excursion that started at that point is gone; the usable
     // range and the 43.82 % MAC potato extreme (267,864 kg) remain.
@@ -571,8 +679,27 @@ fn a380_soft_static_margin_target_does_not_become_a_hard_model_constraint() {
         all_design_missions_verified: false,
     };
     let text = format_matrix_report(&matrix);
-    assert!(text.contains("A380-800: hard constraints PASS")); // final re-pin 2026-10-14: nose-load shortfall gone (see above)
-    assert!(text.contains("hard floor 5.000%"));
+    // The report line states what the assessment found, whichever it is.
+    let verdict = if result.model_cg_envelope_ok {
+        "A380-800: hard constraints PASS"
+    } else {
+        "A380-800: hard constraints FAIL"
+    };
+    assert!(text.contains(verdict), "{text}");
+    // The hard floor is max(configured 5 %, 0.02 l_h / MAC)
+    // (Torenbeek, Advanced Aircraft Design, 2013, sec. 6.3.3, p. 168); on the
+    // A380 the tail-arm term governs (about 5.3 % MAC). The report prints the
+    // assessment's own floor.
+    assert!(
+        result.model_cg_static_margin_floor > 0.05,
+        "A380 floor {} is not the Torenbeek 0.02 l_h term",
+        result.model_cg_static_margin_floor
+    );
+    let floor_text = format!(
+        "hard floor {:.3}%",
+        result.model_cg_static_margin_floor * 100.0
+    );
+    assert!(text.contains(&floor_text), "{text}");
     assert!(text.contains("target preference 10.000%"));
     assert!(!text.to_ascii_lowercase().contains("certif"));
 }
@@ -614,12 +741,12 @@ fn acceptance_narrowbody_and_widebody_mass_calibrations() {
     // diagnostic rather than an independently sourced operational flight
     // plan, so retain the source-backed capacity and test the resulting
     // contract instead of pinning one product-state fuel value.
-    // The inventory is the published 24,167 L at 0.8 kg/L; the published
-    // 19,334 kg is that figure rounded to the kilogram at source.
+    // The inventory is the A320 AC (Rev Jun 01/24, sec. 2-1-1 p.5) 24,209 L at
+    // that page's 0.785 kg/L.
     let usable_capacity_kg = a320
         .usable_fuel_capacity_kg
         .expect("A320 source-backed usable fuel capacity");
-    assert!((usable_capacity_kg - 19_334.0).abs() <= 0.5);
+    assert!((usable_capacity_kg - 24_209.0 * 0.785).abs() <= 0.5);
     assert!(a320.analyzed_carried_fuel_kg.is_finite() && a320.analyzed_carried_fuel_kg > 0.0);
     assert!(a320.analyzed_carried_fuel_kg <= usable_capacity_kg + 1.0e-6);
     assert!(a320.analyzed_carried_fuel_kg <= a320.mtow_closure_fuel_kg + 1.0e-6);
@@ -690,8 +817,8 @@ fn acceptance_narrowbody_and_widebody_mass_calibrations() {
         a320_errors.is_empty(),
         "unexpected error findings: {a320_errors:?}"
     );
-    // Tail scrape (8.19 deg vs 10 deg) is a warning
-    // (`ModelCgConstraint::is_diagnostic`). The one
+    // Tail scrape is a hard limit; the built A320 clears its published
+    // 11.7 deg gear-compressed tail-strike attitude (11.86 deg). The one
     // `ModelCgForwardRangeViolation` warning is the potato boundary
     // excursion. With the trimmable stabiliser at its takeoff nose-up
     // setting the usable takeoff range of the flown and of the design
@@ -762,8 +889,8 @@ fn acceptance_narrowbody_and_widebody_mass_calibrations() {
     );
 }
 
-/// The cruise-thrust finding judges the levels the mission plan flies (owner decision
-/// 2026-10-14), on the day the mission flies, not the design level on the ISA day. The DC-10
+/// The cruise-thrust finding judges the levels the mission plan flies,
+/// on the day the mission flies, not the design level on the ISA day. The DC-10
 /// (CF6-50, a grade-B datum engine: any shortfall is hard) starts heavy at FL323 where level
 /// flight at the maximum-cruise rating needs 0.2603 against the installed 0.2666 static T/W:
 /// no thrust finding. (On the ISA day the same state read 0.2715, 1.8 % short.)
@@ -781,7 +908,7 @@ fn the_dc10_has_no_cruise_thrust_finding_at_the_levels_its_plan_flies() {
 }
 
 #[test]
-fn ave_usable_cg_range_and_tail_scrape_are_warnings() {
+fn ave_usable_cg_range_is_a_warning_and_tail_scrape_an_error() {
     let ave = evaluate_preset("AVE").expect("AVE evaluation");
     // Each state's forward limit is the most aft of the boundaries its own
     // phase admits; AVE reports the usable-range shortfall as a warning, and
@@ -815,61 +942,92 @@ fn ave_usable_cg_range_and_tail_scrape_are_warnings() {
         "AVE usable CG range {ave_usable_range} %MAC against the {ave_range_limit} %MAC minimum"
     );
     assert!((ave_range_limit - 30.0).abs() < 0.01);
-    // Tail scrape is a warning (`ModelCgConstraint::is_diagnostic`). The
-    // takeoff CG (26.1 %MAC) now clears the nose-wheel lift-off boundary, so
-    // no rotation Error remains.
+    // Tail scrape is a hard limit: the AVE's 7.54 deg against the 10 deg
+    // required rotation attitude is an Error (asserted below). The takeoff
+    // CG (26.1 %MAC) clears the nose-wheel lift-off boundary, so no rotation
+    // Error remains.
     let ave_errors: Vec<_> = ave
         .physical_findings
         .iter()
         .filter(|finding| finding.severity == alas_pipeline::FindingSeverity::Error)
         .collect();
-    // No thrust error remains (fix lane cruise-thrust-levels 2026-10-14): level cruise is judged
+    // No thrust error remains: level cruise is judged
     // at the levels the mission plan flies, FL307 first at 350,885 kg, where the AVE needs static
     // T/W 0.2574 against the 0.2655 installed (3.1 % margin); the design level FL390 at the
     // mid-cruise weight (0.2806 required, 5.4 % short) is a requirement label the plan does not
-    // fly. The engine-out second segment, which needed 0.2785 (-4.7 %) with the Bartel-Young
-    // take-off lapse (V2 thrust ratio 0.738), needs 0.2528 with Jenkinson's take-off charts
-    // (0.821): met, with 5.0 % to spare (fix lane deck-takeoff 2026-10-14, probe).
-    // Swept-box re-sizing 2026-10-16 (fix-beam-vs-fe, by probe): the strength
+    // fly. Engine-out second segment: with V2 capped at the printed V2/VS maxi (1.35
+    // VSR where the type prints none; Airbus Getting to Grips with Aircraft Performance, 2002,
+    // p. 194) and the AVE's declared high-lift system, the registered AVE is
+    // climb-limited at its declared MTOW (the declared mass and thrust are inputs):
+    // it needs static T/W 0.2658 at 1.35 VSR against 0.2655 installed (0.1 % short,
+    // inside the +-8.2 % take-off chart scatter). Either outcome is legitimate as the margin
+    // moves; what must hold is that a shortfall stays a warning inside the scatter, comes with
+    // the climb-limit finding at the V2 cap, and never becomes a thrust error.
+    // Swept-box re-sizing: the strength
     // sizing resolves the moment about the section normal to the swept elastic
     // axis (M/cos L, Torenbeek 2013 Eq. 11.11), so the AVE box (31.0 t both
     // wings) exceeds the FLOPS complete-wing mass (29.45 t) and the inventory
     // check reports no positive secondary remainder. That is the only Error,
-    // and it is an open owner decision, not a modelling defect hidden here.
+    // and it follows from the declared mass, not from a modelling defect hidden here.
     assert!(
-        ave_errors
-            .iter()
-            .all(|finding| finding.code == FindingCode::StructuralInventoryUnverified),
-        "{ave_errors:?}"
-    );
-    assert!(
-        !ave.physical_findings.iter().any(|finding| matches!(
+        ave_errors.iter().all(|finding| matches!(
             finding.code,
-            FindingCode::ThrustWithinChartScatter | FindingCode::ThrustMarginViolation
+            FindingCode::StructuralInventoryUnverified | FindingCode::TailScrapeViolation
         )),
-        "{:?}",
-        ave.physical_findings
+        "{ave_errors:?}"
     );
     assert!(
         !ave.physical_findings
             .iter()
-            .any(|finding| finding.message.contains("second segment")
-                || finding.message.contains("second-segment")),
-        "the AVE meets the second segment (no error and no take-off-band warning): {:?}",
+            .any(|finding| finding.code == FindingCode::ThrustMarginViolation),
+        "{:?}",
         ave.physical_findings
     );
+    let second_segment_shortfalls: Vec<_> = ave
+        .physical_findings
+        .iter()
+        .filter(|finding| finding.code == FindingCode::ThrustWithinChartScatter)
+        .collect();
+    for finding in &second_segment_shortfalls {
+        assert_eq!(finding.severity, alas_pipeline::FindingSeverity::Warning);
+        assert!(finding.message.contains("second segment"), "{finding:?}");
+    }
+    if !second_segment_shortfalls.is_empty() {
+        let climb_limit = ave
+            .physical_findings
+            .iter()
+            .find(|finding| finding.code == FindingCode::ImprovedClimbV2)
+            .expect("a second-segment shortfall comes with the climb-limit finding");
+        assert_eq!(
+            climb_limit.severity,
+            alas_pipeline::FindingSeverity::Warning
+        );
+        assert!(
+            climb_limit.message.contains("1.350"),
+            "the climb limit is at the V2/VS maxi cap: {climb_limit:?}"
+        );
+    }
     let ave_scrape = ave
         .physical_findings
         .iter()
         .find(|finding| finding.message.contains("tail-scrape"))
-        .expect("AVE still reports its tail-scrape shortfall as a warning");
-    assert_eq!(ave_scrape.severity, alas_pipeline::FindingSeverity::Warning);
+        .expect("AVE reports its tail-scrape shortfall");
+    assert_eq!(ave_scrape.severity, alas_pipeline::FindingSeverity::Error);
     // The ground plane hangs below the lowest belly point, 0.70 m above the
     // nose-tip-centreline datum used before (0.7 m nose droop on AVE), so the
     // tail sits closer to the runway: 6.79 -> 5.18 deg. Geometry phase 1 (fitted aft loft and
-    // tailcone) lifts it to 6.94 deg.
+    // tailcone) lifts it to 6.94 deg. The AVE then declares its belly clearance
+    // (2.44 m from the Boeing 777-9 airport-planning ground clearances,
+    // D6-86073 Rev G Table 2-2) instead of the 0.35 D fallback (2.17 m): the
+    // ground is 0.27 m lower under the same aft belly, 6.94 -> 7.65 deg (probe
+    // `clearance_before_after_probe`, AVE).
+    // The AVE-specific cause (aft keel or crown refit) has no loft-swap probe yet, so it
+    // is not stated here (the APU cone is A380-only).
+    // The scrape angle (7.537 deg) follows the main-gear station and the loaded takeoff
+    // state, the CG/NP family of effects (the neutral point, `alas-stab` fuselage term, and
+    // the mission fuel). The finding (an Error) and its 10 deg limit are unchanged.
     assert!(
-        (ave_scrape.actual.expect("AVE tail-scrape actual") - 6.939_530_656_850_694).abs() < 0.01,
+        (ave_scrape.actual.expect("AVE tail-scrape actual") - 7.536_943_534_818_638).abs() < 0.01,
         "AVE tail-scrape clearance {:?} deg",
         ave_scrape.actual
     );
@@ -905,16 +1063,30 @@ fn a320_source_max_payload_case_separates_net_tare_gross_and_usable_fuel() {
     // lower hold has no installed loading system (`lower_deck_uld == "BLK"`,
     // see `preset_flops::declared_cargo_loading`). This source maximum-payload
     // case is the cargo-loading-system option/STC: its net freight (20,682 kg)
-    // and a six-ULD hold with 492 kg combined tare (6 x 82 kg, the
+    // and a seven-ULD hold with 574 kg combined tare (7 x 82 kg, the
     // reduced-height LD3-45's tare) are the containerized variant's numbers,
     // not the bulk baseline's. Select that variant explicitly rather than
     // inheriting the preset's delivered-aircraft default.
     // With the A320 wing datum anchored to the Airbus LEMAC
-    // (`root_datum_x_m` 11.891 m), the lower forward hold, bounded by
-    // `wing_box_x_range()`, has room for six LD3-45 rows: the net
-    // freight/bag/belly-cargo demand (20,682 kg) is carried in six containers
-    // with 492 kg combined tare, so total gross payload is 21,174 kg.
+    // (`root_datum_x_m` 11.891 m), the lower holds, bounded by
+    // `wing_box_x_range()`, take LD3-45 rows. The A320's lower holds are declared from AC fig. 2-6-0-991-003
+    // (forward 4.95 m from x = 7.44 m, aft 9.83 m from x = 18.87 m) and the
+    // AC prints 3 forward + 4 aft LD3-45 positions (fig. 2-6-0-991-006); the
+    // model has 3 forward and 3 aft: the fourth aft position (x = 24.6 m,
+    // footprint to 25.4 m) falls where the lofted belly rises (clear height
+    // 1.142 m at 25.5 m against the 1.14 m container, and the hold chord
+    // narrows). The six positions
+    // carry the 5,562 kg of bags and belly cargo (6 x 1,052 kg net), and the
+    // 82 kg of tare of the missing seventh container is the difference to the
+    // source's 21,256 kg.
     config.cabin.cargo.lower_deck_uld = "LD3-45".to_owned();
+    // The source's maximum structural payload puts 5,562 kg of bags and belly freight in six
+    // 3.6 m3 LD3-45 positions: 257.5 kg/m3 at the very least, against the ICAO default 161 kg/m3
+    // a container is limited to. The case asserts loading limited by the
+    // positions' own mass (1,052 kg net on 3.6 m3, binding from 292 kg/m3 up), so any declared
+    // density of 292 kg/m3 or more gives the identical case: 300 is a scenario declaration
+    // (dense freight, the source's structural payload), not a data value.
+    config.cabin.cargo.stowage_density_kg_m3 = Some(300.0);
 
     let airplane = AircraftBuilder::new(Some(config.geometry.clone()))
         .build(Some(&preset.design_vector), true)

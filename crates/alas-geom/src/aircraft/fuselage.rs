@@ -37,6 +37,18 @@ use crate::loft::Loft;
 /// `width == height`).
 pub const DEFAULT_SHAPE: f64 = 2.0;
 
+/// Axial run of a closing disc in [`Fuselage::closed_stations`], m: one
+/// millimetre, as the other steps of the station view, so stations keep
+/// strictly increasing in x.
+pub const END_DISC_RUN_M: f64 = 1.0e-3;
+/// Stations of a rounded fuselage tail end.
+const END_DOME_STATIONS: usize = 8;
+/// A forward end ring below this fraction of the widest section is a spinner
+/// tip. Inlet highlights are 0.7 to 0.9, spinner tips below 0.2.
+const SPINNER_WIDTH_FRACTION: f64 = 0.5;
+/// A section thinner than this, m, is already a point.
+const POINT_SIZE_M: f64 = 1.0e-9;
+
 /// [`FuselageXSec::new`] rejects specifying both `radius` and
 /// (`width`, `height`), and rejects specifying neither: the same two
 /// conditions upstream's two `raise ValueError(...)`s guard, restated as a
@@ -57,7 +69,7 @@ pub enum FuselageXSecError {
 /// A fuselage cross-section: center point, width, height and superellipse
 /// shape exponent: `FuselageXSec`, scoped to the fields this program uses
 /// (no normal vector, no analysis-specific options; see the module doc).
-#[derive(Debug, Clone, Copy, PartialEq)]
+#[derive(serde::Serialize, serde::Deserialize, Debug, Clone, Copy, PartialEq)]
 pub struct FuselageXSec {
     /// The center of this cross-section, m in geometry axes.
     pub xyz_c: [f64; 3],
@@ -115,6 +127,20 @@ impl FuselageXSec {
         }
     }
 
+    /// Whether this section has no open ring to close.
+    fn is_point(&self) -> bool {
+        self.width <= POINT_SIZE_M || self.height <= POINT_SIZE_M
+    }
+
+    /// The zero-size section on this one's station.
+    fn as_point(&self) -> Self {
+        Self {
+            width: 0.0,
+            height: 0.0,
+            ..*self
+        }
+    }
+
     /// This cross-section's perimeter ("circumference" for a circular
     /// section): `FuselageXSec.xsec_perimeter`, a closed-form
     /// symbolic-regression fit to the exact (infinite-series) superellipse
@@ -141,6 +167,27 @@ impl FuselageXSec {
     }
 }
 
+/// A scarfed inlet: the rings of the lip lean, the upper lip forward, and come
+/// upright at the crest. Only a surface that is drawn or exported sees it; the
+/// sections the analyses read stay normal to the axis.
+#[derive(serde::Serialize, serde::Deserialize, Debug, Clone, Copy, PartialEq)]
+pub struct LipScarf {
+    /// Station of the inlet ring, m.
+    pub highlight_x_m: f64,
+    /// Axial run over which the lean fades to zero, m.
+    pub blend_m: f64,
+    /// Axial shift per metre below the top of the inlet ring.
+    pub slope: f64,
+}
+
+impl LipScarf {
+    /// The lean of the ring at station `x`, axial metres per metre of height.
+    #[must_use]
+    pub fn lean_at(&self, x: f64) -> f64 {
+        self.slope * (1.0 - (x - self.highlight_x_m) / self.blend_m).clamp(0.0, 1.0)
+    }
+}
+
 /// A fuselage (or other slender body: pod, fuel tank, nacelle): a name and an
 /// ordered list of cross-sections: `Fuselage`, scoped to the fields and
 /// methods this program uses (see the module doc).
@@ -148,7 +195,7 @@ impl FuselageXSec {
 /// A body built from a [`Loft`] also carries it: `xsecs` is then the dense
 /// legacy view of the loft ([`Loft::sample_xsecs`]) that consumers which read
 /// stations keep using, and `loft` serves the exact queries.
-#[derive(Debug, Clone, PartialEq)]
+#[derive(serde::Serialize, serde::Deserialize, Clone, PartialEq)]
 pub struct Fuselage {
     /// The fuselage's name, e.g. `"Fuselage"` or `"Nacelle R"`: later
     /// modules distinguish a nacelle from the main fuselage by substring
@@ -159,6 +206,36 @@ pub struct Fuselage {
     pub xsecs: Vec<FuselageXSec>,
     /// The lofted surface the stations were sampled from, if any.
     pub loft: Option<Arc<Loft>>,
+    /// A separate small cone attached behind the lofted hull (the stepped APU
+    /// exhaust cone), its own body of two stations; the hull curves stay smooth
+    /// and the stations of this cone are also the last two of `xsecs`.
+    pub apu_cone: Option<Arc<Fuselage>>,
+    /// The scarfed inlet of a nacelle, if any.
+    pub lip_scarf: Option<LipScarf>,
+    /// A nacelle hung from the fuselage (a rear-fuselage pair or a tail-centre
+    /// pod) rather than from a wing, as the builder placed it. False for the
+    /// main fuselage, a wing pod and a body read back without the attribute.
+    /// Not part of the `Debug` layout: it is a placement attribute, not geometry.
+    pub fuselage_mounted: bool,
+}
+
+/// The derived layout, with `apu_cone` shown only when there is one: bodies without
+/// an APU cone print exactly as before the field existed (geometry hashes of
+/// the registered presets are taken over this text).
+impl std::fmt::Debug for Fuselage {
+    fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
+        let mut s = f.debug_struct("Fuselage");
+        s.field("name", &self.name)
+            .field("xsecs", &self.xsecs)
+            .field("loft", &self.loft);
+        if let Some(cone) = &self.apu_cone {
+            s.field("apu_cone", cone);
+        }
+        if let Some(scarf) = &self.lip_scarf {
+            s.field("lip_scarf", scarf);
+        }
+        s.finish()
+    }
 }
 
 impl Fuselage {
@@ -168,6 +245,9 @@ impl Fuselage {
             name: name.into(),
             xsecs,
             loft: None,
+            apu_cone: None,
+            lip_scarf: None,
+            fuselage_mounted: false,
         }
     }
 
@@ -181,15 +261,152 @@ impl Fuselage {
                 .loft
                 .as_ref()
                 .map(|loft| Arc::new(loft.translated(xyz))),
+            apu_cone: self
+                .apu_cone
+                .as_ref()
+                .map(|cone| Arc::new(cone.translate(xyz))),
+            lip_scarf: self.lip_scarf.map(|scarf| LipScarf {
+                highlight_x_m: scarf.highlight_x_m + xyz[0],
+                ..scarf
+            }),
+            fuselage_mounted: self.fuselage_mounted,
         }
     }
 
-    /// The wetted area of the lofted surface when there is one (exact skin
-    /// integral, excluding base faces), else [`Self::area_wetted`].
-    pub fn area_wetted_lofted(&self) -> f64 {
+    /// This body marked as hung from the fuselage.
+    #[must_use]
+    pub fn mounted_on_fuselage(mut self) -> Self {
+        self.fuselage_mounted = true;
+        self
+    }
+
+    /// The lean of `station`'s ring, axial metres per metre of height; zero
+    /// without a scarf.
+    #[must_use]
+    pub fn ring_lean(&self, station: &FuselageXSec) -> f64 {
+        self.lip_scarf
+            .map_or(0.0, |scarf| scarf.lean_at(station.xyz_c[0]))
+    }
+
+    /// Axial shift, m, of the surface point at height `z` of `station`'s ring:
+    /// the top of the ring stays on the station.
+    #[must_use]
+    pub fn ring_x_shift_m(&self, station: &FuselageXSec, z: f64) -> f64 {
+        self.ring_lean(station) * (station.xyz_c[2] + 0.5 * station.height - z)
+    }
+
+    /// [`Self::closed_stations`] with each ring's centre where the scarf puts
+    /// it, and the ring's tilt about the +y axis, degrees: for whatever places
+    /// whole sections, an export. Negative tilt moves the top of the ring
+    /// forward (rotation from +z towards +x is positive).
+    #[must_use]
+    pub fn posed_closed_stations(&self) -> Vec<(FuselageXSec, f64)> {
+        self.closed_stations()
+            .into_iter()
+            .map(|mut station| {
+                let lean = self.ring_lean(&station);
+                let tilt_deg = -lean.atan().to_degrees();
+                station.xyz_c[0] += lean * 0.5 * station.height;
+                (station, tilt_deg)
+            })
+            .collect()
+    }
+
+    /// The stations of the closed outer surface, for whatever draws or exports
+    /// a solid: `xsecs` with the open end rings closed, at the same overall
+    /// length. `xsecs` and the loft stay the open body the analyses read, so the
+    /// base area remains a base and no wetted area, volume or ground clearance
+    /// moves with this closure.
+    ///
+    /// * The aft end of a fuselage is rounded: a quarter ellipse over the last
+    ///   half of the smaller end dimension, ending in a point on the same
+    ///   station.
+    /// * The aft end of a nacelle is a flat disc [`END_DISC_RUN_M`] long: a
+    ///   nozzle or plug is cut square, its size is engine data.
+    /// * A forward end smaller than half the widest section is a spinner tip and
+    ///   gets the same disc. A larger one is an inlet lip and stays open: the
+    ///   duct is not modelled, and it now looks onto the closed aft end.
+    /// * The inlet lip of a nacelle on the plane of symmetry, a trijet's centre
+    ///   pod, gets the same disc too, a fan face on the lip: the fin root stands
+    ///   inside that shell, and an open lip would show it through the duct.
+    #[must_use]
+    pub fn closed_stations(&self) -> Vec<FuselageXSec> {
+        let mut stations = self.xsecs.clone();
+        if stations.len() < 2 {
+            return stations;
+        }
+        let widest = stations.iter().map(|s| s.width).fold(0.0, f64::max);
+        let first = stations[0];
+        let centre_pod = self.name.contains("Nacelle") && first.xyz_c[1].abs() <= POINT_SIZE_M;
+        if !first.is_point() && (first.width < SPINNER_WIDTH_FRACTION * widest || centre_pod) {
+            let run = END_DISC_RUN_M.min(0.25 * (stations[1].xyz_c[0] - first.xyz_c[0]));
+            stations[0].xyz_c[0] += run;
+            stations.insert(0, first.as_point());
+        }
+        let last = stations[stations.len() - 1];
+        if last.is_point() {
+            return stations;
+        }
+        if self.name.contains("Nacelle") {
+            let before = stations[stations.len() - 2].xyz_c[0];
+            let run = END_DISC_RUN_M.min(0.25 * (last.xyz_c[0] - before));
+            if let Some(ring) = stations.last_mut() {
+                ring.xyz_c[0] -= run;
+            }
+            stations.push(last.as_point());
+            return stations;
+        }
+        rounded_aft_end(&stations)
+    }
+
+    /// Outer skin chord (full width, m) at station `x` and height `z` (geometry axes): the
+    /// single outer-section source of every consumer that places something inside the body
+    /// (payload lining = this chord minus twice the drawn lining offset). `None` without a loft.
+    #[must_use]
+    pub fn skin_chord_m(&self, x: f64, z: f64) -> Option<f64> {
         self.loft
             .as_ref()
-            .map_or_else(|| self.area_wetted(), |loft| loft.wetted_area())
+            .map(|loft| 2.0 * loft.half_width_at(x, z))
+    }
+
+    /// Half-width of the outer skin at station `x` and height `z` (geometry axes), m:
+    /// the loft's when there is one, else the superellipse of the stations either side,
+    /// interpolated linearly; zero outside the body.
+    #[must_use]
+    pub fn half_width_at(&self, x: f64, z: f64) -> f64 {
+        if let Some(loft) = &self.loft {
+            return loft.half_width_at(x, z);
+        }
+        let Some(pair) = self.xsecs.windows(2).find(|pair| {
+            pair[0].xyz_c[0] <= x && x <= pair[1].xyz_c[0] && pair[1].xyz_c[0] > pair[0].xyz_c[0]
+        }) else {
+            return 0.0;
+        };
+        let t = (x - pair[0].xyz_c[0]) / (pair[1].xyz_c[0] - pair[0].xyz_c[0]);
+        let lerp = |a: f64, b: f64| a + t * (b - a);
+        let (width, height) = (
+            lerp(pair[0].width, pair[1].width),
+            lerp(pair[0].height, pair[1].height),
+        );
+        let shape = lerp(pair[0].shape, pair[1].shape);
+        let u = (2.0 * (z - lerp(pair[0].xyz_c[2], pair[1].xyz_c[2])) / height).abs();
+        if !(width > 0.0 && height > 0.0 && shape > 0.0 && u < 1.0) {
+            return 0.0;
+        }
+        0.5 * width * (1.0 - u.powf(shape)).powf(1.0 / shape)
+    }
+
+    /// The wetted area of the lofted surface when there is one (exact skin
+    /// integral, excluding base faces) plus the separate APU cone, else
+    /// [`Self::area_wetted`].
+    pub fn area_wetted_lofted(&self) -> f64 {
+        let cone = self
+            .apu_cone
+            .as_ref()
+            .map_or(0.0, |cone| cone.area_wetted());
+        self.loft
+            .as_ref()
+            .map_or_else(|| self.area_wetted(), |loft| loft.wetted_area() + cone)
     }
 
     /// The fuselage's wetted area: each adjacent pair of stations'
@@ -205,9 +422,134 @@ impl Fuselage {
     }
 }
 
+/// `stations` with the part aft of `length - d` scaled by the quarter ellipse
+/// `sqrt(1 - t^2)`, `d` being half the smaller end dimension: the end keeps its
+/// station and its centre line, and its corners take the radius the end section
+/// itself allows.
+fn rounded_aft_end(stations: &[FuselageXSec]) -> Vec<FuselageXSec> {
+    let Some(&last) = stations.last() else {
+        return Vec::new();
+    };
+    let end_x = last.xyz_c[0];
+    let depth = (0.5 * last.width.min(last.height)).min(end_x - stations[0].xyz_c[0]);
+    let start_x = end_x - depth;
+    let outline_at = |x: f64| -> FuselageXSec {
+        for pair in stations.windows(2) {
+            let (a, b) = (pair[0], pair[1]);
+            let span = b.xyz_c[0] - a.xyz_c[0];
+            if x <= b.xyz_c[0] && span > 0.0 {
+                let t = ((x - a.xyz_c[0]) / span).clamp(0.0, 1.0);
+                let lerp = |p: f64, q: f64| p + t * (q - p);
+                return FuselageXSec {
+                    xyz_c: [
+                        x,
+                        lerp(a.xyz_c[1], b.xyz_c[1]),
+                        lerp(a.xyz_c[2], b.xyz_c[2]),
+                    ],
+                    width: lerp(a.width, b.width),
+                    height: lerp(a.height, b.height),
+                    shape: lerp(a.shape, b.shape),
+                };
+            }
+        }
+        last
+    };
+    let mut out: Vec<FuselageXSec> = stations
+        .iter()
+        .copied()
+        .filter(|s| s.xyz_c[0] < start_x)
+        .collect();
+    for k in 0..=END_DOME_STATIONS {
+        // Equal turning angle along the quarter ellipse.
+        let angle = std::f64::consts::FRAC_PI_2 * k as f64 / END_DOME_STATIONS as f64;
+        let (t, scale) = (angle.sin(), angle.cos());
+        let outline = outline_at(start_x + depth * t);
+        out.push(if k == END_DOME_STATIONS {
+            last.as_point()
+        } else {
+            FuselageXSec {
+                width: outline.width * scale,
+                height: outline.height * scale,
+                ..outline
+            }
+        });
+    }
+    out
+}
+
 #[cfg(test)]
 mod tests {
     use super::*;
+
+    fn tube(name: &str, first: f64, last: f64) -> Fuselage {
+        let ring = |x: f64, d: f64| {
+            FuselageXSec::new([x, 1.0, 2.0], Some(0.5 * d), None, None, DEFAULT_SHAPE)
+                .expect("radius alone is valid")
+        };
+        Fuselage::new(
+            name,
+            vec![ring(0.0, first), ring(5.0, 2.0), ring(10.0, last)],
+        )
+    }
+
+    #[test]
+    fn a_fuselage_tail_ends_in_a_rounded_point_at_its_own_length() {
+        let body = tube("Fuselage", 1.9, 1.0);
+        let closed = body.closed_stations();
+        let end = closed.last().expect("stations");
+        assert_eq!(end.xyz_c, [10.0, 1.0, 2.0]);
+        assert_eq!((end.width, end.height), (0.0, 0.0));
+        assert!(closed.windows(2).all(|p| p[0].xyz_c[0] < p[1].xyz_c[0]));
+        // The outline is untouched ahead of the half-dimension depth.
+        let start = closed
+            .iter()
+            .position(|s| s.xyz_c[0] >= 9.5)
+            .expect("dome start");
+        assert_eq!(&closed[..start], &body.xsecs[..start]);
+        assert!((closed[start].xyz_c[0] - 9.5).abs() < 1e-12);
+    }
+
+    #[test]
+    fn a_nacelle_ends_in_a_disc_at_its_own_length_and_its_inlet_stays_open() {
+        let body = tube("Nacelle R", 1.8, 0.5);
+        let closed = body.closed_stations();
+        assert_eq!(closed[0], body.xsecs[0]);
+        let end = closed[closed.len() - 1];
+        let ring = closed[closed.len() - 2];
+        assert_eq!(end.xyz_c[0], 10.0);
+        assert_eq!((end.width, end.height), (0.0, 0.0));
+        assert_eq!(ring.width, 0.5);
+        assert!((ring.xyz_c[0] - (10.0 - END_DISC_RUN_M)).abs() < 1e-12);
+    }
+
+    #[test]
+    fn a_centre_pod_inlet_is_closed_on_its_lip() {
+        let mut pod = tube("Nacelle Center", 1.8, 0.5);
+        for xsec in &mut pod.xsecs {
+            xsec.xyz_c[1] = 0.0;
+        }
+        let closed = pod.closed_stations();
+        assert_eq!((closed[0].width, closed[0].xyz_c[0]), (0.0, 0.0));
+        assert_eq!(closed[1].width, 1.8);
+        assert!((closed[1].xyz_c[0] - END_DISC_RUN_M).abs() < 1e-12);
+        assert!(closed.windows(2).all(|p| p[0].xyz_c[0] < p[1].xyz_c[0]));
+    }
+
+    #[test]
+    fn a_spinner_tip_is_closed_and_a_point_is_left_alone() {
+        let spinner = tube("Nacelle L", 0.2, 0.0).closed_stations();
+        assert_eq!((spinner[0].width, spinner[0].xyz_c[0]), (0.0, 0.0));
+        assert_eq!(spinner[1].width, 0.2);
+        assert_eq!(spinner.len(), 4);
+    }
+
+    #[test]
+    fn closing_leaves_the_open_body_the_analyses_read() {
+        let body = tube("Fuselage", 0.0, 1.0);
+        let before = body.xsecs.clone();
+        let _ = body.closed_stations();
+        assert_eq!(body.xsecs, before);
+    }
 
     #[test]
     fn from_width_and_height_keeps_them_distinct() {

@@ -127,6 +127,17 @@ pub struct WingAnalysisState {
     pub(crate) run_revision: u64,
     pub(crate) rx: Option<Receiver<WingAnalysisRun>>,
     pub(crate) cancel_flag: Arc<AtomicBool>,
+    /// A geometry edit waiting out the debounce, or being rebuilt off-thread.
+    pub(crate) pending_geometry: Option<worker::PendingGeometry>,
+    /// The background rebuild of the surfaces and the preview, if one runs.
+    pub(crate) geometry_job: Option<worker::GeometryJob>,
+    /// The analysed surfaces lofted and partitioned for drawing, once per
+    /// geometry; an orbit frame only reprojects it.
+    pub(crate) preview_model: Option<alas_report::families::geometry::SandboxSceneModel>,
+    /// The pane the preview is drawn for, in points (set by the view).
+    pub(crate) preview_canvas: (f64, f64),
+    /// The tight fit of the preview, made once per pane size and geometry.
+    pub(crate) preview_fit: Option<crate::sandbox::scene::OrbitFit>,
 }
 
 impl Default for WingAnalysisState {
@@ -150,7 +161,11 @@ impl Default for WingAnalysisState {
             geometry_error: None,
             source_name: String::new(),
             preview: None,
-            camera: PreviewCamera::isometric(),
+            // A wide, short pane: a low elevation spreads the wing across it.
+            camera: PreviewCamera {
+                pitch_deg: 12.0,
+                ..PreviewCamera::isometric()
+            },
             moment_reference_manual: false,
             geometry_revision: 0,
             preview_revision: 0,
@@ -166,6 +181,11 @@ impl Default for WingAnalysisState {
             run_revision: 0,
             rx: None,
             cancel_flag: Arc::new(AtomicBool::new(false)),
+            pending_geometry: None,
+            geometry_job: None,
+            preview_model: None,
+            preview_canvas: (900.0, 380.0),
+            preview_fit: None,
         }
     }
 }
@@ -182,6 +202,12 @@ impl WingAnalysisState {
     /// question the window asks before showing a number as current.
     pub fn result_is_current(&self) -> bool {
         self.result.is_some() && self.result_revision == self.input_revision
+    }
+
+    /// Whether a geometry edit is still waiting to be reflected in the preview
+    /// (debouncing or rebuilding); the last preview stays on screen meanwhile.
+    pub fn preview_pending(&self) -> bool {
+        self.pending_geometry.is_some()
     }
 
     /// Whether the empennage is part of the analysed configuration.
@@ -211,6 +237,7 @@ impl WingAnalysisState {
     pub fn invalidate_geometry(&mut self) {
         self.geometry_revision = self.geometry_revision.wrapping_add(1);
         self.preview = None;
+        self.preview_fit = None;
         self.invalidate_inputs();
     }
 

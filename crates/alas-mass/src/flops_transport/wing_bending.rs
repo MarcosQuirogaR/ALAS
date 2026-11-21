@@ -39,7 +39,7 @@ pub struct WingStation {
 }
 
 /// The detailed bending factor and its inertia-relief companion.
-#[derive(Debug, Clone, Copy, PartialEq)]
+#[derive(serde::Serialize, serde::Deserialize, Debug, Clone, Copy, PartialEq)]
 pub struct DetailedBendingFactor {
     /// `BTB`: the factor before the sweep-bucket adjustment (equation 26).
     pub unadjusted: f64,
@@ -120,6 +120,11 @@ pub fn detailed_bending_factor(
         // Equation 30: the strip's contribution to the moment arm of every
         // pod outboard of its inboard station, the full strip width for a
         // pod beyond the strip and the partial distance for a pod inside it.
+        // The TM's wording ("next outboard engine") does not settle more than one
+        // pod per side, and FLOPS implementations differ (Aviary reads only the
+        // innermost). The sum is the beam statics: each pod's weight relieves the
+        // moment inboard of it, and equation 39 floors the result. It cannot be
+        // checked against a run: neither Aviary case has two pods on a semi-wing.
         let delme: f64 = engine_eta
             .iter()
             .filter(|&&eta| eta > inboard.eta)

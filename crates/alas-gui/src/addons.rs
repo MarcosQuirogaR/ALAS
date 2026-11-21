@@ -6,14 +6,21 @@
 //!
 //! The GUI-free core is `alas-addons`. Drawing lives in [`view`].
 
+mod files;
+mod highlight;
+mod install;
+mod output_view;
+mod runner;
 mod view;
 
 use std::collections::BTreeMap;
 use std::path::{Path, PathBuf};
-use std::sync::mpsc::{channel, Receiver, TryRecvError};
+use std::sync::atomic::AtomicBool;
+use std::sync::mpsc::Receiver;
+use std::sync::Arc;
 
 use alas_addons::apply::{self, AppliedRecord, PlannedChange, Target};
-use alas_addons::{AddonError, AddonSettings, Discovery, RunOutcome};
+use alas_addons::{AddonError, AddonSettings, Discovery, RunEvent, RunOutcome};
 use alas_config::{validate, AlasConfig, Severity, DESIGN_VARIABLE_SPECS};
 use serde_json::Value;
 
@@ -32,6 +39,16 @@ pub(crate) struct LastRun {
     pub(crate) result: Result<RunOutcome, String>,
 }
 
+/// Which part of the selected add-on's detail pane is shown.
+#[derive(Debug, Default, Clone, Copy, PartialEq, Eq)]
+pub(crate) enum DetailTab {
+    /// Inputs, run controls, progress and outputs.
+    #[default]
+    Run,
+    /// The add-on's file tree and read-only code viewer.
+    Files,
+}
+
 /// State of the Add-ons page.
 #[derive(Default)]
 pub struct AddonsPanel {
@@ -44,11 +61,20 @@ pub struct AddonsPanel {
     pub(crate) input_text: BTreeMap<String, String>,
     pub(crate) python_text: String,
     pub(crate) running: Option<(String, Receiver<Result<RunOutcome, AddonError>>)>,
+    /// Live progress and stderr of the running add-on.
+    pub(crate) events: Option<Receiver<RunEvent>>,
+    /// Set to stop the running add-on.
+    pub(crate) cancel: Option<Arc<AtomicBool>>,
+    pub(crate) run_view: runner::RunView,
+    pub(crate) browser: files::FileBrowser,
+    pub(crate) tab: DetailTab,
     pub(crate) last: Option<LastRun>,
     pub(crate) preview: Option<Vec<PlannedChange>>,
     /// Changes applied in this session and still in effect.
     pub(crate) applied: Vec<AppliedRecord>,
     pub(crate) status: Option<String>,
+    /// Set when a run finishes so the page scrolls to its result once.
+    pub(crate) scroll_to_result: bool,
 }
 
 impl AddonsPanel {
@@ -160,6 +186,7 @@ impl AppState {
             self.addons.selected = self.addons.discovery.addons.first().map(|a| a.id.clone());
         }
         self.addons.preview = None;
+        self.addons.browser = files::FileBrowser::default();
     }
 
     pub(crate) fn save_addon_settings(&mut self) {
@@ -194,108 +221,6 @@ impl AppState {
         summary
     }
 
-    /// Start the selected add-on on a worker thread.
-    pub(crate) fn run_selected_addon(&mut self) {
-        if self.addons.running.is_some() {
-            return;
-        }
-        let Some(id) = self.addons.selected.clone() else {
-            return;
-        };
-        let Some(addon) = self
-            .addons
-            .discovery
-            .addons
-            .iter()
-            .find(|addon| addon.id == id)
-            .cloned()
-        else {
-            return;
-        };
-        let mut inputs = BTreeMap::new();
-        for spec in &addon.manifest.inputs {
-            let text = self
-                .addons
-                .input_text
-                .get(&format!("{id}/{}", spec.name))
-                .map(|text| text.trim().to_owned())
-                .unwrap_or_default();
-            if text.is_empty() {
-                continue;
-            }
-            match text.parse::<f64>() {
-                Ok(value) => {
-                    inputs.insert(spec.name.clone(), value);
-                }
-                Err(_) => {
-                    self.addons.status = Some(format!("`{}` is not a number: {text}", spec.name));
-                    return;
-                }
-            }
-        }
-        let design = self.addon_design_summary();
-        let settings = self.addons.settings.clone();
-        let (tx, rx) = channel();
-        let spawned = std::thread::Builder::new()
-            .name("alas-addon".to_owned())
-            .spawn(move || {
-                let _ = tx.send(alas_addons::run_addon(&addon, &inputs, &design, &settings));
-            });
-        if let Err(error) = spawned {
-            self.addons.status = Some(format!("cannot start the add-on worker: {error}"));
-            return;
-        }
-        self.addons.preview = None;
-        self.addons.status = None;
-        self.addons.running = Some((id, rx));
-    }
-
-    /// Collect a finished add-on run; called every frame.
-    pub fn poll_addons(&mut self) {
-        let Some((id, rx)) = self.addons.running.as_ref() else {
-            return;
-        };
-        let finished = match rx.try_recv() {
-            Ok(result) => Some(result.map_err(|error| error.to_string())),
-            Err(TryRecvError::Empty) => None,
-            Err(TryRecvError::Disconnected) => Some(Err("the add-on worker stopped".to_owned())),
-        };
-        let Some(result) = finished else {
-            return;
-        };
-        let id = id.clone();
-        self.addons.running = None;
-        let name = self
-            .addons
-            .discovery
-            .addons
-            .iter()
-            .find(|addon| addon.id == id)
-            .map(|addon| addon.manifest.name.clone())
-            .unwrap_or_else(|| id.clone());
-        match &result {
-            Ok(outcome) => {
-                let summary: Vec<String> = outcome
-                    .outputs
-                    .iter()
-                    .map(|(key, value)| format!("{key} = {value}"))
-                    .collect();
-                self.log(
-                    format!("Add-on {name}: {}", summary.join(", ")),
-                    LogKind::Info,
-                );
-                if !outcome.log.trim().is_empty() {
-                    self.log(
-                        format!("Add-on {name} log: {}", outcome.log.trim()),
-                        LogKind::Info,
-                    );
-                }
-            }
-            Err(error) => self.log(format!("Add-on {name} failed: {error}"), LogKind::Warn),
-        }
-        self.addons.last = Some(LastRun { id, result });
-    }
-
     /// Before/after rows for the last run's targeted outputs.
     pub(crate) fn preview_addon_changes(&mut self) {
         let Some(last) = self.addons.last.as_ref() else {
@@ -313,12 +238,28 @@ impl AppState {
         else {
             return;
         };
-        match apply::plan(
+        let planned = apply::plan(
             &addon.manifest,
             &outcome.outputs,
             &self.config_values,
             &self.design_values,
-        ) {
+        )
+        .and_then(|mut rows| {
+            // A returned configuration overlay goes through the same preview,
+            // validation and provenance as targeted outputs.
+            if let Some(path) = &outcome.config_overlay {
+                let overlay = apply::read_overlay(path)?;
+                rows.extend(apply::plan_overlay(
+                    &addon.manifest.name,
+                    &addon.manifest.version,
+                    &overlay,
+                    &self.config_values,
+                    &self.design_values,
+                )?);
+            }
+            Ok(rows)
+        });
+        match planned {
             Ok(rows) => {
                 self.addons.status = rows
                     .is_empty()
@@ -360,6 +301,7 @@ impl AppState {
         match apply::apply(&rows, &mut config, &mut design, &validator) {
             Ok(records) => {
                 self.config_values = config;
+                self.bump_config_revision();
                 self.design_values = design;
                 self.on_config_modified();
                 let kept = self.addon_records_in_effect(&records);
@@ -466,8 +408,7 @@ mod tests {
             id: "demo".to_owned(),
             result: Ok(RunOutcome {
                 outputs: BTreeMap::from([("y".to_owned(), value)]),
-                messages: Vec::new(),
-                log: String::new(),
+                ..RunOutcome::default()
             }),
         });
         state

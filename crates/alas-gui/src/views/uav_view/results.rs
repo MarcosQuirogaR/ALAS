@@ -45,11 +45,6 @@ pub(super) fn aircraft_bom(components: &SelectedComponents, ui: &mut Ui) {
                 currency_amount(subtotal.currency, subtotal.amount_minor)
             ));
         }
-        if !estimate.complete {
-            ui.weak(tr("Partial price estimate")).on_hover_text(tr(
-                "The displayed total is partial: shipping, tax, consumables, machining, and payload costs are not inferred.",
-            ));
-        }
     });
 }
 

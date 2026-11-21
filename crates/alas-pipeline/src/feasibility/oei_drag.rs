@@ -1,7 +1,7 @@
 // SPDX-License-Identifier: AGPL-3.0-or-later
 // Copyright (C) 2026 Marcos Quiroga Rodriguez
 
-//! Clean candidate drag at the actual departure/V2 point for the OEI check.
+//! Engine-out drag at the actual departure/V2 point for the OEI check.
 
 use alas_config::AlasConfig;
 use alas_opt::mdo::{
@@ -67,7 +67,8 @@ pub(super) fn assess(
             None,
         ));
     }
-    let departure = alas_config::airports::get(&config.departure_airport)
+    let departure = config
+        .departure_airport_record()
         .map_err(|error| format!("departure airport: {error}"))?;
     let speeds = compute_v_speeds_at_masses(
         takeoff_mass_kg,
@@ -115,19 +116,46 @@ pub(super) fn assess(
         },
     );
     // Both diagnostic and condition-specific branches evaluate this selected
-    // CL. The point projection includes trimmed clean drag; the declared
-    // high-lift and the derived (or configured) asymmetric/failed-engine
-    // terms remain separate.
+    // CL. The point projection is the V2 climb-out locus, which contains the
+    // take-off flaps (no flap increment is added) and, where its source states
+    // the reduction, the asymmetry of the failed engine; otherwise the derived
+    // (or configured) trim term remains separate. The failed-engine drag
+    // itself is always separate.
+    let polar = crate::field_reference::v2_climb_out_polar(config, report);
     Ok(assess_oei_climb(
         point_cd,
         point_k,
         n_engines,
         gradient,
         cl,
-        perf.oei_climb_delta_cd,
+        0.0,
         perf.cl_max_to,
-        Some(evidence.condition),
+        Some(polar.engine_out_condition(evidence.condition)),
     ))
+}
+
+/// Warnings for the inputs of the V2 climb-out locus that its source does not
+/// cover (an undeclared slat state, a Krueger-only leading edge, a critical
+/// engine position without a stated engine-failure reduction), each saying
+/// what was applied.
+fn push_polar_notes(
+    config: &AlasConfig,
+    report: &AnalysisReport,
+    findings: &mut Vec<PhysicalFinding>,
+) {
+    let n_engines = config.geometry.engine.spanwise_positions_m.len();
+    if !(2..=4).contains(&n_engines) {
+        return;
+    }
+    for note in crate::field_reference::v2_climb_out_polar(config, report).notes() {
+        findings.push(warning(
+            FindingCode::TakeoffClimbOutPolarDomain,
+            format!("engine-out second-segment climb: {note}"),
+            None,
+            None,
+            "",
+        ));
+    }
 }
 
 /// Masses, wing area and installed thrust of one climb assessment.
@@ -151,8 +179,9 @@ pub(super) struct ClimbBasis {
 /// An in-flight OEI estimate is useful as a diagnostic, but it is not
 /// dimensionally comparable with the SLS axis used here. Only a complete
 /// condition-specific SLS result may create a hard thrust-margin finding;
-/// missing evidence is surfaced as a warning so a conceptual fallback is not
-/// mistaken for Part 25 evidence.
+/// missing evidence is a failed check (the optimizer rejects such a candidate
+/// with a hard residual) so a conceptual fallback is not mistaken for Part 25
+/// evidence.
 pub(super) fn push_findings(
     config: &AlasConfig,
     report: &AnalysisReport,
@@ -183,8 +212,7 @@ pub(super) fn push_findings(
     });
     if let Some(required_sls_tw) = oei_assessment.required_sls_tw {
         if required_sls_tw.is_finite() && basis.static_tw < required_sls_tw {
-            // The take-off rating carries the take-off band (owner decision
-            // 2026-10-14): a shortfall inside it is a flagged warning, beyond
+            // The take-off rating carries the take-off band: a shortfall inside it is a flagged warning, beyond
             // it a hard failure. A turboprop has no band.
             let band = takeoff_thrust_scatter(config);
             let assessment = ThrustAssessment::takeoff(required_sls_tw, basis.static_tw, band);
@@ -222,19 +250,19 @@ pub(super) fn push_findings(
             ));
             }
         }
-    } else if !matches!(
-        oei_assessment.status,
-        OeiClimbStatus::NotApplicable | OeiClimbStatus::ConceptualInflight
-    ) {
+    } else if !matches!(oei_assessment.status, OeiClimbStatus::NotApplicable) {
+        // The search rejects a candidate whose engine-out climb cannot be
+        // demonstrated (a hard residual), so the report fails it too.
         findings.push(PhysicalFinding {
             code: FindingCode::FieldPerformanceUnavailable,
-            severity: FindingSeverity::Warning,
+            severity: FindingSeverity::Error,
             message: oei_assessment.diagnostic.to_owned(),
             actual: None,
             limit: None,
             unit: "",
         });
     }
+    push_polar_notes(config, report, findings);
     push_certification_findings(config, report, basis, findings);
 }
 
@@ -267,7 +295,7 @@ fn push_certification_findings(
             let reason = model.err().or(artifacts.err()).unwrap_or_default();
             findings.push(PhysicalFinding {
                 code: FindingCode::FieldPerformanceUnavailable,
-                severity: FindingSeverity::Warning,
+                severity: FindingSeverity::Error,
                 message: format!("certification climb checks not scored: {reason}"),
                 actual: None,
                 limit: None,
@@ -276,7 +304,7 @@ fn push_certification_findings(
             return;
         }
     };
-    let departure = alas_config::airports::get(&config.departure_airport).ok();
+    let departure = config.departure_airport_record().ok();
     let arrival = alas_config::airports::get(&config.arrival_airport).ok();
     let checks = evaluate_climb_checks(&CertificationInputs {
         config,
@@ -338,7 +366,7 @@ fn push_certification_findings(
             }
             ClimbOutcome::EvidenceGap(reason) => findings.push(PhysicalFinding {
                 code: FindingCode::FieldPerformanceUnavailable,
-                severity: FindingSeverity::Warning,
+                severity: FindingSeverity::Error,
                 message: format!("{} not scored: {reason}", clause(segment)),
                 actual: None,
                 limit: None,
@@ -362,7 +390,7 @@ mod tests {
     use super::*;
 
     #[test]
-    fn oei_departure_drag_uses_the_shared_table_and_the_shared_evidence() {
+    fn oei_departure_drag_is_the_v2_locus_on_the_shared_thrust_evidence() {
         use alas_opt::mdo::{EngineOutCondition, EngineOutRating};
 
         let mut config = AlasConfig::from_value(&serde_json::json!({"preset": "A320-200"}))
@@ -379,11 +407,8 @@ mod tests {
             .fuel
             .artifacts(&config, &report.design)
             .unwrap_or_else(|error| panic!("A320 artifacts: {error}"));
-        let table = artifacts
-            .drag
-            .table()
-            .unwrap_or_else(|| panic!("native table"));
-        let departure = alas_config::airports::get(&config.departure_airport)
+        let departure = config
+            .departure_airport_record()
             .unwrap_or_else(|error| panic!("departure: {error}"));
         let speeds = compute_v_speeds_at_masses(
             takeoff_mass_kg,
@@ -402,11 +427,15 @@ mod tests {
         let atmosphere =
             alas_atmo::us1976_compute_values(departure.elevation_m, departure.isa_deviation_c);
         let mach = speeds.v2_ms / atmosphere.speed_of_sound_m_s;
-        let reynolds_per_m =
-            atmosphere.density_kg_m3 * speeds.v2_ms / atmosphere.dynamic_viscosity_pa_s;
-        let clean_cd = table.cd0_at_reynolds_per_m(mach, reynolds_per_m)
-            + table.induced_cd(cl)
-            + table.wave_cd(cl, mach);
+        // The V2 climb-out locus (Torenbeek 1982, Eq. 5-29) of a slatted wing
+        // with a failed wing-mounted engine: C0 0.018, E 0.70 lowered 4 %. The
+        // flaps and the asymmetry are in it; the windmilling drag is added.
+        let aspect_ratio = alas_opt::mdo::climb_out_aspect_ratio(
+            &config,
+            report.airplane.b_ref,
+            report.airplane.s_ref,
+        );
+        let locus_cd = 0.018 + cl * cl / (std::f64::consts::PI * aspect_ratio * 0.70 * 0.96);
         // The point projection must not depend on the report's polar fit.
         report.polar_fit.cd0 = f64::NAN;
         report.polar_fit.c1 = f64::NAN;
@@ -439,10 +468,6 @@ mod tests {
                 cd0,
             )
             .unwrap_or_else(|error| panic!("engine-out point: {error}"));
-        let trim = point
-            .asymmetric_trim_cd
-            .unwrap_or_else(|| panic!("handbook trim drag"));
-
         config.performance.oei_condition_to_sls_thrust_ratio = None;
         let result = assess(
             &config,
@@ -452,10 +477,8 @@ mod tests {
             static_thrust_n,
         )
         .unwrap_or_else(|error| panic!("OEI: {error}"));
-        let expected_inflight = 2.0
-            * (far25_oei_gradient(2).unwrap_or(0.0)
-                + (clean_cd + config.performance.oei_climb_delta_cd + point.windmilling_cd + trim)
-                    / cl);
+        let expected_inflight =
+            2.0 * (far25_oei_gradient(2).unwrap_or(0.0) + (locus_cd + point.windmilling_cd) / cl);
         let actual = result
             .required_inflight_tw
             .unwrap_or_else(|| panic!("in-flight T/W"));
@@ -496,7 +519,7 @@ mod tests {
 
         // Unique in-memory records avoid replacing the shared airport registry.
         // Both departures have the same elevation/coordinates and differ only
-        // in temperature, so both consumers must retain the actual field Re.
+        // in temperature.
         static DEPARTURES: std::sync::OnceLock<()> = std::sync::OnceLock::new();
         DEPARTURES.get_or_init(|| {
             for (icao, isa_delta_c) in [("ZUHC", 20.0), ("ZUCC", -20.0)] {
@@ -510,6 +533,7 @@ mod tests {
                     runway_lengths_m: vec![4_000.0],
                     declared_toda_m: Some(4_000.0),
                     declared_lda_m: Some(4_000.0),
+                    departure_surveys: Vec::new(),
                     provenance: Default::default(),
                 })
                 .unwrap_or_else(|error| panic!("regression departure {icao}: {error}"));
@@ -601,9 +625,20 @@ mod tests {
             let optimizer_residual = assessment
                 .residuals
                 .iter()
-                .find(|residual| residual.id == "oei_second_segment")
+                .find(|residual| residual.id == "oei_second_segment_at_departure")
+                .or_else(|| {
+                    assessment
+                        .residuals
+                        .iter()
+                        .find(|residual| residual.id == "oei_second_segment")
+                })
                 .unwrap_or_else(|| panic!("optimizer OEI residual"));
-            assert_eq!(optimizer_residual.role, ResidualRole::Constraint);
+            // The row at the departure's own elevation and temperature (a
+            // diagnostic beside the sea-level ISA certification row).
+            assert!(matches!(
+                optimizer_residual.role,
+                ResidualRole::Constraint | ResidualRole::Diagnostic
+            ));
             assert!(!assessment
                 .residuals
                 .iter()
@@ -640,9 +675,13 @@ mod tests {
             .unwrap_or_else(|| panic!("schedule SLS demand"));
             report_demands.push(schedule_demand);
         }
+        // At one pressure altitude the V2 Mach number does not depend on the
+        // temperature (M^2 = 2 W / (gamma p S CL)), the deck thrust ratio reads
+        // pressure and Mach only, and the V2 climb-out locus has no Reynolds
+        // term: the demand at the schedule speed is the same hot and cold.
         assert!(
-            (report_demands[0] - report_demands[1]).abs() > 1.0e-6,
-            "departure temperature must alter the clean drag demand"
+            (report_demands[0] / report_demands[1] - 1.0).abs() < 1.0e-9,
+            "the V2 demand does not depend on the departure temperature: {report_demands:?}"
         );
     }
 }

@@ -23,6 +23,7 @@ use alas_prop::cycle::sweeps::{
 
 mod carpet;
 pub use carpet::*;
+mod bpr_helpers;
 mod bpr_sensitivity;
 pub use bpr_sensitivity::*;
 // A test asserts on values it constructed or read off a fixed config here

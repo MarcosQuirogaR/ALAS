@@ -35,7 +35,10 @@ fn relative(a: f64, b: f64) -> f64 {
 fn the_fleet_relations_are_measured_and_the_windows_contain_the_fleet() {
     let stats = fleet_statistics().unwrap();
     for preset in registry() {
-        if preset.geometry.engine.propulsion_technology != crate::PropulsionTechnology::Turbofan {
+        // The measured fleet: the transport turbofans, without the business jet.
+        if preset.geometry.engine.propulsion_technology != crate::PropulsionTechnology::Turbofan
+            || preset.class != crate::presets::AircraftClass::Transport
+        {
             continue;
         }
         let wing = WingPlanformSummary::of(&preset.geometry.wing, &preset.design_vector).unwrap();
@@ -103,9 +106,15 @@ fn only_a_preset_less_brief_that_departs_from_the_reference_is_derived() {
         let unchanged = config
             .optimizer
             .design_space
-            .envelope(&preset.design_vector);
+            .envelope_for(&preset.design_vector, preset.class);
+        // The span limit, a wing position derived from the balance and a
+        // held reference sweep are the configuration's own rules
+        // (`design_envelope`), not a clean-sheet derivation.
         for (with, without) in envelope.iter().zip(&unchanged) {
-            if with.name != "span_m" {
+            let held = with.name == "span_m"
+                || (with.name == crate::WING_POSITION_VARIABLE && config.derives_wing_position())
+                || (with.name == "sweep_deg" && config.holds_reference_sweep());
+            if !held {
                 assert_eq!(with, without, "{} {}", preset.name, with.name);
             }
         }
@@ -212,10 +221,15 @@ fn the_derived_box_contains_the_start_and_keeps_the_cabin_sized_fuselage_fixed()
     assert!(fuselage.fixed);
     let (lower, upper) = config.fuselage_sizing_interval_m();
     let f = &config.geometry.fuselage;
+    let (guard_lower, _) = SPECS
+        .iter()
+        .find(|spec| spec.name == "fuselage_length_m")
+        .unwrap()
+        .guardrails_for(config.aircraft_class());
     assert!(
         relative(
             lower,
-            (f.cabin_start_x_m + f.tailcone_length_m + f.diameter_m).max(20.0)
+            (f.cabin_start_x_m + f.tailcone_length_m + f.diameter_m).max(guard_lower)
         ) < 1e-12
     );
     assert!(lower < design.fuselage_length_m && design.fuselage_length_m < upper);
@@ -403,10 +417,9 @@ fn the_derived_box_respects_the_guardrails_and_contains_the_start() {
     let design = config.configured_nominal_design();
     for (variable, spec) in config.design_envelope(&design).iter().zip(SPECS) {
         assert!(variable.lower <= variable.nominal && variable.nominal <= variable.upper);
-        let inside = variable.lower >= spec.preset_lower - 1e-9
-            && variable.upper <= spec.preset_upper + 1e-9;
-        let start_outside =
-            variable.nominal < spec.preset_lower || variable.nominal > spec.preset_upper;
+        let (guard_lower, guard_upper) = spec.guardrails_for(config.aircraft_class());
+        let inside = variable.lower >= guard_lower - 1e-9 && variable.upper <= guard_upper + 1e-9;
+        let start_outside = variable.nominal < guard_lower || variable.nominal > guard_upper;
         assert!(inside || start_outside, "{}", spec.name);
     }
 }
@@ -591,19 +604,148 @@ fn a_four_engine_turboprop_brief_is_not_a_regional_twin() {
 }
 
 #[test]
-fn a_jet_brief_and_a_turboprop_registered_preset_are_untouched_by_the_class() {
+fn a_jet_brief_takes_the_jet_class_and_a_registered_turboprop_is_untouched() {
     let jet = load(&narrowbody_brief());
     assert_eq!(jet.performance, crate::PerformanceConfig::default());
-    assert_eq!(jet.requirements.min_wing_loading_kg_m2, 485.0);
+    // The wing-loading floor is the brief's own largest class wing, not the
+    // AVE reference twin's 485 kg/m^2.
+    let r = &jet.requirements;
+    assert!((r.min_wing_loading_kg_m2 * r.max_wing_area_m2 - r.mtow_kg).abs() < 1e-6);
+    assert!(r.max_wing_area_m2 < 535.0);
+    let t = &jet.mass_model.flops_transport;
+    // A single-aisle section: the short/medium-haul relations and bulk holds,
+    // and a fuel capacity that is a fraction of the brief's MTOW, not the
+    // 200 t of the long-haul study block.
     assert_eq!(
-        jet.mass_model.flops_transport.maximum_fuel_capacity_kg,
-        Some(200_000.0)
+        t.haul_class,
+        Some(crate::OperatingHaulClass::ShortMediumHaul)
+    );
+    assert_eq!(t.cargo_loading, Some(crate::CargoHoldLoading::Bulk));
+    let fuel_fraction = t.maximum_fuel_capacity_kg.unwrap() / r.mtow_kg;
+    assert!((0.1..0.4).contains(&fuel_fraction), "{fuel_fraction}");
+    assert_eq!(t.flight_attendant_count, Some(4));
+    assert_eq!(
+        (t.wing_mounted_engine_count, t.fuselage_mounted_engine_count),
+        (Some(2), Some(0))
     );
     assert_eq!(jet.departure_airport, "London Heathrow (EGLL)");
+    // A key the brief names wins over the class.
+    let mut named = narrowbody_brief();
+    named["mass_model"] = json!({"flops_transport": {"maximum_fuel_capacity_kg": 19_000.0}});
+    assert_eq!(
+        load(&named)
+            .mass_model
+            .flops_transport
+            .maximum_fuel_capacity_kg,
+        Some(19_000.0)
+    );
     let atr = load(&json!({"preset": "ATR72-600"}));
     assert_eq!(atr.requirements.min_wing_loading_kg_m2, 330.0);
     assert!(!atr.derives_clean_sheet_start());
     assert_eq!(atr.departure_airport, "Madrid Barajas (LEMD)");
+}
+
+#[test]
+fn a_jet_brief_without_an_engine_takes_a_catalogue_engine_of_its_size() {
+    let thrust_kn = |value: &serde_json::Value| {
+        let config = load(value);
+        crate::engines::get(&config.geometry.engine.engine_name)
+            .unwrap()
+            .thrust_kn
+    };
+    // A 72.5 t twin needs about a 100-120 kN class engine on its second
+    // segment, not the 467 kN GE9X of the shipped default.
+    let narrow = thrust_kn(&narrowbody_brief());
+    assert!((80.0..160.0).contains(&narrow), "{narrow} kN");
+    // A smaller brief takes a smaller engine.
+    let mut small = narrowbody_brief();
+    small["requirements"]["mtow_kg"] = json!(11_000.0);
+    small["requirements"]["num_passengers"] = json!(8);
+    small["geometry"]["fuselage"]["diameter_m"] = json!(1.8);
+    assert!(thrust_kn(&small) < narrow);
+    // The second segment is flown on the remaining engines at the gradient of
+    // the engine count (CS 25.121(b): 2.4, 2.7 and 3.0 %). On one engine type
+    // and one 250 t twin-aisle airframe, the remaining engines of a quad must
+    // give more thrust than the twin's one (the steeper gradient, the drag of
+    // two more nacelles) but each of the quad's engines less than a third of
+    // the twin's pair; the start engine follows.
+    let heavy = |positions: serde_json::Value| {
+        let mut value = narrowbody_brief();
+        value["requirements"]["mtow_kg"] = json!(250_000.0);
+        value["requirements"]["num_passengers"] = json!(300);
+        value["geometry"]["fuselage"]["diameter_m"] = json!(6.0);
+        value["geometry"]["engine"] = json!({ "spanwise_positions_m": positions });
+        value
+    };
+    let reference = crate::engines::get("CF6-50").unwrap();
+    let per_engine_kn = |positions: serde_json::Value| {
+        let value = heavy(positions);
+        let segment = super::oei_thrust::SecondSegment::of(&load(&value), &value).unwrap();
+        segment.rated_thrust_per_engine_n(reference).unwrap() / 1_000.0
+    };
+    let twin_kn = per_engine_kn(json!([11.0, -11.0]));
+    let tri_kn = per_engine_kn(json!([11.0, 0.0, -11.0]));
+    let quad_kn = per_engine_kn(json!([20.0, 11.0, -11.0, -20.0]));
+    assert!(
+        3.0 * quad_kn > twin_kn,
+        "quad remaining {} kN, twin {twin_kn} kN",
+        3.0 * quad_kn
+    );
+    assert!(
+        2.0 * tri_kn > twin_kn,
+        "tri remaining {} kN, twin {twin_kn} kN",
+        2.0 * tri_kn
+    );
+    assert!(
+        4.0 * quad_kn < 2.0 * twin_kn,
+        "quad installed {} kN",
+        4.0 * quad_kn
+    );
+    assert!(quad_kn < tri_kn && tri_kn < twin_kn);
+    // At 250 t a twin needs about 330 kN per engine on its second segment; the
+    // registered long-haul twins' engine-out thrust-to-weight (0.135) would
+    // give 331 kN.
+    assert!((280.0..400.0).contains(&twin_kn), "{twin_kn} kN");
+    let twin = thrust_kn(&heavy(json!([11.0, -11.0])));
+    let quad = thrust_kn(&heavy(json!([20.0, 11.0, -11.0, -20.0])));
+    assert!(quad < 0.5 * twin, "{quad} kN against {twin} kN");
+    // An engine the brief names is kept.
+    let mut named = narrowbody_brief();
+    named["geometry"] =
+        json!({"fuselage": {"diameter_m": 3.96}, "engine": {"engine_name": "GE9X"}});
+    assert_eq!(load(&named).geometry.engine.engine_name, "GE9X");
+}
+
+#[test]
+fn a_jet_brief_counts_its_engines_where_the_installation_puts_them() {
+    let counts = |positions: serde_json::Value, extra: serde_json::Value| {
+        let mut value = narrowbody_brief();
+        value["requirements"]["mtow_kg"] = json!(195_000.0);
+        value["requirements"]["num_passengers"] = json!(270);
+        value["geometry"]["fuselage"]["diameter_m"] = json!(6.0);
+        value["geometry"]["engine"] = json!({"spanwise_positions_m": positions});
+        if let (Some(engine), Some(extra)) = (
+            value["geometry"]["engine"].as_object_mut(),
+            extra.as_object(),
+        ) {
+            engine.extend(extra.clone());
+        }
+        let config = load(&value);
+        let t = &config.mass_model.flops_transport;
+        (
+            t.wing_mounted_engine_count.unwrap(),
+            t.fuselage_mounted_engine_count.unwrap(),
+            t.haul_class,
+        )
+    };
+    let long = Some(crate::OperatingHaulClass::LongHaul);
+    assert_eq!(
+        counts(json!([20.0, 11.0, -11.0, -20.0]), json!({})),
+        (4, 0, long)
+    );
+    assert_eq!(counts(json!([9.0, -9.0, 0.0]), json!({})), (2, 1, long));
+    let rear = json!({"aft_fuselage": {"inlet_ahead_of_tail_m": 8.0, "axis_z_m": 0.8}});
+    assert_eq!(counts(json!([4.0, -4.0]), rear), (0, 2, long));
 }
 
 #[test]

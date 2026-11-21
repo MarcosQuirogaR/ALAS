@@ -11,6 +11,7 @@
 //! assumed (see [`push_flops_systems_and_operating_items`]).
 
 use crate::breakdown::MassBreakdown;
+use crate::flops_transport::seats::SeatClass;
 use crate::flops_transport::{
     FlopsOperatingItemsBreakdown, FlopsSystemsBreakdown, FlopsTransportBreakdown,
 };
@@ -19,7 +20,7 @@ use crate::ledger::{
 };
 use crate::stations::ComponentStations;
 
-use super::build::{closure_tolerance, propulsion_positions, push_furnishings_item};
+use super::build::{closure_tolerance, propulsion_positions, push_furnishings_item, SeatCentroids};
 
 /// A point-mass ledger item retaining the equation source that produced it.
 ///
@@ -47,6 +48,41 @@ fn push_flops_item(
     });
 }
 
+/// The station of the systems that have no rule of their own (hydraulics, electrics, ECS, military
+/// equipment and the margin residual): the one that puts the centroid of the whole `group_kg` at
+/// `stations.systems`, the published systems-group rule, given where the located items sit (APU
+/// 0.95, avionics and instruments 0.10 fuselage length, anti-ice at the wing, controls 60/20/20
+/// wing/tails). Falls back to the group station when nothing is left over.
+fn systems_remainder_station(
+    stations: &ComponentStations,
+    systems: &FlopsSystemsBreakdown,
+    group_kg: f64,
+) -> [f64; 3] {
+    let fuselage_length_m = stations.fuselage.extent_m[0];
+    let wing_x = stations.wing.position_m[0];
+    let located_kg = systems.apu_kg
+        + systems.instruments_kg
+        + systems.avionics_kg
+        + systems.anti_ice_kg
+        + systems.surface_controls_kg;
+    let located_moment = systems.apu_kg * fuselage_length_m * 0.95
+        + (systems.instruments_kg + systems.avionics_kg) * fuselage_length_m * 0.10
+        + systems.anti_ice_kg * wing_x
+        + systems.surface_controls_kg
+            * (0.60 * wing_x
+                + 0.20 * stations.horizontal_tail.position_m[0]
+                + 0.20 * stations.vertical_tail.position_m[0]);
+    let remainder_kg = group_kg - located_kg;
+    let mut station = stations.systems.position_m;
+    if remainder_kg > 0.0 {
+        let solved = (group_kg * station[0] - located_moment) / remainder_kg;
+        if solved.is_finite() {
+            station[0] = solved.clamp(0.0, fuselage_length_m);
+        }
+    }
+    station
+}
+
 /// Eight of FLOPS's nine systems-and-equipment components at the stations
 /// the module doc's placement contract names: all at the systems station
 /// except APU (0.95 fuselage length), avionics/instruments (0.10 fuselage
@@ -67,15 +103,16 @@ fn push_flops_systems(
     ledger: &mut MassLedger,
     stations: &ComponentStations,
     systems: &FlopsSystemsBreakdown,
+    systems_station: [f64; 3],
+    cargo_equipment_station: [f64; 3],
 ) -> f64 {
     let fuselage_length_m = stations.fuselage.extent_m[0];
     let z = stations.fuselage.position_m[2];
     let apu_station = [fuselage_length_m * 0.95, 0.0, z];
     let forward_bay_station = [fuselage_length_m * 0.10, 0.0, z];
-    let systems_station = stations.systems.position_m;
     let wing_station = stations.wing.position_m;
 
-    let items: [(&str, f64, [f64; 3]); 11] = [
+    let items: [(&str, f64, [f64; 3]); 12] = [
         ("systems-apu", systems.apu_kg, apu_station),
         (
             "systems-instruments",
@@ -87,9 +124,10 @@ fn push_flops_systems(
         (
             "systems-military_cargo_equipment",
             systems.military_cargo_equipment_kg,
-            systems_station,
+            cargo_equipment_station,
         ),
         ("systems-hydraulics", systems.hydraulics_kg, systems_station),
+        ("systems-pneumatic", systems.pneumatic_kg, systems_station),
         ("systems-electrical", systems.electrical_kg, systems_station),
         (
             "systems-air_conditioning",
@@ -133,9 +171,10 @@ fn push_flops_systems(
 }
 
 /// The four FLOPS operating items the module doc's placement contract
-/// names (flight crew at 0.05 fuselage length, cabin crew and passenger
+/// names (flight crew on the flight deck from the built nose loft, FLOPS 0.05 length fallback, cabin crew and passenger
 /// service at the operating-items station, engine oil split across the
-/// propulsion positions). Unusable fuel and cargo containers are not
+/// propulsion positions). `operating_seat_kg`, the LTH seats already placed on
+/// the seat rows, is taken out of the passenger-service row. Unusable fuel and cargo containers are not
 /// placed here: unusable fuel arrives through
 /// [`super::MassStatementInputs::unusable_fuel_items`], and both remain
 /// folded into the reduced furnishings remainder
@@ -146,18 +185,15 @@ fn push_flops_systems(
 fn push_flops_operating_items(
     ledger: &mut MassLedger,
     stations: &ComponentStations,
+    operating_seat_kg: f64,
     operating_items: &FlopsOperatingItemsBreakdown,
     flops: &FlopsTransportBreakdown,
 ) -> f64 {
-    let fuselage_length_m = stations.fuselage.extent_m[0];
-    let z = stations.fuselage.position_m[2];
-    let flight_crew_station = [fuselage_length_m * 0.05, 0.0, z];
-
     let named_items: [(&str, f64, [f64; 3]); 3] = [
         (
             "operating-flight_crew",
             operating_items.flight_crew_and_baggage_kg,
-            flight_crew_station,
+            flight_crew_station(stations),
         ),
         (
             "operating-cabin_crew",
@@ -166,7 +202,7 @@ fn push_flops_operating_items(
         ),
         (
             "operating-passenger_service",
-            operating_items.passenger_service_kg,
+            operating_items.passenger_service_kg - operating_seat_kg,
             stations.operating_items.position_m,
         ),
     ];
@@ -178,16 +214,20 @@ fn push_flops_operating_items(
             MassRole::OperatingItem,
             mass_kg,
             position_m,
-            if flops.cabin_equipment_method
-                == alas_config::CabinEquipmentMethod::LthCivilTransportV1
-            {
-                if id == "operating-passenger_service" {
-                    MassMethod::Correlation("LTH civil transport cabin")
-                } else {
-                    MassMethod::Correlation("FLOPS crew allocation within LTH total")
+            match flops.cabin_equipment_method {
+                alas_config::CabinEquipmentMethod::LthCivilTransportV1 => {
+                    if id == "operating-passenger_service" {
+                        MassMethod::Correlation("LTH civil transport cabin")
+                    } else {
+                        MassMethod::Correlation("FLOPS crew allocation within LTH total")
+                    }
                 }
-            } else {
-                MassMethod::Correlation("FLOPS")
+                alas_config::CabinEquipmentMethod::ExecutiveJetV1
+                    if id == "operating-passenger_service" =>
+                {
+                    MassMethod::Correlation("Torenbeek executive cabin")
+                }
+                _ => MassMethod::Correlation("FLOPS"),
             },
         );
     }
@@ -220,6 +260,81 @@ fn push_flops_operating_items(
         + operating_items.cabin_crew_and_baggage_kg
         + operating_items.passenger_service_kg
         + operating_items.engine_oil_kg
+}
+
+/// The flight-crew station: the geometry-derived flight-deck point (`ComponentStations::flight_crew`, built
+/// nose loft, Raymer 6th ed. ch. 9.2 pp. 235-237). Only when the loft is unavailable does the FLOPS rule,
+/// 0.05 fuselage length, apply (it lies ahead of the cockpit on a short fuselage).
+fn flight_crew_station(stations: &ComponentStations) -> [f64; 3] {
+    if let Some(crew) = &stations.flight_crew {
+        return crew.position_m;
+    }
+    let fuselage_length_m = stations.fuselage.extent_m[0];
+    [
+        fuselage_length_m * 0.05,
+        0.0,
+        stations.fuselage.position_m[2],
+    ]
+}
+
+/// The seats on the cabin layout. Torenbeek 1982 Table 8-15
+/// p. 294 places furnishing from its subdivision and the cabin layout: each
+/// class's seats sit on that class's rows (all rows if the class has none),
+/// the flight-crew seats on the flight deck. Without a layout the passenger
+/// seats stay in the cabin-station rows. Returns the passenger-seat mass placed
+/// and the mass taken out of furnishings.
+fn push_seats(
+    ledger: &mut MassLedger,
+    stations: &ComponentStations,
+    flops: &FlopsTransportBreakdown,
+    (by_class, all): SeatCentroids,
+) -> (f64, f64) {
+    let seats = &flops.seats;
+    let (prefix, group, role) = if seats.in_operating_items {
+        (
+            "operating-seats",
+            MassGroup::OperatingItems,
+            MassRole::OperatingItem,
+        )
+    } else {
+        ("furnishings-seats", MassGroup::Furnishings, MassRole::Fixed)
+    };
+    let mut placed_kg = 0.0;
+    for class in all.map_or(&[][..], |_| &SeatClass::ALL[..]) {
+        let mass_kg = seats.passenger_kg[class.index()];
+        if mass_kg > 0.0 {
+            let name = ["first", "business", "tourist"][class.index()];
+            let position_m = by_class[class.index()].or(all).unwrap_or_default();
+            let id = format!("{prefix}-{name}");
+            push_flops_item(
+                ledger,
+                &id,
+                group,
+                role,
+                mass_kg,
+                position_m,
+                MassMethod::LayoutPlacement,
+            );
+            placed_kg += mass_kg;
+        }
+    }
+    if seats.flight_deck_kg > 0.0 {
+        push_flops_item(
+            ledger,
+            "furnishings-flight_deck_seats",
+            MassGroup::Furnishings,
+            MassRole::Fixed,
+            seats.flight_deck_kg,
+            flight_crew_station(stations),
+            MassMethod::Correlation("FLOPS"),
+        );
+    }
+    let from_furnishings_kg = if seats.in_operating_items {
+        0.0
+    } else {
+        placed_kg
+    };
+    (placed_kg, from_furnishings_kg + seats.flight_deck_kg)
 }
 
 /// The FLOPS path: eight named systems items, the systems-group residual,
@@ -258,8 +373,25 @@ pub(super) fn push_flops_systems_and_operating_items(
     stations: &ComponentStations,
     flops: &FlopsTransportBreakdown,
     unusable_fuel_items: &[MassItem],
+    seat_centroids: SeatCentroids,
 ) -> Result<(), LedgerError> {
-    let placed_systems_kg = push_flops_systems(ledger, stations, &flops.systems);
+    // A civil freighter's pallet handling system lies on the main deck and is
+    // no part of the systems the group station rule describes.
+    let deck_handling = super::freight_items::deck_handling_station(stations, flops).filter(|_| {
+        flops.systems.military_cargo_equipment_kg > 0.0
+            && flops.systems.military_cargo_equipment_kg < masses.systems
+    });
+    let ruled_systems_kg =
+        masses.systems - deck_handling.map_or(0.0, |_| flops.systems.military_cargo_equipment_kg);
+    let systems_remainder_station =
+        systems_remainder_station(stations, &flops.systems, ruled_systems_kg);
+    let placed_systems_kg = push_flops_systems(
+        ledger,
+        stations,
+        &flops.systems,
+        systems_remainder_station,
+        deck_handling.unwrap_or(systems_remainder_station),
+    );
     let systems_residual_kg = masses.systems - placed_systems_kg;
     if systems_residual_kg.abs() > closure_tolerance(masses.systems) {
         push_flops_item(
@@ -268,13 +400,23 @@ pub(super) fn push_flops_systems_and_operating_items(
             MassGroup::Systems,
             MassRole::Fixed,
             systems_residual_kg,
-            stations.systems.position_m,
+            systems_remainder_station,
             MassMethod::Correlation("FLOPS empty mass margin"),
         );
     }
 
-    let placed_operating_items_kg =
-        push_flops_operating_items(ledger, stations, &flops.operating_items, flops);
+    let (seat_kg, seat_furnishings_kg) = push_seats(ledger, stations, flops, seat_centroids);
+    let placed_operating_items_kg = push_flops_operating_items(
+        ledger,
+        stations,
+        if flops.seats.in_operating_items {
+            seat_kg
+        } else {
+            0.0
+        },
+        &flops.operating_items,
+        flops,
+    );
     let allocated_unusable_kg = flops.operating_items.unusable_fuel_kg;
     let supplied_unusable_kg: f64 = unusable_fuel_items.iter().map(|item| item.mass_kg).sum();
     let relieved_unusable_kg = if unusable_fuel_items.is_empty() {
@@ -292,7 +434,7 @@ pub(super) fn push_flops_systems_and_operating_items(
     };
 
     let reduced_furnishings_kg =
-        masses.furnishings - placed_operating_items_kg - relieved_unusable_kg;
+        masses.furnishings - placed_operating_items_kg - relieved_unusable_kg - seat_furnishings_kg;
     push_furnishings_item(
         ledger,
         reduced_furnishings_kg,
@@ -307,6 +449,9 @@ pub(super) fn push_flops_systems_and_operating_items(
             }
             alas_config::CabinEquipmentMethod::RegionalTurbopropV1 => {
                 MassMethod::Correlation("Torenbeek regional turboprop systems residual")
+            }
+            alas_config::CabinEquipmentMethod::ExecutiveJetV1 => {
+                MassMethod::Correlation("Torenbeek executive cabin")
             }
             alas_config::CabinEquipmentMethod::FlopsTransportV1 => MassMethod::Correlation("FLOPS"),
         },

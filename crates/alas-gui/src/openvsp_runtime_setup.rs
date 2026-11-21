@@ -22,6 +22,7 @@ use std::sync::Arc;
 use std::thread;
 
 use alas_exec::process::{kill_process_tree, NewProcessGroup, NoConsoleWindow};
+use alas_exec::SupervisedSpawn;
 
 /// Location of the maintained setup script, relative to the repository or
 /// packaged-application root. Never edited by this module: only its literal
@@ -147,26 +148,40 @@ fn read_manifest(path: &Path) -> Option<PreviewManifest> {
 /// script, searching upward from `start`: a source checkout keeps the script
 /// under `tools/`, a packaged install under its source snapshot.
 fn locate_from(start: Option<&Path>) -> Option<(PathBuf, PathBuf)> {
+    // A script is accepted only in the install itself (the executable's folder
+    // or its parent) or in a source checkout (a folder holding `Cargo.toml`);
+    // a folder further up, such as a drive root, is not part of the install.
     let mut current = start;
+    let mut depth = 0_usize;
     while let Some(dir) = current {
-        let script = [SCRIPT_RELATIVE_PATH, PACKAGED_SCRIPT_RELATIVE_PATH]
-            .iter()
-            .map(|relative| dir.join(relative))
-            .find(|path| path.is_file());
-        if let Some(script) = script {
-            return Some((dir.to_path_buf(), script));
+        let checkout = dir.join("Cargo.toml").is_file();
+        if depth <= 1 || checkout {
+            let script = [SCRIPT_RELATIVE_PATH, PACKAGED_SCRIPT_RELATIVE_PATH]
+                .iter()
+                .map(|relative| dir.join(relative))
+                .find(|path| path.is_file());
+            if let Some(script) = script {
+                return Some((dir.to_path_buf(), script));
+            }
         }
-        if dir.join("Cargo.toml").is_file() {
+        if checkout {
             return None;
         }
         current = dir.parent();
+        depth += 1;
     }
     None
 }
 
 fn locate_install() -> Option<(PathBuf, PathBuf)> {
-    let exe = std::env::current_exe().ok()?;
-    locate_from(exe.parent())
+    // The running executable never moves, so the upward directory walk is done once.
+    static INSTALL: std::sync::OnceLock<Option<(PathBuf, PathBuf)>> = std::sync::OnceLock::new();
+    INSTALL
+        .get_or_init(|| {
+            let exe = std::env::current_exe().ok()?;
+            locate_from(exe.parent())
+        })
+        .clone()
 }
 
 fn locate_repo_root() -> Option<PathBuf> {
@@ -240,7 +255,7 @@ fn run_worker(
         .no_window()
         .new_process_group();
 
-    let mut child = match command.spawn() {
+    let mut child = match command.spawn_supervised("OpenVSP preview-runtime setup") {
         Ok(child) => child,
         Err(error) => {
             let _ = sender.send(WorkerMessage::Finished(PreviewInstallEvent::Failed(
@@ -555,6 +570,18 @@ mod worker_tests {
         assert_eq!(root, package);
         assert_eq!(script, tools.join("setup_openvsp_preview.ps1"));
         let _ = fs::remove_dir_all(&package);
+    }
+
+    #[test]
+    fn a_script_in_a_distant_folder_without_a_manifest_is_not_taken() {
+        let root = unique_dir("distant-script");
+        let tools = root.join("tools");
+        fs::create_dir_all(&tools).expect("create tools directory");
+        fs::write(tools.join("setup_openvsp_preview.ps1"), "").expect("write script");
+        let start = root.join("a").join("b").join("c");
+        fs::create_dir_all(&start).expect("create start directory");
+        assert!(super::locate_from(Some(&start)).is_none());
+        let _ = fs::remove_dir_all(&root);
     }
 
     #[test]

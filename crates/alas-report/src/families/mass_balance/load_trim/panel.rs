@@ -1,490 +1,540 @@
 // SPDX-License-Identifier: AGPL-3.0-or-later
 // Copyright (C) 2026 Marcos Quiroga Rodriguez
 
-//! Side panel of the load-and-trim sheet: limit key, worked loading case as
-//! an additive index table, and the run's CG-gate verdict for each state.
+//! Side panel of the load-and-trim sheet: a compact chart key, the weight and
+//! balance table of the worked case with the run's CG-gate verdict, and the
+//! limit mechanism that sets each phase's forward and aft limit.
 //!
-//! The three boxes fill the chart's height exactly: the row pitch is solved
-//! from the number of rows, so the column never ends in an empty band below
-//! the tables whatever the number of loading states.
+//! Every fixed text is its own scene text so the desktop catalog can
+//! translate it after the sheet is drawn; only numbers are formatted in.
 
-use super::layers::{limit_style, LimitKind};
-use super::render::{tag, text, Ink};
-use super::{GatePhase, LoadStep, LoadTrimSheetData};
-use crate::scene::{Fill, Scene, SceneElement, Stroke, TextAlign, CSS_PIXELS_PER_POINT};
+use super::gate::{table_notes, NOTE_ABOVE_MLW, TABLE_NOTE};
+use super::geom::{text_height, text_width, Geom};
+use super::numbers::{kg, signed_tenths};
+use super::render::{marker, text, Ink};
+use super::{EnvelopeKind, LoadStep, LoadTrimSheetData};
+use crate::scene::{Fill, Scene, SceneElement, Stroke, TextAlign};
 
-/// Key text of each limit set. Static strings so the desktop catalog can
-/// translate them.
-pub(super) const LIMIT_KEY: [(LimitKind, &str); 4] = [
-    (LimitKind::Ground, "Ground limits"),
-    (LimitKind::Takeoff, "Takeoff limits"),
-    (LimitKind::Flight, "Flight limits"),
-    (LimitKind::Landing, "Landing limits"),
-];
-/// Key text of the shaded field.
-pub(super) const KEY_SHADE: &str = "Outside ground limits";
+const TITLE_KEY: &str = "Chart key";
+const TITLE_TABLE: &str = "Weight and balance";
+const TITLE_LIMITS: &str = "Governing limits [%MAC]";
+/// Key text of the fuel curve.
+const KEY_FUEL: &str = "Fuel loading, ZFW to TOW (tank sequence)";
+/// The fuel line of a sheet that runs it on to the maximum-fuel takeoff.
+const KEY_FUEL_MAX: &str = "Fuel loading, ZFW to max-fuel TOW (tank sequence)";
+/// Key text of the loading states.
+const KEY_STATE: &str = "Loading state";
+/// Key text of the red band.
+pub(super) const KEY_CROSSED: &str = "No feasible CG range (forward limit aft of aft limit)";
 /// Key text of the ring around a state the run's CG gate failed.
 pub(super) const KEY_OUTSIDE: &str = "State failing the CG gate";
-/// Limit-column text of a loading step the CG gate does not evaluate.
-const NOT_GATED: &str = "not gated";
-const TITLE_KEY: &str = "LIMIT DEFINITIONS";
-const TITLE_POINTS: &str = "LOADING POINTS";
-const TITLE_CHECK: &str = "CG GATE (%MAC)";
-const POINT_HEADERS: [&str; 5] = ["dW kg", "dI", "W kg", "I", "%MAC"];
-const CHECK_HEADERS: [&str; 4] = ["Limit", "Fwd", "Aft", "Margin"];
+/// Key prefix of a published comparison envelope, followed by its source.
+pub(super) const CERTIFIED: &str = "Published";
+/// Key lead of the en-route-above-MLW outline, followed by the label of the
+/// mechanism the gate found bounding it forward.
+pub(super) const KEY_ABOVE_MLW: &str = "En route above MLW, fwd limit:";
+/// Label of the forward and aft limit lines.
+pub(super) const FWD_LIMIT: &str = "Fwd limit";
+/// See [`FWD_LIMIT`].
+pub(super) const AFT_LIMIT: &str = "Aft limit";
+/// Headers of the weight and balance table.
+const TABLE_HEADERS: [&str; 5] = ["W [kg]", "CG [%MAC]", "Fwd", "Aft", "Margin"];
+/// Header of the state column.
+const STATE_HEADER: &str = "State";
+/// The takeoff and landing rows of a sheet that also carries the sizing
+/// loading's maximum-fuel takeoff: they are the flown route's.
+const TABLE_TOW_FLOWN: &str = "TOW (flown route)";
+const TABLE_LW_FLOWN: &str = "LW (flown route)";
 
 /// Axis titles and the sheet name, shared with the chart and the data title.
-pub(super) const AXIS_INDEX: &str = "INDEX";
-pub(super) const AXIS_WEIGHT: &str = "AIRPLANE GROSS WEIGHT - KILOGRAMS";
-pub(super) const SHEET_NAME: &str = "LOAD & TRIM SHEET (ALAS model)";
+pub(super) const AXIS_CG: &str = "CG position [%MAC]";
+pub(super) const AXIS_WEIGHT: &str = "Airplane gross weight [kg]";
+pub(super) const SHEET_NAME: &str = "Load & trim sheet (ALAS model)";
+
+/// Phase names of the governing-limit table.
+const PHASE_TAKEOFF: &str = "Takeoff";
+const PHASE_LANDING: &str = "Landing";
+const PHASE_ZERO_FUEL: &str = "Zero fuel";
 
 /// Every fixed string the sheet draws, for catalog coverage.
 pub const SHEET_TEXT: &[&str] = &[
-    AXIS_INDEX,
+    AXIS_CG,
     AXIS_WEIGHT,
     SHEET_NAME,
     TITLE_KEY,
-    TITLE_POINTS,
-    TITLE_CHECK,
-    "Ground limits",
-    "Takeoff limits",
-    "Flight limits",
-    "Landing limits",
-    KEY_SHADE,
+    TITLE_TABLE,
+    TITLE_LIMITS,
+    "Takeoff envelope",
+    "Landing envelope",
+    "Zero-fuel envelope",
+    FWD_LIMIT,
+    AFT_LIMIT,
+    CERTIFIED,
+    KEY_ABOVE_MLW,
+    KEY_FUEL,
+    KEY_FUEL_MAX,
+    KEY_STATE,
+    KEY_CROSSED,
     KEY_OUTSIDE,
-    NOT_GATED,
-    "State",
-    "dW kg",
-    "W kg",
-    "Limit",
-    "Fwd",
-    "Aft",
-    "Margin",
+    PHASE_TAKEOFF,
+    PHASE_LANDING,
+    PHASE_ZERO_FUEL,
+    "nose-gear load",
+    "rotation",
+    "landing trim",
+    "static margin",
+    "min nose load",
+    "tip-back",
+    STATE_HEADER,
+    TABLE_TOW_FLOWN,
+    super::data::MAX_FUEL_STATE,
+    TABLE_LW_FLOWN,
+    TABLE_NOTE,
+    NOTE_ABOVE_MLW,
+    TABLE_HEADERS[0],
+    TABLE_HEADERS[1],
+    TABLE_HEADERS[2],
+    TABLE_HEADERS[3],
+    TABLE_HEADERS[4],
 ];
-
-/// Rows above and below a box's table: the title band and the bottom pad.
-const TITLE_ROWS: f64 = 1.6;
-const PAD_ROWS: f64 = 0.5;
-/// The row pitch is kept legible and not stretched past readable spacing;
-/// the remainder of the column goes to the gaps between boxes.
-const ROW_MIN: f64 = 16.0;
-const ROW_MAX: f64 = 30.0;
-const GAP_MIN: f64 = 12.0;
-/// Column widths of the two tables in em: the state tag, the state name and
-/// the numeric columns, each with its gap. Digits advance about 0.6 em.
-const POINT_COLUMNS_EM: [f64; 7] = [1.8, 4.6, 4.4, 3.8, 5.0, 3.6, 3.8];
-const CHECK_COLUMNS_EM: [f64; 6] = [1.8, 4.6, 3.4, 3.8, 3.8, 4.8];
-const TABLE_INSET: f64 = 10.0;
-
-/// Group thousands with a space: 78000 -> "78 000".
-pub(super) fn kg(value: f64) -> String {
-    let digits = format!("{:.0}", value.abs());
-    let mut out = String::new();
-    for (i, c) in digits.chars().enumerate() {
-        if i > 0 && (digits.len() - i) % 3 == 0 {
-            out.push(' ');
-        }
-        out.push(c);
-    }
-    if value < 0.0 {
-        format!("-{out}")
-    } else {
-        out
-    }
-}
-
-/// A signed value to one decimal, with no sign on a value that rounds to
-/// zero ("-0.0" would read as outside a limit the state sits on).
-pub(super) fn signed_tenths(value: f64) -> String {
-    let rounded = (value * 10.0).round() / 10.0;
-    if rounded == 0.0 {
-        "0.0".to_owned()
-    } else {
-        format!("{rounded:+.1}")
-    }
-}
-
-/// Geometry of the panel column.
-#[derive(Debug, Clone, Copy, PartialEq)]
-pub(super) struct PanelLayout {
-    pub(super) x: f64,
-    pub(super) top: f64,
-    pub(super) width: f64,
-    /// Row pitch, px.
-    pub(super) row: f64,
-    /// Space between boxes, px.
-    pub(super) gap: f64,
-    /// Table text size, pt.
-    pub(super) font: f64,
-    /// Rows of each box: key, loading points, limit check.
-    pub(super) rows: [usize; 3],
-}
-
-impl PanelLayout {
-    /// Solve the row pitch that makes the three boxes span `top..bottom`.
-    pub(super) fn solve(x: f64, top: f64, bottom: f64, width: f64, rows: [usize; 3]) -> Self {
-        let fixed_rows = 3.0 * (TITLE_ROWS + PAD_ROWS) + rows.iter().sum::<usize>() as f64;
-        let available = (bottom - top).max(0.0);
-        let row = ((available - 2.0 * GAP_MIN) / fixed_rows).clamp(ROW_MIN, ROW_MAX);
-        let gap = ((available - row * fixed_rows) / 2.0).max(GAP_MIN);
-        let table_em = POINT_COLUMNS_EM
-            .iter()
-            .sum::<f64>()
-            .max(CHECK_COLUMNS_EM.iter().sum::<f64>());
-        let width_font = (width - 2.0 * TABLE_INSET) / (table_em * CSS_PIXELS_PER_POINT);
-        let font = width_font.min(row / 2.0).clamp(9.0, 13.0);
-        Self {
-            x,
-            top,
-            width,
-            row,
-            gap,
-            font,
-            rows,
-        }
-    }
-
-    fn box_height(&self, rows: usize) -> f64 {
-        self.row * (TITLE_ROWS + PAD_ROWS + rows as f64)
-    }
-
-    /// Bottom edge of the last box.
-    pub(super) fn bottom(&self) -> f64 {
-        self.top + self.rows.iter().map(|&r| self.box_height(r)).sum::<f64>() + 2.0 * self.gap
-    }
-
-    /// Text size of box titles, pt.
-    fn title_font(&self) -> f64 {
-        self.font + 1.5
-    }
-
-    /// One em of table text, px.
-    fn em(&self) -> f64 {
-        self.font * CSS_PIXELS_PER_POINT
-    }
-}
-
-/// Rows of each box for `data`: the key (four sets, the shaded field and,
-/// when any state is outside its limits, the ring), and a header plus one
-/// row per state in each table.
-pub(super) fn panel_rows(data: &LoadTrimSheetData) -> [usize; 3] {
-    let flagged = data.steps.iter().any(gate_failed);
-    let states = data.steps.len();
-    [5 + usize::from(flagged), states + 1, states + 1]
-}
-
-fn boxed(scene: &mut Scene, ink: &Ink, layout: &PanelLayout, y: f64, rows: usize, title: &str) {
-    scene.add(SceneElement::Rect {
-        x: layout.x,
-        y,
-        width: layout.width,
-        height: layout.box_height(rows),
-        rx: 3.0,
-        fill: Some(Fill::new(ink.paper)),
-        stroke: Some(Stroke::new(ink.text, 1.0)),
-    });
-    text(
-        scene,
-        title,
-        [layout.x + TABLE_INSET, y + 0.85 * layout.row],
-        layout.title_font(),
-        ink.text,
-        TextAlign::Left,
-        true,
-    );
-}
-
-/// Centre line of table row `index` (0 is the header) of a box at `y`.
-fn row_y(layout: &PanelLayout, y: f64, index: usize) -> f64 {
-    y + layout.row * (TITLE_ROWS + 0.5 + index as f64)
-}
-
-/// Right edges of a table's columns, px, from its em widths.
-fn right_edges<const N: usize>(layout: &PanelLayout, columns: [f64; N]) -> [f64; N] {
-    let mut edges = [0.0; N];
-    let mut x = layout.x + TABLE_INSET;
-    for (edge, width) in edges.iter_mut().zip(columns) {
-        x += width * layout.em();
-        *edge = x;
-    }
-    // The last column ends at the box's inner right edge.
-    let shift = layout.x + layout.width - TABLE_INSET - edges[N - 1];
-    for edge in edges.iter_mut().skip(2) {
-        *edge += shift;
-    }
-    edges
-}
-
-fn state_fill(ink: &Ink, item: &str) -> crate::scene::Color {
-    if item.to_ascii_lowercase().contains("fuel") {
-        ink.fuel
-    } else {
-        ink.path
-    }
-}
-
-fn state_tag(scene: &mut Scene, ink: &Ink, layout: &PanelLayout, y: f64, k: usize, item: &str) {
-    tag(
-        scene,
-        [layout.x + TABLE_INSET + 0.9 * layout.em(), y],
-        &format!("{}", k + 1),
-        state_fill(ink, item),
-        ink.paper,
-        ink.paper,
-    );
-}
-
-fn draw_key(scene: &mut Scene, ink: &Ink, layout: &PanelLayout, y: f64, flagged: bool) {
-    boxed(scene, ink, layout, y, layout.rows[0], TITLE_KEY);
-    let (x, font) = (layout.x, layout.font);
-    let label_x = x + TABLE_INSET + 3.4 * layout.em();
-    let mut ry = row_y(layout, y, 0);
-    for (kind, label) in LIMIT_KEY {
-        scene.add(SceneElement::Line {
-            p1: [x + TABLE_INSET, ry],
-            p2: [x + TABLE_INSET + 2.6 * layout.em(), ry],
-            stroke: limit_style(kind, ink.text),
-        });
-        text(
-            scene,
-            label,
-            [label_x, ry],
-            font,
-            ink.text,
-            TextAlign::Left,
-            false,
-        );
-        ry += layout.row;
-    }
-    scene.add(SceneElement::Rect {
-        x: x + TABLE_INSET + 0.4 * layout.em(),
-        y: ry - 0.35 * layout.em(),
-        width: 1.8 * layout.em(),
-        height: 0.7 * layout.em(),
-        rx: 0.0,
-        fill: Some(Fill::new(ink.shade)),
-        stroke: Some(Stroke::new(ink.text, 0.6)),
-    });
-    text(
-        scene,
-        KEY_SHADE,
-        [label_x, ry],
-        font,
-        ink.text,
-        TextAlign::Left,
-        false,
-    );
-    if flagged {
-        ry += layout.row;
-        alert_ring(scene, ink, [x + TABLE_INSET + 1.3 * layout.em(), ry]);
-        text(
-            scene,
-            KEY_OUTSIDE,
-            [label_x, ry],
-            font,
-            ink.text,
-            TextAlign::Left,
-            false,
-        );
-    }
-}
-
-/// The ring drawn around a state outside its limits, on the chart and in
-/// the key.
-pub(super) fn alert_ring(scene: &mut Scene, ink: &Ink, center: crate::scene::Point2D) {
-    scene.add(SceneElement::Circle {
-        center,
-        radius: 13.0,
-        fill: None,
-        stroke: Some(Stroke::new(ink.alert, 2.6)),
-    });
-}
-
-fn header(scene: &mut Scene, ink: &Ink, layout: &PanelLayout, y: f64, name_x: f64) {
-    let font = layout.font;
-    text(
-        scene,
-        "#",
-        [layout.x + TABLE_INSET + 0.9 * layout.em(), y],
-        font,
-        ink.muted,
-        TextAlign::Center,
-        true,
-    );
-    text(
-        scene,
-        "State",
-        [name_x, y],
-        font,
-        ink.muted,
-        TextAlign::Left,
-        true,
-    );
-}
-
-fn draw_points(
-    scene: &mut Scene,
-    data: &LoadTrimSheetData,
-    ink: &Ink,
-    layout: &PanelLayout,
-    y: f64,
-) {
-    boxed(scene, ink, layout, y, layout.rows[1], TITLE_POINTS);
-    let right = right_edges(layout, POINT_COLUMNS_EM);
-    let name_x = right[0] + 0.2 * layout.em();
-    let hy = row_y(layout, y, 0);
-    header(scene, ink, layout, hy, name_x);
-    for (rx, h) in right[2..].iter().zip(POINT_HEADERS) {
-        text(
-            scene,
-            h,
-            [*rx, hy],
-            layout.font,
-            ink.muted,
-            TextAlign::Right,
-            true,
-        );
-    }
-    let mut prev: Option<(f64, f64)> = None;
-    for (k, s) in data.steps.iter().enumerate() {
-        let ry = row_y(layout, y, k + 1);
-        let i = data.index_at(s.mass_kg, s.pct_mac);
-        let (dw, di) = prev.map_or((String::new(), String::new()), |(pm, pi)| {
-            (format!("{:+.0}", s.mass_kg - pm), format!("{:+.1}", i - pi))
-        });
-        state_tag(scene, ink, layout, ry, k, &s.item);
-        text(
-            scene,
-            s.state.clone(),
-            [name_x, ry],
-            layout.font,
-            ink.text,
-            TextAlign::Left,
-            false,
-        );
-        let cells = [
-            dw,
-            di,
-            kg(s.mass_kg),
-            format!("{i:.1}"),
-            format!("{:.1}", s.pct_mac),
-        ];
-        for (rx, cell) in right[2..].iter().zip(cells) {
-            text(
-                scene,
-                cell,
-                [*rx, ry],
-                layout.font,
-                ink.text,
-                TextAlign::Right,
-                false,
-            );
-        }
-        prev = Some((s.mass_kg, i));
-    }
-}
-
-/// The limit-set line style of a gate phase, as the chart draws that set.
-fn phase_style(phase: GatePhase, ink: &Ink) -> Stroke {
-    limit_style(
-        match phase {
-            GatePhase::Ground => LimitKind::Ground,
-            GatePhase::Takeoff => LimitKind::Takeoff,
-            GatePhase::Flight => LimitKind::Flight,
-            GatePhase::Landing => LimitKind::Landing,
-        },
-        ink.text,
-    )
-}
 
 /// Whether the run's CG gate failed the state of `step`.
 pub(super) fn gate_failed(step: &LoadStep) -> bool {
     step.gate.as_ref().is_some_and(|gate| gate.violated)
 }
 
-fn draw_checks(
-    scene: &mut Scene,
-    data: &LoadTrimSheetData,
-    ink: &Ink,
-    layout: &PanelLayout,
-    y: f64,
-) {
-    boxed(scene, ink, layout, y, layout.rows[2], TITLE_CHECK);
-    let right = right_edges(layout, CHECK_COLUMNS_EM);
-    let name_x = right[0] + 0.2 * layout.em();
-    let hy = row_y(layout, y, 0);
-    header(scene, ink, layout, hy, name_x);
-    // The limit column holds the phase's line sample, centred under its header.
-    let glyph = (right[1] + 0.4 * layout.em(), right[2] - 0.2 * layout.em());
-    let font = layout.font;
-    let head = |scene: &mut Scene, label: &str, x: f64, align| {
-        text(scene, label, [x, hy], font, ink.muted, align, true);
-    };
-    head(
-        scene,
-        CHECK_HEADERS[0],
-        0.5 * (glyph.0 + glyph.1),
-        TextAlign::Center,
-    );
-    for (rx, h) in right[3..].iter().zip(&CHECK_HEADERS[1..]) {
-        head(scene, h, *rx, TextAlign::Right);
+/// One row of the chart key.
+enum KeyRow {
+    Envelope(EnvelopeKind),
+    Stroke(Stroke, &'static str),
+    /// A line sample, a translatable lead and a text after it.
+    Led(Stroke, &'static str, String),
+    State,
+    Crossed,
+    Ring,
+}
+
+/// The key rows of `data`: each drawn envelope, the loading curves and fuel
+/// curve when drawn, each certified source, and the ring and red band when
+/// the state or an envelope failed.
+fn key_rows(data: &LoadTrimSheetData, ink: &Ink) -> Vec<KeyRow> {
+    let mut rows: Vec<KeyRow> = data
+        .envelopes()
+        .iter()
+        .map(|e| KeyRow::Envelope(e.kind))
+        .collect();
+    if let Some(set) = &data.en_route_above_mlw {
+        let bound = set.forward_bound.label().to_owned();
+        rows.push(KeyRow::Led(ink.above_mlw_stroke(), KEY_ABOVE_MLW, bound));
     }
-    for (k, s) in data.steps.iter().enumerate() {
-        let ry = row_y(layout, y, k + 1);
-        state_tag(scene, ink, layout, ry, k, &s.item);
+    if data
+        .envelopes()
+        .iter()
+        .any(|e| !e.crossed_bands().is_empty())
+    {
+        rows.push(KeyRow::Crossed);
+    }
+    if data.fuel_curve.len() >= 2 {
+        let label = if data.steps.iter().any(|s| s.state == super::data::MAX_FUEL_STATE) {
+            KEY_FUEL_MAX
+        } else {
+            KEY_FUEL
+        };
+        rows.push(KeyRow::Stroke(Stroke::new(ink.fuel, 1.4), label));
+    }
+    for source in certified_sources(data) {
+        let stroke = Stroke::dashed(ink.certified, 1.5, 6.0, 3.0);
+        rows.push(KeyRow::Led(stroke, CERTIFIED, format!("({source})")));
+    }
+    rows.push(KeyRow::State);
+    if data.steps.iter().any(gate_failed) {
+        rows.push(KeyRow::Ring);
+    }
+    rows
+}
+
+/// The source of each certified comparison line, each once.
+pub(super) fn certified_sources(data: &LoadTrimSheetData) -> Vec<String> {
+    let mut sources: Vec<String> = Vec::new();
+    for line in &data.lines.published {
+        if !sources.contains(&line.source) {
+            sources.push(line.source.clone());
+        }
+    }
+    sources
+}
+
+/// Text size of the panel, pt.
+fn panel_font(geom: &Geom) -> f64 {
+    geom.font(10.5)
+}
+
+/// Row pitch of the panel, px.
+fn row_pitch(font_pt: f64) -> f64 {
+    text_height(font_pt) * 1.32
+}
+
+const INSET: f64 = 12.0;
+const TITLE_ROWS: f64 = 1.5;
+const BOTTOM_PAD_ROWS: f64 = 0.4;
+const BOX_GAP: f64 = 14.0;
+
+/// The state name the table prints. When the sheet also carries the
+/// maximum-fuel takeoff of the sizing loading, the takeoff and landing rows
+/// are the flown route's and say so.
+fn table_label(data: &LoadTrimSheetData, step: &LoadStep) -> String {
+    let two_bases = data.steps.iter().any(|s| s.state == super::data::MAX_FUEL_STATE);
+    match step.state.as_str() {
+        "TOW" if two_bases => TABLE_TOW_FLOWN.to_owned(),
+        "LW" if two_bases => TABLE_LW_FLOWN.to_owned(),
+        _ => step.state.clone(),
+    }
+}
+
+/// The mass basis of the sheet, one line: the flown route's takeoff and fuel
+/// and, when the sheet carries it, the MTOW sizing basis beside it.
+pub(super) fn basis_line(data: &LoadTrimSheetData) -> String {
+    let mass = |state: &str| data.steps.iter().find(|s| s.state == state).map(|s| s.mass_kg);
+    let (Some(tow), Some(zfw)) = (mass("TOW"), mass("ZFW")) else {
+        return String::new();
+    };
+    let t = |kg: f64| format!("{:.1} t", kg / 1000.0);
+    match mass(super::data::MAX_FUEL_STATE) {
+        Some(max) => format!(
+            "Flown route: TOW {}, fuel {}   |   MTOW sizing basis: {}, fuel {}",
+            t(tow),
+            t(tow - zfw),
+            t(max),
+            t(max - zfw)
+        ),
+        None => format!("TOW {}, fuel {}", t(tow), t(tow - zfw)),
+    }
+}
+
+/// The states the table lists: those the gate evaluates.
+fn table_steps(data: &LoadTrimSheetData) -> Vec<&LoadStep> {
+    data.steps.iter().filter(|s| s.gate.is_some()).collect()
+}
+
+/// The phases of the governing-limit table with the state whose mass they
+/// are read at.
+fn limit_phases(data: &LoadTrimSheetData) -> Vec<(EnvelopeKind, &'static str, f64)> {
+    let mass = |state: &str| {
+        data.steps
+            .iter()
+            .find(|s| s.state == state)
+            .map(|s| s.mass_kg)
+    };
+    [
+        (EnvelopeKind::Takeoff, PHASE_TAKEOFF, "TOW"),
+        (EnvelopeKind::Landing, PHASE_LANDING, "LW"),
+        (EnvelopeKind::ZeroFuel, PHASE_ZERO_FUEL, "ZFW"),
+    ]
+    .into_iter()
+    .filter(|_| !data.lines.mechanisms.is_empty())
+    .filter_map(|(kind, name, state)| Some((kind, name, mass(state)?)))
+    .collect()
+}
+
+/// Rows (in row pitches) of the three boxes.
+fn box_rows(data: &LoadTrimSheetData, ink: &Ink) -> [f64; 3] {
+    let key = key_rows(data, ink).len() as f64;
+    let table = 1.0 + (table_steps(data).len() + table_notes(&data.steps).len()) as f64;
+    let limits = 2.0 * limit_phases(data).len() as f64 + 0.2;
+    [key, table, limits]
+}
+
+/// Total height of the panel for `data` at the geometry's font, px.
+pub(super) fn panel_height(data: &LoadTrimSheetData, geom: &Geom) -> f64 {
+    let pitch = row_pitch(panel_font(geom));
+    let ink = Ink::for_palette(&crate::theme::PALETTE_LIGHT);
+    let rows = box_rows(data, &ink);
+    let boxes = rows.iter().filter(|r| **r > 0.3).count() as f64;
+    rows.iter()
+        .filter(|r| **r > 0.3)
+        .map(|r| (r + TITLE_ROWS + BOTTOM_PAD_ROWS) * pitch)
+        .sum::<f64>()
+        + (boxes - 1.0).max(0.0) * BOX_GAP
+}
+
+fn boxed(
+    scene: &mut Scene,
+    ink: &Ink,
+    (x, y, width, height): (f64, f64, f64, f64),
+    title: &str,
+    font: f64,
+) {
+    scene.add(SceneElement::Rect {
+        x,
+        y,
+        width,
+        height,
+        rx: 4.0,
+        fill: Some(Fill::new(ink.panel)),
+        stroke: Some(Stroke::new(ink.grid, 1.0)),
+    });
+    text(
+        scene,
+        title,
+        [x + INSET, y + 0.85 * row_pitch(font)],
+        font + 0.8,
+        ink.text,
+        TextAlign::Left,
+        true,
+    );
+}
+
+/// Draw the panel at the geometry's panel origin.
+pub(super) fn draw_panel(scene: &mut Scene, data: &LoadTrimSheetData, ink: &Ink, geom: &Geom) {
+    let font = panel_font(geom);
+    let pitch = row_pitch(font);
+    let (x, mut y, width) = geom.panel;
+    let rows = box_rows(data, ink);
+    let height = |rows: f64| (rows + TITLE_ROWS + BOTTOM_PAD_ROWS) * pitch;
+
+    // Key.
+    let key = key_rows(data, ink);
+    boxed(scene, ink, (x, y, width, height(rows[0])), TITLE_KEY, font);
+    let sample_x = (x + INSET, x + INSET + 34.0);
+    let label_x = sample_x.1 + 9.0;
+    let room = x + width - INSET - label_x;
+    for (k, row) in key.into_iter().enumerate() {
+        let ry = y + (TITLE_ROWS + k as f64 + 0.35) * pitch;
+        let mid = 0.5 * (sample_x.0 + sample_x.1);
+        let label: String = match row {
+            KeyRow::Envelope(kind) => {
+                let (fill, edge) = ink.envelope(kind);
+                scene.add(SceneElement::Rect {
+                    x: sample_x.0,
+                    y: ry - 5.0,
+                    width: sample_x.1 - sample_x.0,
+                    height: 10.0,
+                    rx: 1.5,
+                    fill: (kind == EnvelopeKind::Takeoff).then(|| Fill::new(fill)),
+                    stroke: Some(if kind == EnvelopeKind::ZeroFuel {
+                        Stroke::dashed(edge, 1.4, 5.0, 2.5)
+                    } else {
+                        Stroke::new(edge, 1.4)
+                    }),
+                });
+                kind.key().to_owned()
+            }
+            KeyRow::Stroke(stroke, label) => {
+                scene.add(SceneElement::Line {
+                    p1: [sample_x.0, ry],
+                    p2: [sample_x.1, ry],
+                    stroke,
+                });
+                label.to_owned()
+            }
+            KeyRow::Led(stroke, lead, rest) => {
+                scene.add(SceneElement::Line {
+                    p1: [sample_x.0, ry],
+                    p2: [sample_x.1, ry],
+                    stroke,
+                });
+                // The lead is translatable; the rest (a source, a mechanism)
+                // follows as its own text.
+                let size = font;
+                text(
+                    scene,
+                    lead,
+                    [label_x, ry],
+                    size,
+                    ink.text,
+                    TextAlign::Left,
+                    false,
+                );
+                let offset = text_width(lead, size) + 6.0;
+                let fit = ((room - offset) / text_width(&rest, size)).min(1.0);
+                text(
+                    scene,
+                    rest,
+                    [label_x + offset, ry],
+                    (size * fit).max(size.min(9.5)),
+                    ink.muted,
+                    TextAlign::Left,
+                    false,
+                );
+                continue;
+            }
+            KeyRow::State => {
+                marker(scene, ink, [mid, ry], false);
+                KEY_STATE.to_owned()
+            }
+            KeyRow::Crossed => {
+                scene.add(SceneElement::Rect {
+                    x: sample_x.0,
+                    y: ry - 5.0,
+                    width: sample_x.1 - sample_x.0,
+                    height: 10.0,
+                    rx: 0.0,
+                    fill: Some(Fill::new(ink.crossed())),
+                    stroke: Some(Stroke::new(ink.alert, 0.6)),
+                });
+                KEY_CROSSED.to_owned()
+            }
+            KeyRow::Ring => {
+                marker(scene, ink, [mid, ry], true);
+                KEY_OUTSIDE.to_owned()
+            }
+        };
+        let fit = (room / text_width(&label, font)).min(1.0);
         text(
             scene,
-            s.state.clone(),
-            [name_x, ry],
-            font,
+            label,
+            [label_x, ry],
+            (font * fit).max(font.min(9.5)),
             ink.text,
             TextAlign::Left,
             false,
         );
-        let Some(gate) = &s.gate else {
-            // An intermediate loading step: the gate does not evaluate it,
-            // so it has no verdict and no ring.
+    }
+    y += height(rows[0]) + BOX_GAP;
+
+    // Weight and balance table.
+    let steps = table_steps(data);
+    boxed(
+        scene,
+        ink,
+        (x, y, width, height(rows[1])),
+        TITLE_TABLE,
+        font,
+    );
+    let inner_w = width - 2.0 * INSET;
+    // Right edges of the five numeric columns as shares of the inner width.
+    let shares = [0.44, 0.62, 0.755, 0.875, 1.0];
+    let right: Vec<f64> = shares.iter().map(|s| x + INSET + s * inner_w).collect();
+    let hy = y + (TITLE_ROWS + 0.35) * pitch;
+    text(
+        scene,
+        STATE_HEADER,
+        [x + INSET, hy],
+        font,
+        ink.muted,
+        TextAlign::Left,
+        true,
+    );
+    for (rx, h) in right.iter().zip(TABLE_HEADERS) {
+        text(scene, h, [*rx, hy], font, ink.muted, TextAlign::Right, true);
+    }
+    scene.add(SceneElement::Line {
+        p1: [x + INSET, hy + 0.55 * pitch],
+        p2: [x + width - INSET, hy + 0.55 * pitch],
+        stroke: Stroke::new(ink.grid, 0.8),
+    });
+    for (k, step) in steps.iter().enumerate() {
+        let ry = hy + (k as f64 + 1.0) * pitch;
+        let failed = gate_failed(step);
+        marker(scene, ink, [x + INSET + 4.0, ry], failed);
+        text(
+            scene,
+            table_label(data, step),
+            [x + INSET + 16.0, ry],
+            font,
+            ink.text,
+            TextAlign::Left,
+            true,
+        );
+        let gate = step.gate.as_ref();
+        let cells = [
+            kg(step.mass_kg),
+            format!("{:.1}", step.pct_mac),
+            gate.map_or_else(String::new, |g| format!("{:.1}", g.fwd_pct_mac)),
+            gate.map_or_else(String::new, |g| format!("{:.1}", g.aft_pct_mac)),
+            gate.map_or_else(String::new, |g| signed_tenths(g.margin_pct_mac())),
+        ];
+        for (index, (rx, cell)) in right.iter().zip(cells).enumerate() {
+            let alert = index == 4 && failed;
             text(
                 scene,
-                NOT_GATED,
-                [glyph.0, ry],
+                cell,
+                [*rx, ry],
                 font,
-                ink.muted,
-                TextAlign::Left,
-                false,
+                if alert { ink.alert } else { ink.text },
+                TextAlign::Right,
+                alert,
             );
-            continue;
-        };
-        scene.add(SceneElement::Line {
-            p1: [glyph.0, ry],
-            p2: [glyph.1, ry],
-            stroke: phase_style(gate.phase, ink),
-        });
-        let cells = [
-            format!("{:.1}", gate.fwd_pct_mac),
-            format!("{:.1}", gate.aft_pct_mac),
-            signed_tenths(gate.margin_pct_mac()),
-        ];
-        for (index, (rx, cell)) in right[3..].iter().zip(cells).enumerate() {
-            let alert = index == 2 && gate.violated;
-            let color = if alert { ink.alert } else { ink.text };
-            text(scene, cell, [*rx, ry], font, color, TextAlign::Right, alert);
         }
     }
-}
+    for (k, (lead, bound)) in table_notes(&data.steps).into_iter().enumerate() {
+        let ny = hy + (steps.len() + k + 1) as f64 * pitch;
+        let at = |dx: f64| [x + INSET + dx, ny];
+        text(
+            scene,
+            lead,
+            at(0.0),
+            font,
+            ink.muted,
+            TextAlign::Left,
+            false,
+        );
+        if let Some(bound) = bound {
+            let dx = text_width(lead, font) + 4.0;
+            text(scene, bound, at(dx), font, ink.text, TextAlign::Left, true);
+        }
+    }
+    y += height(rows[1]) + BOX_GAP;
 
-/// Draw the panel in the column `layout` describes.
-pub(super) fn draw_panel(
-    scene: &mut Scene,
-    data: &LoadTrimSheetData,
-    ink: &Ink,
-    layout: &PanelLayout,
-) {
-    let flagged = data.steps.iter().any(gate_failed);
-    let mut y = layout.top;
-    draw_key(scene, ink, layout, y, flagged);
-    y += layout.box_height(layout.rows[0]) + layout.gap;
-    draw_points(scene, data, ink, layout, y);
-    y += layout.box_height(layout.rows[1]) + layout.gap;
-    draw_checks(scene, data, ink, layout, y);
+    // Governing limits.
+    let phases = limit_phases(data);
+    if !phases.is_empty() {
+        boxed(
+            scene,
+            ink,
+            (x, y, width, height(rows[2])),
+            TITLE_LIMITS,
+            font,
+        );
+        let cols = (
+            x + INSET,
+            x + INSET + 0.30 * inner_w,
+            x + INSET + 0.66 * inner_w,
+        );
+        for (k, (kind, name, mass)) in phases.into_iter().enumerate() {
+            let ry = y + (TITLE_ROWS + 0.35 + 2.0 * k as f64) * pitch;
+            text(
+                scene,
+                name,
+                [cols.0, ry],
+                font,
+                ink.text,
+                TextAlign::Left,
+                true,
+            );
+            for (col, forward, caption) in [(cols.1, true, FWD_LIMIT), (cols.2, false, AFT_LIMIT)] {
+                let value = data.envelope_limit_at(kind, mass, forward);
+                text(
+                    scene,
+                    caption,
+                    [col, ry],
+                    font,
+                    ink.muted,
+                    TextAlign::Left,
+                    false,
+                );
+                let cap_w = text_width(caption, font) + 6.0;
+                text(
+                    scene,
+                    format!("{value:.1}"),
+                    [col + cap_w, ry],
+                    font,
+                    ink.text,
+                    TextAlign::Left,
+                    true,
+                );
+                if let Some(mechanism) = data.governing_mechanism(kind, mass, forward) {
+                    text(
+                        scene,
+                        mechanism.label(),
+                        [col, ry + 0.95 * pitch],
+                        font,
+                        ink.muted,
+                        TextAlign::Left,
+                        false,
+                    );
+                }
+            }
+        }
+    }
 }

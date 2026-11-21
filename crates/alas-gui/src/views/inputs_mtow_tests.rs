@@ -34,7 +34,9 @@ fn page_text(state: &mut AppState) -> Vec<String> {
 }
 
 fn has(text: &[String], needle: &str) -> bool {
-    text.iter().any(|line| line.contains(needle))
+    let shown = crate::views::tr_label(needle);
+    text.iter()
+        .any(|line| line.contains(needle) || line.contains(&shown))
 }
 
 fn optimizing_state() -> AppState {
@@ -76,7 +78,7 @@ fn the_declared_mtow_is_rendered_once_with_the_optimizer_on_or_off() {
         let text = page_text(&mut state);
         let count = text
             .iter()
-            .filter(|line| line.contains("Max take-off weight (MTOW)"))
+            .filter(|line| line.contains("Maximum take-off mass (MTOW)"))
             .count();
         assert_eq!(count, 1, "optimize={optimize}");
     }

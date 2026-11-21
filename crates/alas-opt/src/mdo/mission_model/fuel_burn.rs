@@ -56,10 +56,26 @@ impl FuelBurnModel for SegmentMissionModel {
         self.arrival_elevation_m
     }
 
+    /// Normal cruise is the cruise the trip flies at its level: the declared speed resolved
+    /// there (`cruise_tas_at` of the profile geometry, held to VMO or VC as the trip holds it), or, at a mass
+    /// whose drag at that speed exceeds the cruise rating, the fastest speed the cruise rating
+    /// holds level (the speed at maximum cruise thrust). Pricing it at the raw declared speed
+    /// asked the A220-300 for 241.6 m/s at FL250, above the 209 m/s its trip flies there, and the
+    /// rating could not hold it above 53 t: the FAA reserve could not be priced and the dispatch
+    /// stalled at that mass (faa_domestic, faa_flag_supplemental).
     fn cruise_fuel_flow_kg_s(&self, mass_kg: f64) -> Result<f64, FuelModelError> {
         self.check_cancelled()?;
         self.validate().map_err(FuelModelError::InvalidModel)?;
-        self.level_fuel_flow_kg_s(mass_kg, self.cruise_altitude_m, self.cruise_tas_m_s)
+        let altitude_m = self.cruise_altitude_m;
+        let declared_m_s = self
+            .geometry()
+            .cruise_tas_at(altitude_m, self.cruise_tas_m_s)?;
+        match self.level_fuel_flow_kg_s(mass_kg, altitude_m, declared_m_s) {
+            Err(FuelModelError::NotConverged(refusal)) => self
+                .rating_limited_cruise_flow_kg_s(mass_kg, altitude_m, declared_m_s)
+                .ok_or(FuelModelError::NotConverged(refusal)),
+            flow => flow,
+        }
     }
 
     fn taxi_fuel_flow_kg_s(&self) -> Result<f64, FuelModelError> {
@@ -83,6 +99,43 @@ impl FuelBurnModel for SegmentMissionModel {
 }
 
 impl SegmentMissionModel {
+    /// Fuel flow at the fastest level speed below `refused_m_s` that the cruise rating holds at
+    /// `altitude_m` and `mass_kg`, found by bisection between the minimum-drag speed and the
+    /// refused one; `None` when the rating cannot hold even the minimum-drag speed (the level is
+    /// above the aircraft's cruise ceiling at that mass).
+    fn rating_limited_cruise_flow_kg_s(
+        &self,
+        mass_kg: f64,
+        altitude_m: f64,
+        refused_m_s: f64,
+    ) -> Option<f64> {
+        let density = alas_atmo::us1976_try_compute_values(altitude_m, self.isa_deviation_c)
+            .ok()?
+            .density_kg_m3;
+        let cl_best = self.min_drag_cl(0.0, altitude_m);
+        let minimum_drag_m_s = (2.0 * mass_kg * self.gravity_at(altitude_m)
+            / (density * self.wing_area_m2 * cl_best))
+            .sqrt();
+        if !(minimum_drag_m_s.is_finite() && minimum_drag_m_s < refused_m_s) {
+            return None;
+        }
+        let mut held = (
+            minimum_drag_m_s,
+            self.level_fuel_flow_kg_s(mass_kg, altitude_m, minimum_drag_m_s)
+                .ok()?,
+        );
+        let mut refused = refused_m_s;
+        // 1 mm/s on a cruise speed: far below any effect on the reserve fuel.
+        while refused - held.0 > 1.0e-3 {
+            let middle = 0.5 * (held.0 + refused);
+            match self.level_fuel_flow_kg_s(mass_kg, altitude_m, middle) {
+                Ok(flow) => held = (middle, flow),
+                Err(_) => refused = middle,
+            }
+        }
+        Some(held.1)
+    }
+
     /// Fuel flow in steady level flight at `altitude_m` and `tas_m_s`, kg/s,
     /// on the flown day.
     pub(super) fn level_fuel_flow_kg_s(
@@ -126,14 +179,14 @@ impl SegmentMissionModel {
     /// Gravity at `altitude_m`, m/s^2: `g0 (r / (r + h))^2` with the mean
     /// Earth radius of the native mission (`alas_mission::segments::frames::
     /// compute_gravity`), so the segment and native missions weigh the
-    /// aircraft identically (audit MIS-09). `g0` is `gravity_m_s2`.
+    /// aircraft identically. `g0` is `gravity_m_s2`.
     pub fn gravity_at(&self, altitude_m: f64) -> f64 {
-        self.gravity_m_s2 * (MEAN_EARTH_RADIUS_M / (MEAN_EARTH_RADIUS_M + altitude_m)).powi(2)
+        gravity_at_altitude(self.gravity_m_s2, altitude_m)
     }
 
     /// Cruise true airspeed at `altitude_m` for the model's cruise Mach on
     /// the flown day: `M a(T)`, `a` from the US Standard Atmosphere 1976
-    /// plus the model's temperature offset (audit MIS-03, MIS-04).
+    /// plus the model's temperature offset.
     ///
     /// # Errors
     ///
@@ -197,6 +250,13 @@ impl SegmentMissionModel {
 
 /// Mean Earth radius, m, as in the native mission's gravity.
 const MEAN_EARTH_RADIUS_M: f64 = 6.371e6;
+
+/// Gravity at `altitude_m` for the surface value `gravity_m_s2`, m/s^2:
+/// [`SegmentMissionModel::gravity_at`] without a model, for the checks that
+/// evaluate the states the mission flies.
+pub(crate) fn gravity_at_altitude(gravity_m_s2: f64, altitude_m: f64) -> f64 {
+    gravity_m_s2 * (MEAN_EARTH_RADIUS_M / (MEAN_EARTH_RADIUS_M + altitude_m)).powi(2)
+}
 
 /// `M a(h, dT)` from the US Standard Atmosphere 1976, m/s.
 pub(super) fn cruise_tas_us1976(

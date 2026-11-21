@@ -40,10 +40,10 @@ use alas_config::{ActiveEngineModel, AlasConfig, PerformanceConfig};
 use alas_geom::aircraft::airplane::Airplane;
 use alas_perf::performance::failed_engine_drag::{
     asymmetric_trim_drag_area_m2, feathered_propeller_cd, fin_force_drag_areas_m2,
-    high_bypass_streams, windmilling_jet_drag_area_m2,
+    windmilling_turbofan_drag_area_m2,
 };
 use alas_perf::performance::yaw_balance::{YawControlGeometry, YawTrimMode};
-use alas_perf::performance::{OeiV2Condition, VSpeeds};
+use alas_perf::performance::{GroundEffect, OeiV2Condition, VSpeeds};
 use alas_prop::system::PropulsionRating;
 use alas_prop::turboprop::{
     Pw127m568fModel, Pw127mRating, TurbopropCommand, TurbopropCondition, TurbopropMode,
@@ -121,6 +121,7 @@ enum Source {
     Jet {
         deck: PropulsionDeck,
         fan_diameter_m: f64,
+        bypass_ratio: f64,
     },
     Propeller {
         model: Pw127m568fModel,
@@ -137,8 +138,11 @@ pub struct EngineOutModel {
     windmilling_override: Option<f64>,
     trim_override: Option<f64>,
     yaw: Option<yaw_model::YawModel>,
+    ground_effect: Option<GroundEffect>,
     weight_n: Option<f64>,
     spool_fraction: f64,
+    /// Customer loads of the take-off rating (`takeoff_bleed`).
+    takeoff_loads: alas_prop::system::PropulsionLoads,
 }
 
 /// Airframe handle used only for the fin and centre-of-gravity geometry.
@@ -187,6 +191,7 @@ impl EngineOutModel {
                 Source::Jet {
                     deck,
                     fan_diameter_m: engine.fan_diameter_m,
+                    bypass_ratio: engine.bypass_ratio,
                 }
             }
             ActiveEngineModel::Turboprop(spec) => {
@@ -204,6 +209,7 @@ impl EngineOutModel {
         };
         let perf = &config.performance;
         let yaw = airframe.and_then(|frame| yaw_model::build(config, frame));
+        let ground_effect = airframe.and_then(|frame| ground_effect::build(config, frame));
         Ok(Self {
             source,
             n_engines,
@@ -212,8 +218,10 @@ impl EngineOutModel {
             windmilling_override: perf.oei_windmilling_cd,
             trim_override: perf.oei_asymmetric_trim_cd,
             yaw,
+            ground_effect,
             weight_n: None,
             spool_fraction: perf.go_around_spool_thrust_fraction,
+            takeoff_loads: takeoff_bleed::packs_loads(config),
         })
     }
 
@@ -235,6 +243,13 @@ impl EngineOutModel {
     /// airframe supplies them.
     pub fn yaw_control(&self) -> Option<YawControlGeometry> {
         self.yaw.and_then(|model| model.control)
+    }
+
+    /// The wing over the ground (span, mean chord, aerodynamic-centre height)
+    /// for the ground-effect reduction of the take-off drag, when the airframe
+    /// supplies it.
+    pub fn ground_effect(&self) -> Option<GroundEffect> {
+        self.ground_effect
     }
 
     /// Fraction of go-around thrust available 8 s after the levers move.
@@ -274,7 +289,7 @@ impl EngineOutModel {
                     EngineOutRating::MaximumClimb => PropulsionRating::MaximumClimb,
                 };
                 let at_condition = deck
-                    .rated_point(flight, deck_rating)
+                    .rated_point_with_loads(flight, deck_rating, self.takeoff_loads)
                     .map_err(|error| error.to_string())?
                     .thrust_n;
                 let at_static = deck
@@ -348,13 +363,13 @@ impl EngineOutModel {
         let windmilling_cd = match self.windmilling_override {
             Some(value) => value,
             None => match &self.source {
-                Source::Jet { fan_diameter_m, .. } => {
-                    windmilling_jet_drag_area_m2(
-                        *fan_diameter_m,
-                        &high_bypass_streams(*fan_diameter_m),
-                        mach,
-                    )
-                    .ok_or_else(|| "windmilling drag inputs are invalid".to_owned())?
+                Source::Jet {
+                    fan_diameter_m,
+                    bypass_ratio,
+                    ..
+                } => {
+                    windmilling_turbofan_drag_area_m2(*fan_diameter_m, *bypass_ratio)
+                        .ok_or_else(|| "windmilling drag inputs are invalid".to_owned())?
                         / self.s_ref_m2
                 }
                 Source::Propeller { .. } => feathered_propeller_cd(clean_cd0)
@@ -475,6 +490,8 @@ pub fn second_segment_evidence(
     SecondSegmentEvidence { condition, point }
 }
 
+mod ground_effect;
+mod takeoff_bleed;
 #[cfg(test)]
 mod tests;
 mod yaw_model;

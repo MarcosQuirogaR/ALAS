@@ -30,7 +30,7 @@ const A6: f64 = 0.035;
 const A7: f64 = 1.50;
 
 /// Where the wing equivalent bending material factor comes from.
-#[derive(Debug, Clone, Copy, PartialEq)]
+#[derive(serde::Serialize, serde::Deserialize, Debug, Clone, Copy, PartialEq)]
 pub enum WingBendingFactor {
     /// Equation 10 from the trapezoidal planform; the pod inertia-relief
     /// factor is equation 38.
@@ -49,7 +49,7 @@ pub enum WingBendingFactor {
 }
 
 /// SI inputs to the wing equations.
-#[derive(Debug, Clone, Copy, PartialEq)]
+#[derive(serde::Serialize, serde::Deserialize, Debug, Clone, Copy, PartialEq)]
 pub struct FlopsWingInputs {
     /// Design gross mass `DG`, kg.
     pub design_gross_mass_kg: f64,
@@ -75,6 +75,9 @@ pub struct FlopsWingInputs {
     pub strut_bracing: f64,
     /// Fraction of load carried by the wing `PCTL`.
     pub wing_load_fraction: f64,
+    /// Lower-cover service-life factor on the bending material `W1NIR`
+    /// ([`service_life_bending_factor`]); 1.0 is the equation as published.
+    pub bending_stress_factor: f64,
     /// Number of fuselages `NFUSE`, for the multiple-fuselage factor `CAYF`.
     pub fuselage_count: usize,
     /// Variable-sweep penalty `VARSWP`, 0-1.
@@ -86,7 +89,7 @@ pub struct FlopsWingInputs {
 }
 
 /// The wing mass terms, kg, and the factors that produced them.
-#[derive(Debug, Clone, Copy, PartialEq)]
+#[derive(serde::Serialize, serde::Deserialize, Debug, Clone, Copy, PartialEq)]
 pub struct FlopsWingBreakdown {
     /// Equivalent bending material factor `BT`.
     pub bending_factor: f64,
@@ -130,6 +133,93 @@ pub fn simplified_bending_factor(
     // The April 2018 errata grouping: the power applies to the planform
     // ratio alone and the sweep and thickness factors divide it.
     0.215 * (0.37 + 0.7 * taper_ratio) * aspect_ratio.powf(ems) / (cayl * thickness_to_chord)
+}
+
+/// 1 g tensile stress limit of a riveted 2024-T3 lower cover on a short-range
+/// airliner (more than 50 000 flights), Pa. Torenbeek, *Advanced Aircraft
+/// Design* (2013), sec. 11.7.1, p. 350.
+const LOWER_COVER_1G_STRESS_SHORT_RANGE_PA: f64 = 75.0e6;
+/// 1 g tensile stress of an integrally machined lower cover on a long-range
+/// airliner (about 25 000 flights), Pa. Same page.
+const LOWER_COVER_1G_STRESS_LONG_RANGE_PA: f64 = 110.0e6;
+/// Static tensile limit of the lower cover, Pa: 450 MPa for 2024-T3 less the
+/// 5 % reserve for combined tension and shear. Same page.
+const LOWER_COVER_STATIC_TENSILE_PA: f64 = 0.95 * 450.0e6;
+/// Recommended compressive limit of a highly loaded 7075-T6 upper cover, Pa.
+/// Same book, sec. 11.7.2, p. 351 (transports above about 50 t; a lighter
+/// wing has a lower allowable, which makes the factor below slightly smaller).
+const UPPER_COVER_COMPRESSIVE_PA: f64 = 420.0e6;
+/// Standard inspection cut-out width `w_ic`, m. Same book, eq. 11.57, p. 341.
+const INSPECTION_CUTOUT_WIDTH_M: f64 = 0.25;
+
+/// Bending-material factor for the service life the lower cover is designed
+/// to: the ratio of the mean root stress term of Torenbeek, *Advanced
+/// Aircraft Design* (2013), eq. 11.83 p. 358,
+/// `1/sigma_r = (R_ic/sigma_t + 1.25/sigma_c) / 2`, at the aircraft's haul
+/// class to the same term at the long-range stress level.
+///
+/// `sigma_t = min(0.95 * 450 MPa, sigma_1g * n_ult)` with `sigma_1g` 75 MPa
+/// for a short-range and 110 MPa for a long-range airliner (sec. 11.7.1,
+/// p. 350); `R_ic = 1 + 2 w_ic b_st / S` (eq. 11.57) with the structural span
+/// `b_st = b / cos(sweep of the 40 % chord line)` (eq. 11.15 and p. 358).
+///
+/// The FLOPS bending term carries no service-life input. Against the wing
+/// weights of Beltramo et al., NASA CR-151970 (1977), Table 5.1, the FLOPS
+/// wing reproduces the seven long-range aircraft (mean predicted/actual 1.00)
+/// and is 11 % light on the seven short-range ones; with this factor the
+/// short-range mean is 0.95 and the long-range one is unchanged. The long-range
+/// level is therefore the reference at which the factor is one.
+///
+/// Class boundary. The source names the classes by design life in flights:
+/// more than 50 000 (short range) and about 25 000 (long range). The haul
+/// class stands for that life. In the check above the two groups are apart
+/// on a regulatory measure of it, the flight-cycle implementation times of
+/// 14 CFR 121.1107(a): F-28, BAC 1-11, DC-9 and 737 60 000 flights and 727
+/// 45 000 (short range); DC-8 and DC-10 30 000, L-1011 27 000, 707 and 747
+/// 15 000 (long range). A type between the groups (A300B2, 36 000) is not
+/// placed by the source; a design goal near 50 000 flights sits with the
+/// short-range level.
+///
+/// Better rule once the data exist: a sourced design service goal per
+/// aircraft, with the 1 g stress interpolated between the two published
+/// levels. No preset declares a sourced goal today. The short/medium-haul
+/// presets that would need one are A220-300, A320-200, A320P2F, C919,
+/// E195-E2, ATR72-600, C295, LJ60 and A400M; the long-haul ones (A340-300,
+/// A350-900, A380-800, AVE, B747-400, B747-400F, B787-9, DC-10, DC-10-30F)
+/// lack one too and stay at the long-range level.
+///
+/// The limit is a fatigue property of an aluminium cover, so only
+/// `metallic_cover_fraction` of the bending material takes the factor.
+/// Validity: conventional cantilever transport wings with aluminium-alloy
+/// covers, the domain of the source section.
+pub fn service_life_bending_factor(
+    haul_class: alas_config::OperatingHaulClass,
+    ultimate_load_factor: f64,
+    wing_area_m2: f64,
+    wing_span_m: f64,
+    taper_ratio: f64,
+    quarter_chord_sweep_deg: f64,
+    metallic_cover_fraction: f64,
+) -> f64 {
+    let stress_1g = match haul_class {
+        alas_config::OperatingHaulClass::LongHaul => return 1.0,
+        alas_config::OperatingHaulClass::ShortMediumHaul => LOWER_COVER_1G_STRESS_SHORT_RANGE_PA,
+    };
+    let aspect_ratio = wing_span_m * wing_span_m / wing_area_m2;
+    let elastic_axis_tan = quarter_chord_sweep_deg.to_radians().tan()
+        - 4.0 / aspect_ratio * 0.15 * (1.0 - taper_ratio) / (1.0 + taper_ratio);
+    let structural_span_m = wing_span_m * (1.0 + elastic_axis_tan * elastic_axis_tan).sqrt();
+    let r_ic = 1.0 + 2.0 * INSPECTION_CUTOUT_WIDTH_M * structural_span_m / wing_area_m2;
+    let root_stress_term = |stress_1g: f64| {
+        let tensile = (stress_1g * ultimate_load_factor).min(LOWER_COVER_STATIC_TENSILE_PA);
+        r_ic / tensile + 1.25 / UPPER_COVER_COMPRESSIVE_PA
+    };
+    let metallic =
+        root_stress_term(stress_1g) / root_stress_term(LOWER_COVER_1G_STRESS_LONG_RANGE_PA);
+    if !metallic.is_finite() {
+        return 1.0;
+    }
+    1.0 + (metallic - 1.0) * metallic_cover_fraction.clamp(0.0, 1.0)
 }
 
 /// Equations 33-38 (or 39 for a detailed factor) and 45: the transport wing
@@ -181,6 +271,7 @@ pub fn wing_mass(inputs: &FlopsWingInputs) -> FlopsWingBreakdown {
         * cayf
         * vfact
         * inputs.wing_load_fraction
+        * inputs.bending_stress_factor
         / 1.0e6;
     let w2 =
         A3 * (1.0 - 0.17 * fcomp) * ft2(inputs.movable_surface_area_m2).powf(A4) * dg_lb.powf(A5);
@@ -215,6 +306,37 @@ pub fn vertical_tail_kg(
         * (taper_ratio + 0.5)
         * (count as f64).powf(0.7)
         * ft2(area_per_tail_m2).powf(0.85))
+}
+
+/// The fin mass factor of a tailplane carried by the fin.
+///
+/// FLOPS equation 50 has no term for where the tailplane sits. A fin that
+/// carries it takes the tailplane's loads through its own box, which Torenbeek,
+/// *Synthesis of Subsonic Airplane Design* (1982), Section 8.4.1, p. 282 prices
+/// as `k_v = 1 + 0.15 (S_h h_h) / (S_v b_v)` for fin-mounted stabilizers, with
+/// `k_v = 1` for a fuselage-mounted tailplane. `h_h` is the height of the
+/// tailplane above the fin root and `b_v` the fin span (Fig. 9-20, p. 331), so a
+/// T-tail has `h_h / b_v` of one. Neither Aviary validation case has a tailplane
+/// on the fin, so both keep the published equation 50 result.
+///
+/// Published empennage masses keep the term. Roskam, *Airplane Design* Part V
+/// (1985), Appendix A7, prints 6 T-tail and 9 conventional transport jets whose
+/// fin taper Obert, *Aerodynamic Design of Transport Aircraft* (2009), Fig. 32.15
+/// p. 422 plots (DC-9 0.68, 727 0.44, BAC-111 0.68, F-28 0.72; 737 0.29, 747
+/// 0.30, A300 0.35, 707 0.36, DC-8 0.29). Over equations 46 + 50 at those tapers
+/// the T-tail median stands 1.073 times the conventional one without the term
+/// and 0.988 with it; a uniform error of 0.05 in the read tapers keeps that order.
+pub fn fin_mounted_tailplane_factor(
+    tailplane_area_m2: f64,
+    tailplane_height_above_fin_root_m: f64,
+    fin_area_m2: f64,
+    fin_span_m: f64,
+) -> f64 {
+    if tailplane_height_above_fin_root_m <= 0.0 || fin_area_m2 <= 0.0 || fin_span_m <= 0.0 {
+        return 1.0;
+    }
+    let height = tailplane_height_above_fin_root_m.min(fin_span_m);
+    1.0 + 0.15 * (tailplane_area_m2 * height) / (fin_area_m2 * fin_span_m)
 }
 
 /// Equations 56-57: transport fuselage mass, kg. `fuselage_engines` is the
@@ -298,7 +420,7 @@ pub fn nacelle_kg(
 }
 
 /// SI inputs to the complete structural group.
-#[derive(Debug, Clone, Copy, PartialEq)]
+#[derive(serde::Serialize, serde::Deserialize, Debug, Clone, Copy, PartialEq)]
 pub struct FlopsStructureInputs {
     /// The wing equations' inputs.
     pub wing: FlopsWingInputs,
@@ -312,6 +434,11 @@ pub struct FlopsStructureInputs {
     pub vertical_tail_taper_ratio: f64,
     /// Number of vertical tails `NVERT`.
     pub vertical_tail_count: usize,
+    /// Fin mass factor for a tailplane the fin carries, `k_v` of Torenbeek,
+    /// *Synthesis of Subsonic Airplane Design* (1982), Section 8.4.1, p. 282.
+    /// One for a fuselage-mounted tailplane; see
+    /// [`fin_mounted_tailplane_factor`].
+    pub fin_mounted_tailplane_factor: f64,
     /// Total fuselage length `XL`, m.
     pub fuselage_length_m: f64,
     /// Maximum fuselage width `WF`, m.
@@ -322,6 +449,10 @@ pub struct FlopsStructureInputs {
     pub scaled_fuselage_engines: f64,
     /// Military cargo floor factor `CARGF`.
     pub military_cargo_floor: f64,
+    /// Fractional fuselage increment for a large main-deck cargo door, 0 for
+    /// none ([`super::military_cargo::MAIN_DECK_CARGO_DOOR_FUSELAGE_FRACTION`]),
+    /// applied to whichever fuselage equation prices the aircraft.
+    pub main_deck_cargo_door_fraction: f64,
     /// Design landing mass `WLDG`, kg.
     pub design_landing_mass_kg: f64,
     /// Extended main-gear oleo length `XMLG`, m.
@@ -356,7 +487,7 @@ pub struct FlopsStructureInputs {
 }
 
 /// The structural group, kg, with the wing terms kept separately.
-#[derive(Debug, Clone, Copy, PartialEq)]
+#[derive(serde::Serialize, serde::Deserialize, Debug, Clone, Copy, PartialEq)]
 pub struct FlopsStructureBreakdown {
     /// Wing terms and factors.
     pub wing: FlopsWingBreakdown,
@@ -392,7 +523,7 @@ pub fn estimate_flops_structure(inputs: &FlopsStructureInputs) -> FlopsStructure
         inputs.vertical_tail_taper_ratio,
         inputs.vertical_tail_count,
         dg_kg,
-    );
+    ) * inputs.fin_mounted_tailplane_factor;
     // Equation 56 multiplies by `NFUSE` linearly. The wing inputs carry the
     // single declared fuselage count (equation 34's `CAYF` reads the same
     // one), so the two equations cannot disagree about the architecture.
@@ -406,7 +537,7 @@ pub fn estimate_flops_structure(inputs: &FlopsStructureInputs) -> FlopsStructure
             inputs.military_cargo_floor,
             inputs.wing.fuselage_count.max(1),
         ),
-    };
+    } * (1.0 + inputs.main_deck_cargo_door_fraction);
     let main_gear = main_gear_kg(
         inputs.design_landing_mass_kg,
         inputs.main_gear_oleo_length_m,
@@ -468,6 +599,7 @@ mod tests {
             aeroelastic_tailoring: 0.0,
             strut_bracing: 0.0,
             wing_load_fraction: 1.0,
+            bending_stress_factor: 1.0,
             fuselage_count: 1,
             variable_sweep_penalty: 0.0,
             wing_mounted_engine_count: 2,
@@ -511,6 +643,33 @@ mod tests {
     }
 
     #[test]
+    fn the_service_life_factor_follows_the_published_stress_levels() {
+        use alas_config::OperatingHaulClass::{LongHaul, ShortMediumHaul};
+        // A320-class planform: 122.6 m2, 34.1 m span, taper 0.24, 25 deg.
+        let factor = |haul, ulf, metallic| {
+            service_life_bending_factor(haul, ulf, 122.6, 34.1, 0.24, 25.0, metallic)
+        };
+        assert_eq!(factor(LongHaul, 3.75, 1.0), 1.0);
+        // b_st = 34.1 / cos(22.6 deg) = 36.9 m, R_ic = 1 + 0.5 * 36.9 / 122.6 = 1.151;
+        // (1.151/281.25 + 1.25/420) / (1.151/412.5 + 1.25/420) = 1.226.
+        let short = factor(ShortMediumHaul, 3.75, 1.0);
+        assert!((short - 1.226).abs() < 2e-3, "{short}");
+        // Composite covers carry no aluminium fatigue limit.
+        assert_eq!(factor(ShortMediumHaul, 3.75, 0.0), 1.0);
+        assert!((factor(ShortMediumHaul, 3.75, 0.5) - (1.0 + 0.5 * (short - 1.0))).abs() < 1e-12);
+        // Above n_ult = 5.7 the static limit governs both classes.
+        assert!((factor(ShortMediumHaul, 6.0, 1.0) - 1.0).abs() < 1e-12);
+        // The factor scales the bending material and nothing else.
+        let mut inputs = narrowbody_wing();
+        let base = wing_mass(&inputs);
+        inputs.bending_stress_factor = short;
+        let heavier = wing_mass(&inputs);
+        assert!(heavier.bending_material_kg > base.bending_material_kg);
+        assert_eq!(heavier.shear_and_control_kg, base.shear_and_control_kg);
+        assert_eq!(heavier.miscellaneous_kg, base.miscellaneous_kg);
+    }
+
+    #[test]
     fn composites_and_engines_relieve_the_wing_as_the_equations_say() {
         let metallic = wing_mass(&narrowbody_wing());
         let mut composite_inputs = narrowbody_wing();
@@ -523,7 +682,7 @@ mod tests {
         );
 
         // Hand evaluation of NASA/TM-2017-219627 Eqs. 33-37 in US units for
-        // FCOMP = 0, 0.5, 1 (lane E1): the factors are (1 - 0.4F), (1 - 0.17F)
+        // FCOMP = 0, 0.5, 1: the factors are (1 - 0.4F), (1 - 0.17F)
         // and (1 - 0.3F) on W1NIR, W2 and W3, and the total is
         // (DG CAYE W1NIR + W2 + W3) / (1 + W1NIR). Constants are written out
         // here, not read from the module.
@@ -565,6 +724,10 @@ mod tests {
         let sht = 32.8 / (FOOT * FOOT);
         assert!((ht - 0.53 * sht * dg_lb.powf(0.2) * 0.8).abs() < 1e-9);
 
+        // A tailplane on the fin raises the fin by Torenbeek's k_v, 1.15 for a
+        // T-tail of equal tail areas, and a fuselage-mounted one leaves it.
+        assert!((fin_mounted_tailplane_factor(26.4, 5.0, 26.4, 5.0) - 1.15).abs() < 1e-12);
+        assert_eq!(fin_mounted_tailplane_factor(26.4, -0.5, 26.4, 5.0), 1.0);
         let vt = vertical_tail_kg(26.4, 0.3, 1, dg_kg) / POUND_MASS;
         let svt = 26.4 / (FOOT * FOOT);
         assert!((vt - 0.32 * dg_lb.powf(0.3) * 0.8 * svt.powf(0.85)).abs() < 1e-9);

@@ -3,7 +3,7 @@
 
 //! Drag of the failed engine and of the asymmetric-thrust trim.
 //!
-//! Sources, read from the page images of the owner-supplied handbooks:
+//! Sources, read from the page images of the handbooks:
 //!
 //! - Windmilling turbofan: Roskam, *Airplane Design Part VI*, Sec. 4.5.3,
 //!   Eq. (4.67), and the same equation in Torenbeek, *Synthesis of Subsonic
@@ -11,6 +11,16 @@
 //!   `d(CD S)_wm = 0.0785 d_inl^2 + 2/(1 + 0.16 M^2) * sum A_N (V_N/U)(1 - V_N/U)`.
 //!   The first term is `0.1 (pi/4) d_inl^2` of external spillage (G-80); the
 //!   second is the internal momentum loss of each exhaust stream.
+//! - Windmilling turbofan without nozzle data: the internal loss of
+//!   Torenbeek Eq. (G-81), `D = m (V - V_N)`, with the windmilling mass flow
+//!   `m = mfr rho V (pi/4) d_inl^2` at the representative mass flow ratio
+//!   0.30 of a windmilling engine (Obert, *Aerodynamic Design of Transport
+//!   Aircraft*, 2009, pp. 491-492), split between the fan and the primary
+//!   stream by the engine's bypass ratio `B`, each at Torenbeek's typical
+//!   `V_N/V` (G-8.1): `d(CD S)_int = 2 mfr (pi/4) d_inl^2 (B (1 - 0.92) +
+//!   (1 - 0.12)) / (1 + B)`. The catalogue carries no nozzle areas, so this
+//!   is the rule for every turbofan; it gives the A320 worked example of
+//!   Eq. (G-82) within 3 percent.
 //! - Stopped propeller: Roskam VI Eq. (4.69) and Torenbeek Eq. (G-83),
 //!   `d(CD S) = 0.00125 n_p D_p^2`; Torenbeek Sec. 5.4.3(d) states that a
 //!   feathered propeller adds about 4 percent to CD0, used here because the
@@ -21,9 +31,14 @@
 //!   thrust and the failed-engine drag.
 //!
 //! All areas are drag areas `CD * S` in m^2; divide by the reference wing
-//! area for a coefficient. The trim value is an upper bound for a pilot who
-//! may use sideslip and up to 5 deg of bank (CS 25.149(b)); the handbook
-//! gives no relief formula.
+//! area for a coefficient. Torenbeek (1982, p. 555, read on the page) says
+//! the total asymmetric drag is smallest at a small sideslip toward the live
+//! engine but that "there is very little drag increment in a flight without
+//! sideslip", where the fin dominates: the zero-sideslip value is therefore
+//! a slight over-estimate, not a large one (E7). Jenkinson (2003, pp. 236,
+//! 251) takes 5 percent of the basic profile drag "initially" and asks for a
+//! detailed method when the take-off climb is critical; that rule is not
+//! used here. The handbook gives no relief formula for sideslip and bank.
 
 use std::f64::consts::PI;
 
@@ -39,14 +54,9 @@ pub const VN_OVER_U_FAN_STREAM: f64 = 0.92;
 /// Nozzle flow velocity over flight speed, high-bypass primary (core) stream
 /// (Torenbeek Sec. G-8.1).
 pub const VN_OVER_U_CORE_STREAM: f64 = 0.12;
-/// Fan-stream nozzle area over inlet area for a CFM56-class high-bypass
-/// engine: 1.45 m^2 over `pi/4 * 1.735^2` m^2. An assumed class geometry (the
-/// catalogue carries no nozzle areas); it enters only the internal term,
-/// which is about 55 percent of the windmilling drag area.
-pub const FAN_NOZZLE_OVER_INLET_AREA: f64 = 0.613;
-/// Core-stream nozzle area over inlet area for the same class geometry:
-/// 0.40 m^2 over the 2.364 m^2 inlet.
-pub const CORE_NOZZLE_OVER_INLET_AREA: f64 = 0.169;
+/// Inlet mass flow ratio of a windmilling engine, captured stream tube over
+/// inlet area (Obert 2009, pp. 491-492; 0.15 with a locked rotor).
+pub const WINDMILL_MASS_FLOW_RATIO: f64 = 0.30;
 
 /// One exhaust stream of a windmilling engine.
 #[derive(Debug, Clone, Copy, PartialEq)]
@@ -91,20 +101,26 @@ pub fn windmilling_jet_drag_area_m2(
     )
 }
 
-/// The two exhaust streams of a high-bypass turbofan scaled from its inlet
-/// diameter with the class nozzle-area ratios above.
-pub fn high_bypass_streams(inlet_diameter_m: f64) -> [ExhaustStream; 2] {
+/// Windmilling drag area `CD S` [m^2] of one turbofan of inlet diameter
+/// `inlet_diameter_m` and bypass ratio `bypass_ratio`, from its own inlet
+/// and bypass ratio (see the module doc): spillage (G-80) plus the internal
+/// loss (G-81) of the windmilling mass flow, mass-weighted over the fan and
+/// primary streams. `None` for invalid inputs.
+pub fn windmilling_turbofan_drag_area_m2(inlet_diameter_m: f64, bypass_ratio: f64) -> Option<f64> {
+    if !(inlet_diameter_m.is_finite()
+        && inlet_diameter_m > 0.0
+        && bypass_ratio.is_finite()
+        && bypass_ratio >= 0.0)
+    {
+        return None;
+    }
     let inlet_area = PI / 4.0 * inlet_diameter_m * inlet_diameter_m;
-    [
-        ExhaustStream {
-            nozzle_area_m2: FAN_NOZZLE_OVER_INLET_AREA * inlet_area,
-            velocity_ratio: VN_OVER_U_FAN_STREAM,
-        },
-        ExhaustStream {
-            nozzle_area_m2: CORE_NOZZLE_OVER_INLET_AREA * inlet_area,
-            velocity_ratio: VN_OVER_U_CORE_STREAM,
-        },
-    ]
+    let loss = (bypass_ratio * (1.0 - VN_OVER_U_FAN_STREAM) + (1.0 - VN_OVER_U_CORE_STREAM))
+        / (1.0 + bypass_ratio);
+    Some(
+        WINDMILL_SPILLAGE_COEFFICIENT * inlet_diameter_m * inlet_diameter_m
+            + 2.0 * WINDMILL_MASS_FLOW_RATIO * inlet_area * loss,
+    )
 }
 
 /// Drag area `CD S` [m^2] of a stopped propeller with `blade_count` blades of
@@ -277,12 +293,20 @@ mod tests {
     }
 
     #[test]
-    fn the_class_stream_geometry_reproduces_the_worked_inlet_ratios() {
-        let streams = high_bypass_streams(1.735);
-        assert!((streams[0].nozzle_area_m2 - 1.45).abs() < 0.01);
-        assert!((streams[1].nozzle_area_m2 - 0.40).abs() < 0.01);
-        let area = windmilling_jet_drag_area_m2(1.735, &streams, 0.22).unwrap_or(f64::NAN);
-        assert!((area - 0.532).abs() < 0.01, "{area}");
+    fn the_bypass_ratio_rule_reproduces_the_worked_example_and_scales_with_bypass() {
+        // The A320 example of Eq. (G-82): 1.735 m inlet, CFM56-5 bypass 5.7,
+        // nozzle areas 1.45 and 0.40 m^2: 0.532 m^2.
+        let worked = windmilling_jet_drag_area_m2(1.735, &a320_streams(), 0.22).unwrap_or(f64::NAN);
+        let rule = windmilling_turbofan_drag_area_m2(1.735, 5.7).unwrap_or(f64::NAN);
+        assert!((rule / worked - 1.0).abs() < 0.03, "{rule} vs {worked}");
+        let hand =
+            0.0785 * 1.735 * 1.735 + 0.6 * PI / 4.0 * 1.735 * 1.735 * (5.7 * 0.08 + 0.88) / 6.7;
+        assert!((rule - hand).abs() < 1e-12);
+        // Per unit inlet area the internal loss falls with the bypass ratio.
+        let at = |b: f64| windmilling_turbofan_drag_area_m2(2.0, b).unwrap_or(f64::NAN);
+        assert!(at(10.0) < at(5.0) && at(5.0) < at(0.0));
+        assert!(windmilling_turbofan_drag_area_m2(0.0, 5.0).is_none());
+        assert!(windmilling_turbofan_drag_area_m2(2.0, -1.0).is_none());
     }
 
     #[test]

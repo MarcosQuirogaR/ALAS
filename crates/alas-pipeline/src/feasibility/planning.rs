@@ -19,6 +19,7 @@ pub(super) fn assess_public_cg_reference(
     config: &AlasConfig,
     report: &AnalysisReport,
     analyzed_carried_fuel_kg: f64,
+    offloaded_payload_kg: f64,
     model_cg: Option<&ModelCgEnvelopeAssessment>,
     operational_envelope: Option<&OperationalEnvelopeAssessment>,
 ) -> CgEnvelopeAssessment {
@@ -26,7 +27,12 @@ pub(super) fn assess_public_cg_reference(
         return CgEnvelopeAssessment::default();
     };
     let mass_and_cg = preset.reference.planning_cg_envelope.and_then(|envelope| {
-        analyzed_mass_and_cg_pct_mac(report, envelope.mac_reference, analyzed_carried_fuel_kg)
+        analyzed_mass_and_cg_pct_mac(
+            report,
+            envelope.mac_reference,
+            analyzed_carried_fuel_kg,
+            offloaded_payload_kg,
+        )
     });
     let mut assessment = assess_reference_limits(&preset.reference, mass_and_cg);
     if let Some(envelope) = preset.reference.planning_cg_envelope {
@@ -197,6 +203,7 @@ fn analyzed_mass_and_cg_pct_mac(
     report: &AnalysisReport,
     mac_reference: PlanningMacReference,
     analyzed_carried_fuel_kg: f64,
+    offloaded_payload_kg: f64,
 ) -> Option<(f64, f64)> {
     let names = [
         alas_mass::breakdown::WING,
@@ -216,7 +223,12 @@ fn analyzed_mass_and_cg_pct_mac(
     let mut mass_kg = analyzed_carried_fuel_kg;
     let mut moment_x_kg_m = 0.0;
     for name in names {
-        let component_mass = report.component_masses.get(name).copied()?;
+        let mut component_mass = report.component_masses.get(name).copied()?;
+        // The payload the flown route carries: less what a landing-weight-
+        // limited route leaves behind, at the payload's lumped station.
+        if name == alas_mass::breakdown::PAYLOAD {
+            component_mass -= offloaded_payload_kg;
+        }
         let coordinate = report.mass_coordinates.get(name).copied()?;
         if !component_mass.is_finite() || !coordinate[0].is_finite() {
             return None;
@@ -416,7 +428,7 @@ mod tests {
                 operational_envelope,
             )
             .unwrap_or_else(|| panic!("{condition:?} curve must sweep at least one point"));
-            // Lane E1: with the A220 wing at FCOMP = 1.0 the empty-aircraft
+            // E1 work: with the A220 wing at FCOMP = 1.0 the empty-aircraft
             // state (OEW about 35.9 t) lies below the 36,287 kg floor of the
             // published weight table, which the sweep does not extrapolate
             // (`limits_at` refuses it), so at most that one state is absent.

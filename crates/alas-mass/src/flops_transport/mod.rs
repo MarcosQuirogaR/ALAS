@@ -16,10 +16,14 @@
 mod airframe;
 mod airframe_geometry;
 mod equations;
+pub mod executive_cabin;
+pub mod main_deck_freight;
 pub mod military_cargo;
+pub mod military_gear;
 mod movable_area;
 pub(crate) mod product;
 pub mod propulsion;
+pub mod seats;
 pub mod structure;
 pub mod turboprop;
 mod units;
@@ -35,7 +39,7 @@ pub use propulsion::{estimate_flops_propulsion, FlopsPropulsionBreakdown, FlopsP
 pub use structure::{estimate_flops_structure, FlopsStructureBreakdown, FlopsStructureInputs};
 
 /// Fully resolved SI inputs to the FLOPS transport subsystem equations.
-#[derive(Debug, Clone, Copy, PartialEq)]
+#[derive(serde::Serialize, serde::Deserialize, Debug, Clone, Copy, PartialEq)]
 pub struct FlopsTransportInputs {
     /// Maximum Mach number, FLOPS `VMAX`.
     pub maximum_mach: f64,
@@ -67,6 +71,11 @@ pub struct FlopsTransportInputs {
     pub business_class_passenger_count: usize,
     /// Tourist/economy passenger count, FLOPS `NPT`.
     pub tourist_class_passenger_count: usize,
+    /// Seats the APU, air-conditioning and FLOPS electrical terms size for
+    /// when not the seated ones: a converted freighter's airliner seats.
+    pub systems_passenger_count: Option<usize>,
+    /// Cabin shell's all-coach capacity at 34 in, NASA CR-151970 `Np`.
+    pub all_coach_passenger_count: Option<usize>,
     /// Flight-deck crew count, FLOPS `NFLCR`.
     pub flight_crew_count: usize,
     /// Cabin flight-attendant count, FLOPS `NSTU`.
@@ -92,13 +101,14 @@ pub struct FlopsTransportInputs {
     /// Whether the aircraft has an auxiliary power unit for equation 101.
     /// Engine hotel-mode power can explicitly set this false.
     pub apu_installed: bool,
+    /// Whether engine bleed air feeds the cabin and anti-ice systems. A
+    /// bleedless (electric) architecture carries no pneumatic distribution.
+    pub bleed_air_system: bool,
     /// Number of fuel tanks, FLOPS `NTANK`.
     pub fuel_tank_count: usize,
-    /// Revenue cargo loaded into containers, kilograms, part of FLOPS
-    /// `WCARGO`.
+    /// Revenue cargo loaded into containers, kilograms, part of FLOPS `WCARGO`.
     pub containerized_cargo_kg: f64,
-    /// Checked passenger baggage that rides in the containers, kilograms,
-    /// FLOPS `WPBAG`.
+    /// Checked passenger baggage that rides in the containers, kg, FLOPS `WPBAG`.
     ///
     /// Equation 126 names only `WCARGO`, but FLOPS as run charges checked
     /// baggage to the containers too: NASA Aviary's `LargeSingleAisle1FLOPS`
@@ -111,11 +121,9 @@ pub struct FlopsTransportInputs {
     /// bulk-loaded hold carries none; the adapter resolves this field from
     /// the declared [`alas_config::CargoHoldLoading`].
     pub containerized_baggage_kg: f64,
-    /// The declared hold-loading architecture this evaluation used, retained
-    /// so an audit can see which rule produced the container tare.
+    /// The declared hold-loading architecture, kept to audit the tare rule.
     pub cargo_loading: alas_config::CargoHoldLoading,
-    /// Which method prices the cabin equipment and the occupant-driven
-    /// operating items.
+    /// Which method prices the cabin equipment and occupant operating items.
     pub cabin_equipment_method: alas_config::CabinEquipmentMethod,
     /// Which LTH operating-item relation applies, read only by
     /// [`alas_config::CabinEquipmentMethod::LthCivilTransportV1`].
@@ -124,6 +132,9 @@ pub struct FlopsTransportInputs {
     pub propulsion_sizing: PropulsionSizing,
     /// Declared main-deck freight hold (military or freighter), else `None`.
     pub military_cargo: Option<military_cargo::MilitaryCargoHold>,
+    /// Declared executive interior, read only by the executive-jet cabin method.
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub executive_cabin: Option<executive_cabin::ExecutiveCabinInputs>,
 }
 
 /// The engine rating the thrust-dependent operating items are sized on.
@@ -133,7 +144,7 @@ pub struct FlopsTransportInputs {
 /// equation 123. Every other equation in sections 5.4 and 5.5 reads counts,
 /// geometry, Mach number or passengers. A propeller installation therefore
 /// needs a substitute for exactly those two terms and nothing else.
-#[derive(Debug, Clone, Copy, PartialEq)]
+#[derive(serde::Serialize, serde::Deserialize, Debug, Clone, Copy, PartialEq)]
 pub enum PropulsionSizing {
     /// FLOPS equations 121 and 123 evaluated from the rated thrust, which is
     /// the published transport method.
@@ -170,7 +181,7 @@ impl FlopsTransportInputs {
 }
 
 /// One verified systems-and-equipment component buildup, in kilograms.
-#[derive(Debug, Clone, Copy, PartialEq)]
+#[derive(serde::Serialize, serde::Deserialize, Debug, Clone, Copy, PartialEq)]
 pub struct FlopsSystemsBreakdown {
     /// Surface controls, FLOPS `WSC`.
     pub surface_controls_kg: f64,
@@ -190,6 +201,9 @@ pub struct FlopsSystemsBreakdown {
     pub air_conditioning_kg: f64,
     /// Anti-icing, FLOPS `WAI`.
     pub anti_ice_kg: f64,
+    /// Pneumatic (bleed-air distribution) system, which FLOPS does not price:
+    /// see `equations::pneumatic_kg`.
+    pub pneumatic_kg: f64,
     /// Military cargo handling, tie-down and ramp items, zero without a freight hold.
     pub military_cargo_equipment_kg: f64,
     /// Sum of the nine transport systems-and-equipment components.
@@ -197,7 +211,7 @@ pub struct FlopsSystemsBreakdown {
 }
 
 /// One verified operating-items buildup, in kilograms.
-#[derive(Debug, Clone, Copy, PartialEq)]
+#[derive(serde::Serialize, serde::Deserialize, Debug, Clone, Copy, PartialEq)]
 pub struct FlopsOperatingItemsBreakdown {
     /// Flight attendants, galley crew, and their baggage, FLOPS `WSTUAB`.
     pub cabin_crew_and_baggage_kg: f64,
@@ -219,10 +233,10 @@ pub struct FlopsOperatingItemsBreakdown {
     /// part of the mass the references this product compares against are
     /// stated on:
     ///
-    /// * Boeing D6-58333 Rev Q section 2.1 (operating empty weight) and FAA
-    ///   AC 120-27F (basic operating weight) both exclude unit load devices;
-    /// * FAA AC 120-85B treats a ULD as tare tracked **with the load**, not
-    ///   with the aircraft;
+    /// * Boeing D6-58333 Rev Q section 2.1 and FAA AC 120-27F Appendix A (A.3)
+    ///   name no ULD in operating empty or basic operating weight, and FAA
+    ///   AC 120-85B (2.4.7.3, 2.6.2.5) tracks ULD tare **with the load**; a
+    ///   spec OEW that carries a pallet set (747-400F) is not like-for-like;
     /// * the Airbus in-house chapter list (Scholz, *Aircraft Design* Ch. 10
     ///   Fig. 10.3 p. 10-6; Fuchte/Nagel/Gollnick, AIAA AVIATION 2013 Table 1
     ///   p. 4) puts the aircraft-side cargo loading system in furnishings
@@ -249,10 +263,12 @@ pub struct FlopsOperatingItemsBreakdown {
 }
 
 /// Verified FLOPS systems, equipment, and operating items.
-#[derive(Debug, Clone, Copy, PartialEq)]
+#[derive(serde::Serialize, serde::Deserialize, Debug, Clone, Copy, PartialEq)]
 pub struct FlopsTransportBreakdown {
     /// Systems and equipment from section 5.4.
     pub systems: FlopsSystemsBreakdown,
+    /// The seat part of furnishings or operating items, placed on the seat rows.
+    pub seats: seats::SeatMasses,
     /// Operating items from section 5.5.
     pub operating_items: FlopsOperatingItemsBreakdown,
     /// Cabin-equipment and occupant-driven operating-item relation that was
@@ -271,6 +287,12 @@ pub struct FlopsTransportBreakdown {
     /// evaluation.  This remains on the breakdown so exports do not have to
     /// infer an architectural absence from a zero mass.
     pub apu_installed: bool,
+    /// Whether engine bleed air feeds the cabin and anti-ice systems.
+    pub bleed_air_system: bool,
+    /// Stations of a civil main-deck freighter's doors, freight floor and
+    /// handling system ([`main_deck_freight`]); `None` for every other aircraft.
+    #[serde(default)]
+    pub main_deck_freight: Option<main_deck_freight::MainDeckFreightPlacement>,
 }
 
 /// A component-level projection when the complete method is not verifiable.
@@ -489,7 +511,7 @@ pub enum FlopsTransportEvaluation {
     /// Every source and physical input is present and the buildup is valid.
     Verified {
         /// Exact resolved input record.
-        inputs: FlopsTransportInputs,
+        inputs: Box<FlopsTransportInputs>,
         /// Revision-locked evidence for every declared non-geometric input.
         provenance: Box<alas_config::FlopsTransportProvenance>,
         /// Complete FLOPS component buildup.

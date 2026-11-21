@@ -33,6 +33,11 @@ pub struct DesignDatabase {
     pub weights: serde_json::Value,
     /// Physical feasibility evidence from the evaluated load case.
     pub feasibility: serde_json::Value,
+    /// Datasheet quantities of the design (tail volumes, ISA sea-level field
+    /// speeds and lengths, ceilings, certified operating altitude); `null`
+    /// when the database is written without the evaluated load case.
+    #[serde(default)]
+    pub characteristics: serde_json::Value,
     /// Canonical CPACS aircraft reference for this compatibility report.
     #[serde(default)]
     pub cpacs: Option<CpacsReference>,
@@ -52,6 +57,21 @@ pub struct CpacsReference {
 }
 
 mod aerodynamics;
+mod characteristics;
+
+/// Whether a sizing closure set the analysed takeoff mass of the report whose
+/// geometry summary is `summary` (else the configured MTOW is the basis).
+fn mass_basis_is_sized(summary: &BTreeMap<String, f64>) -> bool {
+    summary
+        .get("analysis_mass_basis_is_sized")
+        .is_some_and(|value| *value > 0.5)
+}
+
+/// The jump of the takeoff-mass map the report's sizing closure met, when the
+/// report's fuel artifacts are built and the closure met one.
+fn sizing_map_jump(report: &AnalysisReport) -> Option<alas_opt::mdo::SizingMapJump> {
+    report.fuel.built_artifacts()?.sizing_map_jump
+}
 
 /// Convert an [`AnalysisReport`] and [`AlasConfig`] into the standard [`DesignDatabase`].
 pub fn report_to_database(report: &AnalysisReport, config: &AlasConfig) -> DesignDatabase {
@@ -75,15 +95,24 @@ pub fn report_to_database(report: &AnalysisReport, config: &AlasConfig) -> Desig
             .get("analysis_mass_basis_kg")
             .copied()
             .unwrap_or(req.mtow_kg),
-        "analysis_mass_basis": if report
-            .geometry_summary
-            .get("analysis_mass_basis_is_sized")
-            .is_some_and(|value| *value > 0.5)
-        {
+        "analysis_mass_basis": if mass_basis_is_sized(&report.geometry_summary) {
             "mission_sized_finalist"
         } else {
             "configured_mtow"
         },
+        // The configured mode, beside the basis that says whether it sized this
+        // analysis (`configured_mtow`: it did not).
+        "mtow_sizing": config.optimizer.objective.mtow_sizing.as_str(),
+        // A jump of the takeoff-mass map the closure met (null: none), and
+        // whether the heavier side's held mission plan settled it.
+        "sizing_map_jump": sizing_map_jump(report).map(|jump| serde_json::json!({
+            "lower_kg": jump.lower_kg,
+            "lower_next_kg": jump.lower_next_kg,
+            "upper_kg": jump.upper_kg,
+            "upper_next_kg": jump.upper_next_kg,
+            "resolved_by_held_plan": jump.resolved_by_held_plan,
+            "survives_held_plan": jump.survives_held_plan,
+        })),
         "mass_architecture": config.mass_model.mass_architecture.as_str(),
         "systems_mass_method": config.mass_model.systems_mass_method,
         "systems_mass_status": if config.mass_model.mass_architecture.is_pure_flops() {
@@ -112,6 +141,7 @@ pub fn report_to_database(report: &AnalysisReport, config: &AlasConfig) -> Desig
         aerodynamics: aero,
         weights,
         feasibility: serde_json::Value::Null,
+        characteristics: serde_json::Value::Null,
         cpacs: None,
     }
 }
@@ -201,6 +231,7 @@ fn flops_mass_buildup_to_json(
             "furnishings": systems.furnishings_kg,
             "air_conditioning": systems.air_conditioning_kg,
             "anti_ice": systems.anti_ice_kg,
+            "pneumatic": systems.pneumatic_kg,
             "total": systems.total_kg,
         },
         "operating_items_kg": {
@@ -224,6 +255,26 @@ fn flops_mass_buildup_to_json(
             "nacelles_owned_by": "propulsion",
             "nacelles_counted_once": true,
         },
+        // Present only for a thrust-rated (turbofan) aircraft: the dry
+        // engines of the propulsion group, FLOPS equations 75-80, before the
+        // reversers, controls, starters, fuel system and pylons. `engines` is
+        // the complete scaled engines (`WENG x NENG`); the key names match the
+        // shaft-power group below so one reader serves both.
+        "turbofan_propulsion_kg": airframe.propulsion.as_ref().map(|group| {
+            serde_json::json!({
+                "engine_each": group.engine_each_kg,
+                "engines": group.engines_kg,
+                "engine_cores": group.engine_cores_kg,
+                "inlets": group.inlets_kg,
+                "nozzles": group.nozzles_kg,
+                "thrust_reversers": group.thrust_reversers_kg,
+                "engine_controls": group.engine_controls_kg,
+                "starters": group.starters_kg,
+                "fuel_system": group.fuel_system_kg,
+                "pylons": group.pylons_kg,
+                "total_without_nacelles": group.total_kg,
+            })
+        }),
         // Present only for a shaft-power aircraft. The item ledger is what
         // lets a reader see that the ATR's propulsion mass is engines,
         // propellers and installation rather than a thrust-scaled group, and
@@ -278,6 +329,9 @@ pub fn report_to_database_with_feasibility(
 ) -> DesignDatabase {
     let mut database = report_to_database(report, config);
     database.feasibility = feasibility_to_json(feasibility);
+    database.characteristics = characteristics::database(report, config);
+    let route = crate::full_analysis::route_cruise_point(config, report, &feasibility.fuel_loading);
+    database.aerodynamics["route_cruise_point"] = serde_json::json!(route.map(|p| p.to_json()));
     database
 }
 
@@ -331,6 +385,20 @@ pub fn export_json_with_feasibility_and_cpacs(
 }
 
 fn feasibility_to_json(report: &FeasibilityReport) -> serde_json::Value {
+    let findings: Vec<serde_json::Value> = report
+        .findings
+        .iter()
+        .map(|finding| {
+            serde_json::json!({
+                "code": format!("{:?}", finding.code),
+                "severity": format!("{:?}", finding.severity),
+                "message": finding.message,
+                "actual": finding.actual,
+                "limit": finding.limit,
+                "unit": finding.unit,
+            })
+        })
+        .collect();
     let fuel = report.fuel_loading;
     let cruise_equilibrium = report.cruise_equilibrium.as_ref().map_or_else(
         || serde_json::json!({ "status": "not_evaluated" }),
@@ -389,6 +457,7 @@ fn feasibility_to_json(report: &FeasibilityReport) -> serde_json::Value {
             },
             "dispatch": fuel.dispatch.map(|dispatch| dispatch.to_json()),
         },
+        "findings": findings,
         "cruise_equilibrium": cruise_equilibrium,
         "mass_balance": report.mass_balance.as_ref().map(mass_balance_to_json),
     })
@@ -445,7 +514,7 @@ fn mass_balance_to_json(
             })
         })
         .collect();
-    serde_json::json!({
+    let mut json = serde_json::json!({
         "states": states,
         "tanks": tanks,
         "usable_capacity_kg": assessment.usable_capacity_kg,
@@ -463,6 +532,73 @@ fn mass_balance_to_json(
         },
         "ledger_items": items,
         "lumped_takeoff_cg_pct_mac": assessment.lumped_takeoff_cg_pct_mac,
+    });
+    // Only a flown mission plan has stages to report: a run of the standard mission keeps the
+    // document it always had.
+    if let (Some(history), Some(map)) = (assessment.history.as_ref(), json.as_object_mut()) {
+        map.insert("history".to_owned(), mission_history_to_json(history));
+    }
+    json
+}
+
+/// The mass, centre-of-gravity and tank history of a flown plan: one row per stage and per event.
+fn mission_history_to_json(history: &crate::feasibility::MissionHistory) -> serde_json::Value {
+    let stages: Vec<serde_json::Value> = history
+        .stages
+        .iter()
+        .map(|stage| {
+            serde_json::json!({
+                "id": stage.id,
+                "kind": stage.label,
+                "fuel_kg": stage.fuel_kg,
+                "time_s": stage.time_s,
+                "distance_m": stage.distance_m,
+                "mass_start_kg": stage.mass_start_kg,
+                "mass_end_kg": stage.mass_end_kg,
+                "cg_end_pct_mac": stage.cg_end_pct_mac,
+                "cg_range_pct_mac": stage.cg_range_pct_mac,
+                "within_envelope": stage.within_envelope,
+            })
+        })
+        .collect();
+    let events: Vec<serde_json::Value> = history
+        .events
+        .iter()
+        .map(|event| {
+            serde_json::json!({
+                "stage": event.stage,
+                "description": event.description,
+                "mass_before_kg": event.mass_before_kg,
+                "mass_after_kg": event.mass_after_kg,
+                "cg_before_pct_mac": event.cg_before_pct_mac,
+                "cg_after_pct_mac": event.cg_after_pct_mac,
+                "within_envelope": event.within_envelope,
+            })
+        })
+        .collect();
+    let points: Vec<serde_json::Value> = history
+        .points
+        .iter()
+        .map(|point| {
+            serde_json::json!({
+                "label": point.label,
+                "time_s": point.time_s,
+                "range_m": point.range_m,
+                "mass_kg": point.mass_kg,
+                "cg_pct_mac": point.cg_pct_mac,
+                "forward_limit_pct_mac": point.forward_limit_pct_mac,
+                "aft_limit_pct_mac": point.aft_limit_pct_mac,
+                "within_envelope": point.within_envelope,
+                "fuel_kg": point.fuel_kg,
+            })
+        })
+        .collect();
+    serde_json::json!({
+        "stages": stages,
+        "events": events,
+        "points": points,
+        "notes": history.notes,
+        "max_mass_mismatch_kg": history.max_mass_mismatch_kg,
     })
 }
 
@@ -480,6 +616,7 @@ fn carried_fuel_basis_name(basis: CarriedFuelBasis) -> &'static str {
         CarriedFuelBasis::UsableFuelCapacity => "usable_fuel_capacity",
         CarriedFuelBasis::CapacityUnverified => "capacity_unverified",
         CarriedFuelBasis::ReservePolicyClosure => "reserve_policy_closure",
+        CarriedFuelBasis::MissionPlanClosure => "mission_plan_closure",
     }
 }
 
@@ -524,6 +661,16 @@ pub fn export_airfoil_dat(
     Ok(())
 }
 
+/// One polar-fit summary line: the value of a successful fit, or the
+/// statement that the fit failed and there is no value.
+fn polar_fit_line(label: &str, fit: &crate::full_analysis::PolarFit, value: String) -> String {
+    if fit.status.is_fitted() {
+        format!("  {label}: {value}")
+    } else {
+        format!("  {label}: not available (polar fit failed)")
+    }
+}
+
 /// Format a concise multi-line summary of the design report for display.
 pub fn format_summary(report: &AnalysisReport, config: Option<&AlasConfig>) -> String {
     let dp = &report.design_point;
@@ -549,6 +696,15 @@ pub fn format_summary(report: &AnalysisReport, config: Option<&AlasConfig>) -> S
             report.static_margin * 100.0
         ),
     ];
+    lines.splice(
+        5..5,
+        crate::full_analysis::cruise_point_summary_lines(report),
+    );
+    if let Some(note) =
+        crate::feasibility::linear_model_summary_note(report.polar.compressible_mach)
+    {
+        lines.insert(5, format!("  NOTE             : {note}"));
+    }
 
     if let Some(tdp) = &report.trimmed_design_point {
         lines.push(format!(
@@ -563,6 +719,21 @@ pub fn format_summary(report: &AnalysisReport, config: Option<&AlasConfig>) -> S
             "  MTOW (specified) : {:>10.0} kg",
             cfg.requirements.mtow_kg
         ));
+        // The sizing mode decides the takeoff mass only where a closure sized the
+        // analysed design; a fixed aircraft analysed without a search keeps its
+        // configured MTOW under every mode, so the line says which happened.
+        lines.push(format!(
+            "  MTOW sizing      : {} ({})",
+            cfg.optimizer.objective.mtow_sizing.as_str(),
+            if mass_basis_is_sized(g) {
+                "closed the analysed takeoff mass"
+            } else {
+                "not applied: analysed at the configured MTOW"
+            }
+        ));
+        if let Some(jump) = sizing_map_jump(report) {
+            lines.push(format!("  MTOW map jump    : {}", jump.describe()));
+        }
     }
     if let Some(mass_basis) = g.get("analysis_mass_basis_kg") {
         lines.push(format!(
@@ -606,9 +777,9 @@ pub fn format_summary(report: &AnalysisReport, config: Option<&AlasConfig>) -> S
         format!("  Physical CG X    : {:6.2} m", report.physical_cg[0]),
         "  ----------------------------------------------".to_owned(),
         format!("  Polar fit status  : {}", pf.status.as_str()),
-        format!("  CD0 (clean fit)  : {:7.5}", pf.cd0),
-        format!("  k factor         : {:6.4}", pf.k),
-        format!("  Oswald e         : {:6.3}", pf.oswald_e),
+        polar_fit_line("CD0 (clean fit)  ", pf, format!("{:7.5}", pf.cd0)),
+        polar_fit_line("k factor         ", pf, format!("{:6.4}", pf.k)),
+        polar_fit_line("Oswald e         ", pf, format!("{:6.3}", pf.oswald_e)),
         format!("  Aspect ratio     : {:6.2}", pf.aspect_ratio),
         "  ----------------------------------------------".to_owned(),
         format!(
@@ -736,7 +907,7 @@ mod tests {
     }
 
     #[test]
-    fn polar_fit_fallback_status_survives_json_export() {
+    fn a_failed_polar_fit_exports_its_status_and_no_coefficients() {
         let report = AnalysisReport {
             design: DesignVector::default(),
             airplane: Airplane {
@@ -751,6 +922,7 @@ mod tests {
             polar: PolarSweep {
                 alpha_deg: Vec::new(),
                 geometric_alpha_deg: Vec::new(),
+                compressible_mach: None,
                 cl: Vec::new(),
                 cd: Vec::new(),
                 cd_induced: Vec::new(),
@@ -766,10 +938,10 @@ mod tests {
                 l_over_d: 0.0,
             },
             polar_fit: PolarFit {
-                cd0: 0.02,
-                c1: 0.0,
-                k: 0.04,
-                oswald_e: 1.0 / (std::f64::consts::PI * 10.0 * 0.04),
+                cd0: f64::NAN,
+                c1: f64::NAN,
+                k: f64::NAN,
+                oswald_e: f64::NAN,
                 aspect_ratio: 10.0,
                 status: PolarFitStatus::FallbackInsufficientPoints,
             },
@@ -790,7 +962,13 @@ mod tests {
         let database = report_to_database(&report, &AlasConfig::default());
         assert_eq!(
             database.aerodynamics["polar_fit_status"],
-            "fallback_insufficient_points"
+            "failed_insufficient_points"
         );
+        // A failed fit exports no coefficient, and the summary says so.
+        assert!(database.aerodynamics["shifted_polar_fit"]["cd0"].is_null());
+        assert!(database.aerodynamics["shifted_polar_fit"]["k_factor"].is_null());
+        let summary = super::format_summary(&report, None);
+        assert!(summary.contains("CD0 (clean fit)  : not available (polar fit failed)"));
+        assert!(!summary.contains("0.02000"));
     }
 }

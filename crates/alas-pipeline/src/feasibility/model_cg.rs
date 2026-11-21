@@ -61,6 +61,8 @@ fn ledger_loading_basis(
         takeoff_cg_x_m: takeoff.cg_m[0],
         takeoff_cg_z_m: takeoff.cg_m[2],
         takeoff_pitch_inertia_kg_m2: takeoff.inertia_cg.iyy,
+        oew_pitch_inertia_kg_m2: oew.inertia_cg.iyy,
+        zero_fuel_pitch_inertia_kg_m2: zero_fuel.inertia_cg.iyy,
     })
 }
 
@@ -127,6 +129,12 @@ pub(super) fn model_cg_assessment(
         fuel: coordinate(FUEL)?,
     };
     masses.fuel = fuel_loading.analyzed_carried_fuel_kg;
+    // The analysed load is the flown route's, less any payload a
+    // landing-weight-limited route leaves behind, unless it is the sized
+    // design loading, which carries the full payload.
+    if fuel_loading.design_takeoff_loading.is_none() {
+        masses.payload -= fuel_loading.offloaded_payload_kg();
+    }
     let analyzed_cg = calculate_physical_cg(&masses, &coordinates);
     // The critical (most-forward) neutral point when available, else clean.
     let critical_x_np = report
@@ -187,10 +195,37 @@ pub(super) const fn finding_code(constraint: ModelCgConstraint) -> FindingCode {
     }
 }
 
+/// How a tail-scrape requirement of this basis is compared, and why a miss
+/// does or does not reject the design.
+fn rotation_basis_note(basis: alas_config::RotationAngleBasis) -> &'static str {
+    use alas_config::RotationAngleBasis as Basis;
+    match basis {
+        Basis::Assumed => {
+            "no published tail-strike attitude, a configured assumption, so a warning"
+        }
+        Basis::PublishedStatic => {
+            "published gear-compressed attitude against the static model attitude"
+        }
+        Basis::PublishedGearExtended => {
+            "published gear-extended attitude against the gear-extended model attitude"
+        }
+        Basis::PublishedStateUnspecified => {
+            "published with no gear state, against the gear-extended model attitude, so a warning"
+        }
+    }
+}
+
 pub(super) fn append_model_cg_findings(
     findings: &mut Vec<PhysicalFinding>,
     assessment: &ModelCgEnvelopeAssessment,
+    config: &AlasConfig,
 ) {
+    let rotation_basis = config.landing_gear.required_rotation_basis;
+    // A registered type with a published envelope is held to its width at
+    // each mass (alas-opt envelope::usable_range); the warning names it.
+    let published = alas_config::presets::get(&config.preset)
+        .ok()
+        .and_then(|preset| preset.reference.usable_cg_range);
     let constraints = [
         ModelCgConstraint::StaticStabilityFloor,
         ModelCgConstraint::PhysicalForwardCgLimit,
@@ -226,13 +261,24 @@ pub(super) fn append_model_cg_findings(
         let aft_mechanism = aft_mechanism_label(limits.aft_limit_governance);
         let code = finding_code(constraint);
         let message = match constraint {
-            ModelCgConstraint::TipBack | ModelCgConstraint::TailScrape => format!(
+            ModelCgConstraint::TipBack => format!(
                 "{} loading state violates the model {} constraint ({:.2} deg against \
                  {:.2} deg; a ground-clearance geometry limit, not a nose-load shortfall)",
                 state.label(),
                 constraint.label(),
                 result.actual,
                 result.limit
+            ),
+            ModelCgConstraint::TailScrape => format!(
+                "{} loading state violates the model {} constraint ({:.2} deg against \
+                 {:.2} deg; a ground-clearance geometry limit, not a nose-load shortfall; \
+                 requirement basis {}: {})",
+                state.label(),
+                constraint.label(),
+                result.actual,
+                result.limit,
+                rotation_basis.as_str(),
+                rotation_basis_note(rotation_basis)
             ),
             // `cg_range_pct_mac` is a configured/assumed requirement (a
             // load-and-trim-sheet convention, default 30 %MAC), not a
@@ -244,15 +290,13 @@ pub(super) fn append_model_cg_findings(
             // boundaries actually admit and the configured value it fell
             // short of, so a reader can tell the assumption from the
             // physics without cross-referencing the envelope assessment.
-            ModelCgConstraint::MinimumUsableCgRange => format!(
-                "{} loading state's usable CG range is {:.2} % MAC, below the configured \
-                 requirement of {:.2} % MAC (cg_range_pct_mac; a configured assumption, not \
-                 a physical limit -- the physical forward/aft boundaries themselves are \
-                 unaffected); the forward limit of this state is governed by \
-                 {forward_mechanism} and its aft limit by {aft_mechanism}",
+            ModelCgConstraint::MinimumUsableCgRange => usable_range_message(
                 state.label(),
                 result.actual,
-                result.limit
+                result.limit,
+                (limits.fwd_limit_pct_mac, forward_mechanism),
+                (limits.aft_limit_pct_mac, aft_mechanism),
+                published.as_ref(),
             ),
             ModelCgConstraint::PhysicalForwardCgLimit => format!(
                 "{} loading state violates the model {} constraint (the forward limit of \
@@ -266,7 +310,7 @@ pub(super) fn append_model_cg_findings(
                 constraint.label()
             ),
         };
-        let push = if constraint.is_diagnostic() {
+        let push = if result.is_diagnostic() {
             warning
         } else {
             error
@@ -292,10 +336,96 @@ pub(super) fn append_model_cg_findings(
 // Fixtures are registered presets; a failed unwrap/expect is the assertion
 // failing, not a library invariant breaking.
 #[allow(clippy::unwrap_used, clippy::expect_used)]
+/// Message of the minimum-usable-CG-range finding.
+///
+/// A non-negative range below the configured requirement is a warning about a
+/// configured assumption. A negative range means the forward limit lies aft of
+/// the aft limit: no CG satisfies both, whatever the requirement, so the
+/// message says so and names both limits and the mechanisms that set them (the
+/// cause to look at), instead of a shortfall against `cg_range_pct_mac`.
+fn usable_range_message(
+    state: &str,
+    usable_pct_mac: f64,
+    requirement_pct_mac: f64,
+    forward: (f64, &str),
+    aft: (f64, &str),
+    published: Option<&alas_config::UsableCgRangeSource>,
+) -> String {
+    if usable_pct_mac < 0.0 {
+        return format!(
+            "{state} loading state has no feasible CG range: the forward limit \
+             ({:.2} % MAC, set by {}) lies aft of the aft limit ({:.2} % MAC, set by {}) \
+             by {:.2} % MAC, so no centre of gravity satisfies both",
+            forward.0, forward.1, aft.0, aft.1, -usable_pct_mac
+        );
+    }
+    if let Some(source) = published {
+        return format!(
+            "{state} loading state's usable CG range is {usable_pct_mac:.2} % MAC, below the \
+             {requirement_pct_mac:.2} % MAC the type's published CG envelope spans at this mass \
+             ({}, {}, {}: {}); the forward limit of this state is governed by {} and its aft \
+             limit by {}",
+            source.source.document,
+            source.source.revision,
+            source.source.location,
+            source.basis,
+            forward.1,
+            aft.1
+        );
+    }
+    format!(
+        "{state} loading state's usable CG range is {usable_pct_mac:.2} % MAC, below the \
+         configured requirement of {requirement_pct_mac:.2} % MAC (cg_range_pct_mac; a \
+         configured assumption, not a physical limit -- the physical forward/aft boundaries \
+         themselves are unaffected); the forward limit of this state is governed by {} and \
+         its aft limit by {}",
+        forward.1, aft.1
+    )
+}
+
+#[allow(clippy::unwrap_used, clippy::expect_used)]
 #[cfg(test)]
 mod tests {
     use super::*;
     use crate::feasibility::{assess_physical_feasibility, FindingSeverity};
+
+    /// A forward limit aft of the aft limit is reported as "no feasible CG
+    /// range" with both limits and their mechanisms; a short but positive range
+    /// keeps the configured-requirement wording.
+    #[test]
+    fn an_inverted_envelope_is_reported_as_no_feasible_range_with_its_cause() {
+        let inverted = usable_range_message(
+            "Analyzed landing",
+            -1.44,
+            30.0,
+            (20.64, "landing trim, sourced THS and elevator travel"),
+            (19.20, "minimum nose-gear load"),
+            None,
+        );
+        assert!(inverted.contains("no feasible CG range"), "{inverted}");
+        assert!(
+            inverted.contains("20.64 % MAC, set by landing trim"),
+            "{inverted}"
+        );
+        assert!(
+            inverted.contains("19.20 % MAC, set by minimum nose-gear load"),
+            "{inverted}"
+        );
+        assert!(inverted.contains("by 1.44 % MAC"), "{inverted}");
+        assert!(!inverted.contains("configured requirement"), "{inverted}");
+        let short = usable_range_message(
+            "Analyzed takeoff",
+            18.0,
+            30.0,
+            (5.0, "a"),
+            (23.0, "b"),
+            None,
+        );
+        assert!(
+            short.contains("below the configured requirement of 30.00 % MAC"),
+            "{short}"
+        );
+    }
 
     /// A preset whose configured `cg_range_pct_mac` (30 %MAC default)
     /// exceeds its physical usable range must raise
@@ -336,7 +466,7 @@ mod tests {
             .flatten()
             .flat_map(|assessment| &assessment.loading_states)
             .flat_map(|state| &state.constraints)
-            .any(|constraint| constraint.violated && !constraint.constraint.is_diagnostic());
+            .any(|constraint| constraint.violated && !constraint.is_diagnostic());
         let text = crate::feasibility::report_format::format_feasibility(&feasibility);
         let status = text
             .lines()
@@ -348,6 +478,23 @@ mod tests {
             "{status}"
         );
         assert!(status.contains("diagnostic limit(s) not met"), "{status}");
+        // The forward boundary line names the governing landing law and
+        // reports Torenbeek's eq. 6.2 beside it, never as the limit.
+        let model_cg = feasibility.model_cg.as_ref().expect("model CG assessment");
+        let forward = text
+            .lines()
+            .find(|line| line.starts_with("Forward CG boundary"))
+            .expect("forward CG boundary line");
+        assert!(forward.contains(&format!(
+            "{:.1}% MAC",
+            model_cg.configured_forward_limit_pct_mac
+        )));
+        assert!(forward.contains("eq. 6.2 design rule"), "{forward}");
+        assert!(
+            model_cg.configured_forward_limit_pct_mac
+                >= model_cg.landing_trim_fwd_limit_pct_mac - 1.0e-9,
+            "{forward}"
+        );
     }
 
     /// Ground-clearance constraints report under their own finding codes, and
@@ -417,50 +564,53 @@ mod tests {
         );
     }
 
-    /// When the ledger exists, the hard gate's analyzed-TOW
-    /// centre of gravity must be the ledger's own point (the tank-fill-order,
-    /// detailed-payload state the mass statement reports), not the lumped
-    /// ten-group model's -- the A220-300 is the example of the two
-    /// paths disagreeing by several percent MAC.
+    /// When the item ledger exists, the hard gate's analyzed-TOW centre of
+    /// gravity is the ledger's own flown-takeoff point (tank fill order,
+    /// detailed payload), not the lumped ten-group model's, which is only the
+    /// fallback when no ledger could be built. Since the lumped coordinates
+    /// describe the ledger's aircraft the two agree on the
+    /// presets, so the ledger's take-off point is moved 5 % MAC aft here: the
+    /// two then genuinely differ, and the gate must follow the ledger.
     #[test]
-    fn a220_300_hard_gate_uses_the_ledgers_takeoff_cg_not_the_lumped_one() {
-        let config = AlasConfig::from_value(&serde_json::json!({ "preset": "A220-300" }))
-            .expect("A220-300 preset config");
-        let preset = alas_config::presets::get("A220-300").expect("registered preset");
+    fn the_hard_gate_uses_the_ledgers_takeoff_cg_not_the_lumped_one() {
+        let config = AlasConfig::from_value(&serde_json::json!({ "preset": "LJ60" }))
+            .expect("LJ60 preset config");
+        let preset = alas_config::presets::get("LJ60").expect("registered preset");
         let report = crate::full_analysis::FullAnalysis::new(config.clone())
             .run(&preset.design_vector, true)
-            .expect("A220-300 must analyze");
+            .expect("LJ60 must analyze");
         let feasibility =
             assess_physical_feasibility(&config, &preset.design_vector, &report, None);
-        let mass_balance = feasibility
+        let mut ledger = feasibility
             .mass_balance
-            .as_ref()
-            .expect("A220-300 builds an item-level mass ledger");
-        let ledger_takeoff_pct_mac = mass_balance
+            .clone()
+            .expect("LJ60 builds an item-level mass ledger");
+        let takeoff = ledger
             .states
-            .iter()
+            .iter_mut()
             .find(|state| state.label == "flown takeoff")
-            .expect("the ledger reports a flown-takeoff state")
-            .cg_pct_mac;
-        let gate_takeoff_pct_mac = feasibility
-            .model_cg
-            .as_ref()
-            .expect("A220-300 produces a model CG assessment")
-            .loading_states
-            .iter()
-            .find(|state| state.state == alas_opt::ModelCgLoadingState::AnalyzedTakeoff)
-            .expect("the gate reports an analyzed-takeoff state")
-            .cg_pct_mac;
+            .expect("the ledger reports a flown-takeoff state");
+        takeoff.cg_m[0] += 0.05 * report.airplane.c_ref;
+        let ledger_x_m = takeoff.cg_m[0];
+        let takeoff_cg = |ledger: Option<&MassBalanceAssessment>| {
+            model_cg_assessment(&config, &report, &feasibility.fuel_loading, ledger)
+                .expect("the gate assesses the loading states")
+                .loading_states
+                .into_iter()
+                .find(|state| state.state == alas_opt::ModelCgLoadingState::AnalyzedTakeoff)
+                .map(|state| (state.cg_x_m, state.cg_pct_mac))
+                .expect("the gate reports an analyzed-takeoff state")
+        };
+        let (gate_x_m, gate_pct_mac) = takeoff_cg(Some(&ledger));
+        let (_, lumped_pct_mac) = takeoff_cg(None);
         assert!(
-            (gate_takeoff_pct_mac - ledger_takeoff_pct_mac).abs() < 0.5,
-            "gate {gate_takeoff_pct_mac} should track the ledger {ledger_takeoff_pct_mac}, not \
-             the lumped model {}",
-            mass_balance.lumped_takeoff_cg_pct_mac
+            (gate_x_m - ledger_x_m).abs() < 1.0e-9,
+            "gate take-off CG {gate_x_m} m should be the ledger's {ledger_x_m} m"
         );
         assert!(
-            (mass_balance.lumped_takeoff_cg_pct_mac - ledger_takeoff_pct_mac).abs() > 1.0,
-            "this preset must still be the case where the lumped model disagrees with the \
-             ledger, or this test is not exercising the fix"
+            (gate_pct_mac - lumped_pct_mac).abs() > 4.0,
+            "the gate ({gate_pct_mac} %MAC) must leave the lumped model ({lumped_pct_mac} %MAC) \
+             when the ledger is moved 5 % MAC aft"
         );
     }
 }

@@ -21,10 +21,19 @@ pub enum MainWingStationKind {
     Kink,
     /// Wingtip.
     Tip,
+    /// Outboard trailing-edge break between the kink and the tip: the leading
+    /// edge stays on the straight outboard line and the chord is the straight
+    /// taper chord plus an offset. Not part of [`TransportPlanform::stations`];
+    /// see [`TransportPlanform::te_breaks`].
+    TeBreak,
     /// Start of a swept-back tip rake, between the kink and the tip. It is
     /// not part of [`TransportPlanform::stations`]; see
     /// [`TransportPlanform::tip_rake`].
     TipRake,
+    /// Station whose edges are offset from the straight lines (see
+    /// [`super::WingEdgeStation`]). Not part of [`TransportPlanform::stations`];
+    /// see [`TransportPlanform::edge_stations`].
+    EdgeStation,
 }
 
 /// One planform station, measured on the right semispan.
@@ -80,7 +89,10 @@ pub struct MainWingPanel {
 /// of truth.
 #[derive(Debug, Clone, PartialEq, Serialize)]
 pub struct TransportPlanform {
-    /// Centerline root station.
+    /// Centerline root station: the design datum the inboard panel extends to.
+    /// A product wing does not loft this chord: its edges stay on their own inboard
+    /// lines to `y = 0` (see [`Self::inboard_edge_lines`] and the builder's
+    /// `carry_through` module).
     pub root: MainWingStation,
     /// Fuselage side-of-body station when requested.
     pub side_of_body: Option<MainWingStation>,
@@ -96,6 +108,24 @@ pub struct TransportPlanform {
     /// [`Self::reference_area_m2`], [`Self::panels`] and
     /// [`Self::leading_edge_x_at`].
     pub tip_rake: Option<MainWingStation>,
+    /// Optional outboard trailing-edge break stations (kind
+    /// [`MainWingStationKind::TeBreak`], zero to two, in span order): on the straight
+    /// outboard leading-edge line, with the straight kink-to-tip chord plus an offset.
+    /// Kept out of [`Self::stations`]; included by [`Self::stations_with_rake`], the
+    /// reference area, the panels and [`Self::leading_edge_x_at`], but not by
+    /// the reference trapezoid (which stays on the straight outboard lines).
+    pub te_breaks: Vec<MainWingStation>,
+    /// Optional stations with offset edges (kind [`MainWingStationKind::EdgeStation`], in
+    /// span order, outboard of the side of body), inboard or outboard of the kink. Treated
+    /// as the trailing-edge breaks are: out of [`Self::stations`] and the reference
+    /// trapezoid, in [`Self::stations_with_rake`] and everything built on it. Those
+    /// that make a fillet are blend bodies, not wing: see [`Self::without_blends`].
+    pub edge_stations: Vec<MainWingStation>,
+    /// The user-defined sections (kind [`MainWingStationKind::EdgeStation`]), each a
+    /// section of the built wing as drawn. Those between the side of body and the kink
+    /// are vertices of the edge polylines ([`Self::inboard_edge_lines`]) and stations of
+    /// [`Self::without_blends`]; nothing moves them.
+    pub custom_stations: Vec<MainWingStation>,
     /// Inboard leading-edge sweep set by the design vector.
     pub inboard_le_sweep_deg: f64,
     /// Outboard leading-edge sweep. Product transport planforms keep this
@@ -132,6 +162,47 @@ pub enum TransportPlanformError {
         /// Kink semispan fraction.
         kink: f64,
     },
+    /// The tip-rake start station does not lie strictly outboard of the kink and inboard of the tip.
+    #[error(
+        "tip-rake start must satisfy kink < rake start < tip; got kink {kink}, rake start {rake_start} (semispan fractions)"
+    )]
+    TipRakeStartOutOfOrder {
+        /// Kink semispan fraction.
+        kink: f64,
+        /// Tip-rake start semispan fraction.
+        rake_start: f64,
+    },
+    /// The tip-rake chord is not below the design tip chord: the rake would not sweep the
+    /// leading edge aft of its straight line, and the chord would not fall outboard.
+    #[error(
+        "tip-rake tip chord ({rake_tip_chord_m} m) must be below the design tip chord the straight edges reach ({tip_chord_m} m)"
+    )]
+    TipRakeChordNotBelowTip {
+        /// Declared chord at the extreme tip, in metres.
+        rake_tip_chord_m: f64,
+        /// Design-vector tip chord, in metres.
+        tip_chord_m: f64,
+    },
+    /// A trailing-edge break lies off its allowed span range.
+    #[error(
+        "trailing-edge breaks must lie outboard of the kink ({kink}), in increasing order and inboard of the tip rake; got {fraction}"
+    )]
+    InvalidTrailingEdgeBreak {
+        /// Kink semispan fraction.
+        kink: f64,
+        /// Offending break semispan fraction.
+        fraction: f64,
+    },
+    /// An edge station lies off its allowed span range.
+    #[error(
+        "wing edge stations (at most {}) must lie outboard of the side of body and inboard of the tip, in increasing order and off every other station by at least {} of the semispan; got {fraction}",
+        super::MAX_EDGE_STATIONS,
+        super::MIN_EDGE_STATION_SPACING
+    )]
+    InvalidEdgeStation {
+        /// Offending semispan fraction.
+        fraction: f64,
+    },
     /// A query falls outside the modeled semispan.
     #[error("spanwise position {y_m} m lies outside the modeled semispan of {tip_y_m} m")]
     SpanwisePositionOutsidePlanform {
@@ -140,7 +211,9 @@ pub enum TransportPlanformError {
         /// Modeled semispan, in metres.
         tip_y_m: f64,
     },
-    /// Chord increases moving outboard, which is outside this transport family.
+    /// Chord increases moving outboard, which is outside this transport family. A root
+    /// chord that is only a datum ([`super::WingConfig::root_chord_is_only_a_datum`]) is
+    /// not compared.
     #[error(
         "main-wing chord must be non-increasing from root to tip; {inboard} is followed by {outboard}"
     )]
@@ -181,14 +254,42 @@ impl TransportPlanform {
         stations
     }
 
-    /// Defining stations plus the optional tip-rake station, centreline to tip.
+    /// The optional trailing-edge-break, edge and tip-rake stations between the
+    /// kink and the tip, in span order.
+    pub fn outboard_stations(&self) -> Vec<MainWingStation> {
+        // An edge station on a break or on the rake start stands in for it: the
+        // straight-line station stays on its field for the reference trapezoid.
+        let lofted = |station: &MainWingStation| {
+            !self.edge_stations.iter().any(|edge| {
+                (edge.span_fraction - station.span_fraction).abs() <= super::STATION_SPAN_TOLERANCE
+            })
+        };
+        let mut stations: Vec<_> = self
+            .te_breaks
+            .iter()
+            .chain(&self.tip_rake)
+            .filter(|station| lofted(station))
+            .chain(
+                self.edge_stations
+                    .iter()
+                    .filter(|station| station.y_m > self.kink.y_m),
+            )
+            .copied()
+            .collect();
+        stations.sort_by(|a, b| a.y_m.total_cmp(&b.y_m));
+        stations
+    }
+
+    /// Defining stations plus the optional outboard stations, centreline to tip.
     pub fn stations_with_rake(&self) -> Vec<MainWingStation> {
         let mut stations = self.stations();
-        if let Some(rake) = self.tip_rake {
-            let tip = stations.pop();
-            stations.push(rake);
-            stations.extend(tip);
-        }
+        stations.extend(self.outboard_stations());
+        stations.extend(
+            self.edge_stations
+                .iter()
+                .filter(|station| station.y_m < self.kink.y_m),
+        );
+        stations.sort_by(|a, b| a.y_m.total_cmp(&b.y_m));
         stations
     }
 
@@ -315,6 +416,22 @@ pub enum WingSectionError {
         /// Invalid chord, in metres.
         value: f64,
     },
+    /// The station lies at or inboard of the side of body, where the wing is set by
+    /// the side-of-body section and the two edge lines.
+    #[error(
+        "custom wing section {index} at span fraction {span_fraction} lies at or inboard of the \
+         side of body at {side_of_body}: the wing there is set by the side-of-body section and \
+         the edge lines, so the section could not be honoured; move it outboard of the side of \
+         body or remove it"
+    )]
+    AtOrInboardOfSideOfBody {
+        /// Zero-based section index.
+        index: usize,
+        /// Semispan fraction of the section.
+        span_fraction: f64,
+        /// Semispan fraction of the side of body.
+        side_of_body: f64,
+    },
     /// The station lies at or beyond a defining root/tip section.
     #[error("custom wing section {index} span fraction must lie strictly in (0, 1), got {value}")]
     SpanOutOfRange {
@@ -352,40 +469,4 @@ pub enum WingSectionError {
     /// The airfoil lookup key is empty.
     #[error("custom wing section {0} needs a non-empty airfoil name")]
     EmptyAirfoil(usize),
-}
-
-/// Reject a non-finite planform input.
-pub(super) fn validate_finite(
-    field: &'static str,
-    value: f64,
-) -> Result<(), TransportPlanformError> {
-    if value.is_finite() {
-        Ok(())
-    } else {
-        Err(TransportPlanformError::NonFinite { field, value })
-    }
-}
-
-/// Reject a non-positive planform input.
-pub(super) fn validate_positive(
-    field: &'static str,
-    value: f64,
-) -> Result<(), TransportPlanformError> {
-    if value > 0.0 {
-        Ok(())
-    } else {
-        Err(TransportPlanformError::NonPositive { field, value })
-    }
-}
-
-/// Reject a leading-edge sweep at or beyond 89 degrees.
-pub(super) fn validate_sweep(
-    field: &'static str,
-    value: f64,
-) -> Result<(), TransportPlanformError> {
-    if value.abs() < 89.0 {
-        Ok(())
-    } else {
-        Err(TransportPlanformError::InvalidSweep { field, value })
-    }
 }

@@ -1,11 +1,13 @@
 // SPDX-License-Identifier: AGPL-3.0-or-later
 // Copyright (C) 2026 Marcos Quiroga Rodriguez
 
-//! Geometric twist measured independently of uniform trimmed incidence.
+//! Geometric twist measured independently of uniform trimmed incidence, on the
+//! design twist line: the carried box's, because the loft holds the side-of-body
+//! twist inside the body and the design variable is the root station.
 use alas_geom::aircraft::airplane::Airplane;
 
 pub(super) fn tip_washout_deg(plane: &Airplane) -> Option<f64> {
-    let wing = plane.wings.first()?;
+    let wing = plane.wings.first()?.carried_box();
     let root = wing.xsecs.first()?;
     let tip = wing.xsecs.last()?;
     let washout = tip.twist - root.twist;
@@ -32,7 +34,7 @@ pub(super) fn tip_washout_deg(plane: &Airplane) -> Option<f64> {
 /// and the design variable is the station value. The linear loft is a
 /// polyline through the same stations, so its extremes are the stations too.
 pub(super) fn max_washin_rise_deg(plane: &Airplane, stations_y_m: Option<&[f64]>) -> Option<f64> {
-    let wing = plane.wings.first()?;
+    let wing = plane.wings.first()?.carried_box();
     let semispan = wing.xsecs.last()?.xyz_le[1].abs();
     let mut lowest_inboard = f64::INFINITY;
     let mut rise = 0.0_f64;

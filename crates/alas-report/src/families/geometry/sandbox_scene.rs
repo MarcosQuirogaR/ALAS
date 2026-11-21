@@ -44,8 +44,10 @@ use alas_geom::aircraft::wing::Wing;
 
 use crate::scene::{Camera3D, Color, Fill, Point2D, Point3D, Scene, SceneElement, Stroke};
 use crate::theme::get_palette;
+use rayon::prelude::*;
 
 use super::sandbox_bsp::{BspPolygon, BspTree};
+pub use super::sandbox_framing::{FramingReference, SceneFraming};
 
 const BULKHEAD_SEGMENTS: usize = 24;
 /// Width of the outline stroke on original face edges, in canvas units.
@@ -59,6 +61,9 @@ const PLANE_TOLERANCE_FRACTION: f64 = 5e-4;
 /// Cutting stops once the fragments exceed this multiple of the faces;
 /// the AVE interactive model needs about twice its faces.
 const MAX_FRAGMENTS_PER_FACE: usize = 16;
+/// Fragments per parallel drawing chunk; a smaller model is drawn on the
+/// calling thread.
+const PARALLEL_FRAGMENTS: usize = 1024;
 
 /// One editable aircraft component the sandbox can isolate in the preview.
 #[derive(Debug, Clone, Copy, PartialEq, Eq, Hash)]
@@ -103,52 +108,11 @@ impl SceneComponent {
     pub fn color(self) -> Color {
         match self {
             Self::Wing => Color::from_hex("#2563eb"),
-            Self::HorizontalTail | Self::VerticalTail => Color::from_hex("#8f9bb3"),
+            Self::HorizontalTail => Color::from_hex("#22b8a0"),
+            Self::VerticalTail => Color::from_hex("#b57cf0"),
             Self::Fuselage => Color::from_hex("#b8bec8"),
             Self::Nacelles => Color::from_hex("#ff9900"),
         }
-    }
-}
-
-/// The model point at the viewport centre and the model extent (a radius
-/// about it) that maps to 45 % of the viewport's smaller side at zoom 1,
-/// independent of the camera orientation.
-#[derive(Debug, Clone, Copy, PartialEq)]
-pub struct FramingReference {
-    /// The model point mapped to the viewport centre.
-    pub center: Point3D,
-    /// The model radius about `center` that maps to 45 % of the smaller
-    /// viewport side, the same convention as [`Camera3D::project`]'s
-    /// `max_span`.
-    pub extent: f64,
-}
-
-impl FramingReference {
-    /// The reference enclosing `points` from every orientation: the centre
-    /// of their bounding box and the radius of the sphere about it that
-    /// contains them all, so the projected model never leaves the 90 %
-    /// central disc of the viewport at zoom 1. `None` for an empty set.
-    pub fn enclosing(points: &[Point3D]) -> Option<Self> {
-        if points.is_empty() {
-            return None;
-        }
-        let b = bounds(points);
-        let center = [
-            (b[0] + b[1]) * 0.5,
-            (b[2] + b[3]) * 0.5,
-            (b[4] + b[5]) * 0.5,
-        ];
-        let radius = points
-            .iter()
-            .map(|p| {
-                let d = [p[0] - center[0], p[1] - center[1], p[2] - center[2]];
-                (d[0] * d[0] + d[1] * d[1] + d[2] * d[2]).sqrt()
-            })
-            .fold(0.0_f64, f64::max);
-        Some(Self {
-            center,
-            extent: radius.max(1e-6),
-        })
     }
 }
 
@@ -173,52 +137,6 @@ impl Default for SandboxSceneOptions {
             canvas: (600.0, 500.0),
             reference: None,
         }
-    }
-}
-
-/// The projection a sandbox scene was drawn with.
-#[derive(Debug, Clone, Copy, PartialEq)]
-pub struct SceneFraming {
-    /// The camera used for every face.
-    pub camera: Camera3D,
-    /// The model point mapped to the viewport centre.
-    pub center: Point3D,
-    /// The model span that fills the viewport.
-    pub max_span: f64,
-    /// The viewport rectangle inside the scene canvas.
-    pub viewport: (f64, f64, f64, f64),
-    /// The scene canvas size.
-    pub canvas: (f64, f64),
-}
-
-impl SceneFraming {
-    /// Project a model point into scene canvas coordinates.
-    pub fn project(&self, point: Point3D) -> Point2D {
-        self.camera
-            .project(point, self.center, self.max_span, self.viewport)
-    }
-
-    /// The unit view direction (from the model toward the viewer) in model
-    /// axes, used for headlight shading and painter ordering.
-    pub fn view_direction(&self) -> Point3D {
-        let elev = self.camera.elev_deg.to_radians();
-        let azim = self.camera.azim_deg.to_radians();
-        [azim.sin() * elev.cos(), azim.cos() * elev.cos(), elev.sin()]
-    }
-
-    /// The framing reference this scene was drawn with.
-    pub fn reference(&self) -> FramingReference {
-        FramingReference {
-            center: self.center,
-            extent: self.max_span,
-        }
-    }
-
-    /// Canvas units per model metre, the same in every direction of an
-    /// orthographic view.
-    pub fn scale(&self) -> f64 {
-        let (_, _, vw, vh) = self.viewport;
-        vw.min(vh) * 0.45 * self.camera.zoom / self.max_span.max(1e-6)
     }
 }
 
@@ -301,7 +219,38 @@ fn wing_faces(wing: &Wing, max_points: usize, component: SceneComponent) -> Vec<
             }
         }
     }
+    // The end faces: without them a tip section is a ring to look through.
+    for outline in [outlines.first(), outlines.last()].into_iter().flatten() {
+        for &mirror in mirrors {
+            let place = |p: Point3D| if mirror { mirror_y(p) } else { p };
+            let placed: Vec<Point3D> = outline.iter().map(|&p| place(p)).collect();
+            faces.extend(
+                section_end_faces(&placed)
+                    .into_iter()
+                    .map(|points| face(component, points)),
+            );
+        }
+    }
     faces
+}
+
+/// One closed section outline as a strip across the chord: each point paired
+/// with its opposite on the other surface, so a cambered, non-convex section
+/// is filled exactly. The outline starts and ends at the trailing edge.
+fn section_end_faces(outline: &[Point3D]) -> Vec<Vec<Point3D>> {
+    let mut strips = Vec::new();
+    let (mut low, mut high) = (0, outline.len().saturating_sub(1));
+    while low + 1 < high {
+        let mut points = vec![outline[low], outline[low + 1]];
+        if low + 1 < high - 1 {
+            points.push(outline[high - 1]);
+        }
+        points.push(outline[high]);
+        strips.push(points);
+        low += 1;
+        high -= 1;
+    }
+    strips
 }
 
 fn bulkhead_ring(xsec: &alas_geom::aircraft::fuselage::FuselageXSec) -> Vec<Point3D> {
@@ -318,7 +267,18 @@ fn bulkhead_ring(xsec: &alas_geom::aircraft::fuselage::FuselageXSec) -> Vec<Poin
 }
 
 fn fuselage_faces(fuselage: &Fuselage, component: SceneComponent) -> Vec<SandboxFace> {
-    let rings: Vec<Vec<Point3D>> = fuselage.xsecs.iter().map(bulkhead_ring).collect();
+    // The closed surface: no open tail or nozzle ring to look through.
+    let rings: Vec<Vec<Point3D>> = fuselage
+        .closed_stations()
+        .iter()
+        .map(|station| {
+            let mut ring = bulkhead_ring(station);
+            for point in &mut ring {
+                point[0] += fuselage.ring_x_shift_m(station, point[2]);
+            }
+            ring
+        })
+        .collect();
     let mut faces = Vec::new();
     for pair in rings.windows(2) {
         let (fore, aft) = (&pair[0], &pair[1]);
@@ -436,6 +396,31 @@ impl SandboxSceneModel {
         })
     }
 
+    /// The framing that makes the shown components fill `fill` of the part of
+    /// a `canvas` the `inset` (left, top, right, bottom, canvas units) leaves
+    /// free, as seen from `camera`, centred in that part: the tight fit of the
+    /// projected bounding box, not the orientation-independent sphere. A caller
+    /// keeps it across orbit, so the scale does not change while turning.
+    pub fn tight_framing_reference(
+        &self,
+        isolate: Option<SceneComponent>,
+        camera: Camera3D,
+        canvas: (f64, f64),
+        fill: f64,
+        inset: (f64, f64, f64, f64),
+    ) -> FramingReference {
+        let points: Vec<Point3D> = self
+            .points
+            .iter()
+            .filter(|(component, _)| included(isolate, *component))
+            .map(|&(_, p)| p)
+            .collect();
+        if points.is_empty() {
+            return self.framing_reference(isolate);
+        }
+        super::sandbox_framing::tight_reference(&points, camera, canvas, fill, inset)
+    }
+
     /// Draw the model for `camera` and `options`, returning the framing
     /// used. Without an explicit reference the shown components are
     /// enclosed; with one, the same pixels per metre and centre are kept
@@ -445,6 +430,21 @@ impl SandboxSceneModel {
         camera: Option<Camera3D>,
         theme: Option<&str>,
         options: &SandboxSceneOptions,
+    ) -> (Scene, SceneFraming) {
+        self.render_toned(camera, theme, options, &|_, colour| colour, &|_| false)
+    }
+
+    /// [`Self::render`] with `tone` applied to every colour a component is
+    /// drawn with (fill and outline), so a caller can push chosen components
+    /// into the background; components for which `behind` is true are drawn
+    /// first, behind the rest whatever their depth.
+    pub fn render_toned(
+        &self,
+        camera: Option<Camera3D>,
+        theme: Option<&str>,
+        options: &SandboxSceneOptions,
+        tone: &(dyn Fn(SceneComponent, Color) -> Color + Sync),
+        behind: &(dyn Fn(SceneComponent) -> bool + Sync),
     ) -> (Scene, SceneFraming) {
         let pal = get_palette(theme);
         let (width, height) = options.canvas;
@@ -464,22 +464,28 @@ impl SandboxSceneModel {
             canvas: options.canvas,
         };
         let light = framing.view_direction();
-        for index in self.tree.painter_order(light) {
+        let (back, front): (Vec<usize>, Vec<usize>) = (self.tree)
+            .painter_order(light)
+            .into_iter()
+            .partition(|&i| behind(self.faces[self.tree.polygons()[i].source].component));
+        let order: Vec<usize> = back.into_iter().chain(front).collect();
+        // One fragment's face and its outline, appended to `out`.
+        let draw = |index: usize, out: &mut Vec<SceneElement>| {
             let fragment = &self.tree.polygons()[index];
             let face = &self.faces[fragment.source];
             if !included(options.isolate, face.component) {
-                continue;
+                return;
             }
             let n = face.normal;
             let lambert = (n[0] * light[0] + n[1] * light[1] + n[2] * light[2]).abs();
             let factor = 0.55 + 0.45 * lambert;
-            let fill = shade(face.component.color(), factor);
+            let fill = tone(face.component, shade(face.component.color(), factor));
             let projected: Vec<Point2D> = fragment
                 .points
                 .iter()
                 .map(|&p| framing.project(p))
                 .collect();
-            scene.add(SceneElement::Polygon {
+            out.push(SceneElement::Polygon {
                 points: projected.clone(),
                 fill: Some(Fill::new(fill)),
                 stroke: None,
@@ -490,10 +496,35 @@ impl SandboxSceneModel {
                 let stroke = if fragment.edge_is_cut(i) {
                     Stroke::new(seam, SEAM_WIDTH)
                 } else {
-                    Stroke::new(outline, OUTLINE_WIDTH)
+                    Stroke::new(tone(face.component, outline), OUTLINE_WIDTH)
                 };
-                scene.add(SceneElement::Line { p1, p2, stroke });
+                out.push(SceneElement::Line { p1, p2, stroke });
             }
+        };
+        // A camera turn redraws every fragment: a large aircraft is drawn in
+        // ordered chunks on the rayon pool and the chunks are added in painter
+        // order, so the scene is element for element the sequential one.
+        // Elements go through `Scene::add` on this thread, where a plot-data
+        // capture would observe them.
+        let parts: Vec<Vec<SceneElement>> = if order.len() < PARALLEL_FRAGMENTS {
+            let mut out = Vec::with_capacity(order.len() * 5);
+            order.iter().for_each(|&index| draw(index, &mut out));
+            vec![out]
+        } else {
+            let chunk =
+                PARALLEL_FRAGMENTS.max(order.len().div_ceil(4 * rayon::current_num_threads()));
+            order
+                .par_chunks(chunk)
+                .map(|part| {
+                    let mut out = Vec::with_capacity(part.len() * 5);
+                    part.iter().for_each(|&index| draw(index, &mut out));
+                    out
+                })
+                .collect()
+        };
+        scene.elements.reserve(parts.iter().map(Vec::len).sum());
+        for element in parts.into_iter().flatten() {
+            scene.add(element);
         }
         (scene, framing)
     }
@@ -559,6 +590,63 @@ mod tests {
             .count()
     }
 
+    /// Shoelace area of a polygon in the x-z plane, m2.
+    fn area_xz(points: &[Point3D]) -> f64 {
+        let n = points.len();
+        (0..n)
+            .map(|i| {
+                let (a, b) = (points[i], points[(i + 1) % n]);
+                a[0] * b[2] - b[0] * a[2]
+            })
+            .sum::<f64>()
+            .abs()
+            / 2.0
+    }
+
+    #[test]
+    fn the_end_strip_fills_a_cambered_section_exactly() {
+        // Trailing edge, upper surface with a concave stretch, leading edge, lower surface.
+        let outline: Vec<Point3D> = [
+            (1.0, 0.0),
+            (0.7, 0.06),
+            (0.4, 0.05),
+            (0.1, 0.07),
+            (0.0, 0.0),
+            (0.1, -0.02),
+            (0.4, -0.01),
+            (0.7, 0.01),
+            (1.0, 0.0),
+        ]
+        .iter()
+        .map(|&(x, z)| [x, 3.0, z])
+        .collect();
+        let strips = section_end_faces(&outline);
+        let total: f64 = strips.iter().map(|s| area_xz(s)).sum();
+        assert!((total - area_xz(&outline[..outline.len() - 1])).abs() < 1e-12);
+    }
+
+    #[test]
+    fn body_ends_are_closed_and_wing_tips_have_faces() {
+        let plane = ave();
+        let wing = &plane.wings[0];
+        let open = wing_faces(wing, 30, SceneComponent::of_wing(wing));
+        let outlines = wing.section_outlines(Some(30));
+        let side_faces = (outlines.len() - 1) * (outlines[0].len() - 1);
+        let mirrors = if wing.symmetric { 2 } else { 1 };
+        assert!(open.len() > side_faces * mirrors, "no end faces");
+        let body = &plane.fuselages[0];
+        let faces = fuselage_faces(body, SceneComponent::of_fuselage(0, body));
+        let last_x = body.xsecs.last().expect("stations").xyz_c[0];
+        // Every point on the end station is the one closing point.
+        let end_points: Vec<Point3D> = faces
+            .iter()
+            .flat_map(|f| f.points.iter().copied())
+            .filter(|p| (p[0] - last_x).abs() < 1e-12)
+            .collect();
+        assert!(!end_points.is_empty());
+        assert!(end_points.windows(2).all(|p| p[0] == p[1]));
+    }
+
     #[test]
     fn whole_aircraft_scene_lofts_sections_into_faces_on_every_component() {
         let plane = ave();
@@ -573,6 +661,31 @@ mod tests {
                 }
             }
         }
+    }
+
+    #[test]
+    fn the_scene_does_not_depend_on_how_its_fragments_are_chunked() {
+        let model = SandboxSceneModel::new(&ave(), 40);
+        assert!(
+            model.fragments().count() > 2 * PARALLEL_FRAGMENTS,
+            "the model is drawn on the parallel path"
+        );
+        let camera = Some(Camera3D {
+            elev_deg: 24.0,
+            azim_deg: -131.0,
+            zoom: 1.3,
+        });
+        let options = SandboxSceneOptions::default();
+        let draw_on = |threads: usize| {
+            rayon::ThreadPoolBuilder::new()
+                .num_threads(threads)
+                .build()
+                .expect("thread pool")
+                .install(|| model.render(camera, Some("dark"), &options).0)
+        };
+        let one = draw_on(1);
+        assert_eq!(draw_on(3), one);
+        assert_eq!(draw_on(8), one);
     }
 
     #[test]
@@ -644,6 +757,41 @@ mod tests {
             _ => false,
         });
         assert!(drawn);
+    }
+
+    #[test]
+    fn a_centre_pod_is_closed_on_its_lip_ahead_of_the_fin_root_and_a_wing_nacelle_is_open() {
+        let entry = alas_config::presets::get("DC-10").expect("preset");
+        let plane = alas_geom::builder::AircraftBuilder::new(Some(entry.geometry.clone()))
+            .build(Some(&entry.design_vector), true)
+            .expect("builds");
+        let fin = plane
+            .wings
+            .iter()
+            .find(|wing| wing.name.contains("Vertical"))
+            .expect("fin");
+        let fronts: Vec<(f64, f64)> = plane
+            .fuselages
+            .iter()
+            .filter(|body| body.name.contains("Nacelle"))
+            .map(|body| {
+                let first = body.closed_stations()[0];
+                (first.xyz_c[1], first.width)
+            })
+            .collect();
+        let pods: Vec<_> = fronts.iter().filter(|(y, _)| y.abs() < 1e-9).collect();
+        assert_eq!(pods.len(), 1);
+        assert_eq!(pods[0].1, 0.0);
+        assert!(fronts
+            .iter()
+            .filter(|(y, _)| y.abs() >= 1e-9)
+            .all(|(_, width)| *width > 0.5));
+        let pod = plane
+            .fuselages
+            .iter()
+            .find(|body| body.name.contains("Nacelle") && body.xsecs[0].xyz_c[1].abs() < 1e-9)
+            .expect("pod");
+        assert!(pod.closed_stations()[0].xyz_c[0] < fin.xsecs[0].xyz_le[0]);
     }
 
     #[test]

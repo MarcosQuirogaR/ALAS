@@ -1,9 +1,9 @@
 // SPDX-License-Identifier: AGPL-3.0-or-later
 // Copyright (C) 2026 Marcos Quiroga Rodriguez
 
-//! Airframe mass, centre of gravity, inertia, stability and control (M2 lane D).
+//! Airframe mass, centre of gravity, inertia, stability and control.
 //!
-//! UAV-PLAN sections 2.2, 3.4 and 3.7.  Everything here works from the
+//! Everything here works from the
 //! [`crate::spec::UavSpec`] component tree and the `alas-uav-db` rows, and is
 //! independent of the aerodynamic solver: the neutral point comes from a
 //! [`stability::NeutralPointMethod`] whose default is a closed-form

@@ -10,7 +10,9 @@ use serde_json::{json, Value};
 
 #[path = "performance_fields.rs"]
 mod performance_fields;
-pub use performance_fields::published_landing_change;
+pub use performance_fields::{declared_flap_setting_deg, published_landing_change};
+#[path = "drawing_fit_2026_11.rs"]
+mod drawing_fit_2026_11;
 #[path = "geometry_phase1.rs"]
 mod geometry_phase1;
 #[path = "wing_round2.rs"]
@@ -28,7 +30,9 @@ pub fn dimensions(path: &str) -> Option<(Value, Value)> {
     let numbers = base
         .as_ref()
         .and_then(|(old, new)| Some((old.as_f64()?, new.as_f64()?)));
-    match geometry_phase1::moved(path, numbers) {
+    let phase1 = geometry_phase1::moved(path, numbers);
+    // The 2026-11 drawing passes supersede phase 1 on the paths they list.
+    match drawing_fit_2026_11::moved(path, phase1.or(numbers)).or(phase1) {
         Some((old, new)) => Some((json!(old), json!(new))),
         None => base,
     }
@@ -40,17 +44,25 @@ fn dimensions_before_phase1(path: &str) -> Option<(Value, Value)> {
         return Some((json!(old), json!(new)));
     }
     // This default differs for every preset, so it is matched by suffix
-    // rather than one entry per preset name. Raymer ch.11 / Torenbeek
-    // recommend ~6-8% minimum nose-gear load for steering/braking authority;
-    // the frozen 2% floor left the "Min Nose Load" CG-envelope boundary well
-    // inside the aerodynamic aft limit for most configured presets.
+    // rather than one entry per preset name. The class floor is the lowest
+    // nose-gear share at a certified most-aft CG in a sample of 13 airliner
+    // families (3.52 %; Raymer's 5 % is a design guideline); the frozen 2% floor
+    // left the "Min Nose Load" CG-envelope boundary well inside the aerodynamic
+    // aft limit for most configured presets.
     if path.ends_with(".mass_model.pct_load_nlg_min") {
-        return Some((json!(0.02), json!(0.06)));
+        return Some((json!(0.02), json!(0.0352)));
     }
-    // Fix lane kappa-cal (2026-10-12): viscous margin fitted with the
-    // lift-dependent viscous fraction on (see `DEFAULT_VISCOUS_MARGIN`).
+    // Tail effectiveness: unset in the product, computed from the geometry
+    // (DATCOM 4.4.1 wing wake, Roskam Part VI Eqs. 8.34-8.41); the frozen
+    // value was 0.90.
+    if path.ends_with(".analysis.tail_efficiency") {
+        return Some((json!(0.90), Value::Null));
+    }
+    // Viscous margin: sourced leakage and protuberance allowance (see
+    // `DEFAULT_VISCOUS_MARGIN`).
     if path.ends_with(".drag_model.viscous_margin") {
-        return Some((json!(1.10), json!(1.00)));
+        // Unset: the propulsion class picks the Raymer Table 12.8 row at analysis time.
+        return Some((json!(1.10), Value::Null));
     }
     let (old, new) = match path {
         "A340-300.geometry.empennage.hstab_tip_le_m[1]" => (9.0, 9.7),
@@ -189,14 +201,27 @@ fn dimensions_before_phase1(path: &str) -> Option<(Value, Value)> {
         // area-weighted t/c, which the 12 % root section reproduces in a loft
         // that holds the root section to the kink; the 14 % section gave 0.133.
         "B787-9.geometry.wing.root_airfoil" => return Some((json!("sc20614"), json!("sc20612"))),
-        // Jenkinson, Simpkin and Rhodes, "Civil Jet Aircraft Design" (1999),
-        // Data A, Table 6: 11.0 % average t/c for the DC-10-30, whose
-        // Douglas DSMA-496/-521/-522 root and DSMA-519/-520 tip sections
-        // (Lednicer, "The Incomplete Guide to Airfoil Usage") predate the
-        // supercritical sections. The 11.0 % DSMA-523A replaces the drawn
-        // SC(2)-0612/-0410 pair (0.116 area-weighted) at root and tip alike.
-        "DC-10.geometry.wing.root_airfoil" => return Some((json!("sc20612"), json!("dsma523a"))),
-        "DC-10.geometry.wing.tip_airfoil" => return Some((json!("sc20410"), json!("dsma523a"))),
+        // Tail section thickness read off the manufacturer front views: A340 AC Rev 33
+        // FIGURE-2-2-0-991-007-A01 sheet 1, HTP t/c 0.10; A380 AC Rev 20 FIGURE-2-2-0-991-001-A01
+        // sheet 1, HTP and fin depth over chord about 0.10; 787 ACAP D6-58333 Rev Q 2.2.2,
+        // tailplane depth 0.46 m at y 3.2 m. The 12 % section drew each about 0.1 m too deep.
+        "A340-300.geometry.empennage.tail_airfoil"
+        | "A380-800.geometry.empennage.tail_airfoil"
+        | "B787-9.geometry.empennage.tail_airfoil"
+        | "preset_then_field.geometry.empennage.tail_airfoil" => {
+            return Some((json!("naca0012"), json!("naca0010")))
+        }
+        // The DC-10's Douglas DSMA-496/-521/-522 root and DSMA-519/-520 tip
+        // sections (Lednicer, "The Incomplete Guide to Airfoil Usage")
+        // predate the supercritical sections and are unpublished; Obert,
+        // "Aerodynamic Design of Transport Aircraft" (2009), p. 207, prints
+        // them as peaky sections with very little rear loading and draws the
+        // basic one (Fig. 24.23, p. 208, from AIAA paper 69-830). That
+        // section, digitised as DC10-BASIC, replaces the drawn aft-loaded
+        // SC(2)-0612/-0410 pair at root and tip; the thickness stations set
+        // the t/c.
+        "DC-10.geometry.wing.root_airfoil" => return Some((json!("sc20612"), json!("DC10-BASIC"))),
+        "DC-10.geometry.wing.tip_airfoil" => return Some((json!("sc20410"), json!("DC10-BASIC"))),
         // Boeing DC-10 ACAP DAC-67803A Rev A, Figure 2.2 (Series 30 general
         // dimensions): printed 71 ft 2 in (21.69 m) tailplane span; chords,
         // sweep and root station read off the plan view's 5 ft grid.
@@ -305,7 +330,7 @@ fn dimensions_before_phase1(path: &str) -> Option<(Value, Value)> {
         | "preset_then_field.geometry.empennage.vstab_tip_le_m[2]" => (8.5, 9.12),
         "B787-9.geometry.empennage.vstab_z_m"
         | "preset_then_field.geometry.empennage.vstab_z_m" => (1.8, 3.17),
-        // Nose tip heights of the drawing-fitted noses (geometry round 2): the tip
+        // Nose tip heights of the drawing-fitted noses: the tip
         // height read from each manufacturer drawing; the frozen generic nose
         // droop was a single class estimate.
         "AVE.geometry.fuselage.nose_z_m" => (-0.5, 0.25),
@@ -395,15 +420,37 @@ pub fn retired_reference_key(path: &str, key: &str) -> bool {
         || path.ends_with(".weights") && alas_config::RETIRED_WEIGHT_KEYS.contains(&key)
         || path.ends_with(".propulsion_cycle")
             && alas_config::RETIRED_PROPULSION_CYCLE_KEYS.contains(&key)
+        || path.ends_with(".design_space") && alas_config::RETIRED_DESIGN_SPACE_KEYS.contains(&key)
 }
 
 /// Additive propulsion fields are validated by the active-binding unit tests.
 pub fn native_field(path: &str, key: &str) -> bool {
     performance_fields::is_native_field(path, key)
+        || (key == "toda_override_m" && !path.contains('.'))
+        // The CS 25.337(b) switch that ties the ultimate load factor to the
+        // design MTOW: a native product addition (default off, the frozen
+        // declared value), checked by the `DesignRequirements` unit tests.
+        || (key == "ultimate_load_factor_from_mtow"
+            && (path.ends_with("DesignRequirements") || path.ends_with(".requirements")))
         // Lift-dependent viscous drag fraction: a native product addition
         // (default 0 = the frozen lumped-margin convention).
         || (key == "compressible_trim"
             && (path.ends_with("AnalysisConfig") || path.ends_with(".analysis")))
+        || (key == "payload_items" && (path.ends_with("CabinConfig") || path.ends_with(".cabin")))
+        // A freighter's main-deck cargo door height: a native, sourced addition.
+        || (key == "main_deck_door_clear_height_m" && path.ends_with(".cargo"))
+        // The freighter doors the mass ledger places: native, sourced additions.
+        || (matches!(
+            key,
+            "main_deck_door_clear_width_m"
+                | "main_deck_door_station_m"
+                | "nose_cargo_door_width_m"
+                | "nose_cargo_door_height_m"
+        ) && path.ends_with(".cargo"))
+        // The seats a converted freighter's systems keep: a native, sourced addition.
+        || (key == "converted_freighter_seats" && path.ends_with(".cargo"))
+        || (key == "cabin_section"
+            && (path.ends_with("FuselageConfig") || path.ends_with(".fuselage")))
         || (key == "lift_dependent_viscous_fraction"
             && (path.ends_with("DragModelConfig") || path.ends_with(".drag_model")))
         || (matches!(
@@ -411,19 +458,27 @@ pub fn native_field(path: &str, key: &str) -> bool {
             "vstab_root_le_x_m"
                 | "hstab_root_le_x_m"
                 | "hstab_root_station_y_m"
+                | "vstab_dorsal_length_m"
                 | "vstab_dorsal_x_start_m"
                 | "vstab_dorsal_height_m"
+                | "vstab_dorsal_shoulder"
+                | "vstab_dorsal_seat_rise_m"
                 | "vstab_dorsal_in_aero"
+                | "vstab_airfoil"
         ) && (path.ends_with("EmpennageConfig") || path.ends_with(".empennage")))
         || (matches!(key, "fuel_policy" | "fuel_tanks" | "downstream") && !path.contains('.'))
         // Native rudder deflection limit of the engine-out yaw balance.
         || (key == "rudder_max_deflection_deg"
+            && (path.ends_with("ControlSurfacesConfig") || path.ends_with(".control_surfaces")))
+        // Native inboard aileron run (zero chord: none).
+        || (key.starts_with("inboard_aileron_")
             && (path.ends_with("ControlSurfacesConfig") || path.ends_with(".control_surfaces")))
         // The drawn tail-engine pod of a trijet; the frozen schema places the
         // centreline engine by a rule (`None` keeps that rule).
         || (key == "centre_engine" && (path.ends_with("EngineConfig") || path.ends_with(".engine")))
         || (key == "nacelle_model" && (path.ends_with("EngineConfig") || path.ends_with(".engine")))
         || (key == "z_per_engine_m" && (path.ends_with("EngineConfig") || path.ends_with(".engine")))
+        || (key == "inlet_x_per_engine_m" && (path.ends_with("EngineConfig") || path.ends_with(".engine")))
         // Optional belly-upsweep length; the frozen schema has no such field.
         || (key == "belly_upsweep_length_m"
             && (path.ends_with("FuselageConfig") || path.ends_with(".fuselage")))
@@ -452,6 +507,8 @@ pub fn native_field(path: &str, key: &str) -> bool {
                     | "reference_body_wheelbase_m"
                     | "reference_track_m"
                     | "mlg_strut_bogie_wheels"
+                    | "mlg_tire"
+                    | "nlg_tire"
                     // Dynamic nose-braking, tip-back and
                     // ground-clearance additions the frozen configuration
                     // has no equivalent field for at all.
@@ -459,6 +516,7 @@ pub fn native_field(path: &str, key: &str) -> bool {
                     | "tire_dynamic_rating_factor"
                     | "min_tip_back_deg"
                     | "required_rotation_angle_deg"
+                    | "required_rotation_basis"
                     | "fuselage_ground_clearance_m"
                     // The rotation and landing-trim forward-CG
                     // criteria's own conceptual-design inputs. The frozen
@@ -466,27 +524,47 @@ pub fn native_field(path: &str, key: &str) -> bool {
                     | "rotation_pitch_acceleration_deg_s2"
                     | "pitch_radius_of_gyration_frac_mac"
                     | "takeoff_stabilizer_nose_up_deg"
+                    | "trimmable_stabilizer"
+                    | "stabilizer_nose_up_travel_deg"
                     | "elevator_up_travel_deg"
                     | "cl_ground_attitude_frac_of_cl_max_to"
                     | "rotation_rolling_friction_coefficient"
             ))
         // Spanwise dihedral and thickness stations and the swept-back tip of the
-        // main wing: native additions, omitted from serialization when unset
-        // (geometry round 2); their behaviour is pinned by the wing-profile
+        // main wing: native additions, omitted from serialization when unset;
+        // their behaviour is pinned by the wing-profile
         // tests in `alas-geom` and `alas-config`.
         || (matches!(
             key,
             "dihedral_stations"
                 | "thickness_stations"
+                | "section_stations"
                 | "tip_rake_start_span_fraction"
+                | "te_break_span_fraction"
+                | "te_break_chord_offset_m"
+                | "te_break_2_span_fraction"
+                | "te_break_2_chord_offset_m"
+                | "edge_stations"
                 | "tip_rake_tip_chord_m"
+                | "tip_rake_reference_tip_chord_m"
                 | "wing_profile_interpolation"
                 | "flight_root_rise_m"
                 | "nacelles_hold_ground_height"
                 | "wingtip_device"
                 | "inboard_le_sweep_deg"
                 | "reference_wing"
+                | "drag_divergence_law"
         ) && (path.ends_with("WingConfig") || path.ends_with(".wing")))
+        || (matches!(
+            key,
+            "hstab_edge_stations"
+                | "vstab_edge_stations"
+                | "vstab_thickness_stations"
+                | "vstab_reference_end_fraction"
+                | "ventral_fin_stations"
+        )
+            && (path.ends_with("EmpennageConfig") || path.ends_with(".empennage")))
+        || (path.ends_with(".drag_model") && key == "schema_version")
         || (path.ends_with(".optimizer") && matches!(key, "objective" | "design_space"))
         || (path.ends_with(".mass_model")
             && matches!(
@@ -505,6 +583,9 @@ pub fn native_field(path: &str, key: &str) -> bool {
             ))
         || (path.ends_with(".geometry.engine")
             && matches!(key, "turbofan" | "turboprop" | "propulsion_technology"))
+        // The deployed high-lift chord extension the neutral-point high-lift
+        // condition reads; the frozen configuration has no such field.
+        || (path.ends_with(".performance") && key == "high_lift_chord_extension")
         // The conceptual free-turbine design cycle. The frozen Python
         // propulsion configuration is turbofan-only and declares neither
         // field, so no saved file can disagree about a value it never had.
@@ -525,7 +606,7 @@ pub fn native_field(path: &str, key: &str) -> bool {
         // true airspeed and no way to say otherwise, so this is a native
         // addition rather than a disagreement about a value.
         || (path.ends_with(".mission.profile")
-            && matches!(key, "climb_descent_speed_reference" | "climb_mach" | "descent_mach" | "max_operating_mach" | "max_operating_cas_m_s" | "takeoff_roll_time_s"))
+            && matches!(key, "climb_descent_speed_reference" | "climb_mach" | "descent_mach" | "max_operating_mach" | "max_operating_cas_m_s" | "vmo_schedule" | "mmo_schedule" | "vfe_landing_cas_m_s" | "takeoff_roll_time_s"))
         || (path.ends_with(".optimizer.solver")
             && matches!(
                 key,
@@ -540,6 +621,52 @@ pub fn native_field(path: &str, key: &str) -> bool {
         // so no preset's resolved cargo target moves; `alas-opt`'s
         // `cargo_target_objective` tests pin that.
         || (path.ends_with(".requirements") && key == "cargo_objective_kg")
+        // The optional initial-cruise-altitude requirement has no frozen field;
+        // every registered preset leaves it unset, so nothing is required of it.
+        || (path.ends_with(".requirements")
+            && matches!(key, "initial_cruise_altitude_m" | "initial_cruise_mass_kg"))
+        // The optional maximum-landing-weight requirement has no frozen field;
+        // every registered preset leaves it unset, so the declared MLW governs.
+        || (path.ends_with(".requirements") && key == "mlw_kg")
+        // The optional maximum-zero-fuel-weight requirement has no frozen field;
+        // every registered preset leaves it unset, so the declared MZFW governs.
+        || (path.ends_with(".requirements") && key == "mzfw_kg")
+        // MMO as the design cruise Mach MC has no frozen field; the registry fills
+        // it from each preset's declared operating limits (`design_speeds`).
+        || (path.ends_with(".requirements") && key == "max_operating_mach")
+        // The CS 25.335(b)(1)(ii) flag has no frozen field; the registry sets it
+        // from each preset's sourced certification basis (`high_speed_protection`).
+        || (path.ends_with(".requirements") && key == "high_speed_protection")
+}
+
+/// Cargo deck ULD formats: both
+/// decks select their unit-load-device format automatically to maximise cargo
+/// and space occupation, so the product default is "AUTO" where the frozen
+/// Python reference fixed PMC / LD3. Returns (frozen, product); a preset that
+/// declares its own format (the A400M's "463L" main deck, a declared lower
+/// hold) keeps that declaration as the product value.
+pub fn cargo_deck_uld(path: &str) -> Option<(Value, Value)> {
+    let (case, field) = path.split_once('.')?;
+    let frozen = match field {
+        "cabin.cargo.main_deck_uld" => "PMC",
+        "cabin.cargo.lower_deck_uld" => "LD3",
+        _ => return None,
+    };
+    let name = match case {
+        "preset_only" => "A220-300",
+        "preset_then_field" => "B787-9",
+        name => name,
+    };
+    let cargo = match alas_config::presets::get(name) {
+        Ok(preset) => preset.planning_cabin_config().cargo,
+        Err(_) => alas_config::CargoDeckConfig::default(),
+    };
+    let product = if field.ends_with("main_deck_uld") {
+        cargo.main_deck_uld
+    } else {
+        cargo.lower_deck_uld
+    };
+    Some((json!(frozen), json!(product)))
 }
 
 /// Named operational defaults are product additions, with their inputs and
@@ -596,6 +723,25 @@ pub fn operational(path: &str) -> Option<Value> {
     })
 }
 
+/// The design dive speed a preset derives from its declared VMO/MMO by the CS 25.335(b) rule of
+/// its certification basis (`alas_config::design_speeds`), replacing the frozen hand-set VD. The
+/// values are pinned against an independent mirror by the `design_speeds` unit tests, not here.
+pub fn design_dive_speed(path: &str) -> Option<Value> {
+    let case = path.strip_suffix(".requirements.dive_speed_m_s")?;
+    let name = match case {
+        "preset_only" => "A220-300",
+        "preset_then_field" => "B787-9",
+        name => name,
+    };
+    let preset = alas_config::presets::get(name).ok()?;
+    let profile = preset.operational_mission_defaults().profile;
+    alas_config::design_speeds::dive_speed_from_operating_limits_for(
+        &profile,
+        preset.requirements.upset_criterion(),
+    )?;
+    Some(json!(preset.requirements.dive_speed_m_s))
+}
+
 /// Lower holds a preset declares by station (`presets::declared_lower_holds`):
 /// the frozen configuration carries no declared hold compartments.
 pub fn declared_lower_holds(path: &str) -> Option<Value> {
@@ -611,38 +757,66 @@ pub fn declared_lower_holds(path: &str) -> Option<Value> {
 /// Source-constrained side-of-body corrections have no Python counterpart.
 pub fn added_planform(path: &str) -> Option<Value> {
     match path {
-        "A320-200.geometry.wing.side_of_body_chord_ratio" => Some(json!(0.852_98)),
-        // Airbus A380 AC Rev 20, Figure 2-2-0-991-001-A01 sheet 2: 17.67 m
-        // chord at the side of the body.
-        "A380-800.geometry.wing.side_of_body_chord_ratio" => Some(json!(0.897_945_396_825_144_8)),
+        // Airbus A320 AC FIGURE-2-2-0-991-004-A01 plan view, side-of-body chord
+        // before the fillet (was 0.852 98).
+        "A320-200.geometry.wing.side_of_body_chord_ratio" => Some(json!(0.8726)),
+        // Airbus A340-200/-300 AC Rev 33 FIGURE-2-2-0-991-007-A01 sheet 2:
+        // 10.5 m printed from the LE line to the TE at the fuselage side.
+        "A340-300.geometry.wing.side_of_body_chord_ratio" => Some(json!(0.874)),
+        // Airbus A380 AC Rev 20, Figure 2-2-0-991-001-A01 sheet 2: 17.68 m
+        // (printed 17.67 m) on the drawn inboard LE line over the root datum
+        // (was 0.897 945 on the 19.678 m datum).
+        "A380-800.geometry.wing.side_of_body_chord_ratio" => Some(json!(0.8985)),
         "DC-10.geometry.wing.side_of_body_chord_ratio" => Some(json!(0.925_625_096_354_822)),
-        // A220-300 pass 2: 6.078 m side-of-body chord over the 7.071 m root chord.
+        // A220 ACP Fig 1 plan view: TE x 19.90 m less the LE line 13.768 m =
+        // 6.132 m over the 7.125 m datum chord (was 0.8595).
         "A220-300.geometry.wing.side_of_body_chord_ratio"
-        | "preset_only.geometry.wing.side_of_body_chord_ratio" => Some(json!(0.8595)),
+        | "preset_only.geometry.wing.side_of_body_chord_ratio" => Some(json!(0.8606)),
         "A320-200.geometry.wing.kink_span_fraction" => Some(json!(0.379_3)),
         "A320-200.geometry.wing.side_of_body_span_fraction" => Some(json!(0.115_84)),
         // Airbus A380 AC Rev 20, Figure 2-2-0-991-001-A01: half the 7.14 m body.
         "A380-800.geometry.wing.side_of_body_span_fraction" => Some(json!(3.57 / 39.875)),
-        // Airbus A380 Facts and Figures (February 2022): the wing flexes
-        // upwards by over 4 m during take-off, over the 39.875 m semispan.
-        "A380-800.geometry.wing.flight_tip_rise_semispan_fraction" => Some(json!(0.002_733)),
+        // Boeing 787 ACAP D6-58333 Rev Q section 2.2.2 plan view: half the
+        // printed 18 ft 11 in (5.77 m) body over the 30.06 m semispan; the
+        // drawn inboard trailing edge 33.71 m there, 11.895 m from the built
+        // leading edge, over the 13.62 m root datum (was the derived chord
+        // at the class 0.10).
+        "B787-9.geometry.wing.side_of_body_span_fraction" => Some(json!(2.885 / 30.06)),
+        "B787-9.geometry.wing.side_of_body_chord_ratio" => Some(json!(0.8734)),
+        // Airbus A380 AC Rev 20, Figure 2-2-0-991-001-A01 sheet 1 (front
+        // view): wing centre at the fence 1.48 m against the 1.46 m tip_z,
+        // 0.02 m over the 39.875 m semispan (was 0.002 733, a
+        // held-flight balance value). The over 4 m take-off flex of Airbus A380
+        // Facts and Figures (February 2022) is validated, never lofted.
+        "A380-800.geometry.wing.flight_tip_rise_semispan_fraction" => Some(json!(0.0005)),
         // Geometry round 2: the static ground shape stays at its published clearances and the
         // flight shape carries the drawing fit (root and tip rises, interior station rises).
-        "A320-200.geometry.wing.flight_tip_rise_semispan_fraction" => Some(json!(0.016_681)),
-        "A340-300.geometry.wing.flight_tip_rise_semispan_fraction" => Some(json!(0.013_999)),
+        // Drawing passes: A320 AC FIGURE-2-3-0-991-029-A01 tip
+        // clearance against the fitted line (was 0.016 681);
+        // A340 AC FIGURE-2-2-0-991-007-A01 sheet 1 front-view upper line, 4.37 deg
+        // (was 0.013 999).
+        "A320-200.geometry.wing.flight_tip_rise_semispan_fraction" => Some(json!(0.02372)),
+        "A340-300.geometry.wing.flight_tip_rise_semispan_fraction" => Some(json!(0.0069)),
         _ => None,
     }
 }
 
-/// The declared section class that fixes the Korn technology factor, which
-/// replaced the frozen global `drag_model.korn_technology_factor` and so has
-/// no Python counterpart: conventional for the 1966-1968 DC-10 wing and the
-/// non-transonic ATR 72, supercritical for every other preset and for a
-/// clean-sheet configuration (each preset's `airfoil_class_source`).
+/// The declared section generation, which replaced the frozen global
+/// `drag_model.korn_technology_factor` and so has no Python counterpart. The
+/// class follows the Shevell-Kroo crest-critical Mach method (Kroo,
+/// AA241 notes sec. 4.3; Shevell 1980; Torenbeek 1982) and the
+/// era of the wing: peaky for the 1960s DC-10 and 747, supercritical for the
+/// A320 and A330/A340 wings, advanced supercritical for wings first flown from
+/// 2000 on (A380, 787, A350, A220, E2, C919, A400M and the clean-sheet AVE),
+/// conventional for the non-transonic ATR 72 (each preset's
+/// `airfoil_class_source`).
 pub fn declared_airfoil_class(path: &str) -> Option<Value> {
     let aircraft = path.strip_suffix(".geometry.wing.airfoil_class")?;
     Some(json!(match aircraft {
-        "DC-10" | "ATR72-600" => "conventional",
+        "ATR72-600" => "conventional",
+        "DC-10" | "B747-400" => "peaky",
+        "AVE" | "A380-800" | "B787-9" | "A220-300" | "A350-900" | "E195-E2" | "C919" | "A400M"
+        | "preset_only" | "preset_then_field" => "supercritical_advanced",
         _ => "supercritical",
     }))
 }

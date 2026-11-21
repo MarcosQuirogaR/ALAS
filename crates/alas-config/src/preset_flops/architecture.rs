@@ -116,6 +116,31 @@ pub(super) fn declared_architecture(name: &str) -> Option<DeclaredArchitecture> 
                 uncertainty: "containerized cargo and FLOPS equivalent tank topology are study mappings",
             },
         ),
+        "A350-900" => (
+            0.89,
+            8_500.0,
+            2,
+            HYDRAULIC_5000_PSI_PA,
+            0,
+            Some(3),
+            Some(130_693.0),
+            Evidence {
+                document: "Airbus A350 Family Facts and Figures; Poll and Schumann 2020 Part 2",
+                revision: "June 2026 / Table 1",
+                location: "p.3 (range) and MMO column",
+                applicability: "A350-941 / WV020 HGW; design range is a declared study value",
+                kind: FlopsInputEvidence::UserDeclared,
+                uncertainty: "payload and reserves of the 8,500 nmi range are not defined",
+            },
+            Evidence {
+                document: "EASA.A.151 type-certificate data",
+                revision: "Issue 33, 2026-07-01",
+                location: "section III.2.2: 130,693 kg usable at 0.785 kg/L, mod 110211",
+                applicability: "A350-941 / Trent XWB-84, fixed wing, two wing-mounted engines",
+                kind: FlopsInputEvidence::UserDeclared,
+                uncertainty: "hydraulic pressure, containerized cargo and FLOPS equivalent tank topology are study mappings",
+            },
+        ),
         "A320-200" => (
             0.82,
             3_400.0,
@@ -191,6 +216,34 @@ pub(super) fn declared_architecture(name: &str) -> Option<DeclaredArchitecture> 
                 uncertainty: "hydraulic and cargo mappings are preliminary; propulsion mass is unsupported by FLOPS",
             },
         ),
+        "C295" => (
+            // I: 0.49 is VMO 200 kt at 25,000 ft, the highest Mach on the T1 III.10 line, ISA,
+            // IAS read as CAS. The TCDS prints no MMO.
+            0.49,
+            810.0, // S: A1 about 1,500 km with the 9 t payload
+            2,     // S: T1 III.18 pilot and co-pilot; J1 p.545 crew of two
+            // S: J1 p.293 CN-235 207 bar; J1 p.545 C-295 systems identical to the CN-235 Srs 300.
+            HYDRAULIC_3000_PSI_PA,
+            0,
+            Some(4), // S: T1 III.9 main and auxiliary tank in each wing
+            None,
+            Evidence {
+                document: "Airbus C295 product page and EASA.A.186 CN-235/C-295 TCDS",
+                revision: "accessed 2026-11-05 / Issue 08, 2025-12-09",
+                location: "product page payload-range statement; TCDS Section 5 III.10",
+                applicability: "C-295M overload weights; 9 t over 1,500 km, reserves not stated",
+                kind: FlopsInputEvidence::UserDeclared,
+                uncertainty: "advertised range as a study proxy; maximum Mach derived from the VMO line, no MMO printed",
+            },
+            Evidence {
+                document: "EASA.A.186 CN-235/C-295 TCDS and Jane's All the World's Aircraft 2008-2009",
+                revision: "Issue 08, 2025-12-09 / 2008-2009 edition",
+                location: "TCDS Section 5 III.5-III.9 and III.18; Jane's p.293 and p.545",
+                applicability: "C-295 / PW127G / HSD 568F-5, two wing-mounted engines, four wing tanks, no APU (TCDS III.6 N/A)",
+                kind: FlopsInputEvidence::SourceBacked,
+                uncertainty: "hydraulic pressure read across from the CN-235 Srs 300; a loadmaster is not part of the certified minimum crew",
+            },
+        ),
         "DC-10" => (
             0.88,
             5_700.0,
@@ -211,7 +264,7 @@ pub(super) fn declared_architecture(name: &str) -> Option<DeclaredArchitecture> 
                 document: "FAA TCDS A22WE and Boeing DC/MD-10 ACAP",
                 revision: "Rev 13, 2018-04-30 / DAC-67803A Rev A",
                 location: "engine installation, fuel-system and aircraft-dimensions sections",
-                applicability: "DC-10-30 / CF6-50C, two wing-mounted engines and one tail-mounted engine",
+                applicability: "DC-10-30 / CF6-50C1, two wing-mounted engines and one tail-mounted engine",
                 kind: FlopsInputEvidence::UserDeclared,
                 uncertainty: "containerized cargo is zero by study declaration; tank count follows the ACAP layout",
             },
@@ -244,22 +297,20 @@ pub(super) fn declared_architecture(name: &str) -> Option<DeclaredArchitecture> 
         _ => super::architecture_rows::narrowbody_rows(name)?,
     };
 
-    // The registered A320 case has the same 150-seat total as Airbus' cited
-    // typical layout, which also publishes four attendant positions. Keep
-    // the regulatory operational minimum (14 CFR 121.391(a) / EASA
-    // ORO.CC.100: one cabin crew member per 50 installed passenger seats,
-    // rounded up) for cases whose published cabin total does not match the
-    // registered study cabin. This is not FLOPS: NASA/TM-2017-219627 eq.
-    // 116 reads `NSTU = 1 + ceil(NPASS/40)` (NPASS >= 51), a different,
-    // heavier count for a transport this size. `ceil(seats/50)` is used here because it is the number a real
-    // airline schedule is bound to carry regardless of the FLOPS-fitted
-    // furnishings/systems correlation, and because `cabin_synchronized`
-    // (`alas-pipeline::full_analysis::cabin_sync`) re-derives it against
-    // this same floor whenever the seated cabin changes after this
-    // declaration, so the two paths agree on which rule they follow.
+    // The operational minimum of EASA ORO.CC.100(b): the type-certificate
+    // number for the cabin configuration, never fewer than one per 50 seats
+    // on a deck (`presets::minimum_cabin_crew`). This is not FLOPS:
+    // NASA/TM-2017-219627 eq. 116 reads `NSTU = 1 + ceil(NPASS/40)`, a
+    // heavier count for a transport this size. The deck split is not known
+    // at declaration, so every seat is counted on the main deck here; the
+    // payload layout re-derives the number deck by deck and
+    // `cabin_synchronized_for_cabin` (`alas-opt::mdo::cabin_sync`) raises
+    // the declared count to it.
     let flight_attendant_count = match name {
-        "A320-200" => 4,
-        _ => seats.div_ceil(50),
+        // A business jet flown under TCDS III.9: two crew, no cabin crew required.
+        "LJ60" => 0,
+        _ if crate::systems_mass::minimum_cabin_crew(seats) == 0 => 0,
+        _ => crate::presets::minimum_cabin_crew(name, seats, 0),
     };
     let (class_split, cabin) = source_class_split(name, seats);
     Some(DeclaredArchitecture {
@@ -317,6 +368,21 @@ fn source_class_split(name: &str, seats: usize) -> (ClassSplit, Evidence) {
                 applicability: "787-9; typical two-class 290-seat layout matches the registered passenger total",
                 kind: FlopsInputEvidence::SourceBacked,
                 uncertainty: "Typical Boeing layout; operator cabin equipment and installed seating may differ.",
+            },
+        ),
+        "A350-900" if seats == 325 => (
+            ClassSplit {
+                first: 0,
+                business: 32,
+                tourist: 293,
+            },
+            Evidence {
+                document: "Registered A350-900 study cabin",
+                revision: "study declaration",
+                location: "preset requirements",
+                applicability: "325 seats, between the 315 of the Airbus AC section 2-1-0 and the 332 of the June 2026 Facts and Figures",
+                kind: FlopsInputEvidence::UserDeclared,
+                uncertainty: "class split is a study value; neither Airbus layout has 325 seats.",
             },
         ),
         "B747-400" if seats == 400 => (

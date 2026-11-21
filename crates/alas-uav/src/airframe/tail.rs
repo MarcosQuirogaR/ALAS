@@ -3,6 +3,10 @@
 
 //! Tail sizing from volume coefficients, per topology, and the V-tail mixer.
 //!
+//! Status: a design-study library exercised by the airframe tests; the UAV
+//! generator takes fixed tail geometry and `estimate_trim_setup`, so the sizing
+//! routines here are not called by the product pipeline.
+//!
 //! Sources (read on the page): Raymer, 6th ed., Eq. 6.26-6.29 and Table 6.4,
 //! p. 159-160 (volume coefficients; T-tail, H-tail, all-moving and V-tail
 //! rules in the text of p. 160); Sadraey Eq. 6.24 and 6.47, Examples 6.1 and

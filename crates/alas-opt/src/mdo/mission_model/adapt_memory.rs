@@ -35,10 +35,6 @@ impl AdaptationMemory {
         }
     }
 
-    pub(super) fn get(&self, leg: LegKind) -> Option<i64> {
-        self.0.lock().unwrap_or_else(|p| p.into_inner()).levels[Self::slot(leg)]
-    }
-
     pub(super) fn set(&self, leg: LegKind, index: i64) {
         self.0.lock().unwrap_or_else(|p| p.into_inner()).levels[Self::slot(leg)] = Some(index);
     }

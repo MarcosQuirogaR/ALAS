@@ -5,7 +5,7 @@
 // evidence, not a panic escaping from library code.
 #![allow(clippy::unwrap_used, clippy::expect_used)]
 
-//! Control-surface hinge moment and servo torque check (UAV-PLAN 3.4).
+//! Control-surface hinge moment and servo torque check.
 //!
 //! Source: Sadraey, Aircraft Design: A Systems Engineering Approach,
 //! Eq. 12.147-12.150 (p. 714, read on the page): `H = 1/2 rho V^2 S_cs c_cs Ch`,

@@ -51,9 +51,12 @@ use crate::export::{
     DesignDatabase,
 };
 use crate::feasibility::{
-    assess_physical_feasibility_with_load_case, format_feasibility, FeasibilityReport,
+    assess_physical_feasibility_on_route, format_feasibility, DeliveryClassification,
+    FeasibilityReport, FindingCode, FindingSeverity, PhysicalFinding, RunCompletion,
 };
-use crate::flowunsteady::{run_flowunsteady_analysis, FlowUnsteadyAnalysisResult};
+use crate::flowunsteady::{
+    run_flowunsteady_analysis, scaled_timeout_seconds, FlowUnsteadyAnalysisResult,
+};
 use crate::full_analysis::{AnalysisReport, FullAnalysis};
 use crate::mission_route::{plan_mission_route, route_endpoints};
 use crate::mission_stage::{self, SelectedLoadCase};
@@ -72,12 +75,13 @@ pub(crate) use events::optimization_stage_status;
 pub(crate) use events::{begin_component, finish_component};
 use events::{
     begin_stage, emit_diagnostic, emit_diagnostic_with_severity, emit_tool_diagnostics,
-    finish_optimization_stage, finish_stage, warn_artifact_failure,
+    finish_optimization_stage, finish_stage, staged, warn_artifact_failure, with_search_progress,
 };
 mod helpers;
 mod mission_payload_override;
 mod mses_condition;
 mod mses_polars;
+pub mod partial;
 mod sized_finalist;
 mod snapshots;
 use helpers::{
@@ -187,7 +191,8 @@ impl Default for PipelineOptions {
     }
 }
 
-/// Comprehensive outcome of all stages executed in a pipeline run.
+/// The outputs of every stage a pipeline run executed; a stage that did not
+/// run leaves its field `None`.
 #[derive(Debug, Clone, PartialEq)]
 pub struct PipelineResult {
     /// Configuration evaluated.
@@ -240,7 +245,43 @@ pub struct PipelineResult {
     pub flowunsteady_result: Option<FlowUnsteadyAnalysisResult>,
     /// Which requested execution controls were applied to this run.
     pub execution: PipelineExecutionStatus,
+    /// What this result may be presented as, with every reason it is not an
+    /// accepted feasible success. Computed once per run from the delivered
+    /// design, [`Self::feasibility`] and how the run ended; a live snapshot
+    /// carries [`RunCompletion::InProgress`].
+    pub delivery: DeliveryClassification,
 }
+
+impl PipelineResult {
+    /// The delivery classification: the one label a report, banner or export
+    /// may attach to this result, and its blockers.
+    #[must_use]
+    pub const fn delivery(&self) -> &DeliveryClassification {
+        &self.delivery
+    }
+
+    /// The delivery verdict and blockers followed by the physical-feasibility
+    /// evidence, for terminal, text-report and summary use.
+    #[must_use]
+    pub fn format_delivery(&self) -> String {
+        // The dispatched route's own cruise point, beside the headline one.
+        let route = self.optimized_report.as_ref().and_then(|report| {
+            crate::route_cruise_point(&self.config, report, &self.feasibility.fuel_loading)
+        });
+        format!(
+            "{}{}\n{}",
+            route.map_or_else(String::new, |point| point.summary_line() + "\n"),
+            self.delivery.render(),
+            format_feasibility(&self.feasibility)
+        )
+    }
+}
+
+/// The reason [`RoutePlanningStatus::simbrief`] carries when a dispatch
+/// account is configured but the run was not allowed to contact the service
+/// ([`DesignPipeline::with_live_dispatch_fetch`]).
+pub const LIVE_DISPATCH_NOT_ENABLED: &str =
+    "no request was made: the live dispatch fetch was not enabled for this run";
 
 /// Provenance of the route used by a mission-enabled pipeline run.
 #[derive(Debug, Clone, PartialEq, Eq)]
@@ -249,6 +290,28 @@ pub struct RoutePlanningStatus {
     pub selected_source: RouteSource,
     /// Outcome of the optional live SimBrief tier.
     pub simbrief: SimbriefFetchStatus,
+}
+
+impl RoutePlanningStatus {
+    /// Whether a dispatch account is configured but the run made no request
+    /// because the live dispatch fetch was not enabled for it
+    /// ([`DesignPipeline::with_live_dispatch_fetch`]).
+    pub fn live_dispatch_not_enabled(&self) -> bool {
+        matches!(
+            &self.simbrief,
+            SimbriefFetchStatus::TransportFailed(reason) if reason == LIVE_DISPATCH_NOT_ENABLED
+        )
+    }
+}
+
+/// The live dispatch account `config` names, trimmed; `None` when none is
+/// configured. A run contacts the dispatch service only when this is `Some`
+/// and the caller enabled the fetch with
+/// [`DesignPipeline::with_live_dispatch_fetch`], so a caller asks its user
+/// for that permission exactly when this is `Some`.
+pub fn live_dispatch_account(config: &AlasConfig) -> Option<&str> {
+    let account = config.mission.simbrief_username.trim();
+    (!account.is_empty()).then_some(account)
 }
 
 type MissionStageOutputs = (
@@ -310,7 +373,7 @@ impl PipelineExecutionStatus {
     }
 }
 
-/// Master pipeline coordinator.
+/// Master pipeline orchestrator.
 #[derive(Debug, Clone)]
 pub struct DesignPipeline {
     /// Active configuration.
@@ -322,7 +385,15 @@ pub struct DesignPipeline {
     /// aircraft. The public constructor keeps the existing configuration
     /// workflow unchanged.
     aircraft_override: Option<Airplane>,
+    /// The design vector an imported ALAS export recorded for its aircraft:
+    /// the run's nominal design in place of the configured one.
+    imported_design: Option<DesignVector>,
     mission_payload_override_kg: Option<f64>,
+    /// What the imported document's reading must tell the run's outputs.
+    import_warnings: Vec<String>,
+    /// Whether this run may ask the live dispatch service for its route.
+    /// Never read from the configuration: a loaded file cannot set it.
+    live_dispatch_fetch: bool,
 }
 
 /// The three independently optional observation seams a design-space run can
@@ -345,9 +416,34 @@ impl DesignPipeline {
         Self {
             config,
             aircraft_override,
+            imported_design: None,
             mission_payload_override_kg: None,
+            import_warnings: Vec::new(),
+            live_dispatch_fetch: false,
         }
     }
+
+    /// Allow or forbid this run to request its route from the live dispatch
+    /// service named by `mission.simbrief_username`.
+    ///
+    /// Off by default. The configuration alone never enables the request:
+    /// the caller states it for this run, so a configuration file loaded from
+    /// elsewhere cannot make the run contact the network or take its route
+    /// from another account. While it is off and an account is configured,
+    /// the route falls to the next planning tier and
+    /// [`RoutePlanningStatus::simbrief`] says the request was not made.
+    #[must_use]
+    pub const fn with_live_dispatch_fetch(mut self, allowed: bool) -> Self {
+        self.live_dispatch_fetch = allowed;
+        self
+    }
+
+    /// Whether this run may request its route from the live dispatch service
+    /// ([`Self::with_live_dispatch_fetch`]).
+    pub const fn live_dispatch_fetch_allowed(&self) -> bool {
+        self.live_dispatch_fetch
+    }
+
     /// Create a new design pipeline with `config`.
     pub fn new(config: AlasConfig) -> Self {
         Self::based_on(config, None)
@@ -372,13 +468,23 @@ impl DesignPipeline {
         mut config: AlasConfig,
         document: CpacsDocument,
     ) -> Result<Self, String> {
-        let airplane = document
-            .to_airplane()
+        let (airplane, import_warnings) = document
+            .import_airplane()
             .map_err(|error| format!("CPACS geometry conversion failed: {error}"))?;
         document
             .apply_engine_data_to_config(&mut config, &airplane)
             .map_err(|error| format!("CPACS engine conversion failed: {error}"))?;
-        Ok(Self::new_with_airplane(config, airplane))
+        Ok(Self {
+            import_warnings,
+            imported_design: document.aircraft.design_vector,
+            ..Self::new_with_airplane(config, airplane)
+        })
+    }
+
+    /// What reading the imported document must tell the run's outputs: the same text
+    /// reaches the feasibility findings of its report.
+    pub fn import_warnings(&self) -> &[String] {
+        &self.import_warnings
     }
 
     /// Execute the full end-to-end design and analysis pipeline.
@@ -593,6 +699,8 @@ impl DesignPipeline {
         snapshots: Option<&(dyn Fn(PipelineResult) + Sync)>,
     ) -> Result<PipelineResult, String> {
         let run_clock = Instant::now();
+        // Repeated plain sizing closures of this run are answered once.
+        let _sizing_memo = alas_opt::mdo::sizing_memo_scope();
         check_cancelled(cancel)?;
         validate_run_configuration(&self.config, initial_design.as_ref(), bounds)?;
         // The route depends on the configuration, not on the design, so it
@@ -688,9 +796,15 @@ impl DesignPipeline {
         // reviewed, and would also rewrite a named preset on a no-opt run.
         // Under the MTOW band mode the nominal is the registered aircraft at the
         // target mass (the fixed-requirement baseline), whatever vector is given.
-        let nominal_design = self
-            .config
-            .band_design(initial_design.unwrap_or_else(|| self.configured_nominal_design()));
+        // A reimported ALAS export is the aircraft its recorded vector built,
+        // not the configured one: read as the configured vector, a redesigned
+        // registered aircraft took the preset's published tank inventory.
+        let nominal_design = self.config.band_design(
+            initial_design
+                .or(self.imported_design)
+                .unwrap_or_else(|| self.configured_nominal_design()),
+        );
+        let options = &helpers::searched(&self.config, options, &nominal_design, bounds);
         let fixed_design_review = bounds.is_some_and(bounds_are_fixed);
 
         if planned_route.is_some() {
@@ -746,31 +860,33 @@ impl DesignPipeline {
                 .dest_airport
                 .clone()
                 .or_else(|| get_airport(&self.config.arrival_airport).ok().cloned())?;
+            // One rule for a stated field length, shared with the Results
+            // figures: it applies to the configured aerodrome only.
+            let (origin, destination) = self.config.with_stated_for_route(&origin, &destination);
             Some(AcceptanceRoute {
                 origin,
                 destination,
                 distance_m: planned.route.total_distance_m(),
             })
         });
-        // The optimization stage is where a cancellation request almost
-        // always lands: it is the only stage whose duration is a search
-        // budget rather than a fixed sequence of analyses. Marking it means a
-        // telemetry snapshot can say "the request arrived in the search" and
-        // not merely "somewhere in the pipeline".
+        // Cancellation almost always lands in the search (the one stage timed by a budget):
+        // marked, a telemetry snapshot says so. Its live progress goes to the run events.
         alas_opt::CancelScope::attach(cancel).enter(alas_opt::CancelPhase::PipelineStage, 2);
         let mut solver_optimizations = if options.optimize {
-            Some(run_solver_optimizations(
-                &self.config,
-                options.optimization_solver,
-                options.parallel,
-                options.seed,
-                environment,
-                &nominal_design,
-                bounds,
-                Some(analysis_dir.as_path()),
-                acceptance_route.as_ref(),
-                cancel,
-            ))
+            Some(with_search_progress(events, run_clock, cancel, || {
+                run_solver_optimizations(
+                    &self.config,
+                    options.optimization_solver,
+                    options.parallel,
+                    options.seed,
+                    environment,
+                    &nominal_design,
+                    bounds,
+                    Some(analysis_dir.as_path()),
+                    acceptance_route.as_ref(),
+                    cancel,
+                )
+            }))
         } else {
             None
         };
@@ -889,7 +1005,11 @@ impl DesignPipeline {
         let mut optimized_report = match branch_report {
             Some(report) => report,
             None => match this.aircraft_override.as_ref() {
-                Some(airplane) => full.run_on_airplane(&optimized_design, airplane.clone())?,
+                Some(airplane) => {
+                    let mut report = full.run_on_airplane(&optimized_design, airplane.clone())?;
+                    full.bind_design_cruise_point(&mut report);
+                    report
+                }
                 // A baseline report prices its fuel on artifacts that depend
                 // only on the configuration and design: build them beside the
                 // analysis instead of after it.
@@ -917,6 +1037,9 @@ impl DesignPipeline {
                 events,
                 run_clock,
                 cancel,
+                optimization_result
+                    .as_ref()
+                    .is_some_and(|result| result.history.n_valid() == 0),
             )?;
         }
         emit_diagnostic(
@@ -964,6 +1087,12 @@ impl DesignPipeline {
             avl_result: None,
             flowunsteady_result: None,
             execution: PipelineExecutionStatus::for_options(options, false),
+            delivery: DeliveryClassification::classify(
+                &delivered,
+                &optimized_design,
+                &FeasibilityReport::default(),
+                &RunCompletion::InProgress,
+            ),
         });
         finish_stage(events, run_clock, stage_clock, 3, "full_analysis");
         check_cancelled(cancel)?;
@@ -992,6 +1121,7 @@ impl DesignPipeline {
                 .to_airplane()
                 .map_err(|error| format!("CPACS canonicalization failed: {error}"))?;
             helpers::carry_reference_wing(&mut canonical, &optimized_report.airplane);
+            helpers::carry_body_lofts(&mut canonical, &optimized_report.airplane);
             optimized_report.airplane = canonical;
         }
         live_results.update(|snapshot| {
@@ -1148,7 +1278,7 @@ impl DesignPipeline {
                 &delivered,
                 &analysis_dir,
                 environment.flowunsteady_exe.as_deref(),
-                900.0,
+                scaled_timeout_seconds(&optimized_report, &delivered, 900.0),
             ));
             live_results.update(|snapshot| snapshot.flowunsteady_result = result.clone());
             finish_component(
@@ -1405,13 +1535,13 @@ impl DesignPipeline {
             parallel_effective,
         ) = if options.parallel {
             std::thread::scope(|scope| {
-                let vspaero = scope.spawn(run_vspaero);
-                let avl = scope.spawn(run_avl);
-                let flowunsteady = scope.spawn(run_flowunsteady);
-                let baseline = scope.spawn(run_baseline_analysis);
-                let mission = scope.spawn(run_mission);
-                let mses = scope.spawn(run_mses);
-                let structural = scope.spawn(run_structural);
+                let vspaero = scope.spawn(|| staged("vspaero", run_vspaero));
+                let avl = scope.spawn(|| staged("avl", run_avl));
+                let flowunsteady = scope.spawn(|| staged("flowunsteady", run_flowunsteady));
+                let baseline = scope.spawn(|| staged("baseline_analysis", run_baseline_analysis));
+                let mission = scope.spawn(|| staged("mission", run_mission));
+                let mses = scope.spawn(|| staged("mses", run_mses));
+                let structural = scope.spawn(|| staged("structural", run_structural));
                 let vspaero_result = vspaero
                     .join()
                     .map_err(|_| "VSPAERO worker panicked".to_owned())?;
@@ -1442,16 +1572,17 @@ impl DesignPipeline {
                 ))
             })?
         } else {
-            let (baseline_analysis, baseline_analysis_error) = run_baseline_analysis();
+            let (baseline_analysis, baseline_analysis_error) =
+                staged("baseline_analysis", run_baseline_analysis);
             // Run every worker before propagating a mission error, so a
             // sequential run leaves the same artifacts and events as the
             // parallel one when the mission stage fails.
-            let vspaero_result = run_vspaero();
-            let avl_result = run_avl();
-            let flowunsteady_result = run_flowunsteady();
-            let mission_outputs = run_mission();
-            let mses_outputs = run_mses();
-            let structural_result = run_structural();
+            let vspaero_result = staged("vspaero", run_vspaero);
+            let avl_result = staged("avl", run_avl);
+            let flowunsteady_result = staged("flowunsteady", run_flowunsteady);
+            let mission_outputs = staged("mission", run_mission);
+            let mses_outputs = staged("mses", run_mses);
+            let structural_result = staged("structural", run_structural);
             (
                 vspaero_result,
                 avl_result,
@@ -1490,14 +1621,27 @@ impl DesignPipeline {
         let mut feasibility = native_verification
             .map(|verified| verified.verification().feasibility.clone())
             .unwrap_or_else(|| {
-                assess_physical_feasibility_with_load_case(
+                assess_physical_feasibility_on_route(
                     &delivered,
                     &optimized_design,
                     &optimized_report,
                     mission_result.as_ref(),
                     mission_load_case.as_ref(),
+                    acceptance_route
+                        .as_ref()
+                        .map(|planned| (&planned.origin, &planned.destination)),
                 )
             });
+        feasibility
+            .findings
+            .extend(self.import_warnings.iter().map(|warning| PhysicalFinding {
+                code: FindingCode::CpacsImportReading,
+                severity: FindingSeverity::Warning,
+                message: warning.clone(),
+                actual: None,
+                limit: None,
+                unit: "",
+            }));
         crate::feasibility::structure::append_delivery(
             &delivered,
             &optimized_design,
@@ -1920,6 +2064,12 @@ impl DesignPipeline {
             _ => None,
         };
 
+        let delivery = DeliveryClassification::classify(
+            &delivered,
+            &optimized_design,
+            &feasibility,
+            &RunCompletion::of_search(optimization_result.as_ref()),
+        );
         finish_stage(events, run_clock, stage_clock, 7, "finalization");
         Ok(PipelineResult {
             config: delivered.clone(),
@@ -1946,6 +2096,7 @@ impl DesignPipeline {
             avl_result,
             flowunsteady_result,
             execution: PipelineExecutionStatus::for_options(options, parallel_effective),
+            delivery,
         })
     }
 
@@ -2027,6 +2178,13 @@ impl DesignPipeline {
         // The dispatch service is the one tier the sandbox never queries.
         let (dispatched_route, simbrief) = if let Some(route) = dispatched_route {
             (Some(route), SimbriefFetchStatus::SuppliedByCaller)
+        } else if live_dispatch_account(&self.config).is_none() {
+            (None, SimbriefFetchStatus::NotConfigured)
+        } else if !self.live_dispatch_fetch {
+            (
+                None,
+                SimbriefFetchStatus::TransportFailed(LIVE_DISPATCH_NOT_ENABLED.to_owned()),
+            )
         } else {
             let outcome = fetch_route_with_status(
                 &SystemCurlTransport,
@@ -2093,7 +2251,7 @@ impl DesignPipeline {
         let Some(dir) = mses_dir else {
             return unavailable(
                 alas_aero::mses::MsesStatus::Absent,
-                "MSES executables not configured (Setup > External Tools)",
+                "MSES executables not configured (Workspace > External Tools)",
             );
         };
         let Some(root_airfoil) = root_airfoil else {
@@ -2174,7 +2332,7 @@ impl DesignPipeline {
             Some(ref rep) => format!(
                 "{}\n{}",
                 format_summary(rep, Some(&self.config)),
-                format_feasibility(&result.feasibility)
+                result.format_delivery()
             ),
             None => "No analysis report available.".to_owned(),
         }

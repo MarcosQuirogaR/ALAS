@@ -134,5 +134,7 @@ fn built_in(name: &str) -> bool {
 }
 
 fn selig_or_data(name: &str) -> bool {
-    crate::selig::get(name).is_some() || crate::airfoil_data::get(name).is_some()
+    crate::selig::get(name).is_some()
+        || crate::airfoil_data::get(name).is_some()
+        || crate::digitised_sections::get(name).is_some()
 }

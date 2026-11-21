@@ -10,18 +10,23 @@ use egui::ComboBox;
 /// workflow.  Detection runs in the CFD worker; this card only edits and
 /// persists explicit paths.
 pub(crate) fn openfoam_card(state: &mut AppState, ui: &mut Ui) {
-    card(ui, "OpenFOAM CFD", "https://www.openfoam.com/", &[
+    tool_block(ui, Some("openfoam"), "OpenFOAM, Gmsh and ParaView", "https://www.openfoam.com/", &[
         "Configure the OpenFOAM backend, native project/bin directories and optional Gmsh and ParaView viewers. Connection probing and CFD solves run outside the user-interface thread.",
         "The study selects simpleFoam below Mach 0.3 and rhoSimpleFoam with perfect-gas thermodynamics and bounded shock-safe schemes at higher Mach. Missing utilities or unsupported regimes stop before a solver result is presented.",
-    ], |ui| split_body(ui, state, openfoam_settings_rows, openfoam_connection_rows));
+    ], |ui| {
+        openfoam_settings_rows(state, ui);
+        ui.add_space(4.0);
+        openfoam_connection_rows(state, ui);
+    });
 }
 
 /// Backend and installation paths (left column of a wide card).
 fn openfoam_settings_rows(state: &mut AppState, ui: &mut Ui) {
-    ui.horizontal_wrapped(|ui| {
-        ui.label(RichText::new(tr("Backend")).weak());
+    field_row::grid_row(ui, "Backend", None, |ui| {
         let mut backend = state.cfd.openfoam_preferences.backend;
         ComboBox::from_id_salt("openfoam_backend")
+            .icon(crate::combo_icon::down_arrow)
+            .width(ui.available_width())
             .selected_text(tr(backend.display_name()))
             .show_ui(ui, |ui| {
                 for candidate in [
@@ -226,7 +231,7 @@ fn show_capabilities(state: &AppState, ui: &mut Ui) {
     }
     egui::Grid::new("openfoam_capabilities")
         .num_columns(2)
-        .spacing([12.0, 3.0])
+        .spacing(crate::theme::space::GRID_SPACING)
         .show(ui, |ui| {
             for command in REQUIRED_COMMANDS.iter().copied().chain([GMSH_COMMAND]) {
                 ui.label(command);

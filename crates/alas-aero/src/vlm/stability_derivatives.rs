@@ -61,6 +61,27 @@ enum RotationReference {
 }
 
 impl RotationReference {
+    /// The lattice of this convention: the frozen reference one keeps the
+    /// reference inter-component core
+    /// ([`VlmSystem::assemble_reference_compatibility`]).
+    fn assemble<'a>(
+        self,
+        airplane: &'a Airplane,
+        spanwise_resolution: usize,
+        chordwise_resolution: usize,
+    ) -> Result<VlmSystem<'a>, VlmError> {
+        match self {
+            Self::Product => {
+                VlmSystem::assemble(airplane, spanwise_resolution, chordwise_resolution)
+            }
+            Self::Origin => VlmSystem::assemble_reference_compatibility(
+                airplane,
+                spanwise_resolution,
+                chordwise_resolution,
+            ),
+        }
+    }
+
     fn solve(
         self,
         system: &VlmSystem<'_>,
@@ -296,7 +317,9 @@ fn run_with_stability_derivatives_options(
     // One mesh and one factorization serve the base point and every
     // perturbation: the stencil changes the operating point, never the
     // geometry.
-    let system = VlmSystem::assemble(airplane, spanwise_resolution, chordwise_resolution)?;
+    let system = policy
+        .rotation
+        .assemble(airplane, spanwise_resolution, chordwise_resolution)?;
     let base = policy.rotation.solve(&system, op_point)?;
 
     // Upstream's step sizes and scale factors, transcribed. The angle steps

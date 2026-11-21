@@ -87,7 +87,7 @@ fn run_evaluation(
     let dv = &report.design;
     let req = &config.requirements;
 
-    let torenbeek_mass = report
+    let ledger_wing_mass_kg = report
         .component_masses
         .get("Wing")
         .copied()
@@ -95,26 +95,34 @@ fn run_evaluation(
 
     if !scfg.enabled {
         return StructuralAnalysisResult {
-            torenbeek_wing_mass_kg: torenbeek_mass,
+            ledger_complete_wing_mass_kg: ledger_wing_mass_kg,
             ..Default::default()
         };
     }
 
     let skin_mat = match get_material(&scfg.skin_material) {
         Ok(m) => m,
-        Err(e) => return structural_error(format!("invalid skin material: {e:?}"), torenbeek_mass),
+        Err(e) => {
+            return structural_error(format!("invalid skin material: {e:?}"), ledger_wing_mass_kg)
+        }
     };
     let web_mat = match get_material(&scfg.spar_web_material) {
         Ok(m) => m,
-        Err(e) => return structural_error(format!("invalid web material: {e:?}"), torenbeek_mass),
+        Err(e) => {
+            return structural_error(format!("invalid web material: {e:?}"), ledger_wing_mass_kg)
+        }
     };
     let cap_mat = match get_material(&scfg.spar_cap_material) {
         Ok(m) => m,
-        Err(e) => return structural_error(format!("invalid cap material: {e:?}"), torenbeek_mass),
+        Err(e) => {
+            return structural_error(format!("invalid cap material: {e:?}"), ledger_wing_mass_kg)
+        }
     };
     let rib_mat = match get_material(&scfg.rib_material) {
         Ok(m) => m,
-        Err(e) => return structural_error(format!("invalid rib material: {e:?}"), torenbeek_mass),
+        Err(e) => {
+            return structural_error(format!("invalid rib material: {e:?}"), ledger_wing_mass_kg)
+        }
     };
 
     let (spar_fracs, spar_full_span) = scfg.resolved_spars();
@@ -124,21 +132,25 @@ fn run_evaluation(
         None => {
             return structural_error(
                 "no wings found on aircraft geometry".to_owned(),
-                torenbeek_mass,
+                ledger_wing_mass_kg,
             )
         }
     };
 
     let root_airfoil = match wing.xsecs.first() {
         Some(x) => &x.airfoil,
-        None => return structural_error("wing has no cross sections".to_owned(), torenbeek_mass),
+        None => {
+            return structural_error("wing has no cross sections".to_owned(), ledger_wing_mass_kg)
+        }
     };
     let tip_airfoil = match wing.xsecs.last() {
         Some(x) => &x.airfoil,
-        None => return structural_error("wing has no cross sections".to_owned(), torenbeek_mass),
+        None => {
+            return structural_error("wing has no cross sections".to_owned(), ledger_wing_mass_kg)
+        }
     };
 
-    let wsg = match WingStructureGeometry::new(
+    let mut wsg = match WingStructureGeometry::new(
         dv,
         &config.geometry.wing,
         root_airfoil,
@@ -150,7 +162,7 @@ fn run_evaluation(
         Err(e) => {
             return structural_error(
                 format!("failed to build wing structure geometry: {e:?}"),
-                torenbeek_mass,
+                ledger_wing_mass_kg,
             )
         }
     };
@@ -162,6 +174,13 @@ fn run_evaluation(
     // light. Unconstrained studies receive their closed design mass.
     let mut design_req = config.requirements.clone();
     design_req.mtow_kg = alas_opt::mdo::structural_feasibility::structural_design_mass_kg(config);
+    // The sizing envelope, the native beam and the FE static deck read one
+    // spanwise lift shape, the same one the search path builds (basic +
+    // additional loading, two lattice solves). When no solve is possible the
+    // geometry keeps its Schrenk default; the label below says which.
+    alas_struct::span_load::attach_design_span_load(&mut wsg, &report.airplane, &design_req);
+    // One fuel density: the one the tank inventory is priced at.
+    let fuel_density_kg_m3 = alas_mass::tanks::inventory_density_kg_m3(config);
     let declared = alas_mass::wing_reconciliation::declared_wing_fuel_case(
         config,
         dv,
@@ -176,7 +195,11 @@ fn run_evaluation(
         .map(|case| case.running_mass_kg_m.clone())
         .unwrap_or_else(|| {
             alas_struct::tanks::integral_fuel_running_mass_kg_m(
-                &wsg, &stations, box_front, box_rear,
+                &wsg,
+                &stations,
+                box_front,
+                box_rear,
+                fuel_density_kg_m3,
             )
         });
     let wing_mounted = alas_struct::scope::wing_mounted_relief(
@@ -208,12 +231,13 @@ fn run_evaluation(
         cap_mat,
         rib_mat,
         &fuel_scope,
+        fuel_density_kg_m3,
         &wing_mounted,
     );
     if !scoped.scope.relief_convergence.is_settled() {
         return structural_error(
             "structural inertia-relief closure did not converge".to_owned(),
-            torenbeek_mass,
+            ledger_wing_mass_kg,
         );
     }
     let stiffness = alas_struct::sizing::size_for_linear_model(
@@ -251,7 +275,7 @@ fn run_evaluation(
             wsg: Some(wsg),
             sizing: Some(sizing),
             analysis: Some(analytical_report),
-            torenbeek_wing_mass_kg: torenbeek_mass,
+            ledger_complete_wing_mass_kg: ledger_wing_mass_kg,
             ..Default::default()
         };
     }
@@ -276,7 +300,7 @@ fn run_evaluation(
                 wsg: Some(wsg),
                 sizing: Some(sizing),
                 analysis: Some(analytical_report),
-                torenbeek_wing_mass_kg: torenbeek_mass,
+                ledger_complete_wing_mass_kg: ledger_wing_mass_kg,
                 ..Default::default()
             };
         }
@@ -290,19 +314,40 @@ fn run_evaluation(
             sizing: Some(sizing),
             mesh_health: Some(mesh_health),
             analysis: Some(analytical_report),
-            torenbeek_wing_mass_kg: torenbeek_mass,
+            ledger_complete_wing_mass_kg: ledger_wing_mass_kg,
             ..Default::default()
         };
     }
 
+    mesh_health.warnings.push(format!(
+        "Structural span load: {}.",
+        alas_struct::loads::lift_model_label(&wsg)
+    ));
+    for case in alas_struct::loads::load_cases(&design_req, scfg.additional_safety_factor) {
+        let q = alas_struct::loads::wing_lift_distribution(
+            &wsg,
+            &stations,
+            case.total_force_n,
+            alas_struct::loads::level_semi_wing_lift_n(&design_req),
+        );
+        let integral: f64 = stations
+            .windows(2)
+            .zip(q.windows(2))
+            .map(|(y, q)| 0.5 * (q[0] + q[1]) * (y[1] - y[0]))
+            .sum();
+        mesh_health.warnings.push(format!(
+            "Span load {} (n={:+.2}): integral {:.0} N against n W / 2 = {:.0} N.",
+            case.name, case.load_factor, integral, case.total_force_n
+        ));
+    }
     let wing_mass = WingMassComparison::new(
         2.0 * sizing.total_mass_kg,
         mesh_deck
             .primary_structural_mass_kg()
             .map(|mass| 2.0 * mass),
-        torenbeek_mass,
+        ledger_wing_mass_kg,
     );
-    if let Some(diagnostic) = checks::mesh_mass_diagnostic(&mesh_deck, torenbeek_mass) {
+    if let Some(diagnostic) = checks::mesh_mass_diagnostic(&mesh_deck, ledger_wing_mass_kg) {
         mesh_health.warnings.push(diagnostic);
     }
 
@@ -311,7 +356,7 @@ fn run_evaluation(
     {
         return structural_error(
             format!("cannot map declared structural fuel mass to FE mesh: {error:?}"),
-            torenbeek_mass,
+            ledger_wing_mass_kg,
         );
     }
 
@@ -470,13 +515,13 @@ fn run_evaluation(
         nastran: nastran_results,
         nastran95: nastran95_results,
         patran,
-        torenbeek_wing_mass_kg: torenbeek_mass,
+        ledger_complete_wing_mass_kg: ledger_wing_mass_kg,
         wing_mass: Some(wing_mass),
         evaluation_inputs: Some(EvaluationInputs::from_deck(
             config,
             report,
             &mesh_deck,
-            &node_index.engine_nids,
+            &node_index,
         )),
     }
 }
@@ -497,6 +542,9 @@ mod tests {
         WingboxSizing {
             y_stations: vec![0.0, 10.0],
             axis_cos: Vec::new(),
+            cover_shape: Vec::new(),
+            cover_depth_m: Vec::new(),
+            cover_shear_flow_n_per_m: Vec::new(),
             eta_stations: vec![0.0, 1.0],
             chord: vec![1.0, 1.0],
             spar_fracs: vec![0.25, 0.75],
@@ -512,6 +560,7 @@ mod tests {
                 margin_of_safety: vec![-0.1, 0.5],
             }],
             t_skin: 0.01,
+            skin_gauge_m: Vec::new(),
             num_ribs: 2,
             rib_spacing_m: 4.0,
             mass_breakdown_kg: MassBreakdown {
@@ -556,7 +605,7 @@ mod tests {
     #[test]
     fn missing_patran_configuration_is_reported_as_absent() {
         let result = missing_patran_result("");
-        assert_eq!(result.status, "error");
+        assert_eq!(result.status, "not_configured");
         assert!(result
             .error
             .as_deref()

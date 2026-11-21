@@ -64,7 +64,7 @@ pub fn scaled_nacelle_diameter_m(nacelle_diameter_m: f64, engine_count: usize) -
 }
 
 /// The distributed-propulsion-scaled variables of equations 81-85.
-#[derive(Debug, Clone, Copy, PartialEq)]
+#[derive(serde::Serialize, serde::Deserialize, Debug, Clone, Copy, PartialEq)]
 pub struct DistributedPropulsionScaling {
     /// `FNENG`: scaled total engine count.
     pub engines: f64,
@@ -151,9 +151,14 @@ pub fn scaled_inlet_or_nozzle_kg(
     kg(lb(baseline_kg) * ratio.powf(scaling_exponent))
 }
 
-/// Equation 86: thrust reversers for every nacelle, kg.
-pub fn thrust_reversers_kg(rated_thrust_per_engine_n: f64, total_nacelles: f64) -> f64 {
-    kg(0.034 * lbf(rated_thrust_per_engine_n) * total_nacelles)
+/// Equation 86: thrust reversers, kg, `0.034 THRUST TNAC`.
+///
+/// `reversing_nacelles` is `TNAC` when every nacelle reverses. An installation
+/// that reverses on some engines only (the A380 fits reversers to its inboard
+/// pair and fixed fan ducts outboard) is priced on the engines that carry one:
+/// the equation is a per-unit fraction of rated thrust.
+pub fn thrust_reversers_kg(rated_thrust_per_engine_n: f64, reversing_nacelles: f64) -> f64 {
+    kg(0.034 * lbf(rated_thrust_per_engine_n) * reversing_nacelles)
 }
 
 /// Equation 87: transport engine controls, kg, from the scaled count and
@@ -214,7 +219,7 @@ pub fn pylon_mass_kg(
 }
 
 /// SI inputs to the propulsion group.
-#[derive(Debug, Clone, Copy, PartialEq)]
+#[derive(serde::Serialize, serde::Deserialize, Debug, Clone, Copy, PartialEq)]
 pub struct FlopsPropulsionInputs {
     /// Total engines `NENG`.
     pub engine_count: usize,
@@ -252,6 +257,9 @@ pub struct FlopsPropulsionInputs {
     pub nozzle_scope: FlopsNozzleScope,
     /// Whether thrust reversers are installed.
     pub thrust_reversers_installed: bool,
+    /// Engines that carry a reverser, when not every nacelle does; `None`
+    /// prices equation 86 on `TNAC`.
+    pub thrust_reverser_engine_count: Option<usize>,
     /// Maximum Mach number `VMAX`.
     pub maximum_mach: f64,
     /// Average nacelle diameter `DNAC`, m.
@@ -266,7 +274,7 @@ pub struct FlopsPropulsionInputs {
 }
 
 /// The propulsion group, kg.
-#[derive(Debug, Clone, Copy, PartialEq)]
+#[derive(serde::Serialize, serde::Deserialize, Debug, Clone, Copy, PartialEq)]
 pub struct FlopsPropulsionBreakdown {
     /// The scaling applied for distributed propulsion.
     pub scaling: DistributedPropulsionScaling,
@@ -362,7 +370,10 @@ pub fn estimate_flops_propulsion(inputs: &FlopsPropulsionInputs) -> FlopsPropuls
     let nozzles_kg = nozzle_each_kg * count;
     let engines_kg = engine_each_kg * count;
     let thrust_reversers = if inputs.thrust_reversers_installed {
-        thrust_reversers_kg(inputs.rated_thrust_per_engine_n, total_nacelles)
+        let reversing = inputs
+            .thrust_reverser_engine_count
+            .map_or(total_nacelles, |count| count as f64);
+        thrust_reversers_kg(inputs.rated_thrust_per_engine_n, reversing)
     } else {
         0.0
     };
@@ -462,6 +473,7 @@ mod tests {
             nozzle_scaling_exponent: 1.0,
             nozzle_scope: FlopsNozzleScope::IncludedInBaseline,
             thrust_reversers_installed: true,
+            thrust_reverser_engine_count: None,
             maximum_mach: 0.82,
             nacelle_diameter_m: 2.0,
             maximum_fuel_capacity_kg: 20_000.0,
@@ -550,6 +562,11 @@ mod tests {
             + breakdown.misc_kg
             + breakdown.fuel_system_kg;
         assert!((sum - breakdown.total_kg).abs() < 1e-9);
+
+        let mut one = inputs;
+        one.thrust_reverser_engine_count = Some(1);
+        let half = estimate_flops_propulsion(&one).thrust_reversers_kg;
+        assert!((2.0 * half - breakdown.thrust_reversers_kg).abs() < 1e-9);
 
         let mut without = inputs;
         without.thrust_reversers_installed = false;

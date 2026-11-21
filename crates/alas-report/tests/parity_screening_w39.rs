@@ -86,9 +86,9 @@ fn screening_scenes_keep_reference_labels_and_series_in_both_themes() {
 
         let mses = render_svg(&fig_mses_verification(&result, Some(theme)).expect("MSES data"));
         for label in [
-            "Cruise L/D",
+            "Section L/D (cl/cd, 2-D)",
             "CDw=12 cts",
-            "MSES (Stage 3, real shock/viscous)",
+            "MSES section at M cos(sweep) (Stage 3)",
         ] {
             assert!(
                 mses.contains(label),

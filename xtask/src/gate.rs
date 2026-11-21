@@ -147,7 +147,8 @@ pub fn run(root: &Path, args: &[String]) -> Result<(), String> {
             };
             vec![
                 run_checks(root),
-                cargo(root, &["fmt", "--all", "--check"]),
+                hygiene_step(root),
+                fmt_step(root),
                 cargo(
                     root,
                     &[
@@ -220,7 +221,8 @@ fn quick(
     let mut results = Vec::new();
     if part != Part::Tests {
         results.push(run_checks(root));
-        results.push(cargo(root, &["fmt", "--all", "--check"]));
+        results.push(hygiene_step(root));
+        results.push(fmt_step(root));
     }
 
     let selection: Vec<String> = match affected::affected(&packages, &changed) {
@@ -297,6 +299,59 @@ fn nextest_available(root: &Path) -> bool {
         .stderr(Stdio::null())
         .status()
         .is_ok_and(|s| s.success())
+}
+
+/// `cargo xtask hygiene` as a gate step: no AI or private-tree references in
+/// tracked files.
+fn hygiene_step(root: &Path) -> Result<(), String> {
+    println!(
+        "
+cargo xtask hygiene"
+    );
+    // The local gate runs on work branches; only a checkout of `main` is a
+    // public ref and is checked as one.
+    let branch = Command::new("git")
+        .current_dir(root)
+        .args(["rev-parse", "--abbrev-ref", "HEAD"])
+        .output()
+        .ok()
+        .map(|o| String::from_utf8_lossy(&o.stdout).trim().to_owned());
+    let args: Vec<String> = if branch.as_deref() == Some("main") {
+        Vec::new()
+    } else {
+        vec!["--private-branch".to_owned()]
+    };
+    crate::hygiene::run(root, &args)
+}
+
+/// Formatting check over the whole workspace. `cargo fmt --all` passes every
+/// target file to one rustfmt process, which exceeds the Windows command-line
+/// limit (os error 206) on a workspace this size, so each package is checked on
+/// its own. Every package runs even if an earlier one fails.
+pub(crate) fn fmt(root: &Path) -> Result<(), String> {
+    fmt_step(root)
+}
+
+fn fmt_step(root: &Path) -> Result<(), String> {
+    let packages = workspace_packages(root)?;
+    let names: Vec<&str> = packages.iter().map(|p| p.name.as_str()).collect();
+    fmt_check(root, &names)
+}
+
+fn fmt_check(root: &Path, packages: &[&str]) -> Result<(), String> {
+    let failed: Vec<&str> = packages
+        .iter()
+        .filter(|name| cargo(root, &["fmt", "-p", name, "--check"]).is_err())
+        .copied()
+        .collect();
+    if failed.is_empty() {
+        Ok(())
+    } else {
+        Err(format!(
+            "cargo fmt --check failed for: {}",
+            failed.join(", ")
+        ))
+    }
 }
 
 fn workspace_packages(root: &Path) -> Result<Vec<affected::Package>, String> {
@@ -378,6 +433,41 @@ mod tests {
 
     fn args(list: &[&str]) -> Vec<String> {
         list.iter().map(|a| (*a).to_owned()).collect()
+    }
+
+    #[test]
+    fn fmt_check_passes_formatted_code_and_catches_a_one_space_diff() {
+        let dir = std::env::temp_dir().join(format!("xtask-fmt-check-{}", std::process::id()));
+        let _ = std::fs::remove_dir_all(&dir);
+        std::fs::create_dir_all(dir.join("src")).expect("temp crate");
+        std::fs::write(
+            dir.join("Cargo.toml"),
+            "[package]
+name = \"fmtprobe\"
+version = \"0.0.0\"
+edition = \"2021\"
+
+[workspace]
+",
+        )
+        .expect("manifest");
+        let source = dir.join("src").join("main.rs");
+        std::fs::write(
+            &source,
+            "fn main() {}
+",
+        )
+        .expect("source");
+        assert!(fmt_check(&dir, &["fmtprobe"]).is_ok());
+        std::fs::write(
+            &source,
+            "fn main() { }
+",
+        )
+        .expect("source");
+        let error = fmt_check(&dir, &["fmtprobe"]).expect_err("one extra space");
+        assert!(error.contains("fmtprobe"), "{error}");
+        let _ = std::fs::remove_dir_all(&dir);
     }
 
     #[test]
@@ -470,6 +560,14 @@ mod tests {
         assert_eq!(
             default_filter(&config, "default"),
             format!("not ({slow} | {medium} | {})", crate::tiers::NIGHTLY)
+        );
+        assert_eq!(
+            default_filter(&config, "fast"),
+            default_filter(&config, "default")
+        );
+        assert_eq!(
+            default_filter(&config, "merge"),
+            format!("not ({slow} | {})", crate::tiers::NIGHTLY)
         );
         assert_eq!(default_filter(&config, "nightly"), crate::tiers::NIGHTLY);
         assert_eq!(

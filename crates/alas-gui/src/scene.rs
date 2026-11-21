@@ -12,6 +12,8 @@
 
 mod dispatch_ids;
 mod localization;
+pub(crate) use localization::localize_infeasibility;
+mod lto_airport;
 mod preview;
 mod results;
 mod solver;
@@ -19,15 +21,20 @@ mod solver;
 mod tests;
 
 pub use dispatch_ids::{PREVIEW_DISPATCH_IDS, RESULT_DISPATCH_IDS, SCREENING_DISPATCH_IDS};
-pub use preview::{build_page_preview, build_page_preview_with_camera, build_preview_scene};
+pub use preview::{
+    build_page_preview, build_page_preview_sized, build_page_preview_with_camera,
+    build_preview_scene,
+};
+pub(crate) use preview::{build_page_preview_detached, preview_inputs};
 pub use results::{
-    build_result_figure, build_result_figure_with_camera, build_result_scene,
-    build_screening_figure,
+    build_result_figure, build_result_figure_detached, build_result_figure_with_camera,
+    build_result_scene, build_screening_figure,
 };
 
 use alas_config::AlasConfig;
 use alas_report::scene::{Scene, SceneElement};
 
+pub(crate) use localization::localize_finding_message;
 use localization::localize_scene_text;
 
 /// Translate a report scene for the active desktop language before display.

@@ -60,15 +60,14 @@ pub fn show_run_log(state: &mut AppState, ui: &mut Ui) {
                 state.run_log_export_status = Some(export_log(state));
             }
         }
-        ui.with_layout(egui::Layout::right_to_left(egui::Align::Center), |ui| {
-            if crate::theme::close_icon_button(ui, tr("Close")).clicked() {
-                if state.sandbox.active() {
-                    state.sandbox.layout.log_window_open = false;
-                } else {
+        // The sandbox log is its own window, which has a title-bar close.
+        if !state.sandbox.active() {
+            ui.with_layout(egui::Layout::right_to_left(egui::Align::Center), |ui| {
+                if crate::theme::close_icon_button(ui, tr("Close")).clicked() {
                     state.run_log_open = false;
                 }
-            }
-        });
+            });
+        }
     });
     if let Some(status) = &state.run_log_export_status {
         ui.label(RichText::new(status).weak().small());
@@ -129,7 +128,7 @@ fn show_console(lines: &[RenderedLine], ui: &mut Ui) {
                 // conspicuous blank gap between SYSTEM and INFO.
                 .num_columns(2)
                 .striped(true)
-                .spacing([8.0, 3.0])
+                .spacing(crate::theme::space::GRID_SPACING)
                 .show(ui, |ui| {
                     for line in lines {
                         ui.horizontal(|ui| {

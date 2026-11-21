@@ -31,7 +31,7 @@ use alas_config::{AlasConfig, DesignVector};
 use alas_mission::MissionResult;
 
 use crate::feasibility::{
-    assess_physical_feasibility_with_load_case, FeasibilityReport, FindingSeverity,
+    assess_physical_feasibility_on_route, FeasibilityReport, FindingSeverity,
 };
 use crate::full_analysis::{AnalysisReport, FullAnalysis};
 use crate::mission_stage::{self, SelectedLoadCase};
@@ -88,7 +88,10 @@ pub struct FinalistVerification {
     pub relative_balance: Vec<alas_opt::ConstraintResidual>,
 }
 
+mod replay;
+mod retention;
 mod reuse;
+pub use replay::{verify_replayed, Replayed};
 pub use reuse::VerifiedAnalysis;
 
 /// The registered aircraft a reference adaptation redesigns, re-evaluated
@@ -166,7 +169,12 @@ impl ReportingNominal {
         route: Option<&AcceptanceRoute>,
     ) -> Option<VerifiedAnalysis> {
         self.evaluation.as_ref().ok().map(|(verification, _)| {
-            VerifiedAnalysis::new(config.clone(), route.cloned(), verification.clone())
+            VerifiedAnalysis::of_request(
+                config.clone(),
+                route.cloned(),
+                verification.clone(),
+                self.design,
+            )
         })
     }
 
@@ -247,15 +255,19 @@ impl FinalistVerification {
 ///
 /// The replay, analysis or mission failure, as a description. A candidate
 /// that is not hard-feasible on replay is an error rather than a rejection:
-/// the search must not have offered it.
+/// the search must not have offered it. A search that found no feasible design
+/// at all passes `require_hard_feasible = false`: its least-violating design is
+/// then replayed and reported as the flagged infeasible result it is.
 pub fn verify_finalist_cancellable(
     config: &AlasConfig,
     design: &DesignVector,
     route: Option<&AcceptanceRoute>,
     nominal: Option<&ReportingNominal>,
     cancel: Option<&std::sync::atomic::AtomicBool>,
+    require_hard_feasible: bool,
 ) -> Result<FinalistVerification, String> {
-    let (mut verification, _) = reporting_fidelity(config, design, route, cancel, true)?;
+    let (mut verification, _) =
+        reporting_fidelity(config, design, route, cancel, require_hard_feasible)?;
     hold_to_nominal_at_mass(
         &mut verification,
         config,
@@ -389,7 +401,9 @@ pub fn compare_with_baseline(
 /// `::tail_sizing`). The fin scale lives in the empennage configuration, not
 /// in the vector, so a rebuild from the vector alone draws the unsized fin.
 /// A redesigned candidate's main gear is placed by the search
-/// (`ResolvedProductState::main_gear_placement`) and is written back too.
+/// (`ResolvedProductState::main_gear_placement`) and its clean-sheet engine
+/// is sized to the thrust requirements (`ResolvedProductState::sized_engine`);
+/// both are written back too.
 /// Every reporting-fidelity rebuild goes through here so the report, the
 /// mission and the feasibility verdict describe the aircraft the search
 /// scored.
@@ -402,6 +416,9 @@ pub fn apply_assessed_aircraft(
         .tail_sizing
         .apply_to(&mut config.geometry.empennage, &mut design);
     config.landing_gear.derived_main_gear = resolved.main_gear_placement;
+    if let Some(engine) = &resolved.sized_engine {
+        config.apply_sized_engine(engine);
+    }
     design
 }
 
@@ -414,30 +431,26 @@ fn reporting_fidelity(
     cancel: Option<&std::sync::atomic::AtomicBool>,
     require_hard_feasible: bool,
 ) -> Result<(FinalistVerification, Vec<&'static str>), String> {
-    // Under the MTOW band mode the candidate is the fixed requirement at its own
-    // mass: replay, report, mission and feasibility all read that configuration.
-    let resolved = config.at_band_mass(design.mtow_kg);
-    let config = &resolved;
-    let assessment = alas_opt::assess_product_candidate_cancellable(config, design, cancel)
-        .map_err(|error| {
-            if error == "cancelled" {
-                "Cancelled safely: finalist replay interrupted".to_owned()
-            } else {
-                format!("finalist replay failed: {error}")
-            }
-        })?;
-    let violated = assessment.violated_hard_ids();
-    if require_hard_feasible && !assessment.hard_feasible {
-        let violations = assessment.violated_hard_details().join(", ");
-        return Err(format!(
-            "finalist is not hard-feasible on replay: {}",
-            if violations.is_empty() {
-                "unidentified hard residual".to_owned()
-            } else {
-                violations
-            }
-        ));
+    let replayed = replay::Replayed::run(config, design, cancel)?;
+    if require_hard_feasible && !replayed.hard_feasible() {
+        return Err(replayed.not_hard_feasible());
     }
+    finish(replayed, route)
+}
+
+/// The reported analysis, mission and feasibility assessment of a replayed
+/// candidate, and the hard residuals its replay found violated.
+fn finish(
+    replayed: replay::Replayed,
+    route: Option<&AcceptanceRoute>,
+) -> Result<(FinalistVerification, Vec<&'static str>), String> {
+    let replay::Replayed {
+        config,
+        design,
+        assessment,
+    } = replayed;
+    let (config, design) = (&config, &design);
+    let violated = assessment.violated_hard_ids();
     // The aircraft the gate above passed, not the vector it was handed: the
     // resolved design (a clean-sheet space derives the fuselage from the
     // cabin) with its solved tail sizing, so the report, mission and
@@ -463,12 +476,13 @@ fn reporting_fidelity(
         _ => (None, None),
     };
 
-    let feasibility = assess_physical_feasibility_with_load_case(
+    let feasibility = assess_physical_feasibility_on_route(
         &sized_config,
         &sized_design,
         &report,
         mission.as_ref(),
         load_case.as_ref(),
+        route.map(|planned| (&planned.origin, &planned.destination)),
     );
     Ok((
         FinalistVerification {

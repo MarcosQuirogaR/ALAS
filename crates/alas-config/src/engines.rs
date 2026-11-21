@@ -22,9 +22,11 @@ use std::sync::OnceLock;
 
 use serde::{Deserialize, Serialize};
 
+mod altitude_datum;
+pub use altitude_datum::{ALTITUDE_DATUM_CLOSING_DOCUMENT, ALTITUDE_DATUM_GAP_MARKER};
 mod nacelle_shape;
 pub use nacelle_shape::{
-    NacelleParamSource, NacelleShape, NacelleShapeV2, CORE_COWL_START_FRACTION,
+    NacelleDrawnOutline, NacelleParamSource, NacelleShape, NacelleShapeV2, CORE_COWL_START_FRACTION,
 };
 
 /// Propulsive conversion technology selected by an engine catalogue row.
@@ -62,6 +64,7 @@ pub struct TurbofanEngineSpec {
     /// Combustor-exit stagnation temperature, in kelvin.
     pub turbine_inlet_temp_k: f64,
     /// Reference cruise TSFC in kg/(kgf hr).
+    // Needs data: size dependence of TSFC/PSFC needs same-family TCDS pairs (not on disk); the flat per-engine value stays.
     pub cruise_tsfc_kg_kgf_hr: f64,
     /// Fuel-flow ratios at ICAO LTO 7, 30, 85 and 100 percent thrust.
     pub part_power_fuel_flow_ratios: [f64; 4],
@@ -81,10 +84,9 @@ pub struct TurbofanEngineSpec {
 
 /// Cruise reference point and evidence for the transport turbofan deck.
 ///
-/// `cruise_reference_thrust_n` is per engine.  It is the part-power cruise
-/// thrust paired with `cruise_tsfc_kg_kgf_hr`, not a maximum-climb rating:
-/// the deck derives maximum climb at the reference point from the static
-/// rating and bypass ratio (Jenkinson's engine charts).
+/// `cruise_reference_thrust_n` is per engine, a value of the rating `rating`
+/// names. An engine datum scales Jenkinson's maximum-climb charts onto it;
+/// without one the charts run unscaled ([`Self::altitude_datum_gap`]).
 #[derive(Debug, Clone, PartialEq, Serialize, Deserialize)]
 #[serde(deny_unknown_fields)]
 pub struct TurbofanOffDesignSpec {
@@ -102,11 +104,16 @@ pub struct TurbofanOffDesignSpec {
     /// Exact source and, for estimates, the correlation used.
     pub source: String,
     /// Which rating the cruise reference thrust is a value of. Absent means
-    /// a maximum-cruise value (every catalogue anchor but one); a
-    /// `maximum-climb` datum scales the deck's maximum-climb chart directly.
+    /// a maximum-cruise value (all catalogue anchors but LEAP-1A and LEAP-1C);
+    /// a `maximum-climb` datum scales the deck's maximum-climb chart directly.
     #[serde(default, skip_serializing_if = "Option::is_none")]
     pub rating: Option<String>,
 }
+
+/// Openings of sources stating the class statistic `0.2 F_TO + 890 N` (Svoboda
+/// 2000, OpenAP's thrust fallback), as saved rows under another evidence label.
+pub const CLASS_STATISTIC_SOURCE_PREFIXES: [&str; 2] =
+    ["OpenAP thrust.py Svoboda fallback", "ASSUMED: Svoboda form"];
 
 impl TurbofanOffDesignSpec {
     /// Whether the cruise point is a published datum of the engine (a
@@ -118,7 +125,20 @@ impl TurbofanOffDesignSpec {
         matches!(
             self.evidence.as_str(),
             "direct-openap" | "family-proxy" | "secondary-simulation"
-        ) && !self.source.contains("Svoboda")
+        ) && !self.is_class_statistic()
+    }
+
+    /// Whether the cruise point is the class statistic `0.2 F_TO + 890 N`:
+    /// declared by the `openap-static-fallback` evidence, or by a source that
+    /// opens with one of [`CLASS_STATISTIC_SOURCE_PREFIXES`] (rows, and
+    /// configurations saved from them, that state the statistic under another
+    /// evidence label). A datum's source may name the statistic it replaced
+    /// without being one.
+    pub fn is_class_statistic(&self) -> bool {
+        self.evidence == "openap-static-fallback"
+            || CLASS_STATISTIC_SOURCE_PREFIXES
+                .iter()
+                .any(|prefix| self.source.trim_start().starts_with(prefix))
     }
 
     /// Whether the datum is a maximum-climb thrust (`rating` is
@@ -144,6 +164,64 @@ pub struct TurbopropEngineSpec {
     pub maximum_cruise_shaft_power_kw: f64,
     /// Published two-engine fuel flow at the maximum-cruise reference point.
     pub maximum_cruise_fuel_flow_kg_h: f64,
+    /// Sea-level ambient temperature, K, to which the take-off ratings are
+    /// flat-rated: the take-off corner of the shaft-power lapse
+    /// (`rho_corner = 1.225 kg/m^3 x 288.15 K / T`). Absent in a saved
+    /// configuration from before the field existed: the PW127M value.
+    #[serde(default = "default_takeoff_flat_rating_temperature_k")]
+    pub takeoff_flat_rating_temperature_k: f64,
+    /// Sea-level ambient temperature, K, to which the maximum-continuous
+    /// rating is flat-rated; the climb, cruise and flight-idle ratings share
+    /// this corner. Absent in an older saved configuration: the PW127M value.
+    #[serde(default = "default_maximum_continuous_flat_rating_temperature_k")]
+    pub maximum_continuous_flat_rating_temperature_k: f64,
+    /// Exponent `n` of the shaft-power lapse `(rho / rho_corner)^n` below the
+    /// flat-rating corner. Absent in an older saved configuration: the PW127M
+    /// value.
+    #[serde(default = "default_power_lapse_density_exponent")]
+    pub power_lapse_density_exponent: f64,
+    /// Evidence for the flat-rating temperatures and the lapse exponent.
+    #[serde(default)]
+    pub power_lapse_source: String,
+    /// Exponent `k` of the ram factor `(1 + 0.2 M^2)^k` on the lapsed shaft
+    /// power; 0 is no ram factor. Absent in an older saved configuration: 0,
+    /// the PW127M value, whose lapse fit already holds its cruise schedule.
+    #[serde(default)]
+    pub ram_power_exponent: f64,
+    /// True airspeed, m/s, of the speed schedule the lapse exponent was fitted
+    /// on, so the ram factor does not count that schedule's ram twice; 0 for
+    /// a static fit. Absent in an older saved configuration: 0.
+    #[serde(default)]
+    pub power_lapse_fit_reference_true_airspeed_m_s: f64,
+    /// Evidence for the ram exponent and the fit's reference speed.
+    #[serde(default)]
+    pub ram_power_source: String,
+    /// Ambient temperature, K, above which no rating is held at its full
+    /// value, for an engine certificated at one temperature with no
+    /// flat-rating temperature; 0 is no limit. Absent in an older saved
+    /// configuration: 0, the PW127M value, whose corners are sea-level
+    /// temperature limits already.
+    #[serde(default)]
+    pub rating_temperature_limit_k: f64,
+    /// Thermodynamic (gas-generator) shaft power at sea level, kW, when the
+    /// engine's documents state one; 0 is none. Stated, it sets each
+    /// rating's flat-rating corner (see `power_lapse_source`). Absent in an
+    /// older saved configuration: 0.
+    #[serde(default)]
+    pub thermodynamic_shaft_power_kw: f64,
+    /// Power-specific fuel consumption the model burns on shaft power,
+    /// kg/(kW h), at [`Self::psfc_reference_temperature_k`]. Absent in an
+    /// older saved configuration: the PW127M value (Majeed 2009, PW120A
+    /// flight record, 0.2945).
+    #[serde(default = "default_psfc_reference_kg_kwh")]
+    pub psfc_reference_kg_kwh: f64,
+    /// Ambient static temperature, K, of `psfc_reference_kg_kwh`. Absent in
+    /// an older saved configuration: the PW127M value, 249.65 K.
+    #[serde(default = "default_psfc_reference_temperature_k")]
+    pub psfc_reference_temperature_k: f64,
+    /// Evidence for the PSFC and its temperature.
+    #[serde(default)]
+    pub psfc_source: String,
     /// Installed propeller designation.
     pub propeller_model: String,
     /// Propeller diameter, in metres.
@@ -158,10 +236,46 @@ pub struct TurbopropEngineSpec {
     /// `FlopsTurbopropConfig::resolved_for_engine`.
     #[serde(default, skip_serializing_if = "Option::is_none")]
     pub propeller_blade_count: Option<u32>,
+    /// Coefficient `c` of the propeller's helical-tip-Mach compressibility
+    /// loss `1 - c (M_h - M_crit)^2` (see `alas_prop`'s
+    /// `Pw127m568fModel::tip_mach_loss_coefficient`). The loss is a property
+    /// of the blade design (thickness and sweep), so a propeller with its own
+    /// measured class states it here; absent, the generic class value of the
+    /// propeller model applies.
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub propeller_tip_mach_loss_coefficient: Option<f64>,
+    /// Evidence for `propeller_tip_mach_loss_coefficient`.
+    #[serde(default, skip_serializing_if = "String::is_empty")]
+    pub propeller_compressibility_source: String,
     /// Rating evidence and unit-conversion statement.
     pub rating_source: String,
     /// Propeller/installation geometry evidence.
     pub geometry_source: String,
+}
+
+/// EASA TCDS IM.E.041 section 5, PW127M row: take-off flat-rated to 39 C.
+fn default_takeoff_flat_rating_temperature_k() -> f64 {
+    312.15
+}
+
+/// EASA TCDS IM.E.041 section 5, PW127M row: maximum continuous to 48 C.
+fn default_maximum_continuous_flat_rating_temperature_k() -> f64 {
+    321.15
+}
+
+/// Nita (2008) eq. 3.5.11, the PW120 maximum-cruise power fit.
+fn default_power_lapse_density_exponent() -> f64 {
+    0.728
+}
+
+/// Majeed (2009) SRS-TSD-002 Tab. 3.3, PW120A flight record mean PSFC.
+fn default_psfc_reference_kg_kwh() -> f64 {
+    0.2945
+}
+
+/// Majeed (2009) Tab. 3.3: SAT -23.5 C.
+fn default_psfc_reference_temperature_k() -> f64 {
+    249.65
 }
 
 impl TurbopropEngineSpec {
@@ -224,7 +338,7 @@ pub struct EngineSpec {
     #[serde(default, skip_serializing_if = "Option::is_none")]
     pub flat_rating_temperature_k: Option<f64>,
     /// Take-off mass of the aircraft the engine was sized for, kg, for the
-    /// engine/closed-take-off-mass mismatch warning (FIX-PLAN 0.13); absent
+    /// engine/closed-take-off-mass mismatch warning; absent
     /// when no datum is known (no catalogue row carries one yet).
     #[serde(default, skip_serializing_if = "Option::is_none")]
     pub design_takeoff_mass_kg: Option<f64>,
@@ -250,6 +364,24 @@ pub struct EngineSpec {
     /// Primary evidence for `thrust_kn`.
     #[serde(default)]
     pub thrust_source: String,
+    /// `thrust_kn` is the take-off rating the aircraft is operated at, as
+    /// its own document prints it, rather than the engine certification
+    /// rating of a matched ICAO databank row. The mission deck then flies
+    /// `thrust_kn`, and re-reads the databank's LTO table at that rating.
+    /// Absent means the databank row's rating governs.
+    #[serde(default, skip_serializing_if = "std::ops::Not::not")]
+    pub aircraft_installed_rating: bool,
+    /// Take-off rating, kN, at which the thrust-scaled mass relations price
+    /// this physical engine; absent means `thrust_kn`. Declared only when
+    /// `thrust_kn` is a re-rating of hardware the evidence also lists under
+    /// another rating, so that a rating change alone never sizes a heavier
+    /// engine: a dry mass belongs to the hardware, not to the rating. See
+    /// [`crate::EngineConfig::mass_basis_thrust_kn`].
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub mass_basis_thrust_kn: Option<f64>,
+    /// Evidence that `mass_basis_thrust_kn` rates the same hardware.
+    #[serde(default, skip_serializing_if = "String::is_empty")]
+    pub mass_basis_source: String,
     /// Fan diameter, in metres. Published.
     pub fan_diameter_m: f64,
     /// Bypass ratio. Published.
@@ -264,12 +396,15 @@ pub struct EngineSpec {
     /// generic six-station profile is scaled to the length and radius.
     #[serde(default, skip_serializing_if = "Option::is_none")]
     pub nacelle_shape: Option<NacelleShape>,
-    /// The G2 outline of the same installation (loft design, lane H): the six
+    /// The G2 outline of the same installation: the six
     /// numbers of [`EngineSpec::nacelle_shape`] plus lip, boat-tail, trailing
     /// edge, plug tip, ellipticity and droop. Opt-in: the geometry builder
     /// reads it only when asked; the legacy silhouette is unchanged.
     #[serde(default, skip_serializing_if = "Option::is_none")]
     pub nacelle_shape_v2: Option<NacelleShapeV2>,
+    /// Plan and side outlines and the inlet scarf a revolve cannot make.
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub nacelle_drawn_outline: Option<NacelleDrawnOutline>,
     /// An explicit silhouette, `(station in metres, radius fraction)` pairs
     /// from the nose to the aft end, for an installation that is not a
     /// turbofan pod (a spinner and a long nacelle behind a propeller). Used
@@ -354,6 +489,31 @@ fn default_part_power_source() -> String {
     "uncalibrated representative ICAO-LTO schedule".to_owned()
 }
 
+/// ICAO LTO thrust fractions of the databank's rated thrust.
+const LTO_THRUST_FRACTIONS: [f64; 4] = [0.07, 0.30, 0.85, 1.0];
+
+/// The LTO fuel-flow table of a databank row re-read at an installed rating
+/// `scale` times the row's rated thrust: the take-off fuel flow at the
+/// installed rating and the four ratios at 7, 30, 85 and 100 % of it, by
+/// linear interpolation between the databank points (linear extrapolation
+/// past the end segments).
+fn rerate_lto_table(ratios: [f64; 4], takeoff_fuel_flow_kg_s: f64, scale: f64) -> ([f64; 4], f64) {
+    let at = |fraction: f64| {
+        let x = LTO_THRUST_FRACTIONS;
+        let k = if fraction <= x[1] {
+            0
+        } else if fraction <= x[2] {
+            1
+        } else {
+            2
+        };
+        ratios[k] + (fraction - x[k]) / (x[k + 1] - x[k]) * (ratios[k + 1] - ratios[k])
+    };
+    let full = at(scale);
+    let rerated = LTO_THRUST_FRACTIONS.map(|fraction| at(scale * fraction) / full);
+    (rerated, takeoff_fuel_flow_kg_s * full)
+}
+
 impl EngineSpec {
     /// Materialize the typed turbofan payload without changing the stable
     /// on-disk representation of the ten legacy rows.
@@ -368,10 +528,44 @@ impl EngineSpec {
             self.part_power_evidence.as_str(),
             "direct" | "direct-rating-match" | "rating-proxy" | "family-match"
         );
-        let rated_thrust_kn = if identity_qualified_lto {
+        // Rating basis: the take-off rating the aircraft is operated at. A
+        // record flagged `aircraft_installed_rating` flies its `thrust_kn`,
+        // the installed rating its aircraft document prints; the databank
+        // row is then the certified rating of that hardware and its LTO
+        // table is re-read at the installed rating. The mass basis is a
+        // separate statement (`mass_basis_thrust_kn`).
+        let installed_rating = self.aircraft_installed_rating;
+        let rated_thrust_kn = if identity_qualified_lto && !installed_rating {
             self.lto_rated_thrust_kn.unwrap_or(self.thrust_kn)
         } else {
             self.thrust_kn
+        };
+        let (part_power_fuel_flow_ratios, takeoff_fuel_flow_kg_s) = match (
+            identity_qualified_lto && installed_rating,
+            self.lto_rated_thrust_kn,
+        ) {
+            (true, Some(lto_kn)) if lto_kn > 0.0 && self.thrust_kn != lto_kn => rerate_lto_table(
+                self.part_power_fuel_flow_ratios,
+                self.takeoff_fuel_flow_kg_s,
+                self.thrust_kn / lto_kn,
+            ),
+            // A row borrowed from another rating of the family (a proxy, not
+            // this engine's own row) lends its shape and its take-off fuel
+            // flow per unit thrust, an intensive quantity. The absolute flow
+            // is that of the row's rating, so it is carried to the record's
+            // rating in proportion to thrust; the ratios stay the row's.
+            (false, Some(lto_kn))
+                if !identity_qualified_lto && lto_kn > 0.0 && self.thrust_kn != lto_kn =>
+            {
+                (
+                    self.part_power_fuel_flow_ratios,
+                    self.takeoff_fuel_flow_kg_s * self.thrust_kn / lto_kn,
+                )
+            }
+            _ => (
+                self.part_power_fuel_flow_ratios,
+                self.takeoff_fuel_flow_kg_s,
+            ),
         };
         let takeoff_bypass_ratio = if identity_qualified_lto {
             self.lto_bypass_ratio.unwrap_or(self.bypass_ratio)
@@ -386,8 +580,8 @@ impl EngineSpec {
             fan_pressure_ratio: self.fan_pressure_ratio,
             turbine_inlet_temp_k: self.turbine_inlet_temp_k,
             cruise_tsfc_kg_kgf_hr: self.cruise_tsfc_kg_kgf_hr,
-            part_power_fuel_flow_ratios: self.part_power_fuel_flow_ratios,
-            takeoff_fuel_flow_kg_s: self.takeoff_fuel_flow_kg_s,
+            part_power_fuel_flow_ratios,
+            takeoff_fuel_flow_kg_s,
             part_power_source: self.part_power_source.clone(),
             off_design,
             flat_rating_temperature_k: self.flat_rating_temperature_k,
@@ -489,7 +683,14 @@ mod tests {
     fn the_embedded_table_keeps_the_reference_engines_and_adds_certified_preset_variants() {
         // old 14 -> 15: CF6-80C2 (Boeing 747-400) turbofan entry added to the
         // catalogue that already held the E195-E2 and C919 engines
-        assert_eq!(database().len(), 15);
+        // old 15 -> 16: PW305A (Learjet 60) appended.
+        // old 16 -> 17: PW127G (Airbus C295) turboprop entry added (counted
+        // 15 -> 16 on its own branch, before the PW305A merge)
+        // old 17 -> 18: Trent XWB-84 (Airbus A350-900) entry added
+        assert_eq!(database().len(), 18);
+        assert!(get("PW305A").is_ok());
+        assert!(get("PW127G").is_ok());
+        assert!(get("Trent XWB-84").is_ok());
         assert!(get("GE9X").is_ok());
         assert!(get("CFM56-5B4/3").is_ok());
         assert!(get("CFM56-5C3/F").is_ok());
@@ -521,12 +722,14 @@ mod tests {
     #[test]
     fn only_published_engine_cruise_points_anchor_the_deck_thrust_scale() {
         // CFM56-5B4/3 (OpenAP 2CM014 family anchor), CFM56-5C (2CM015),
-        // CFM56-5C3/F (1CM011 -5C3 value, variant assumed), CF6-50 (3GE074
-        // CF6-50C2 value, variant assumed) and CF6-80C2 (2GE045) carry an
+        // CFM56-5C3/F (1CM011 -5C3 value, variant assumed), CF6-50 (CF6-50C1
+        // row, 3GE073/3GE074 cruise value) and CF6-80C2 (2GE045) carry an
         // engine datum (grade B, M 0.80, 35,000 ft); LEAP-1A carries a
-        // secondary-simulation datum (grade C, maximum-climb, M 0.78); the
-        // other modern engines carry the Svoboda class statistic computed
-        // from the rating.
+        // secondary-simulation datum (grade C, maximum-climb, M 0.78) and LEAP-1C
+        // its ratio (family proxy, same type certificate EASA.E.110); PW305A
+        // carries the PW305B pair of Jenkinson's engine data file (grade C
+        // family proxy, same type certificate, M 0.80, 40,000 ft); the other modern
+        // engines carry the Svoboda class statistic computed from the rating.
         let datum = |name: &str| {
             get(name)
                 .unwrap()
@@ -537,7 +740,14 @@ mod tests {
         };
         assert!(datum("CFM56-5B4/3"));
         assert!(datum("CFM56-5C"));
-        for name in ["CFM56-5C3/F", "CF6-50", "CF6-80C2", "LEAP-1A"] {
+        for name in [
+            "CFM56-5C3/F",
+            "CF6-50",
+            "CF6-80C2",
+            "LEAP-1A",
+            "LEAP-1C",
+            "PW305A",
+        ] {
             assert!(datum(name), "{name}");
         }
         for name in ["GE9X", "Trent 900", "GEnx-1B", "PW1500G"] {
@@ -546,10 +756,73 @@ mod tests {
     }
 
     #[test]
+    fn the_datum_gate_reads_the_evidence_not_a_word_of_the_source() {
+        let spec = |evidence: &str, source: &str| TurbofanOffDesignSpec {
+            cruise_reference_thrust_n: 4_428.0,
+            cruise_reference_altitude_m: 12_192.0,
+            cruise_reference_mach: 0.8,
+            evidence: evidence.to_owned(),
+            source: source.to_owned(),
+            rating: None,
+        };
+        // A published family pair stays a datum when its source names the
+        // class value it replaced.
+        let replaced = "Family proxy, grade C, a printed pair. Replaces the earlier \
+                        assumed class value 0.2 F_TO + 890 N (Svoboda 2000)";
+        assert!(spec("family-proxy", replaced).is_engine_datum());
+        assert!(!spec("family-proxy", replaced).is_class_statistic());
+        // The statistic is declared by its evidence label, or by a source
+        // that opens with the statistic under another label.
+        assert!(!spec("openap-static-fallback", "any text").is_engine_datum());
+        for prefix in CLASS_STATISTIC_SOURCE_PREFIXES {
+            let stated = format!("{prefix}: 0.2 * rated thrust + 890 N per engine");
+            assert!(spec("family-proxy", &stated).is_class_statistic(), "{prefix}");
+            assert!(!spec("family-proxy", &stated).is_engine_datum(), "{prefix}");
+        }
+    }
+
+    #[test]
+    fn no_engine_datum_is_numerically_the_class_statistic() {
+        // Guard independent of any text: a cruise point equal to
+        // 0.2 F_TO + 890 N (within 2 N) is the statistic and may not anchor
+        // the deck, and every catalogue datum differs from it.
+        for name in available() {
+            let engine = get(name).unwrap();
+            let Some(off_design) = engine.off_design.as_ref() else {
+                continue;
+            };
+            let svoboda_n = 0.2 * engine.thrust_kn * 1_000.0 + 890.0;
+            let is_statistic = (off_design.cruise_reference_thrust_n - svoboda_n).abs() < 2.0;
+            assert_eq!(off_design.is_class_statistic(), is_statistic, "{name}");
+            assert_eq!(off_design.is_engine_datum(), !is_statistic, "{name}");
+        }
+    }
+
+    #[test]
+    fn the_pw305a_datum_is_the_pw305b_column_pair_carried_to_its_rating() {
+        // Jenkinson's engine data file, PW305B column: 1,113 lb at M 0.8,
+        // 40,000 ft with the 5,266 lb take-off rating of the same column,
+        // carried to 20.46 kN; the cruise TSFC is the same column's 0.675.
+        let engine = get("PW305A").unwrap();
+        let off_design = engine.off_design.as_ref().unwrap();
+        let ratio: f64 = 1_113.0 / 5_266.0;
+        assert!((off_design.cruise_reference_thrust_n - ratio * 20_460.0).abs() < 1.0);
+        assert_eq!(off_design.cruise_reference_altitude_m, 12_192.0);
+        assert_eq!(off_design.cruise_reference_mach, 0.8);
+        assert_eq!(off_design.evidence, "family-proxy");
+        assert!(off_design.rating.is_none());
+        assert!(!off_design.source.contains("Svoboda"));
+        assert!(off_design.source.contains("PW305B column"));
+        assert!(engine.cruise_tsfc_source.contains("PW305B column"));
+        assert_eq!(engine.cruise_tsfc_kg_kgf_hr, 0.675);
+        assert!(off_design.is_engine_datum());
+    }
+
+    #[test]
     fn catalogue_anchors_identify_exact_variants_and_conditions() {
         let cfm = get("CFM56-5B4/3").unwrap();
         assert_eq!(cfm.evidence_variant, "CFM56-5B4/3");
-        assert_eq!(cfm.thrust_kn, 117.77);
+        assert_eq!(cfm.thrust_kn, 120.10);
         assert_eq!(cfm.bypass_ratio, 5.5);
         assert_eq!(cfm.overall_pressure_ratio, 32.6);
         assert_eq!(cfm.lto_rated_thrust_kn, Some(120.10));
@@ -574,7 +847,7 @@ mod tests {
         let exact = get("Trent 970-84").unwrap();
         assert!(!std::ptr::eq(generic, exact));
         assert_eq!(generic.thrust_kn, 374.0);
-        assert_eq!(exact.thrust_kn, 334.29);
+        assert_eq!(exact.thrust_kn, 338.7);
         assert_eq!(generic.part_power_evidence, "family-proxy");
         assert_eq!(
             generic.lto_evidence_variant.as_deref(),
@@ -623,8 +896,10 @@ mod tests {
         assert!(off_design.source.contains("FlyByWire"));
         assert!(off_design.source.contains("Grade C"));
         assert!(off_design.source.contains("MAXIMUM CLIMB"));
+        // The LEAP-1C carries the same datum as a family ratio (its own test in
+        // `altitude_datum`); no other engine has a maximum-climb datum.
         for other in available() {
-            if *other != "LEAP-1A" {
+            if !["LEAP-1A", "LEAP-1C"].contains(other) {
                 if let Some(other) = get(other).unwrap().off_design.as_ref() {
                     assert!(!other.is_maximum_climb_datum(), "{other:?}");
                 }
@@ -639,7 +914,7 @@ mod tests {
             ("CFM56-5C3/F", "1CM011", 144.56, 6.60, 29.90),
             ("Trent 970-84", "18RR081", 338.7, 8.45, 38.0),
             ("LEAP-1A", "08P28CM155", 120.636, 10.706, 33.177),
-            ("CF6-50", "3GE070", 224.2, 4.30, 27.76),
+            ("CF6-50", "3GE073", 230.4, 4.30, 28.44),
         ];
         for (name, uid, thrust, bypass_ratio, pressure_ratio) in anchors {
             let engine = get(name).unwrap();
@@ -703,6 +978,17 @@ mod tests {
                 Some(engine.bypass_ratio),
                 "{name}"
             );
+            // The borrowed row's take-off fuel flow per unit thrust is kept
+            // at the record's rating: the deck must not pair the row's
+            // absolute flow with a larger thrust.
+            let row_kn = engine.lto_rated_thrust_kn.unwrap();
+            let row_tsfc = engine.takeoff_fuel_flow_kg_s / row_kn;
+            let deck_tsfc = typed.takeoff_fuel_flow_kg_s / typed.rated_thrust_kn;
+            assert!((deck_tsfc - row_tsfc).abs() <= 1.0e-12 * row_tsfc, "{name}");
+            assert_eq!(
+                typed.part_power_fuel_flow_ratios, engine.part_power_fuel_flow_ratios,
+                "{name}"
+            );
         }
     }
 
@@ -764,12 +1050,28 @@ mod tests {
                 profile.len() > 6,
                 "{name}: more than the generic six stations"
             );
-            // The lip is nearly the full cowl for the pods behind a fan.
+            // The inlet highlight must clear the fan tip: a lip smaller than the
+            // fan disc would not admit the flow. The outlines are fitted to the
+            // manufacturer drawings (highlight below 0.9 of the maximum radius
+            // for most of the fleet), so the old 0.9 floor is not a physical
+            // limit. The Trent XWB-84 (A350 AC front view) and PW305A (PTM
+            // front view lip circle) rows were re-read after this
+            // check found them inside their own fans.
             if engine.technology == PropulsionTechnology::Turbofan {
-                assert!(profile[0].1 >= 0.9, "{name}: highlight {}", profile[0].1);
+                let highlight_m = profile[0].1 * engine.nacelle_max_radius_m;
+                assert!(
+                    highlight_m >= 0.5 * engine.fan_diameter_m,
+                    "{name}: highlight radius {highlight_m} m, fan tip {} m",
+                    0.5 * engine.fan_diameter_m
+                );
             }
+            // The refit to the manufacturer drawings cites the drawing itself
+            // (figure or section of the airport-planning document) or says
+            // "drawing-fitted"; a bare envelope statement is not a source.
             assert!(
-                engine.geometry_source.contains("drawing-fitted"),
+                ["drawing-fitted", "figure", "section 2.2"]
+                    .iter()
+                    .any(|marker| engine.geometry_source.contains(marker)),
                 "{name}: source not stated"
             );
         }
@@ -808,5 +1110,220 @@ mod tests {
         assert_eq!(prop.propeller_model, "Hamilton Sundstrand 568F-1");
         assert_eq!(prop.governed_propeller_speed_rpm, 1200.0);
         assert!(prop.takeoff_shaft_power_kw > 1_800.0);
+    }
+
+    #[test]
+    fn every_turboprop_record_states_its_own_power_lapse_corners() {
+        // The record itself carries the corners and the exponent (a serde
+        // default only covers older saved configurations).
+        let raw: serde_json::Value = serde_json::from_str(ENGINES_JSON).unwrap();
+        let records = raw["engines"].as_array().unwrap();
+        let mut turboprops = 0;
+        for record in records {
+            let Some(turboprop) = record.get("turboprop") else {
+                continue;
+            };
+            turboprops += 1;
+            for key in [
+                "takeoff_flat_rating_temperature_k",
+                "maximum_continuous_flat_rating_temperature_k",
+                "power_lapse_density_exponent",
+                "power_lapse_source",
+            ] {
+                assert!(turboprop.get(key).is_some(), "{} {key}", record["name"]);
+            }
+        }
+        assert_eq!(turboprops, 3);
+        // EASA TCDS IM.E.041 Issue 07 section 5: PW127M 39 C take-off and
+        // 48 C maximum continuous, PW127G 35 C for every rating; both take
+        // the PW120 exponent. The TP400-D6 has its own derived corner.
+        for (name, takeoff_k, continuous_k) in
+            [("PW127M", 312.15, 321.15), ("PW127G", 308.15, 308.15)]
+        {
+            let prop = get(name).unwrap().turboprop.clone().unwrap();
+            assert_eq!(prop.takeoff_flat_rating_temperature_k, takeoff_k, "{name}");
+            assert_eq!(
+                prop.maximum_continuous_flat_rating_temperature_k, continuous_k,
+                "{name}"
+            );
+            assert_eq!(prop.power_lapse_density_exponent, 0.728, "{name}");
+        }
+        let tp400 = get("TP400-D6").unwrap().turboprop.clone().unwrap();
+        let corner = 288.15 * (9_694.0_f64 / 7_971.0).powf(1.0 / 0.728);
+        assert!((tp400.takeoff_flat_rating_temperature_k - corner).abs() < 0.01);
+        assert_eq!(
+            tp400.maximum_continuous_flat_rating_temperature_k,
+            tp400.takeoff_flat_rating_temperature_k
+        );
+        assert!(tp400.power_lapse_source.contains("NO TP400 SOURCE"));
+        // Every record's exponent is inside the class band it cites:
+        // Torenbeek (1982) eq. (5-70), p. 165, n between .7 and .8 for a
+        // given rating and Mach number.
+        for name in ["PW127M", "PW127G", "TP400-D6"] {
+            let prop = get(name).unwrap().turboprop.clone().unwrap();
+            assert!(prop.power_lapse_source.contains("eq. (5-70), p. 165"), "{name}");
+            assert!((0.7..=0.8).contains(&prop.power_lapse_density_exponent), "{name}");
+        }
+    }
+
+    #[test]
+    fn an_aircraft_installed_rating_is_the_thrust_and_the_certified_one_the_mass_basis() {
+        // Rating basis: the installed take-off rating the aircraft's own
+        // document prints, when it prints one; the engine certification
+        // rating of the same hardware is the mass basis. COMAC C919 ACAP:
+        // C919 STD 28468 lb; ICAO EEDB LEAP-1C28 129.976 kN.
+        let leap = get("LEAP-1C").unwrap();
+        let installed_kn = 28_468.0 * 4.448_221_615_260_5 / 1_000.0;
+        assert!((leap.turbofan_spec().unwrap().rated_thrust_kn - installed_kn).abs() < 0.01);
+        assert_eq!(leap.mass_basis_thrust_kn, Some(129.976));
+        assert!(leap.thrust_source.contains("28468 lb"));
+        // The LTO table is the databank's, re-read at the installed rating:
+        // the take-off fuel flow falls with the rating, between the 85 % and
+        // 100 % databank points, and the 100 % ratio is 1.
+        let spec = leap.turbofan_spec().unwrap();
+        let scale = leap.thrust_kn / 129.976;
+        let r85 = leap.part_power_fuel_flow_ratios[2];
+        let expected_full = r85 + (scale - 0.85) / 0.15 * (1.0 - r85);
+        assert!(
+            (spec.takeoff_fuel_flow_kg_s - leap.takeoff_fuel_flow_kg_s * expected_full).abs()
+                < 1e-12
+        );
+        assert!((spec.part_power_fuel_flow_ratios[3] - 1.0).abs() < 1e-12);
+        assert!(leap.aircraft_installed_rating);
+        // A record whose thrust is its databank rating keeps the table as is.
+        let cf6 = get("CF6-50").unwrap();
+        assert_eq!(
+            cf6.turbofan_spec().unwrap().part_power_fuel_flow_ratios,
+            cf6.part_power_fuel_flow_ratios
+        );
+        // The family maximum-climb datum (the LEAP-1A26 FN/FN*, 23,600 N over
+        // 120.636 kN) is carried to the installed rating, not the certified one.
+        let off_design = &leap.turbofan_spec().unwrap().off_design;
+        let carried_n = 23_600.0 / 120_636.0 * installed_kn * 1_000.0;
+        assert!((off_design.cruise_reference_thrust_n - carried_n).abs() < 1.0);
+    }
+
+    /// The two statements stay apart: a mass basis alone never changes the
+    /// flown rating, so a record that declares one without the installed
+    /// rating flag must carry its databank rating as `thrust_kn`, and a
+    /// flagged record must state the installed rating's evidence.
+    #[test]
+    fn a_mass_basis_never_stands_in_for_an_installed_rating() {
+        let raw: serde_json::Value = serde_json::from_str(ENGINES_JSON).unwrap();
+        for record in raw["engines"].as_array().unwrap() {
+            let name = record["name"].as_str().unwrap();
+            let spec = get(name).unwrap();
+            if spec.aircraft_installed_rating {
+                assert!(
+                    spec.thrust_rating_condition.contains("aircraft installed"),
+                    "{name}"
+                );
+                continue;
+            }
+            if spec.mass_basis_thrust_kn.is_some() {
+                if let Some(lto_kn) = spec.lto_rated_thrust_kn {
+                    assert_eq!(spec.thrust_kn, lto_kn, "{name}");
+                }
+            }
+        }
+        // The C919's LEAP-1C and the 747-400's CF6-80C2B1F carry an installed
+        // rating that differs from their databank row.
+        let flagged: Vec<&str> = raw["engines"]
+            .as_array()
+            .unwrap()
+            .iter()
+            .filter(|r| r.get("aircraft_installed_rating") == Some(&serde_json::Value::Bool(true)))
+            .map(|r| r["name"].as_str().unwrap())
+            .collect();
+        assert_eq!(flagged, ["LEAP-1C", "CF6-80C2"]);
+    }
+
+    /// The deck of an identity-qualified record flies its databank row's
+    /// rating, so the record's own `thrust_kn` must be that rating unless it
+    /// is flagged as the aircraft's installed rating; otherwise the
+    /// catalogue states two take-off thrusts for one engine. The tolerance
+    /// is the rounding of a rating printed to 0.01 kN or converted from lbf
+    /// or daN by a type certificate (PW1521G 97.73 against 97.72).
+    #[test]
+    fn an_identity_qualified_record_states_the_rating_its_deck_flies() {
+        for spec in database() {
+            let qualified = matches!(
+                spec.part_power_evidence.as_str(),
+                "direct" | "direct-rating-match" | "rating-proxy" | "family-match"
+            );
+            if !qualified || spec.aircraft_installed_rating {
+                continue;
+            }
+            let Some(lto_kn) = spec.lto_rated_thrust_kn else {
+                continue;
+            };
+            assert!(
+                (spec.thrust_kn - lto_kn).abs() <= 0.015,
+                "{}: thrust_kn {} against LTO {}",
+                spec.name,
+                spec.thrust_kn,
+                lto_kn
+            );
+            let typed = spec.turbofan_spec().unwrap();
+            assert_eq!(typed.rated_thrust_kn, lto_kn, "{}", spec.name);
+        }
+    }
+
+    #[test]
+    fn every_turboprop_record_states_the_psfc_it_burns() {
+        // The PW100 records keep the PW120A flight-record PSFC (the C295 and
+        // ATR 72 unchanged); the TP400-D6 burns its own cruise figure.
+        for name in ["PW127M", "PW127G"] {
+            let prop = get(name).unwrap().turboprop.clone().unwrap();
+            assert_eq!(prop.psfc_reference_kg_kwh, 0.2945, "{name}");
+            assert_eq!(prop.psfc_reference_temperature_k, 249.65, "{name}");
+        }
+        let tp400 = get("TP400-D6").unwrap().turboprop.clone().unwrap();
+        // Jane's 2008-2009: 9,694 kW thermodynamic power; the PW100 records
+        // state none and keep their TCDS flat-rating temperatures.
+        assert_eq!(tp400.thermodynamic_shaft_power_kw, 9_694.0);
+        for name in ["PW127M", "PW127G"] {
+            let prop = get(name).unwrap().turboprop.clone().unwrap();
+            assert_eq!(prop.thermodynamic_shaft_power_kw, 0.0, "{name}");
+        }
+        // 0.35 lbm/(eshp h) in kg/(kW h).
+        let expected = 0.35 * 0.453_592_37 / 0.745_699_872;
+        assert!((tp400.psfc_reference_kg_kwh - expected).abs() < 5e-5);
+        assert_eq!(tp400.psfc_reference_temperature_k, 216.65);
+        assert!(tp400.psfc_source.contains("0.35 lbm/eshp-hr"));
+    }
+
+    #[test]
+    fn only_the_static_corner_turboprop_takes_a_ram_factor() {
+        // Nita (2008) eq. 3.5.11 is a fit at 275 kt true airspeed: the PW100
+        // records keep it whole, with no ram factor, and the TP400-D6 takes
+        // a ram factor read from the PW120 chart, relative to that schedule.
+        let reference_m_s = 275.0 * 1_852.0 / 3_600.0;
+        for name in ["PW127M", "PW127G", "TP400-D6"] {
+            let prop = get(name).unwrap().turboprop.clone().unwrap();
+            // TP400-D6: Nita (2008) Fig. 3.6, PW120 maximum cruise power
+            // against true airspeed, read as 3.45 +/- 0.15.
+            let expected_exponent = if name == "TP400-D6" { 3.45 } else { 0.0 };
+            assert_eq!(prop.ram_power_exponent, expected_exponent, "{name}");
+            assert!(
+                (prop.power_lapse_fit_reference_true_airspeed_m_s - reference_m_s).abs() < 1e-3,
+                "{name}"
+            );
+            assert!(prop.ram_power_source.contains("275 kt"), "{name}");
+        }
+    }
+
+    #[test]
+    fn the_tp400_ratings_are_bounded_at_the_tcds_rating_temperature() {
+        // EASA TCDS E.033 states every TP400-D6 rating at sea level ISA and
+        // prints no flat-rating temperature; the PW127 records carry their
+        // own sea-level temperature corners and take no extra bound.
+        let tp400 = get("TP400-D6").unwrap().turboprop.clone().unwrap();
+        assert_eq!(tp400.rating_temperature_limit_k, 288.15);
+        assert!(tp400.power_lapse_source.contains("288.15 K"));
+        for name in ["PW127M", "PW127G"] {
+            let prop = get(name).unwrap().turboprop.clone().unwrap();
+            assert_eq!(prop.rating_temperature_limit_k, 0.0, "{name}");
+        }
     }
 }

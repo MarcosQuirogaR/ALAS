@@ -32,14 +32,14 @@ use super::Loft;
 const SAMPLES: usize = 2000;
 /// Dimensionless curvature (curvature times local half-size) below which a
 /// sample has no sign: radius of curvature above 50 half-sizes.
-const SIGN_THRESHOLD: f64 = 0.02;
+pub(super) const SIGN_THRESHOLD: f64 = 0.02;
 /// Floor of the local half-size used for that scale, m.
-const LOCAL_SCALE_FLOOR_M: f64 = 0.25;
+pub(super) const LOCAL_SCALE_FLOOR_M: f64 = 0.25;
 /// Relative swing of the curvature below which an extremum is not counted.
 const EXTREMUM_THRESHOLD: f64 = 2e-3;
 
 #[derive(Clone, Copy)]
-enum Line {
+pub(super) enum Line {
     Crown,
     Keel,
     Plan,
@@ -47,9 +47,9 @@ enum Line {
 }
 
 impl Line {
-    const ALL: [Line; 4] = [Line::Crown, Line::Keel, Line::Plan, Line::Shoulder];
+    pub(super) const ALL: [Line; 4] = [Line::Crown, Line::Keel, Line::Plan, Line::Shoulder];
 
-    fn name(self) -> &'static str {
+    pub(super) fn name(self) -> &'static str {
         match self {
             Line::Crown => "crown",
             Line::Keel => "keel",
@@ -136,7 +136,7 @@ fn derivatives(j: &Jets, line: Line) -> (f64, f64, f64) {
     }
 }
 
-fn curvature(j: &Jets, line: Line) -> f64 {
+pub(super) fn curvature(j: &Jets, line: Line) -> f64 {
     let (_, f1, f2) = derivatives(j, line);
     f2 / (1.0 + f1 * f1).powf(1.5)
 }

@@ -1,7 +1,7 @@
 // SPDX-License-Identifier: AGPL-3.0-or-later
 // Copyright (C) 2026 Marcos Quiroga Rodriguez
 
-//! UAV-PLAN M4 item 1-4 checks: lattice neutral point, aggregate result, spar
+//! Airframe checks: lattice neutral point, aggregate result, spar
 //! from DB-style laminate rows.  Hand references are stated per test.
 
 #![allow(clippy::unwrap_used, clippy::expect_used)]

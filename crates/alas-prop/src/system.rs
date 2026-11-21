@@ -172,18 +172,18 @@ mod tests {
         });
         assert!(matches!(loaded, Err(PropulsionError::UnsupportedDemand(_))));
 
-        let feathered = model.evaluate(&PropulsionRequest {
+        let shutdown = model.evaluate(&PropulsionRequest {
             flight: (&flight).into(),
             demand: PropulsionDemand::NormalizedForce(0.0),
-            mode: OperatingMode::Feathered,
+            mode: OperatingMode::Shutdown,
             failure: FailureState::None,
             loads: PropulsionLoads::default(),
             state: PropulsionState::default(),
             time_step_s: None,
         });
         assert_eq!(
-            feathered,
-            Err(PropulsionError::UnsupportedMode(OperatingMode::Feathered))
+            shutdown,
+            Err(PropulsionError::UnsupportedMode(OperatingMode::Shutdown))
         );
         Ok(())
     }

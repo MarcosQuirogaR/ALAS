@@ -21,7 +21,7 @@ pub(super) fn reset(state: &mut AppState, page: &Page) {
     };
     let fields = super::placement::visible_fields(page, "optimizer", &node.fields);
     // The desktop's own defaults: the wall-clock search, not the library's
-    // reproducible evaluation-budget one (audit SIZ-06, decision D6).
+    // reproducible evaluation-budget one.
     let mut default_config = alas_config::AlasConfig::default();
     crate::config_edit::apply_interactive_solver(&mut default_config);
     let Ok(defaults) = serde_json::to_value(default_config) else {

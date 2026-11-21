@@ -162,7 +162,8 @@ pub fn candidate_mission_model(
         artifacts.reference_area_m2,
         artifacts.drag.cruise_drag(),
         deck_from_key(config, &artifacts.deck)?,
-    )?;
+    )?
+    .with_buffet_onset_cl(artifacts.buffet_onset_cl);
     let mut model = closure_mission(
         &config.mtow_plan(),
         config,
@@ -170,8 +171,132 @@ pub fn candidate_mission_model(
         route.route_distance_m,
         (0.0, 0),
     )
-    .map_err(|failure| format!("design-mission model is not valid: {}", failure.reason))?
+    .map_err(|failure| format!("design-mission model is not valid: {failure}"))?
     .map_or(model, |mission| mission.model);
+    if let Some(plan) = &artifacts.frozen_plan {
+        model = model.with_frozen_plan(plan.clone());
+    }
+    Ok(model)
+}
+
+/// The design mission of the aircraft `artifacts` describes, for a loading
+/// that no sizing closure flew: the model, the still-air range, m, and the
+/// fuel policy. It prices the reserves that loading lands with
+/// ([`crate::mdo::cruise_mass::cruise_mass_of_loading`]).
+///
+/// The mission is [`AlasConfig::design_mission`] (the declared design range,
+/// under the reserve rule its source quotes), flown on the candidate's drag
+/// and deck at the sizing cruise altitude `requirements.cruise_altitude_m`
+/// from the route's aerodromes, exactly as a takeoff-mass mode that closes on
+/// a design mission flies it ([`closure_mission`]). No frozen trip plan is
+/// carried: the closure's plan belongs to its own range and mass.
+///
+/// # Errors
+///
+/// The engine binding, an invalid model term, or a design range that is
+/// neither declared nor resolvable from the route (or, for a payload-defined
+/// mission, solved only by a sizing closure), as a description.
+pub(crate) fn design_mission_model(
+    config: &AlasConfig,
+    artifacts: &CandidateFuelArtifacts,
+) -> Result<(SegmentMissionModel, f64, alas_config::FuelPolicyConfig), String> {
+    let (model, range_m, policy) = design_mission_flight(config, artifacts)?;
+    Ok((model, range_m?, policy))
+}
+
+/// The design mission's model, its still-air range (m) or why it has none
+/// for an unclosed loading, and its fuel policy ([`design_mission_flight`]).
+pub(crate) type DesignMissionFlight = (
+    SegmentMissionModel,
+    Result<f64, String>,
+    alas_config::FuelPolicyConfig,
+);
+
+/// [`design_mission_model`] for a consumer that needs the mission's model and
+/// reserve rule but not its range (a loading's own range search,
+/// [`crate::mdo::cruise_mass::mid_cruise_point`]): the range is returned as
+/// its own result, so a design range only a sizing closure can solve (a
+/// payload-defined mission) or an unknown route distance does not stop the
+/// model from being built.
+///
+/// # Errors
+///
+/// The engine binding or an invalid model term, as a description; the
+/// range's own failure is the second member.
+pub(crate) fn design_mission_flight(
+    config: &AlasConfig,
+    artifacts: &CandidateFuelArtifacts,
+) -> Result<DesignMissionFlight, String> {
+    let config = &*artifacts.config_with_clmax(config);
+    let route = route::resolve(config);
+    let model = route_mission_model(
+        config,
+        &route,
+        artifacts.reference_area_m2,
+        artifacts.drag.cruise_drag(),
+        deck_from_key(config, &artifacts.deck)?,
+    )?
+    .with_buffet_onset_cl(artifacts.buffet_onset_cl);
+    let mission = config.design_mission();
+    let plan = alas_config::MtowPlan {
+        design_mission: Some(mission),
+        ..config.mtow_plan()
+    };
+    let closure = closure_mission(&plan, config, &model, route.route_distance_m, (0.0, 0))
+        .map_err(|failure| format!("design-mission model is not valid: {failure}"))?
+        .ok_or_else(|| "the configuration declares no design mission".to_owned())?;
+    let range_m = if closure.range_at_mass_kg.is_some() {
+        Err("the design range is the model's output at the certified takeoff mass of a sized closure, so a loading that no closure flew has none to price".to_owned())
+    } else if closure.distance_known && closure.range_m > 0.0 {
+        Ok(closure.range_m)
+    } else {
+        Err("no design range is declared and the route distance is unknown".to_owned())
+    };
+    Ok((
+        closure.model,
+        range_m,
+        mission.fuel_policy(&config.fuel_policy),
+    ))
+}
+
+impl SegmentMissionModel {
+    /// The model the sizing prices the *flown route* with: the candidate's route
+    /// model (the route's own level and range) with the closure's frozen trip
+    /// plan, without the re-basing onto the design mission that
+    /// [`candidate_mission_model`] applies when the takeoff-mass plan declares one
+    /// (`mtow_band`, `payload_adjusted`: the design range and the requirements'
+    /// design cruise altitude). The two are the same model when the plan declares
+    /// no design mission (`fixed_requirement`). A trip of the user's route, its
+    /// dispatch and its fuel load are priced on this one: pricing them on the
+    /// design-mission model flew the route at the design altitude (A320-200 on
+    /// 645 km at 36,445 ft against the 28,000 ft the route is flown at) and
+    /// under-loaded its fuel.
+    ///
+    /// # Errors
+    ///
+    /// The engine binding or the first invalid model term, as a description.
+    pub fn for_candidate_route(
+        config: &AlasConfig,
+        artifacts: &CandidateFuelArtifacts,
+    ) -> Result<Self, String> {
+        candidate_route_mission_model(config, artifacts)
+    }
+}
+
+fn candidate_route_mission_model(
+    config: &AlasConfig,
+    artifacts: &CandidateFuelArtifacts,
+) -> Result<SegmentMissionModel, String> {
+    let config = &*artifacts.config_with_clmax(config);
+    let route = route::resolve(config);
+    let mut model = route_mission_model(
+        config,
+        &route,
+        artifacts.reference_area_m2,
+        artifacts.drag.cruise_drag(),
+        deck_from_key(config, &artifacts.deck)?,
+    )?
+    .with_buffet_onset_cl(artifacts.buffet_onset_cl);
     if let Some(plan) = &artifacts.frozen_plan {
         model = model.with_frozen_plan(plan.clone());
     }
@@ -227,8 +352,22 @@ pub fn baseline_fuel_artifacts(
         &design.to_array(),
         true,
     )
-    .map_err(|failure| format!("sizing closure failed: {}", failure.reason))?;
+    .map_err(|failure| format!("sizing closure failed: {failure}"))?;
     let sized = outcome.sized;
+    if let Some(jump) = sized.sizing_map_jump.filter(|jump| jump.survives_held_plan) {
+        return Err(format!(
+            "sizing closure did not settle: {}",
+            jump.describe()
+        ));
+    }
+    // A closure the burn model ended carries the model's reason on its
+    // dispatch: report that, not the unsettled mass it left.
+    if let DispatchStatus::ModelFailed(reason) = &sized.dispatch.status {
+        return Err(format!(
+            "sizing closure did not settle: the mission model failed after {} passes: {reason}",
+            sized.sizing_iterations
+        ));
+    }
     if !sized.takeoff_mass_settled {
         return Err(format!(
             "sizing closure did not settle: the takeoff mass still moved by more than {} kg after {} passes",
@@ -239,6 +378,10 @@ pub fn baseline_fuel_artifacts(
         DispatchStatus::Converged
         | DispatchStatus::MtowLimited { .. }
         | DispatchStatus::TankLimited { .. } => Ok(Arc::unwrap_or_clone(sized.fuel_artifacts)),
+        DispatchStatus::NotConverged { last_change_kg } => Err(format!(
+            "sizing closure dispatch did not converge: the takeoff mass last moved by {last_change_kg:.0} kg at {:.0} kg. A change far above the sizing tolerance means the model cannot fly the mission at the mass the plan asks for (for example, the aircraft cannot climb to a prescribed cruise level at that mass), rather than an iteration that is still settling",
+            sized.dispatch.takeoff_mass_kg
+        )),
         status => Err(format!(
             "sizing closure dispatch did not converge: {status:?}"
         )),

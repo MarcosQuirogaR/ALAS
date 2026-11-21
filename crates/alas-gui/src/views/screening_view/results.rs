@@ -67,7 +67,7 @@ pub(super) fn show_result(
                     // heading on a narrow display.
                     .num_columns(10)
                     .striped(true)
-                    .spacing([10.0, 3.0])
+                    .spacing(crate::theme::space::GRID_SPACING)
                     .show(ui, |ui| {
                 for h in [
                     "",
@@ -77,7 +77,7 @@ pub(super) fn show_result(
                     "CD",
                     "Score",
                     "L/D (3D)",
-                    "L/D (MSES)",
+                    "Section L/D (MSES, 2-D)",
                     "MSES",
                     "CFD",
                 ] {
@@ -149,6 +149,23 @@ pub(super) fn show_result(
     let language = alas_i18n::get_language();
     let (columns, card_width) = responsive_card_layout(ui.available_width());
     for row in alas_report::SCREENING_FIGURES.chunks(columns) {
+        // One canvas height for the row: the tallest figure at its own aspect,
+        // so the cards of a row are as tall as each other and every figure
+        // keeps its aspect inside its canvas.
+        let row_canvas_width = (crate::theme::card_content_width(card_width) - 2.0).max(280.0);
+        let row_height = row
+            .iter()
+            .filter_map(|descriptor| {
+                state.screening.figure_cache.get(
+                    result,
+                    state.screening.result_revision,
+                    &theme,
+                    &language,
+                    descriptor.id,
+                )
+            })
+            .map(|scene| screening_figure_height(row_canvas_width, &scene))
+            .fold(120.0_f32, f32::max);
         ui.horizontal(|ui| {
             ui.spacing_mut().item_spacing.x = CARD_GAP;
             for descriptor in row {
@@ -161,58 +178,62 @@ pub(super) fn show_result(
                 );
                 let scene_revision = state.screening.figure_cache.revision();
                 crate::theme::card_frame(ui).show(ui, |ui| {
-                    let content_width = crate::theme::card_content_width(card_width);
-                    ui.set_min_width(content_width);
-                    ui.set_max_width(content_width);
-                    ui.label(RichText::new(tr(descriptor.title)).strong())
-                        .on_hover_text(tr(descriptor.description));
-                    let canvas_width = ui.available_width().max(280.0);
-                    match scene {
-                        Some(scene) => {
-                            let size =
-                                vec2(canvas_width, screening_figure_height(canvas_width, &scene));
-                            if !ui.is_rect_visible(egui::Rect::from_min_size(
-                                ui.next_widget_position(),
-                                size,
-                            )) {
-                                // Preserve scroll layout without rasterizing cards below
-                                // the viewport on first entry to the screening page.
-                                ui.allocate_space(size);
-                                return;
+                    // The row is a horizontal layout; a card is a column: its
+                    // title above its figure, the card exactly its share of
+                    // the row.
+                    ui.with_layout(egui::Layout::top_down(egui::Align::Min), |ui| {
+                        let content_width = crate::theme::card_content_width(card_width) - 2.0;
+                        ui.set_min_width(content_width);
+                        ui.set_max_width(content_width);
+                        ui.label(RichText::new(tr(descriptor.title)).strong())
+                            .on_hover_text(tr(descriptor.description));
+                        let canvas_width = ui.available_width().max(280.0);
+                        match scene {
+                            Some(scene) => {
+                                let size = vec2(canvas_width, row_height);
+                                if !ui.is_rect_visible(egui::Rect::from_min_size(
+                                    ui.next_widget_position(),
+                                    size,
+                                )) {
+                                    // Preserve scroll layout without rasterizing cards below
+                                    // the viewport on first entry to the screening page.
+                                    ui.allocate_space(size);
+                                    return;
+                                }
+                                let view_key = format!("screening:{}", descriptor.id);
+                                let view = SceneView::new(&scene, state.view_state_mut(view_key))
+                                    .cache_key(("screening", descriptor.id))
+                                    .cache_revision(scene_revision)
+                                    .static_view()
+                                    .show_toolbar(false)
+                                    // Screening cards share the page ScrollArea;
+                                    // zoom is available in the fullscreen/result
+                                    // viewer instead of stealing page scrolling.
+                                    .wheel_zoom(false)
+                                    .desired_size(size);
+                                let response = ui.add(view);
+                                crate::views::plot_data_menu::attach_scene(
+                                    &response,
+                                    &scene,
+                                    descriptor.id,
+                                    None,
+                                );
                             }
-                            let view_key = format!("screening:{}", descriptor.id);
-                            let view = SceneView::new(&scene, state.view_state_mut(view_key))
-                                .cache_key(("screening", descriptor.id))
-                                .cache_revision(scene_revision)
-                                .static_view()
-                                .show_toolbar(false)
-                                // Screening cards share the page ScrollArea;
-                                // zoom is available in the fullscreen/result
-                                // viewer instead of stealing page scrolling.
-                                .wheel_zoom(false)
-                                .desired_size(size);
-                            let response = ui.add(view);
-                            crate::views::plot_data_menu::attach_scene(
-                                &response,
-                                &scene,
-                                descriptor.id,
-                                None,
-                            );
+                            None => {
+                                ui.add_sized(
+                                    [canvas_width, row_height],
+                                    egui::Label::new(
+                                        RichText::new(screening_unavailable_reason(
+                                            state,
+                                            Some(result),
+                                            descriptor.id,
+                                        ))
+                                        .weak(),
+                                    ),
+                                );
+                            }
                         }
-                        None => {
-                            ui.add_sized(
-                                [canvas_width, 120.0],
-                                egui::Label::new(
-                                    RichText::new(screening_unavailable_reason(
-                                        state,
-                                        Some(result),
-                                        descriptor.id,
-                                    ))
-                                    .weak(),
-                                ),
-                            );
-                        }
-                    }
+                    });
                 });
             }
         });
@@ -232,9 +253,7 @@ pub(super) fn candidate_mses_status(
         return tr("MSES-verified");
     }
     match candidate.mses_status.as_deref() {
-        Some("not_configured") => {
-            tr("MSES executables not configured (Advanced Settings > External Tools)")
-        }
+        Some("not_configured") => tr("MSES executables not configured (External Tools page)"),
         Some(status) => status.to_owned(),
         None => "-".to_owned(),
     }
@@ -351,7 +370,7 @@ pub(super) fn screening_mses_unavailable_reason(
     }
     if !statuses.is_empty() && statuses.iter().all(|status| *status == "not_configured") {
         return tr(
-            "Not available: MSES verification was selected, but no MSES installation was resolved (Advanced Settings > External Tools).",
+            "Not available: MSES verification was selected, but no MSES installation was resolved (External Tools page).",
         );
     }
     if !statuses.is_empty() && statuses.iter().all(|status| *status == "disabled") {

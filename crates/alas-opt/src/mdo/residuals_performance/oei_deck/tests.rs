@@ -90,9 +90,9 @@ fn the_windmilling_drag_follows_the_handbook_formula_for_the_fan_diameter() {
             0.022,
         )
         .unwrap();
-    let d = config.geometry.engine.fan_diameter_m;
-    let mach = 75.0 / us1976_compute_values(0.0, 0.0).speed_of_sound_m_s;
-    let area = windmilling_jet_drag_area_m2(d, &high_bypass_streams(d), mach).unwrap();
+    let engine = &config.geometry.engine;
+    let area =
+        windmilling_turbofan_drag_area_m2(engine.fan_diameter_m, engine.bypass_ratio).unwrap();
     assert!((point.windmilling_cd - area / s_ref).abs() < 1e-15);
     // Order of magnitude of the handbook worked example (0.0043 for a
     // 1.735 m fan on 122.4 m^2).
@@ -268,4 +268,45 @@ fn the_weighted_trim_is_the_yaw_state_and_sideslip_does_not_lower_the_trim_drag(
     // The yaw-control data exposes the rudder limit of the configuration.
     let control = build(None).yaw_control().unwrap();
     assert!((control.rudder_max_deflection_rad - 30.0_f64.to_radians()).abs() < 1e-12);
+}
+
+/// Packs on at take-off: the take-off-rating thrust falls by Raymer Eq. 13.8
+/// (2.0 x the 14 CFR 25.831(a) fresh-air bleed over the core flow), the same
+/// share with one engine out, and only when the configuration asks for it.
+#[test]
+fn packs_on_take_off_thrust_loses_the_bleed_share_of_the_core_flow() {
+    for preset in ["A320-200", "C919"] {
+        let mut config = AlasConfig::from_value(&serde_json::json!({ "preset": preset })).unwrap();
+        config.performance.takeoff_packs_on = false;
+        let off = jet_model(&config, 122.6);
+        config.performance.takeoff_packs_on = true;
+        let on = jet_model(&config, 122.6);
+        let loads = takeoff_bleed::packs_loads(&config);
+        assert!(
+            loads.bleed_mass_flow_kg_s > 0.5 && loads.bleed_mass_flow_kg_s < 1.0,
+            "{loads:?}"
+        );
+        for engine_out in [false, true] {
+            let rating = EngineOutRating::TakeoffGoAround;
+            let thrust = |model: &EngineOutModel| {
+                model
+                    .thrust(condition(0.0, 75.0), rating, engine_out)
+                    .unwrap()
+                    .0
+            };
+            let loss = 1.0 - thrust(&on) / thrust(&off);
+            assert!(loss > 0.002 && loss < 0.05, "{preset}: {loss} at {loads:?}");
+        }
+        let climb = |model: &EngineOutModel| {
+            model
+                .thrust(
+                    condition(3_000.0, 150.0),
+                    EngineOutRating::MaximumClimb,
+                    false,
+                )
+                .unwrap()
+                .0
+        };
+        assert_eq!(climb(&on), climb(&off));
+    }
 }

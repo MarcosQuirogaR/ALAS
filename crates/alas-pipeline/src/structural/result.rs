@@ -24,7 +24,13 @@ pub struct EvaluationInputs {
     config: AlasConfig,
     design: alas_config::DesignVector,
     wing: Option<alas_geom::aircraft::wing::Wing>,
+    /// Skin von Mises limit by submitted material id: the CS 25.305 combined limit
+    /// (`alas_struct::allowables::shell_von_mises_allowable_pa`).
     material_allowables_pa: Vec<(i64, f64)>,
+    /// Stiffened-panel allowable by submitted material id, applied to the
+    /// cover panel stress along the stringers
+    /// (`alas_struct::allowables::bending_allowable_pa`).
+    panel_allowables_pa: Vec<(i64, f64)>,
     shell_identities: Vec<(i64, i64, i64)>,
     /// Shells inside load-introduction or constraint zones of the submitted
     /// deck; their stress is an idealisation artefact and is not assessed
@@ -40,6 +46,7 @@ impl EvaluationInputs {
             design: report.design,
             wing: report.airplane.wings.first().cloned(),
             material_allowables_pa: Vec::new(),
+            panel_allowables_pa: Vec::new(),
             shell_identities: Vec::new(),
             load_introduction: std::collections::BTreeSet::new(),
         }
@@ -49,11 +56,11 @@ impl EvaluationInputs {
         config: &AlasConfig,
         report: &AnalysisReport,
         deck: &alas_struct::mesh::Deck,
-        engine_nids: &[i64],
+        index: &alas_struct::mesh::MeshNodeIndex,
     ) -> Self {
         let mut inputs = Self::new(config, report);
         inputs.load_introduction = deck
-            .load_introduction_elements(engine_nids, alas_struct::mesh::LOAD_INTRODUCTION_LAYERS);
+            .load_introduction_elements_within(index, alas_struct::mesh::LOAD_INTRODUCTION_DEPTHS);
         let cfg = &config.structures;
         let materials: Vec<_> = [
             &cfg.skin_material,
@@ -68,19 +75,26 @@ impl EvaluationInputs {
             // Match only the declared materials against actual MAT1 cards.
             // If two declarations have identical elastic/density properties,
             // use their smaller allowable rather than guessing an identity.
-            let allowable = materials
-                .iter()
-                .filter(|material| {
+            let declared = || {
+                materials.iter().filter(|material| {
                     material.e_pa == submitted.e
                         && material.nu == submitted.nu
                         && material.rho_kg_m3 == submitted.rho
                 })
-                .map(|material| alas_struct::allowables::bending_allowable_pa(material))
+            };
+            let allowable = declared()
+                .map(|material| alas_struct::allowables::shell_von_mises_allowable_pa(material))
                 .fold(f64::INFINITY, f64::min);
             if allowable.is_finite() && allowable > 0.0 {
                 inputs
                     .material_allowables_pa
                     .push((submitted.mid, allowable));
+            }
+            let panel = declared()
+                .map(|material| alas_struct::allowables::bending_allowable_pa(material))
+                .fold(f64::INFINITY, f64::min);
+            if panel.is_finite() && panel > 0.0 {
+                inputs.panel_allowables_pa.push((submitted.mid, panel));
             }
         }
         for shell in deck.quads().iter().chain(deck.trias()) {
@@ -95,6 +109,14 @@ impl EvaluationInputs {
 
     pub(crate) fn material_allowable_pa(&self, mid: i64) -> Option<f64> {
         self.material_allowables_pa
+            .iter()
+            .find(|(id, _)| *id == mid)
+            .map(|(_, value)| *value)
+    }
+
+    /// Stiffened-panel allowable of a cover whose skin is material `mid`.
+    pub(crate) fn panel_allowable_pa(&self, mid: i64) -> Option<f64> {
+        self.panel_allowables_pa
             .iter()
             .find(|(id, _)| *id == mid)
             .map(|(_, value)| *value)
@@ -144,7 +166,7 @@ pub struct StructuralAnalysisResult {
     /// Patran deformation renders, if an external export was performed.
     pub patran: Option<PatranExportResult>,
     /// FLOPS complete-wing mass of the mass ledger, in kg, for comparison.
-    pub torenbeek_wing_mass_kg: f64,
+    pub ledger_complete_wing_mass_kg: f64,
     /// The wing masses of this run, shared with the feasibility findings.
     pub wing_mass: Option<WingMassComparison>,
     /// Inputs of this evaluation; absent results cannot replace native gates.
@@ -190,7 +212,7 @@ impl Default for StructuralAnalysisResult {
             nastran: None,
             nastran95: None,
             patran: None,
-            torenbeek_wing_mass_kg: f64::NAN,
+            ledger_complete_wing_mass_kg: f64::NAN,
             wing_mass: None,
             evaluation_inputs: None,
         }

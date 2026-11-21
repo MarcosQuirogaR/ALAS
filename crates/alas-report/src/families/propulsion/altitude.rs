@@ -19,8 +19,8 @@ use crate::colormap::Colormap;
 use crate::scene::{Axes2D, Color, Fill, Scene, SceneElement, Stroke, TextAlign, TextBaseline};
 use crate::theme::{get_palette, Palette};
 use alas_config::{AlasConfig, DesignRequirements};
-use alas_prop::cycle::anchor_mass_flow_kg_s;
-use alas_prop::cycle::sweeps::compute_altitude_sweep;
+use alas_opt::mdo::propulsion::PropulsionDeck;
+use alas_prop::system::PropulsionRating;
 
 /// Per-engine thrust and TSFC as contours over the full (altitude, Mach)
 /// flight envelope, holding the cycle design parameters fixed.
@@ -31,7 +31,7 @@ pub fn figure_propulsion_altitude_sweep(config: &AlasConfig, theme: Option<&str>
     if super::is_turboprop(config) {
         return super::technology::turboprop_speed_power_scene(config, theme);
     }
-    let eng = match super::turbofan_or_status(config, theme, (1000.0, 480.0)) {
+    let _turbofan = match super::turbofan_or_status(config, theme, (1000.0, 480.0)) {
         Ok(eng) => eng,
         Err(scene) => return scene,
     };
@@ -39,56 +39,63 @@ pub fn figure_propulsion_altitude_sweep(config: &AlasConfig, theme: Option<&str>
     let mut scene = Scene::new(1000.0, 480.0, Some(Color::from_hex(pal.bg)));
     scene.title = Some("Per-Engine Thrust and TSFC vs Altitude & Mach".to_owned());
 
-    let cyc_cfg = &config.propulsion_cycle;
     let req = &config.requirements;
 
     let mach_vec = linspace(0.0, (0.9f64).max(req.cruise_mach * 1.15), 26);
     let alt_vec = linspace(0.0, 13_000.0, 26);
-    let (mdot_total, _static) = anchor_mass_flow_kg_s(
-        eng.rated_thrust_kn,
-        eng.overall_pressure_ratio,
-        eng.fan_pressure_ratio,
-        eng.bypass_ratio,
-        eng.turbine_inlet_temp_k,
-        cyc_cfg,
-    );
-    let sweep = compute_altitude_sweep(
-        &alt_vec,
-        &mach_vec,
-        eng.bypass_ratio,
-        eng.overall_pressure_ratio,
-        eng.fan_pressure_ratio,
-        eng.turbine_inlet_temp_k,
-        mdot_total,
-        cyc_cfg,
-    );
-
-    let alt_km: Vec<f64> = sweep.altitude_m.iter().map(|v| v / 1000.0).collect();
+    // The map is the mission's own propulsion deck (the off-design model every
+    // mission segment, field-length run and dispatch fuel plan is priced with),
+    // read at the maximum-climb rating, installed, per engine. It replaces the
+    // on-design cycle scaled by a fixed sea-level mass flow, which kept the
+    // mass flow constant with altitude and so lapsed the cruise thrust to
+    // 50-60 % of sea-level static (published high-bypass transports: 20-25 %,
+    // Raymer 6th ed. Ch. 5 p.122; Torenbeek 2013 Eq. 3.23 p.66 and Eq. 8.26 p.244: T = SLS thrust * delta
+    // * tau).
+    let deck = match PropulsionDeck::from_engine(
+        &config.geometry.engine,
+        req.cruise_mach,
+        req.cruise_altitude_m,
+        None,
+    ) {
+        Ok(deck) => deck,
+        Err(reason) => {
+            return crate::status_figure::sized_status_scene(
+                "Propulsion model unavailable",
+                &reason,
+                false,
+                pal,
+                1000.0,
+            )
+        }
+    };
+    let engines = deck.n_engines().max(1) as f64;
+    let alt_km: Vec<f64> = alt_vec.iter().map(|v| v / 1000.0).collect();
     let alt_edges = centers_to_edges(&alt_km);
     let mach_edges = centers_to_edges(&mach_vec);
-
-    let thrust: Vec<Vec<f64>> = sweep
-        .dimensional_thrust_kn
-        .iter()
-        .zip(&sweep.feasible_mask)
-        .map(|(row, mask_row)| {
-            row.iter()
-                .zip(mask_row)
-                .map(|(&v, &ok)| if ok { v } else { f64::NAN })
-                .collect()
-        })
-        .collect();
-    let tsfc: Vec<Vec<f64>> = sweep
-        .tsfc_mg_ns
-        .iter()
-        .zip(&sweep.feasible_mask)
-        .map(|(row, mask_row)| {
-            row.iter()
-                .zip(mask_row)
-                .map(|(&v, &ok)| if ok { v } else { f64::NAN })
-                .collect()
-        })
-        .collect();
+    let mut thrust: Vec<Vec<f64>> = Vec::with_capacity(mach_vec.len());
+    let mut tsfc: Vec<Vec<f64>> = Vec::with_capacity(mach_vec.len());
+    for &mach in &mach_vec {
+        let mut thrust_row = Vec::with_capacity(alt_vec.len());
+        let mut tsfc_row = Vec::with_capacity(alt_vec.len());
+        for &altitude_m in &alt_vec {
+            let speed_m_s = mach * alas_atmo::Atmosphere::new(altitude_m).speed_of_sound();
+            let point = deck
+                .flight_condition(altitude_m, speed_m_s, req.gravity_m_s2, 0.0)
+                .and_then(|flight| deck.rated_point(flight, PropulsionRating::MaximumClimb));
+            match point {
+                Ok(point) if point.thrust_n > 0.0 && point.fuel_flow_kg_s > 0.0 => {
+                    thrust_row.push(point.thrust_n / engines / 1000.0);
+                    tsfc_row.push(point.fuel_flow_kg_s / point.thrust_n * 1.0e6);
+                }
+                _ => {
+                    thrust_row.push(f64::NAN);
+                    tsfc_row.push(f64::NAN);
+                }
+            }
+        }
+        thrust.push(thrust_row);
+        tsfc.push(tsfc_row);
+    }
 
     draw_contour_panel(
         &mut scene,
@@ -100,7 +107,7 @@ pub fn figure_propulsion_altitude_sweep(config: &AlasConfig, theme: Option<&str>
         Colormap::Inferno,
         "Thrust [kN]",
         req,
-        "Per-Engine Thrust vs Altitude & Mach\n(anchored to rated static thrust)",
+        "Per-Engine Thrust vs Altitude & Mach\n(mission propulsion deck, max-climb rating)",
     );
     draw_contour_panel(
         &mut scene,
@@ -112,10 +119,41 @@ pub fn figure_propulsion_altitude_sweep(config: &AlasConfig, theme: Option<&str>
         Colormap::Viridis,
         "TSFC [mg/(N.s)]",
         req,
-        "TSFC vs Altitude & Mach",
+        "TSFC vs Altitude & Mach\n(mission propulsion deck, max-climb rating)",
     );
 
     scene
+}
+
+/// Cruise thrust lapse of the mission propulsion deck: maximum-climb thrust at
+/// the cruise altitude and Mach number over take-off thrust at sea-level static
+/// conditions, both for the whole installed engine set. `None` for a binding
+/// the deck cannot build or evaluate.
+///
+/// Published high-bypass transports sit at 0.20-0.25 (Raymer 6th ed. Ch. 5 p.122;
+/// Torenbeek 2013 Eq. 3.23 p.66 and Eq. 8.26 p.244, `T = T_SLS delta tau`), which is what the
+/// plausibility tier checks this against.
+pub fn cruise_thrust_lapse(config: &AlasConfig) -> Option<f64> {
+    let req = &config.requirements;
+    let deck = PropulsionDeck::from_engine(
+        &config.geometry.engine,
+        req.cruise_mach,
+        req.cruise_altitude_m,
+        None,
+    )
+    .ok()?;
+    let g = req.gravity_m_s2;
+    let sea_level = deck
+        .flight_condition(0.0, 0.0, g, 0.0)
+        .and_then(|flight| deck.rated_point(flight, PropulsionRating::TakeoffGoAround))
+        .ok()?;
+    let speed =
+        req.cruise_mach * alas_atmo::Atmosphere::new(req.cruise_altitude_m).speed_of_sound();
+    let cruise = deck
+        .flight_condition(req.cruise_altitude_m, speed, g, 0.0)
+        .and_then(|flight| deck.rated_point(flight, PropulsionRating::MaximumClimb))
+        .ok()?;
+    (sea_level.thrust_n > 0.0).then(|| cruise.thrust_n / sea_level.thrust_n)
 }
 
 /// Convert `n` cell-center values (as `np.linspace` produces) into `n + 1`
@@ -158,16 +196,20 @@ fn draw_contour_panel(
     let (x, y, w, h) = rect;
     let axes_w = w - 55.0;
 
-    scene.add(SceneElement::Text {
-        text: title.replace('\n', "  "),
-        pos: [x, y - 18.0],
-        font_size: 10.0,
-        color: Color::from_hex(pal.title),
-        align: TextAlign::Left,
-        baseline: TextBaseline::Bottom,
-        angle_deg: 0.0,
-        bold: true,
-    });
+    // Stacked: the panel name, then its qualifier, so neighbouring panels' titles
+    // cannot run into one another.
+    for (i, line) in title.split('\n').enumerate() {
+        scene.add(SceneElement::Text {
+            text: line.to_owned(),
+            pos: [x, y - 23.0 + 12.0 * i as f64],
+            font_size: if i == 0 { 10.0 } else { 8.2 },
+            color: Color::from_hex(if i == 0 { pal.title } else { pal.tick }),
+            align: TextAlign::Left,
+            baseline: TextBaseline::Bottom,
+            angle_deg: 0.0,
+            bold: i == 0,
+        });
+    }
 
     let mut vmin = f64::INFINITY;
     let mut vmax = f64::NEG_INFINITY;
@@ -202,6 +244,7 @@ fn draw_contour_panel(
     }
 
     draw_masked_heatmap(scene, &axes, x_edges, y_edges, values, cmap, vmin, vmax);
+    let has_unsolved = hatch_unsolved_cells(scene, &axes, x_edges, y_edges, values, pal);
     let levels = contour_levels(vmin, vmax, 6);
     draw_isolines(scene, &axes, x_edges, y_edges, values, &levels, pal);
     axes.draw_frame(scene, pal);
@@ -247,26 +290,61 @@ fn draw_contour_panel(
     });
 
     let panel = Color::from_hex(pal.panel);
+    let mut entries = vec![(
+        format!("Cruise (M{:.2} @ {cruise_alt_km:.1} km)", req.cruise_mach),
+        LegendMarker::Circle(Color::rgb(255, 255, 255)),
+    )];
+    if has_unsolved {
+        entries.push((
+            "No deck solution (hatched)".to_owned(),
+            LegendMarker::Patch(Color::from_hex(pal.spine)),
+        ));
+    }
+    let box_h = 11.0 + 14.0 * entries.len() as f64;
     scene.add(SceneElement::Rect {
         x: x + 4.0,
-        y: y + h - 30.0,
+        y: y + h - box_h - 5.0,
         width: 190.0,
-        height: 25.0,
+        height: box_h,
         rx: 2.0,
         fill: Some(Fill::new(Color::rgba(panel.r, panel.g, panel.b, 232))),
         stroke: Some(Stroke::new(Color::from_hex(pal.border), 0.8)),
     });
 
-    draw_legend(
-        scene,
-        [x + 8.0, y + h - 22.0],
-        &[(
-            format!("Cruise (M{:.2} @ {cruise_alt_km:.1} km)", req.cruise_mach),
-            LegendMarker::Circle(Color::rgb(255, 255, 255)),
-        )],
-        pal,
-        8.0,
-    );
+    draw_legend(scene, [x + 8.0, y + h - box_h + 3.0], &entries, pal, 8.0);
+}
+
+/// Hatch every grid cell with no solution (`NaN`) so an unsolved cell reads as
+/// "no data" rather than as the page background. Returns whether any was drawn.
+fn hatch_unsolved_cells(
+    scene: &mut Scene,
+    axes: &Axes2D,
+    x_edges: &[f64],
+    y_edges: &[f64],
+    values: &[Vec<f64>],
+    pal: &Palette,
+) -> bool {
+    let _chrome = crate::plot_data::ChromeGuard::begin();
+    let stroke = Stroke::new(Color::from_hex(pal.spine), 0.6);
+    let mut any = false;
+    for (iy, row) in values.iter().enumerate() {
+        for (ix, &v) in row.iter().enumerate() {
+            if v.is_finite() {
+                continue;
+            }
+            any = true;
+            let p0 = axes.map_point(x_edges[ix], y_edges[iy]);
+            let p1 = axes.map_point(x_edges[ix + 1], y_edges[iy + 1]);
+            let (x0, x1) = (p0[0].min(p1[0]), p0[0].max(p1[0]));
+            let (y0, y1) = (p0[1].min(p1[1]), p0[1].max(p1[1]));
+            scene.add(SceneElement::Line {
+                p1: [x0, y1],
+                p2: [x1, y0],
+                stroke: stroke.clone(),
+            });
+        }
+    }
+    any
 }
 
 /// Choose six evenly spaced contour levels, excluding the two filled-field
@@ -278,6 +356,18 @@ fn contour_levels(vmin: f64, vmax: f64, count: usize) -> Vec<f64> {
     (1..=count)
         .map(|i| vmin + (vmax - vmin) * i as f64 / (count + 1) as f64)
         .collect()
+}
+
+/// An iso-line label to three significant digits (115.943 reads as 116).
+fn contour_label(level: f64) -> String {
+    let decimals = if level.abs() >= 100.0 {
+        0
+    } else if level.abs() >= 10.0 {
+        1
+    } else {
+        2
+    };
+    format!("{level:.decimals$}")
 }
 
 /// Draw labelled iso-lines by linearly interpolating each level across the
@@ -340,7 +430,7 @@ fn draw_isolines(
             if let Some((x, y)) = points.get(points.len() / 2).copied() {
                 let p = axes.map_point(x, y);
                 scene.add(SceneElement::Text {
-                    text: format!("{level:.3}"),
+                    text: contour_label(level),
                     pos: [p[0] + 3.0, p[1] - 3.0],
                     font_size: 7.0,
                     color: line_color,
@@ -451,42 +541,12 @@ mod tests {
     }
 
     #[test]
-    fn the_thrust_panel_values_trace_to_the_sweep_function_directly() {
+    fn cruise_thrust_lapses_to_the_published_high_bypass_fraction() {
+        // Published high-bypass transports: cruise thrust is 20-25 % of
+        // sea-level static (Raymer 6th ed. Ch. 5 p.122). The earlier map held the sea-level
+        // mass flow at altitude and returned 0.5-0.6.
         let config = AlasConfig::default();
-        let eng = &config.geometry.engine;
-        let mach_vec = linspace(
-            0.0,
-            (0.9f64).max(config.requirements.cruise_mach * 1.15),
-            26,
-        );
-        let alt_vec = linspace(0.0, 13_000.0, 26);
-        let (mdot, _) = anchor_mass_flow_kg_s(
-            eng.thrust_kn(),
-            eng.overall_pressure_ratio,
-            eng.fan_pressure_ratio,
-            eng.bypass_ratio,
-            eng.turbine_inlet_temp_k,
-            &config.propulsion_cycle,
-        );
-        assert!(mdot.is_finite() && mdot > 0.0);
-        let sweep = compute_altitude_sweep(
-            &alt_vec,
-            &mach_vec,
-            eng.bypass_ratio,
-            eng.overall_pressure_ratio,
-            eng.fan_pressure_ratio,
-            eng.turbine_inlet_temp_k,
-            mdot,
-            &config.propulsion_cycle,
-        );
-        assert!(sweep.feasible_mask.iter().flatten().all(|&ok| ok));
-        // Thrust must fall roughly monotonically as altitude increases at a
-        // fixed low Mach number (thinner air, less mass flow at the anchor).
-        let low_mach_by_altitude: Vec<f64> = sweep
-            .dimensional_thrust_kn
-            .iter()
-            .map(|row| row[0])
-            .collect();
-        assert!(low_mach_by_altitude.first().unwrap() > low_mach_by_altitude.last().unwrap());
+        let lapse = cruise_thrust_lapse(&config).expect("the default engine builds a deck");
+        assert!((0.15..=0.30).contains(&lapse), "lapse {lapse}");
     }
 }

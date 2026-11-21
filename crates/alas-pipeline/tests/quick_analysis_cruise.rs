@@ -21,7 +21,7 @@ fn the_cruise_solve_flies_the_drag_table_of_the_report_fuel_model() {
     let report = FullAnalysis::new(config.clone())
         .run(&DesignVector::default(), true)
         .expect("full baseline analysis");
-    // Mid-cruise weight. The deck lane's chart-based thrust (Jenkinson maximum-climb charts, MCR/MCL
+    // Mid-cruise weight. The deck work's chart-based thrust (Jenkinson maximum-climb charts, MCR/MCL
     // 0.93, pressure lapse above 11 km) cannot hold the default widebody's FL390 at its full
     // MTOW at any Mach (thrust below drag from 0.2 to 0.895), the same reason the mission
     // fixtures qualify FL390 only below 0.77 MTOW; 0.75 MTOW keeps the drag-limited precondition.

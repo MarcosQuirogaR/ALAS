@@ -87,7 +87,8 @@ pub struct AddonManifest {
     pub kind: AddonKind,
     /// Entry file, relative to the add-on folder.
     pub entry: String,
-    /// Optional wall-clock limit in seconds (default 10, at most 120).
+    /// Optional wall-clock limit in seconds (default 10; at most 120 for a
+    /// script, at most 12 hours for a process).
     #[serde(default)]
     pub timeout_s: Option<f64>,
     /// Scalar inputs.
@@ -100,8 +101,11 @@ pub struct AddonManifest {
 
 /// Default wall-clock limit of one run.
 pub const DEFAULT_TIMEOUT_S: f64 = 10.0;
-/// Largest wall-clock limit a manifest may request.
+/// Largest wall-clock limit a script add-on may request.
 pub const MAX_TIMEOUT_S: f64 = 120.0;
+/// Largest wall-clock limit a process add-on may request: a long solver or
+/// optimiser run, in hours.
+pub const MAX_PROCESS_TIMEOUT_S: f64 = 12.0 * 3600.0;
 
 fn is_identifier(text: &str) -> bool {
     let mut chars = text.chars();
@@ -145,9 +149,13 @@ impl AddonManifest {
             ));
         }
         if let Some(timeout) = self.timeout_s {
-            if !(timeout.is_finite() && timeout > 0.0 && timeout <= MAX_TIMEOUT_S) {
+            let limit = match self.kind {
+                AddonKind::Script => MAX_TIMEOUT_S,
+                AddonKind::Process => MAX_PROCESS_TIMEOUT_S,
+            };
+            if !(timeout.is_finite() && timeout > 0.0 && timeout <= limit) {
                 return bad(format!(
-                    "`timeout_s` must be in (0, {MAX_TIMEOUT_S}] seconds, got {timeout}"
+                    "`timeout_s` must be in (0, {limit}] seconds, got {timeout}"
                 ));
             }
         }
@@ -180,8 +188,10 @@ impl AddonManifest {
                 })?;
             }
         }
-        if self.outputs.is_empty() {
-            return bad("an add-on must declare at least one output".into());
+        // A process add-on may return only texts, files or a configuration
+        // overlay; a script has nothing else to return.
+        if self.outputs.is_empty() && self.kind == AddonKind::Script {
+            return bad("a script add-on must declare at least one output".into());
         }
         Ok(())
     }
@@ -251,5 +261,22 @@ target = "mass.some_field"
         assert!(AddonManifest::parse(&dup).is_err());
         let none = GOOD.split("[[outputs]]").next().unwrap_or_default();
         assert!(AddonManifest::parse(none).is_err());
+        // A process add-on may return only texts, files or an overlay.
+        let process_only = none.replace("kind = \"script\"", "kind = \"process\"");
+        assert!(AddonManifest::parse(&process_only).is_ok());
+    }
+
+    #[test]
+    fn a_process_add_on_may_run_for_hours_and_a_script_may_not() {
+        let long = "entry = \"main.rhai\"\ntimeout_s = 7200.0";
+        let script = GOOD.replace("entry = \"main.rhai\"", long);
+        assert!(AddonManifest::parse(&script).is_err());
+        let process = script.replace("kind = \"script\"", "kind = \"process\"");
+        assert_eq!(
+            AddonManifest::parse(&process).unwrap().timeout_seconds(),
+            7200.0
+        );
+        let too_long = process.replace("7200.0", "999999.0");
+        assert!(AddonManifest::parse(&too_long).is_err());
     }
 }

@@ -124,6 +124,7 @@ fn a_locked_page_keeps_its_title_and_labels_at_full_contrast() {
         *sink = text_colors(&output);
     }
     let title = color_of(&locked_colors, "Control Surfaces").expect("page title is drawn");
+    // English labels are sentence case since the label-case change.
     let values = color_of(&locked_colors, "Parameter values").expect("section label is drawn");
     for (what, color) in [("title", title), ("Parameter values", values)] {
         let ratio = contrast_ratio(color, panel);
@@ -139,8 +140,8 @@ fn a_locked_page_keeps_its_title_and_labels_at_full_contrast() {
         "an unlocked page must paint its title the same way"
     );
     // Only the short lock status is painted; its explanation is hover help.
-    assert!(color_of(&locked_colors, "Preset geometry locked").is_some());
-    assert!(color_of(&open_colors, "Preset geometry locked").is_none());
+    assert!(color_of(&locked_colors, "Fixed by reference aircraft").is_some());
+    assert!(color_of(&open_colors, "Fixed by reference aircraft").is_none());
     assert!(color_of(&locked_colors, "Preset geometry is protected").is_none());
 }
 

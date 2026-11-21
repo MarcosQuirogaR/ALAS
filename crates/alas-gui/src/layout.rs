@@ -8,8 +8,13 @@
 //! viewport. The functions operate in egui points, so Windows display scale
 //! is already accounted for before they are called.
 
+/// Below this window width (in points) the step rail becomes a strip above the page.
+pub const STEP_STRIP_BELOW_WIDTH: f32 = 700.0;
 /// Width of the collapsed navigation affordance in egui points.
 pub const NAV_RAIL_WIDTH: f32 = 8.0;
+/// Width of the pointer entry zone of the rail, wider than the drawn strip so
+/// it is easy to hit.
+pub const NAV_RAIL_HIT_WIDTH: f32 = 14.0;
 /// Vertical inset around the attached navigation overlay.
 pub const NAV_OVERLAY_MARGIN: f32 = 12.0;
 /// Visual gutter retained between the navigation surface and page content.
@@ -49,12 +54,6 @@ pub const PREVIEW_DOCK_MAX_WIDTH: f32 = 520.0;
 /// ~10 pt, so 400 pt of panel width is the floor at which every label and
 /// every value box is still fully drawn.
 pub const CONTENT_MIN_WIDTH: f32 = 400.0;
-/// Width the Inputs page's preset and engine selectors need side by side.
-///
-/// A combo box sizes itself to its longest entry and the wrapped layout
-/// cannot break before one, so below this the pair would widen the whole
-/// page and run under the window's right edge. Above it they share a row.
-pub const SELECTOR_PAIR_MIN_WIDTH: f32 = 460.0;
 
 /// Return the width available to an expanded navigation surface.
 ///

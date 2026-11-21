@@ -163,6 +163,21 @@ pub struct MsesSolverAttempt {
     pub solver_output: String,
 }
 
+/// Where and why an alpha sweep stopped early on a solver tool failure.
+///
+/// The sweep keeps every angle converged before the stop (a
+/// [`MsesStatus::PartialConvergence`] result); the angles from `alpha_deg`
+/// on were not solved, so nothing is known about the flow there.
+#[derive(Debug, Clone, PartialEq)]
+pub struct MsesSweepStop {
+    /// The requested angle of attack the sweep had reached, in degrees.
+    pub alpha_deg: f64,
+    /// The tool failure that stopped it (for example [`MsesStatus::Timeout`]).
+    pub status: MsesStatus,
+    /// The failure's message.
+    pub message: String,
+}
+
 /// The result of an MSES alpha sweep on one section.
 ///
 /// The coefficient arrays are parallel and hold one entry per angle that
@@ -186,6 +201,9 @@ pub struct MsesPolarResult {
     pub requested_alpha_count: usize,
     /// Number of requested operating points that converged and were parsed.
     pub converged_alpha_count: usize,
+    /// Set when a solver tool failure stopped the sweep early; the angles
+    /// converged before it are kept.
+    pub stopped: Option<MsesSweepStop>,
     /// One solver transcript for each requested polar point reached by MSES.
     ///
     /// An incomplete sweep retains non-converged points here even though its

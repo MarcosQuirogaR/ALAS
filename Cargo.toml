@@ -3,7 +3,7 @@ resolver = "2"
 members = ["crates/*", "xtask"]
 
 [workspace.package]
-version = "1.4.1"
+version = "1.3.2"
 edition = "2021"
 license = "AGPL-3.0-or-later"
 authors = ["Marcos Quiroga Rodriguez <marcos.quiroga.rodriguez@gmail.com>"]
@@ -19,7 +19,7 @@ winresource = { version = "0.1.31", default-features = false }
 # kill-on-close job, so ending the application, however it ends, ends them too.
 # Held below 2.0.3, which moves to `windows` 0.61 and would add a second copy.
 win32job = ">=2.0.2, <2.0.3"
-serde = { version = "1", features = ["derive"] }
+serde = { version = "1", features = ["derive", "rc"] }
 # Direct DOM parsing keeps CPACS UID/reference validation separate from rendering.
 roxmltree = "0.20"
 # `float_roundtrip` is not optional here, it is what makes `exact` mean anything.

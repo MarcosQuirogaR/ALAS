@@ -150,8 +150,16 @@ pub fn run_tool(
     stdin_input: &str,
     timeout_seconds: f64,
 ) -> Result<ToolRun, RunError> {
+    // The opt-in result cache is a process-wide setting that one test turns on.
+    // A launch in `cwd` with the cache on snapshots and hashes every file under
+    // `cwd`, so a concurrent test running in the shared temp directory would
+    // walk all of it. Launches take the read side; the cache test the write side.
+    let _gate = CACHE_SETTING_GATE.read().unwrap_or_else(|e| e.into_inner());
     run_tool_with_cancel(exe, args, cwd, stdin_input, timeout_seconds, None)
 }
+
+#[cfg(test)]
+static CACHE_SETTING_GATE: std::sync::RwLock<()> = std::sync::RwLock::new(());
 
 /// Run `exe` with `args` in `cwd`, feeding `stdin_input` and capturing output,
 /// killed if it runs past `timeout_seconds`, while observing an optional
@@ -433,7 +441,8 @@ mod tests {
     fn captures_stdout_of_a_short_command() {
         let (program, mut args) = shell();
         args.push("echo hello");
-        let cwd = std::env::temp_dir();
+        let scratch = WorkDir::new("alas_mses_echo_test_").expect("scratch dir");
+        let cwd = scratch.path().to_path_buf();
         let run = run_tool(Path::new(program), &args, &cwd, "", 10.0).unwrap();
         assert!(run.status.success());
         assert!(run.stdout.contains("hello"));
@@ -460,6 +469,9 @@ mod tests {
     #[test]
     fn an_identical_launch_is_replayed_from_the_opt_in_cache() {
         use alas_exec::tool_runtime::RuntimeSettings;
+        let _gate = CACHE_SETTING_GATE
+            .write()
+            .unwrap_or_else(|e| e.into_inner());
         let scratch = WorkDir::new("alas_mses_cache_test_").expect("scratch dir");
         let cache_root = scratch.path().join("cache");
         let work = scratch.path().join("work");
@@ -468,20 +480,29 @@ mod tests {
             cache_dir: Some(cache_root),
             ..RuntimeSettings::default()
         }));
+        // Cleared when the test ends, also on a panic.
+        struct ClearOverride;
+        impl Drop for ClearOverride {
+            fn drop(&mut self) {
+                RuntimeSettings::set_override(None);
+            }
+        }
+        let _clear = ClearOverride;
         #[cfg(windows)]
         let script = "echo %RANDOM%%RANDOM%%TIME% > stamp.txt & type stamp.txt";
         #[cfg(not(windows))]
         let script = "date +%s%N > stamp.txt; cat stamp.txt";
         let (program, mut args) = shell();
         args.push(script);
-        let first = run_tool(Path::new(program), &args, &work, "", 20.0).expect("first run");
+        let first = run_tool_with_cancel(Path::new(program), &args, &work, "", 20.0, None)
+            .expect("first run");
         let first_stamp = std::fs::read_to_string(work.join("stamp.txt")).expect("stamp");
         std::fs::remove_file(work.join("stamp.txt")).expect("remove stamp");
         // The first run left its output in `work`; clear it so the replayed
         // directory looks like the one the first run started from.
-        let second = run_tool(Path::new(program), &args, &work, "", 20.0).expect("second run");
+        let second = run_tool_with_cancel(Path::new(program), &args, &work, "", 20.0, None)
+            .expect("second run");
         let second_stamp = std::fs::read_to_string(work.join("stamp.txt")).expect("replayed");
-        RuntimeSettings::set_override(None);
         assert!(first.status.success() && second.status.success());
         assert_eq!(first.stdout, second.stdout);
         assert_eq!(first_stamp, second_stamp);

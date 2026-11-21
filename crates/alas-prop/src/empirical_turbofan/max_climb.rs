@@ -48,7 +48,7 @@ struct Chart {
 }
 
 /// Heights of the blended table, ft (the union of the chart heights).
-const TABLE_HEIGHTS_FT: [f64; 9] = [
+pub(super) const TABLE_HEIGHTS_FT: [f64; 9] = [
     0.0, 10_000.0, 15_000.0, 20_000.0, 25_000.0, 30_000.0, 36_000.0, 40_000.0, 45_000.0,
 ];
 
@@ -102,7 +102,18 @@ const MAXIMUM_CLIMB_CHARTS: [Chart; 4] = [
             (0.0, [0.590, 0.523, 0.467, 0.423, 0.380, 0.337, 0.307]),
             (10_000.0, [0.492, 0.439, 0.399, 0.366, 0.335, 0.308, 0.291]),
             (15_000.0, [0.436, 0.393, 0.362, 0.335, 0.310, 0.288, 0.272]),
-            (20_000.0, [0.334, 0.307, 0.288, 0.276, 0.263, 0.250, 0.237]),
+            // Fig. 9.21(b) labels this curve "20", but Figs. 9.21(c) and (f) of
+            // the same engine label the same series of curves (SL, 10, 15, 25,
+            // 30) "25", as do all the 6.5 and 8.0 charts. The label is the
+            // evidence; the values only lean that way. Interpolated linearly in
+            // pressure ratio between the 15,000 and 30,000 ft curves, the read
+            // values lie 0.18-0.22 of the way from the 25,000 ft value toward
+            // the 20,000 ft value at M 0.3-0.5 (M 0.3: 0.325 and 0.376, read
+            // 0.334), 0.35 at M 0.6 and 0.41-0.50 at M 0.7-0.9 (M 0.8: 0.239
+            // and 0.261, read 0.250): nearer 25,000 ft at every Mach, midway at
+            // M 0.8. Taken as the 25,000 ft curve with a misprinted label; at
+            // cruise Mach the row sits about half a curve spacing high.
+            (25_000.0, [0.334, 0.307, 0.288, 0.276, 0.263, 0.250, 0.237]),
             (30_000.0, [0.282, 0.262, 0.248, 0.239, 0.230, 0.220, 0.212]),
             (36_000.0, [0.224, 0.210, 0.197, 0.188, 0.181, 0.180, 0.181]),
             (40_000.0, [0.182, 0.173, 0.165, 0.156, 0.152, 0.152, 0.153]),
@@ -161,9 +172,16 @@ pub(super) const MAXIMUM_CATALOGUE_CRUISE_OVER_MAXIMUM_CLIMB: f64 = 1.15;
 pub(super) const ANCHOR_MINIMUM_MACH: f64 = 0.4;
 /// Highest Mach number of the chart reference points.
 pub(super) const ANCHOR_MAXIMUM_MACH: f64 = 0.9;
-/// Tropopause altitude bounding the reference altitude, m (US Standard
-/// Atmosphere 1976).
-pub(super) const ANCHOR_MAXIMUM_ALTITUDE_M: f64 = 11_000.0;
+/// Highest altitude of a reference point, m: the top of the charts, 45,000 ft
+/// (Jenkinson Figs. 9.18(b)-9.21(b), the last of [TABLE_HEIGHTS_FT]). The
+/// anchor factor is the datum over the chart at the datum's own pressure
+/// ratio and Mach number, so any height the charts print reads it; above the
+/// tropopause (US 1976, 11,000 m) the temperature is constant and the charts
+/// are interpolated in pressure ratio as below it. The earlier tropopause
+/// bound turned away the printed cruise points of business-jet engines,
+/// quoted at 40,000 ft (the PW305B column of the small-engine table of
+/// Jenkinson's companion engine data file, Data B).
+pub(super) const ANCHOR_MAXIMUM_ALTITUDE_M: f64 = 45_000.0 * 0.3048;
 
 /// Accepted range of the engine anchor factor: the chart engines are generic
 /// (+-0.02 reading, class spread), so a factor outside 0.7-1.4 says the

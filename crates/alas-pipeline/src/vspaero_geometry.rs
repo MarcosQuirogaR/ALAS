@@ -8,7 +8,7 @@
 //! fin root is seated at the tailplane height), OpenVSP trims both surfaces
 //! along the intersection and writes the cut cells as polygons of two, five,
 //! six or eight vertices. The solver accepts that file and returns force
-//! coefficients that are not physical: the 2026-10-07 B747-400 runs had
+//! coefficients that are not physical: the B747-400 runs had
 //! induced drag of -0.06 to -0.48 at every wake-iteration count and a side
 //! force of 0.012 to 0.29 at zero sideslip on a symmetric aircraft, while the
 //! eleven other presets (all-quadrilateral meshes) did not. The wake gate then

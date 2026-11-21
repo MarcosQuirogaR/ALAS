@@ -3,6 +3,10 @@
 
 //! Control-surface geometry, hinge moment and the servo torque check.
 //!
+//! Status: a design-study library exercised by the airframe tests; the UAV
+//! generator takes fixed tail geometry and `estimate_trim_setup`, so the sizing
+//! routines here are not called by the product pipeline.
+//!
 //! Hinge moment (Sadraey, Eq. 12.147-12.150, p. 714, read on the page):
 //!
 //! ```text

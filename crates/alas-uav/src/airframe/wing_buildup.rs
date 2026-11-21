@@ -170,8 +170,8 @@ impl WingBuildup {
                 b.skin_kg = wetted * self.print_wall_m * self.print_density * 1.5;
             }
         }
-        let m_root =
-            self.n_ult * self.design_mass_kg * 9.806_65 * span / (3.0 * std::f64::consts::PI);
+        let m_root = self.n_ult * self.design_mass_kg * super::analysis::G_M_S2 * span
+            / (3.0 * std::f64::consts::PI);
         let tubes = (m_root / TUBE_CAPACITY_NM).max(1.0);
         b.spar_kg = 0.9 * span * TUBE_G_PER_M * tubes;
         let k = self.team_factor;

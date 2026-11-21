@@ -59,7 +59,11 @@ mod trim;
 mod wing_box;
 use adaptive::PassSchedule;
 use alas_mass::wingbox_feedback::ReferenceWingMass;
-use iteration::{aitken, mass_coordinates_failure, EDGE_STALL_MASS_FRACTION, EDGE_STALL_PASSES};
+pub use iteration::SizingMapJump;
+use iteration::{
+    mass_coordinates_failure, NextPass, TakeoffMassIteration, EDGE_STALL_MASS_FRACTION,
+    EDGE_STALL_PASSES,
+};
 pub(crate) use trim::{retrim_needed, retrim_needed_within};
 pub(crate) use wing_box::PassWingBox;
 
@@ -72,13 +76,22 @@ pub(crate) struct MdaContext<'a> {
     /// Shared segment-integrated model with the candidate polar and engine
     /// terms filled in.
     pub model: SegmentMissionModel,
-    /// Design-mission still-air distance, m.
+    /// Design-mission still-air distance, m. Unused when
+    /// [`Self::range_at_mass_kg`] is set.
     pub range_m: f64,
+    /// The takeoff mass, kg, at which every pass solves the design range
+    /// itself from its own operating empty mass
+    /// (`mtow_modes::range_at_certified_mass`); `None` flies `range_m`.
+    pub range_at_mass_kg: Option<f64>,
     /// The resolved takeoff-mass sizing plan: seed, ceilings, pass budget.
     pub plan: MtowPlan,
     /// Payload the dispatch closure flies instead of the laid-out load case,
     /// kg, when the plan closes on a design payload.
     pub dispatch_payload_kg: Option<f64>,
+    /// Fuel policy the closure's dispatch is planned under: the design
+    /// mission's quoted reserve rule when the plan closes on one
+    /// (`DesignMission::fuel_policy`), otherwise the configured policy.
+    pub fuel_policy: alas_config::FuelPolicyConfig,
     /// Usable tank capacity, kg, when the tank arrangement resolved.
     pub tank_capacity_kg: Option<f64>,
     /// Whether the loop may re-trim; false when the polar was supplied by
@@ -111,11 +124,38 @@ pub(crate) struct MdaState {
     pub coords: MassCoordinates,
     pub cg: [f64; 3],
     pub polar: TrimmedPolar,
+    /// The configuration mass `masses` were evaluated at; `None` for a state
+    /// at the candidate's own configuration.
+    pub evaluated_at: Option<EvaluationMass>,
+}
+
+/// The takeoff mass and reserve landing floor a state's configuration was
+/// read at (`AlasConfig::at_sized_closure_mass_with_landing_floor`). A closure
+/// that stops unsettled holds the state of its last pass, not of the dispatch
+/// mass it reports, and any re-evaluation of that state's components (the
+/// balance ledger's grouped decomposition) must be made at this mass, or its
+/// items and its group totals come from two different aircraft.
+#[derive(Debug, Clone, Copy, PartialEq)]
+pub(crate) struct EvaluationMass {
+    /// Takeoff mass, kg.
+    pub takeoff_mass_kg: f64,
+    /// Reserve landing-mass floor, kg.
+    pub landing_floor_kg: Option<f64>,
+}
+
+impl EvaluationMass {
+    /// `config` read at this mass.
+    pub(crate) fn config(&self, config: &AlasConfig) -> AlasConfig {
+        config.at_sized_closure_mass_with_landing_floor(self.takeoff_mass_kg, self.landing_floor_kg)
+    }
 }
 
 /// The converged (or budget-exhausted) loop.
 pub(crate) struct MdaClosure {
     pub dispatch: DispatchSolution,
+    /// The still-air range the last pass flew, m: the context's, or the one
+    /// solved at the certified mass.
+    pub range_m: f64,
     pub state: MdaState,
     /// Outer passes taken, including the first.
     pub sizing_iterations: usize,
@@ -141,6 +181,8 @@ pub(crate) struct MdaClosure {
     pub frozen_plan: Option<FrozenMissionPlan>,
     /// Trip plans frozen, one per pass that could make one.
     pub plan_freezes: u32,
+    /// The jump of the takeoff-mass map the closure met, if any.
+    pub sizing_map_jump: Option<SizingMapJump>,
 }
 
 /// Re-evaluate the shared product state at one outer-loop takeoff mass.
@@ -208,6 +250,10 @@ fn evaluate_state_at_tow(
     state.masses = masses;
     state.coords = coords;
     state.cg = cg;
+    state.evaluated_at = Some(EvaluationMass {
+        takeoff_mass_kg: tow_k,
+        landing_floor_kg,
+    });
     // The mission model is coupled to the trimmed drag, and the trim is the
     // expensive discipline in this loop: vortex-lattice solves plus the drag
     // table. The table spans the clean lift range at the trim's centre of
@@ -287,9 +333,9 @@ pub(crate) fn converge(
     let mut state = initial;
     let mut cg_at_trim = context.initial_trim_cg_x_m;
     let mut tow_k = seed;
-    let mut iterates: Vec<f64> = vec![tow_k];
     let mut model = context.model.clone();
     let mut outcome: Option<(DispatchSolution, bool)> = None;
+    let mut flown_range_m = context.range_m;
     let mut sizing_iterations = 0;
     let mut retrim_count = 0;
     let mut structural_feedback = context.structural_feedback;
@@ -311,9 +357,7 @@ pub(crate) fn converge(
     let policy = model.profile.cruise_altitude_policy;
     let mut plan_freezes = 0_u32;
     let mut frozen_plan = None;
-    let budget_exhausted = || CandidateFailure {
-        reason: SIZING_BUDGET_EXHAUSTED,
-    };
+    let budget_exhausted = || CandidateFailure::new(SIZING_BUDGET_EXHAUSTED);
     let budget_spent = |model: &SegmentMissionModel| match (model.budget(), model.work()) {
         (Some(budget), Some((flights, deck_evals))) => {
             flights > u64::from(budget.max_trip_flights) || deck_evals > budget.max_deck_evals
@@ -326,11 +370,18 @@ pub(crate) fn converge(
     // Consecutive passes whose dispatch stalled at the edge of what the
     // model can fly while the takeoff mass hardly moved.
     let mut edge_stalled_passes = 0_u32;
+    // A discontinuous dispatch map (a discrete plan choice changing with the
+    // pass mass) can jump across the fixed-point diagonal: no mass is its own
+    // dispatch, and Picard and Aitken cycled 225,236 / 225,643 / 225,441 /
+    // 225,652 kg on the A350-900 for every pass. The iteration's sign-change
+    // bracket turns such a cycle into a bisection onto the jump, and holds
+    // the heavier side's plan once it is narrow (`TakeoffMassIteration`).
+    let mut iteration = TakeoffMassIteration::new(tow_k, tolerance_kg, aitken_ceiling);
 
     for pass in 0..max_passes {
-        model.check_cancelled().map_err(|_| CandidateFailure {
-            reason: "cancelled",
-        })?;
+        model
+            .check_cancelled()
+            .map_err(|_| CandidateFailure::new("cancelled"))?;
         if max_outer_passes.is_some_and(|limit| u32::try_from(pass).map_or(true, |p| p >= limit)) {
             return Err(budget_exhausted());
         }
@@ -358,6 +409,20 @@ pub(crate) fn converge(
             usable_capacity_kg: context.tank_capacity_kg,
         };
         let payload_kg = context.dispatch_payload_kg.unwrap_or(state.masses.payload);
+        // A payload-defined design mission has no declared range: it is the
+        // largest the fuel left at the certified mass flies with reserves,
+        // from this pass's own empty mass.
+        let pass_range_m = match context.range_at_mass_kg {
+            Some(mass_kg) => super::mtow_modes::range_at_certified_mass(
+                &model,
+                &context.fuel_policy,
+                mass_kg,
+                oew_k + payload_kg,
+                context.tank_capacity_kg,
+            )?,
+            None => context.range_m,
+        };
+        flown_range_m = pass_range_m;
         let dispatch_tolerance_kg = schedule.dispatch_tolerance_kg();
         // Warm start: the dispatch iteration starts from this pass's mass,
         // the previous pass's solution (or its Aitken extrapolation).
@@ -365,8 +430,8 @@ pub(crate) fn converge(
         let (pass_model, solution, freezes) = refreeze::Refreeze {
             model: &model,
             policy: &policy,
-            range_m: context.range_m,
-            frozen_at_kg: tow_k,
+            range_m: pass_range_m,
+            frozen_at_kg: iteration.plan_mass_kg(tow_k),
             zero_fuel_kg: oew_k + payload_kg,
             tolerance_kg,
             single_pass: !sizing_iterates,
@@ -376,8 +441,8 @@ pub(crate) fn converge(
             solve_dispatch_with_initial_guess(
                 oew_k + payload_kg,
                 start_kg,
-                context.range_m,
-                &config.fuel_policy,
+                pass_range_m,
+                &context.fuel_policy,
                 flown,
                 &limits,
                 max_passes.max(objective.sizing_max_iterations.max(1) as usize),
@@ -387,9 +452,7 @@ pub(crate) fn converge(
         plan_freezes += freezes;
         drop(trips_profile);
         if matches!(solution.status, DispatchStatus::Cancelled) {
-            return Err(CandidateFailure {
-                reason: "cancelled",
-            });
+            return Err(CandidateFailure::new("cancelled"));
         }
         if budget_spent(&model) {
             return Err(budget_exhausted());
@@ -398,6 +461,16 @@ pub(crate) fn converge(
         landing_floor_kg = super::mtow_modes::landing_floor_kg(&solution);
         if !sizing_iterates {
             outcome = Some((solution, true));
+            break;
+        }
+        // A dispatch whose burn model failed carries the degenerate plan at
+        // the zero-fuel mass (`solve_dispatch_with_initial_guess`), not a
+        // takeoff mass: taken as the next iterate it restarted the loop from
+        // the zero-fuel mass, and the LJ60 cycled 8,010 / 6,319 / 7,166 kg for
+        // every remaining pass. The failure ends the closure, unsettled, with
+        // the model's reason on the dispatch.
+        if matches!(solution.status, DispatchStatus::ModelFailed(_)) {
+            outcome = Some((solution, false));
             break;
         }
         let next_tow = solution.takeoff_mass_kg;
@@ -454,16 +527,12 @@ pub(crate) fn converge(
         if configured_done || edge_stalled_passes >= EDGE_STALL_PASSES {
             break;
         }
-        iterates.push(next_tow);
-        // Every third iterate is extrapolated from the two plain passes
-        // before it; the plain iterate stands when the extrapolation is
-        // not admissible.
-        tow_k = match iterates.as_slice() {
-            [.., x0, x1, x2] if iterates.len() % 3 == 0 => {
-                aitken(*x0, *x1, *x2, aitken_ceiling).unwrap_or(next_tow)
-            }
-            _ => next_tow,
-        };
+        // A jump that survives the held plan stops the closure unsettled,
+        // with the jump on the record.
+        match iteration.advance(tow_k, next_tow, retrim_count) {
+            NextPass::Fly(mass_kg) => tow_k = mass_kg,
+            NextPass::Stop => break,
+        }
     }
 
     let Some((dispatch, takeoff_mass_settled)) = outcome else {
@@ -472,9 +541,11 @@ pub(crate) fn converge(
         return Err(mass_coordinates_failure());
     };
     let cg_shift_pct_mac = (state.cg[0] - cg_at_trim).abs() / mac * 100.0;
+    let sizing_map_jump = iteration.finish(takeoff_mass_settled);
     let sizing_closed =
         takeoff_mass_settled && matches!(dispatch.status, DispatchStatus::Converged);
     Ok(MdaClosure {
+        range_m: flown_range_m,
         dispatch,
         state,
         sizing_iterations,
@@ -487,5 +558,6 @@ pub(crate) fn converge(
         structural_inventory_complete,
         frozen_plan,
         plan_freezes,
+        sizing_map_jump,
     })
 }

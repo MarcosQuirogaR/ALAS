@@ -71,9 +71,11 @@ fn every_native_preset_mission_reads_the_carried_trimmed_drag_table() {
                     );
                     let cl = solution.lift_coefficient;
                     let cd0 = table.cd0_at_reynolds_per_m(mach, reynolds_number_per_m);
-                    // The viscous (parasite) term carries kappa CD0 CL^2.
-                    let parasite = cd0 + table.viscous_lift_cd(cl, cd0);
-                    let induced = table.induced_cd(cl);
+                    // The viscous (parasite) term carries kappa CD0 CL^2 and
+                    // the upsweep at the trimmed body attitude.
+                    let parasite =
+                        cd0 + table.viscous_lift_cd(cl, cd0) + table.upsweep_attitude_cd(cl, mach);
+                    let induced = table.induced_cd_at(cl, mach);
                     let wave = table.wave_cd(cl, mach);
                     assert_eq!(
                         solution.drag.parasite_total.to_bits(),

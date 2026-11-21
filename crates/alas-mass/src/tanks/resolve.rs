@@ -60,6 +60,10 @@ impl FuelTankLayout {
             .wings
             .first()
             .ok_or(TankLayoutError::DegenerateWingSpan)?;
+        // Tanks live between the spars, and inside the body those are the box
+        // carried across from the side of body, not chord fractions of the loft.
+        let wing = wing.carried_box();
+        let wing: &Wing = &wing;
         let (front, rear) = spar_box_limits(structures)?;
         let pricing = TankPricing {
             front,
@@ -84,11 +88,24 @@ impl FuelTankLayout {
         }
 
         if config.center.enabled {
+            // Span inboard of the first wing cell holds no wing tank: it is the centre tank's.
+            let first_wing_cell = [&config.inner_wing, &config.mid_wing, &config.outer_wing]
+                .into_iter()
+                .filter(|cell| cell.enabled)
+                .flat_map(|c| {
+                    [
+                        Some(c.span_start_fraction),
+                        c.feed.enabled.then_some(c.feed.span_start_fraction),
+                    ]
+                })
+                .flatten()
+                .reduce(f64::min);
             tanks.push(center_tank(
                 wing,
                 &geometry.wing,
                 &geometry.fuselage,
                 &config.center,
+                first_wing_cell,
                 &pricing,
             )?);
         }
@@ -231,12 +248,18 @@ fn wing_tank_pair(
         .collect())
 }
 
-/// The single carry-through centre tank between `-y_sob` and `+y_sob`.
+/// The centre tank: the carry-through box between `-y_sob` and `+y_sob` plus
+/// both inboard wing bays out to `first_wing_cell` (semispan fraction) when the
+/// first wing cell starts outboard of the body. Such centre tanks run along the
+/// inboard wing to the first wing-tank rib (Airbus A350 Aircraft
+/// Characteristics, Feb 01/26, FIGURE-10-0-0-991-003-A01), aft of the box on a
+/// swept wing: the centroid is the volume-weighted one of box and bays.
 fn center_tank(
     wing: &Wing,
     wing_config: &WingConfig,
     fuselage_config: &FuselageConfig,
     cell: &CenterTankConfig,
+    first_wing_cell: Option<f64>,
     pricing: &TankPricing,
 ) -> Result<FuelTank, TankLayoutError> {
     let (front, rear) = (pricing.front, pricing.rear);
@@ -252,11 +275,11 @@ fn center_tank(
         .ok_or(TankLayoutError::DegenerateWingSpan)?;
     let root_box =
         section_box(root_section, front, rear).ok_or(TankLayoutError::DegenerateWingSpan)?;
-    // A wing whose loft places a distinct station at the side of body tapers
-    // in chord from the centreline root to it, so the representative
-    // section is the mean of the two; a wing with no such station (the side
-    // of body coincides with the root, or the loft runs straight to the
-    // kink) falls back to the root section alone.
+    // The representative section is the mean of the centreline and side-of-body
+    // boxes. `wing` is the carried box, which holds the side-of-body chord across
+    // the body, so the mean then blends only their thickness; a wing with no such
+    // station (the side of body coincides with the root) falls back to the root
+    // alone.
     let side_box = wing
         .xsecs
         .iter()
@@ -267,11 +290,28 @@ fn center_tank(
         None => root_box,
     };
 
-    let width_y_m = 2.0 * y_sob;
-    let geometric_volume_m3 = representative.area_m2 * width_y_m;
-    if !(geometric_volume_m3.is_finite() && geometric_volume_m3 > 0.0) {
+    let box_volume_m3 = representative.area_m2 * 2.0 * y_sob;
+    if !(box_volume_m3.is_finite() && box_volume_m3 > 0.0) {
         return Err(TankLayoutError::DegenerateWingSpan);
     }
+    let end_y = first_wing_cell
+        .map(|fraction| root_y + fraction * semispan)
+        .filter(|&end_y| end_y > y_sob + 1.0e-6 * semispan.max(1.0));
+    let (bay_m3, bay_x_m4, bay_z_m4) = match end_y {
+        Some(end_y) => {
+            let bay = integrate_wing_box(wing, front, rear, y_sob, end_y)
+                .filter(|bay| !bay.is_degenerate())
+                .ok_or(TankLayoutError::DegenerateWingSpan)?;
+            (bay.volume_m3, bay.x_moment_m4, bay.z_moment_m4)
+        }
+        None => (0.0, 0.0, 0.0),
+    };
+    let geometric_volume_m3 = box_volume_m3 + 2.0 * bay_m3;
+    let centroid_x_m =
+        (box_volume_m3 * representative.x_mid_m + 2.0 * bay_x_m4) / geometric_volume_m3;
+    let centroid_z_m =
+        (box_volume_m3 * representative.z_mid_m + 2.0 * bay_z_m4) / geometric_volume_m3;
+    let width_y_m = 2.0 * end_y.unwrap_or(y_sob);
 
     let (usable_volume_m3, capacity_source) = usable_volume(
         geometric_volume_m3,
@@ -289,11 +329,10 @@ fn center_tank(
         usable_volume_m3,
         usable_capacity_kg,
         unusable_kg: pricing.unusable_fuel_fraction * usable_capacity_kg,
-        centroid_m: [representative.x_mid_m, 0.0, representative.z_mid_m],
-        // No spanwise low end is modelled for the carry-through centre
-        // cell (it does not taper across a dihedral break the way a wing
-        // cell does): the full centroid stands for every fill level.
-        low_point_m: [representative.x_mid_m, 0.0, representative.z_mid_m],
+        centroid_m: [centroid_x_m, 0.0, centroid_z_m],
+        // No spanwise low end is modelled for the centre tank: the full
+        // centroid stands for every fill level.
+        low_point_m: [centroid_x_m, 0.0, centroid_z_m],
         extent_m: [representative.width_m, width_y_m, representative.depth_m],
         burn_priority: cell.burn_priority,
         capacity_source,

@@ -122,7 +122,27 @@ pub(crate) fn assemble(
     };
     let normalized_objective = objective_value / normalization_scale.max(1e-9);
 
-    let mut cost = normalized_objective + objective_config.preference_weight * soft_violation_sum;
+    // A row whose violation is undefined (an unavailable measurement, such as
+    // the NaN buffet-onset row or an infinite V-n speed excess) is already
+    // violated and leaves the reported sums non-finite. The scalar cost must
+    // still order the candidate, so here such a row counts as the unit
+    // violation the explicit unavailable sentinels above carry.
+    let cost_sum = |role: ResidualRole| -> f64 {
+        residuals
+            .iter()
+            .filter(|residual| residual.role == role)
+            .map(|residual| {
+                if residual.normalized_violation.is_finite() {
+                    residual.normalized_violation
+                } else {
+                    1.0
+                }
+            })
+            .sum()
+    };
+
+    let mut cost = normalized_objective
+        + objective_config.preference_weight * cost_sum(ResidualRole::Preference);
 
     if !hard_feasible {
         // This finite cost surcharge is not the feasibility guarantee:
@@ -130,7 +150,12 @@ pub(crate) fn assemble(
         // candidates carry the SUM of normalized hard violations, not their
         // worst individual constraint; the early epsilon comparison can also
         // use cost when comparing two infeasible candidates.
-        cost += 1.0 + hard_violation_sum;
+        cost += 1.0 + cost_sum(ResidualRole::Constraint);
+    }
+    if !cost.is_finite() {
+        // An undefined objective value or preference weight: the candidate
+        // has no usable sized state, priced as an evaluation failure.
+        cost = config.optimizer.weights.failure_cost;
     }
 
     // Captured before `outcome.sized` is moved: this is the same state
@@ -149,8 +174,14 @@ pub(crate) fn assemble(
                 &config.geometry.empennage,
                 &outcome.history.dv,
             ),
+            wing_incidence_deg: outcome.sized.fuel_artifacts.tail_sizing.wing_incidence_deg,
         },
         main_gear_placement: config.landing_gear.derived_main_gear,
+        sized_engine: outcome
+            .engine_sizing
+            .as_ref()
+            .filter(|sizing| sizing.sizes)
+            .map(|sizing| sizing.sized.clone()),
         masses: outcome.masses,
         coords: outcome.coords,
         cg_x_m: outcome.cg_x,

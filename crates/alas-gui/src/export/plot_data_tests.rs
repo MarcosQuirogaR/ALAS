@@ -119,10 +119,24 @@ fn payload_range_export_is_the_plotted_corner_data() {
         .iter()
         .find(|s| s.kind == alas_report::plot_data::SeriesKind::Line)
         .expect("payload-range curve");
-    let ranges: Vec<f64> = data.points.iter().map(|p| p.range_nm).collect();
-    let payloads_t: Vec<f64> = data.points.iter().map(|p| p.payload_kg / 1000.0).collect();
+    // The curve is flown at the corners and on the takeoff-mass line between B and C.
+    let curve = data.curve();
+    let ranges: Vec<f64> = curve.iter().map(|p| p.0).collect();
+    let payloads_t: Vec<f64> = curve.iter().map(|p| p.1 / 1000.0).collect();
     assert_eq!(line.x, ranges);
     assert_eq!(line.y, payloads_t);
+    assert_eq!(curve.len(), 4 + data.mtow_line.len());
+    // The B-C line is exported on its own, B and C at its ends.
+    let flown = plot
+        .panels
+        .iter()
+        .flat_map(|panel| panel.series.iter())
+        .find(|s| s.name == "flown takeoff-mass line B-C")
+        .expect("takeoff-mass line series");
+    assert_eq!(flown.x.len(), 2 + data.mtow_line.len());
+    assert_eq!(flown.x[0], data.points[1].range_nm);
+    assert_eq!(flown.x[flown.x.len() - 1], data.points[2].range_nm);
+    assert_eq!(flown.labels.first().map(String::as_str), Some("B"));
 }
 
 #[test]

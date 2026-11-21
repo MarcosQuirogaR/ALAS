@@ -296,3 +296,100 @@ fn a_declared_cabin_the_shell_cannot_seat_keeps_its_shortfall_visible() {
         "the ledger payload is the layout payload"
     );
 }
+
+/// The summary names the configured MTOW sizing mode and says whether it set
+/// the analysed mass: a fixed aircraft analysed at its design point keeps the
+/// configured MTOW under any mode, and only a sized report is closed by it.
+#[test]
+fn the_summary_says_whether_the_mtow_sizing_mode_set_the_analysed_mass() {
+    let preset = presets::get("A320-200").unwrap();
+    let mut config = AlasConfig::from_value(&serde_json::json!({ "preset": "A320-200" })).unwrap();
+    config.optimizer.design_space.mode = DesignMode::BaselineSandbox;
+    config.optimizer.objective.mtow_sizing = alas_config::MtowSizing::PayloadAdjusted;
+    let analysis = FullAnalysis::new(config.clone());
+    let at_design = analysis.run(&preset.design_vector, true).unwrap();
+    let at_closure = analysis
+        .run_at_sized_takeoff_mass(
+            &preset.design_vector,
+            true,
+            0.9 * config.requirements.mtow_kg,
+        )
+        .unwrap();
+    let line = |report| {
+        alas_pipeline::format_summary(report, Some(&config))
+            .lines()
+            .find(|line| line.trim_start().starts_with("MTOW sizing"))
+            .map(str::to_owned)
+            .expect("the summary names the sizing mode")
+    };
+    let fixed = line(&at_design);
+    assert!(
+        fixed.contains("payload_adjusted") && fixed.contains("not applied"),
+        "{fixed}"
+    );
+    let sized = line(&at_closure);
+    assert!(
+        sized.contains("payload_adjusted") && sized.contains("closed"),
+        "{sized}"
+    );
+}
+
+/// The summary's line on a jump of the takeoff-mass map, if it has one.
+fn jump_line(report: &alas_pipeline::AnalysisReport, config: &AlasConfig) -> Option<String> {
+    alas_pipeline::format_summary(report, Some(config))
+        .lines()
+        .find(|line| line.trim_start().starts_with("MTOW map jump"))
+        .map(str::to_owned)
+}
+
+/// A jump of the takeoff-mass map the closure met reaches the summary and the
+/// design database, with whether the held mission plan settled it; a closure
+/// that met none reports none.
+#[test]
+fn a_sizing_map_jump_is_stated_in_the_summary_and_the_database() {
+    let preset = presets::get("A320-200").unwrap();
+    let config = AlasConfig::from_value(&serde_json::json!({ "preset": "A320-200" })).unwrap();
+    let mut report = FullAnalysis::new(config.clone())
+        .run(&preset.design_vector, true)
+        .unwrap();
+    let artifacts = report
+        .fuel
+        .artifacts(&config, &preset.design_vector)
+        .unwrap();
+    assert!(artifacts.sizing_map_jump.is_none());
+    let database = alas_pipeline::export::report_to_database(&report, &config);
+    assert!(database.weights["sizing_map_jump"].is_null());
+    assert!(jump_line(&report, &config).is_none());
+
+    let jump = alas_opt::mdo::SizingMapJump {
+        lower_kg: 75_599.9,
+        lower_next_kg: 75_650.0,
+        upper_kg: 75_600.0,
+        upper_next_kg: 75_236.0,
+        resolved_by_held_plan: true,
+        survives_held_plan: false,
+    };
+    let mut jumped = (*artifacts).clone();
+    jumped.sizing_map_jump = Some(jump);
+    report.fuel =
+        alas_pipeline::fuel_model::ReportFuel::sized(alas_pipeline::fuel_model::SizedFuel {
+            artifacts: std::sync::Arc::new(jumped),
+            takeoff_mass_kg: 75_236.0,
+            takeoff_fuel_kg: f64::NAN,
+            trip_fuel_kg: f64::NAN,
+            design_range_m: f64::NAN,
+            design_landing_mass_kg: f64::NAN,
+            takeoff_loading: None,
+            mid_cruise_mass_kg: f64::NAN,
+        });
+    let line = jump_line(&report, &config).expect("the summary states the jump");
+    assert!(
+        line.contains("75650 kg from 75600 kg") && line.contains("settled on the mission plan"),
+        "{line}"
+    );
+    let database = alas_pipeline::export::report_to_database(&report, &config);
+    let record = &database.weights["sizing_map_jump"];
+    assert_eq!(record["upper_kg"], 75_600.0);
+    assert_eq!(record["resolved_by_held_plan"], true);
+    assert_eq!(record["survives_held_plan"], false);
+}

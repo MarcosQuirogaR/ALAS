@@ -11,10 +11,14 @@
 //! warns; it never changes the result.
 //!
 //! Data: there is no engine design take-off mass in the engine catalogue yet
-//! (lane B1 adds the optional field). The proxy is the declared MTOW of the
+//! (the optional field is added there). The proxy is the declared MTOW of the
 //! registered aircraft, `requirements.mtow_kg`, which is meaningful only when
 //! the engine is matched to that aircraft, i.e. outside the clean-sheet design
 //! mode where the declared MTOW is merely a target.
+//!
+//! A clean-sheet engine has no such datum because it is not a catalogue input:
+//! it is sized to the closed design (`mdo::engine::sizing`), and its match is a
+//! hard residual of its own (`engine_thrust_match`, `engine_scale_validity`).
 
 use alas_config::optimizer::DesignMode;
 use alas_config::AlasConfig;

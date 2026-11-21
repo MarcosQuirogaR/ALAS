@@ -18,14 +18,15 @@ fn preset_exports_close_symmetric_roots_without_flattening_vertical_fins() {
         for (index, wing) in airplane.wings.iter().enumerate() {
             let root = &wing.xsecs[0];
             let tip = &wing.xsecs[1];
-            // A mirrored surface rooted off the plane (wingtip device) has no
-            // seam to close and takes the rotated root frame like a fin.
+            // A mirrored surface rooted off the plane (a wingtip device, or the
+            // ventral fin pair under the tail) has no seam to close
+            // and takes the rotated root frame like a fin.
             let closes_seam = wing.symmetric && root.xyz_le[1].abs() < 1.0e-9;
             if closes_seam {
                 symmetric_roots += 1;
             } else if wing.symmetric {
                 assert!(
-                    wing.name.starts_with("Wingtip Device"),
+                    wing.name.starts_with("Wingtip Device") || wing.name == "Ventral Fin",
                     "{} {} off-plane root",
                     preset.name,
                     wing.name

@@ -4,9 +4,13 @@
 //! HTTPS transport used by the route-planning boundary.
 
 use std::process::Command;
+use std::time::Duration;
 
-use alas_exec::process::NoConsoleWindow;
+use alas_exec::captured::run_captured;
 use alas_route::SimbriefTransport;
+
+/// Largest response body accepted from the dispatch service, bytes (32 MiB).
+const MAX_RESPONSE_BYTES: &str = "33554432";
 
 /// HTTPS transport supplied by the operating system's curl installation.
 pub(super) struct SystemCurlTransport;
@@ -19,38 +23,47 @@ impl SimbriefTransport for SystemCurlTransport {
         let executable = if cfg!(windows) { "curl.exe" } else { "curl" };
         let timeout = timeout_s.clamp(1.0, 120.0).to_string();
         let connect_timeout = timeout_s.clamp(1.0, 10.0).to_string();
-        let output = Command::new(executable)
-            .args([
-                "--silent",
-                "--show-error",
-                // Keep an HTTP error body: SimBrief uses it for actionable
-                // account/plan diagnostics (for example, no plan on file).
-                "--fail-with-body",
-                "--location",
-                "--proto",
-                "=https",
-                "--connect-timeout",
-                &connect_timeout,
-                "--max-time",
-                &timeout,
-                // A short retry budget covers transient DNS/TLS/5xx failures
-                // without turning an optional route tier into a long stall.
-                "--retry",
-                "2",
-                "--retry-delay",
-                "1",
-                "--retry-max-time",
-                &timeout,
-                "--user-agent",
-                "ALAS/1.0 (SimBrief route import)",
-                url,
-            ])
-            .no_window()
-            .output()
-            .map_err(|error| format!("cannot launch {executable}: {error}"))?;
+        let mut command = Command::new(executable);
+        command.args([
+            "--silent",
+            "--show-error",
+            // Keep an HTTP error body: SimBrief uses it for actionable
+            // account/plan diagnostics (for example, no plan on file).
+            "--fail-with-body",
+            "--location",
+            "--proto",
+            "=https",
+            "--connect-timeout",
+            &connect_timeout,
+            "--max-time",
+            &timeout,
+            // A flight plan is a few megabytes; refuse a body that could not
+            // be one instead of holding it in memory.
+            "--max-filesize",
+            MAX_RESPONSE_BYTES,
+            // A short retry budget covers transient DNS/TLS/5xx failures
+            // without turning an optional route tier into a long stall.
+            "--retry",
+            "2",
+            "--retry-delay",
+            "1",
+            "--retry-max-time",
+            &timeout,
+            "--user-agent",
+            "ALAS/1.0 (SimBrief route import)",
+            url,
+        ]);
+        // curl enforces `--max-time` per attempt and `--retry-max-time` for the
+        // retries, so a call can run for two budgets; the supervised deadline is the backstop
+        // for a hung process and never ends a call curl itself would allow. A reader
+        // still open after the child exits adds a "[output reader still open ...]" note to
+        // stdout (bounded drain); a payload parse then fails loudly rather than silently.
+        let deadline = Duration::from_secs_f64(2.0 * timeout_s.clamp(1.0, 120.0) + 15.0);
+        let output = run_captured(&mut command, "SimBrief route import", deadline)
+            .map_err(|error| format!("cannot run {executable}: {error}"))?;
         if !output.status.success() {
-            let body = bounded_diagnostic(&String::from_utf8_lossy(&output.stdout));
-            let stderr = bounded_diagnostic(&String::from_utf8_lossy(&output.stderr));
+            let body = bounded_diagnostic(&output.stdout);
+            let stderr = bounded_diagnostic(&output.stderr);
             let detail = match (body.is_empty(), stderr.is_empty()) {
                 (true, true) => "no response body or stderr".to_owned(),
                 (false, true) => format!("response: {body}"),
@@ -62,8 +75,12 @@ impl SimbriefTransport for SystemCurlTransport {
                 output.status
             ));
         }
-        String::from_utf8(output.stdout)
-            .map_err(|error| format!("SimBrief returned non-UTF-8 data: {error}"))
+        // The captured text is decoded lossily; a replacement character means the
+        // body was not valid UTF-8.
+        if output.stdout.contains('\u{FFFD}') {
+            return Err("SimBrief returned non-UTF-8 data".to_owned());
+        }
+        Ok(output.stdout)
     }
 }
 

@@ -11,7 +11,7 @@
 
 use alas_pipeline::structural::StructuralAnalysisResult;
 
-use crate::scene::{Color, Scene};
+use crate::scene::{Color, Scene, SceneElement};
 use crate::theme::Palette;
 
 /// A minimal, chart-sized status note ported from `figure_status_message`,
@@ -19,6 +19,23 @@ use crate::theme::Palette;
 /// text wraps inside the canvas.
 pub fn status_message_scene(title: &str, message: &str, ok: bool, pal: &Palette) -> Scene {
     crate::status_figure::status_scene(title, message, ok, pal)
+}
+
+/// Neutral card for an optional external tool that is not set up: the MSES
+/// status layout with the title in the ordinary title color, not the failure
+/// red, because a missing optional tool is a configuration state, not a
+/// solver error.
+pub fn tool_not_configured_scene(title: &str, tool: &str, detail: &str, pal: &Palette) -> Scene {
+    let message = format!("{tool} not configured. {detail}");
+    let mut scene = crate::status_figure::status_scene(title, &message, true, pal);
+    for element in &mut scene.elements {
+        if let SceneElement::Text { text, color, .. } = element {
+            if text == title {
+                *color = Color::from_hex(pal.title);
+            }
+        }
+    }
+    scene
 }
 
 /// Port of `_structures_unavailable_message`, folded together with the
@@ -33,6 +50,14 @@ pub fn resolve_structural_result<'a>(
     let message = crate::families::common::structural_unavailable_message(result);
     if let (Some(result), None) = (result, &message) {
         return Ok(result);
+    }
+    // A stage that was not run is a neutral note; only a failed one is red.
+    if result.is_none_or(|r| r.status == "not_run") {
+        return Err(crate::status_figure::skipped_status_scene(
+            title,
+            &message.unwrap_or_default(),
+            pal,
+        ));
     }
     Err(status_message_scene(
         title,
@@ -64,7 +89,6 @@ pub fn with_alpha(hex: &str, alpha: u8) -> Color {
 #[cfg(test)]
 mod tests {
     use super::*;
-    use crate::scene::SceneElement;
     use crate::theme::PALETTE_LIGHT;
 
     #[test]
@@ -89,6 +113,17 @@ mod tests {
             |e| matches!(e, SceneElement::TextBlock { text, .. } if text.contains("bad material")),
         );
         assert!(has_message);
+    }
+
+    #[test]
+    fn not_configured_card_keeps_the_title_out_of_failure_red() {
+        let scene = tool_not_configured_scene("T", "Patran", "Set it.", &PALETTE_LIGHT);
+        let title_color = scene.elements.iter().find_map(|e| match e {
+            SceneElement::Text { text, color, .. } if text == "T" => Some(*color),
+            _ => None,
+        });
+        assert_eq!(title_color, Some(Color::from_hex(PALETTE_LIGHT.title)));
+        assert!(scene.elements.iter().any(|e| matches!(e, SceneElement::TextBlock { text, .. } if text.starts_with("Patran not configured"))));
     }
 
     #[test]

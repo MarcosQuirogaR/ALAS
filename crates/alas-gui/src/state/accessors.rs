@@ -53,13 +53,14 @@ impl AppState {
     ///
     /// An `Error`-severity line always opens the run log, independent of
     /// whatever the panel's current visibility was. Every pre-run validation
-    /// failure and every Setup > Tools picker failure reports through this
+    /// failure and every External Tools picker failure reports through this
     /// path, so a user who has closed the log (or never opened it) still sees
     /// why clicking Run or Browse did nothing. This only flips a visibility
     /// flag; it does not request keyboard focus.
     pub fn log(&mut self, text: impl Into<String>, kind: LogKind) {
         if matches!(kind, LogKind::Error) {
             self.run_log_open = true;
+            self.shell.errors_logged += 1;
         }
         let elapsed = self.run_started.map(|started| started.elapsed());
         self.logs.push(LogLine {
@@ -91,21 +92,46 @@ impl AppState {
             .any(|i| i.severity == Severity::Error)
     }
 
+    /// Whether the configuration cannot be previewed (unreadable, or with a
+    /// validation error). Validation is a pure function of the configuration,
+    /// so the answer is kept against its fingerprint: a camera drag rebuilds
+    /// the scene every frame without the configuration changing, and used to
+    /// validate (and re-read) it each time.
+    fn config_invalid_for_preview(&self) -> bool {
+        thread_local! {
+            static VERDICT: std::cell::Cell<Option<(u64, bool)>> =
+                const { std::cell::Cell::new(None) };
+        }
+        let fingerprint = self.config_fingerprint_now();
+        if let Some((cached, invalid)) = VERDICT.with(std::cell::Cell::get) {
+            if cached == fingerprint {
+                return invalid;
+            }
+        }
+        let invalid = self.typed_config_arc().is_none_or(|config| {
+            alas_config::validate(&config)
+                .iter()
+                .any(|issue| issue.severity == alas_config::Severity::Error)
+        });
+        VERDICT.with(|verdict| verdict.set(Some((fingerprint, invalid))));
+        invalid
+    }
+
     /// Update the live-preview scene from the current geometry and dock tab.
     pub fn update_preview_scene(&mut self) {
         // A text editor can temporarily hold an unreadable or physically
         // invalid configuration. Keep the last accepted scene visible until
         // the edit is valid again; replacing it with a blank scene makes an
         // ordinary mid-edit keystroke look like data loss.
-        let invalid = self.typed_config().is_none_or(|config| {
-            alas_config::validate(&config)
-                .iter()
-                .any(|issue| issue.severity == alas_config::Severity::Error)
-        });
-        if invalid {
+        if self.config_invalid_for_preview() {
             return;
         }
-        let next_scene = crate::scene::build_preview_scene(self);
+        // Adjusted for the tab once here, so the dock shares this scene
+        // instead of copying it on every camera frame.
+        let tab = self.preview_tab;
+        let next_scene = crate::scene::build_preview_scene(self)
+            .map(|scene| crate::views::preview_dock::preview_scene_for_tab(scene, tab))
+            .map(std::sync::Arc::new);
         if next_scene.is_none() && self.preview_scene.is_some() {
             return;
         }
@@ -118,7 +144,16 @@ impl AppState {
         // A run identity is stable while new stages arrive. Both successful
         // scenes and cached `None`/unavailable scenes must be invalidated at
         // each data boundary, including the final result.
-        self.result_figure_cache.clear();
+        self.clear_result_figures();
+        self.refresh_result_scene();
+    }
+
+    /// Rebuild the selected-figure scene on opening the Results page, keeping
+    /// the cached gallery figures: their keys already carry the run, solver
+    /// view, theme and language, and every change of the result data goes
+    /// through [`Self::update_result_scene`]. Dropping the cache on each visit
+    /// rebuilt and re-rasterized every figure of a tab (seconds, measured).
+    pub fn refresh_result_scene(&mut self) {
         self.patran_textures.clear();
         self.result_scene = crate::scene::build_result_scene(self);
     }

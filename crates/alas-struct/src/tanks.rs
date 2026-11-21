@@ -57,7 +57,11 @@ pub const INTEGRAL_TANK_SPAN_END_FRACTION: f64 = 0.85;
 /// Share of the geometric spar-box volume that is usable tank volume.
 pub const INTEGRAL_TANK_USABLE_FRACTION: f64 = 0.92;
 
-/// Jet A-1 density, kg/m^3, at the value the registered reference data states.
+/// Jet A-1 density, kg/m^3, of the entry points that are given no fuel
+/// density (the reference-compatibility sizing and unit tests). Product
+/// callers pass the density the tank inventory is priced at instead, so the
+/// fuel that relieves the wing and the fuel in the mass statement are one
+/// mass.
 pub const JET_FUEL_DENSITY_KG_M3: f64 = 800.0;
 
 /// Chordwise samples used to integrate the enclosed box section.
@@ -101,18 +105,24 @@ pub fn box_section_area_m2(wsg: &WingStructureGeometry, eta: f64, front: f64, re
 ///
 /// Zero outside the declared tank band. The band is expressed in fractions of
 /// the semi-span, so it follows the candidate's own wing rather than a fixed
-/// station.
+/// station. `fuel_density_kg_m3` is the density of the fuel, kg/m^3; a
+/// non-finite or non-positive density carries no fuel.
 pub fn integral_fuel_running_mass_kg_m(
     wsg: &WingStructureGeometry,
     y: &[f64],
     front: f64,
     rear: f64,
+    fuel_density_kg_m3: f64,
 ) -> Vec<f64> {
     let semi_span = wsg.semi_span;
-    if !semi_span.is_finite() || semi_span <= 0.0 {
+    if !semi_span.is_finite()
+        || semi_span <= 0.0
+        || !fuel_density_kg_m3.is_finite()
+        || fuel_density_kg_m3 <= 0.0
+    {
         return vec![0.0; y.len()];
     }
-    let density = JET_FUEL_DENSITY_KG_M3 * INTEGRAL_TANK_USABLE_FRACTION;
+    let density = fuel_density_kg_m3 * INTEGRAL_TANK_USABLE_FRACTION;
     y.iter()
         .map(|&station| {
             let eta = station / semi_span;
@@ -130,6 +140,15 @@ mod tests {
     use super::*;
     use alas_config::preset_fuel_tanks;
     use alas_config::WingTankConfig;
+
+    /// The recorded basis of a preset's own wing-cell band: the configuration's
+    /// provenance entry (published, derived or a stated estimate), never empty.
+    fn band_source(name: &str) -> Option<&'static str> {
+        use preset_fuel_tanks::TankBandSource::{Derived, Estimate, Published};
+        preset_fuel_tanks::band_provenance(name).map(|source| match source {
+            Published(note) | Derived(note) | Estimate(note) => note,
+        })
+    }
 
     #[test]
     fn the_declared_tank_band_matches_the_configuration_defaults() {
@@ -162,11 +181,22 @@ mod tests {
             if !outermost.is_finite() {
                 continue;
             }
-            assert!(
-                (outermost - INTEGRAL_TANK_SPAN_END_FRACTION).abs() < 1e-9,
-                "{} ends its outermost wing cell at {outermost}",
-                preset.name
-            );
+            if (outermost - INTEGRAL_TANK_SPAN_END_FRACTION).abs() >= 1e-9 {
+                // A preset that declares its own band must keep it inside the
+                // semi-span the box is sized over (the sizing clamps eta to
+                // 0..=1) and must record where the band comes from.
+                assert!(
+                    innermost >= 0.0 && outermost <= 1.0 && innermost < outermost,
+                    "{} declares the band {innermost}..{outermost} outside the wing box",
+                    preset.name
+                );
+                assert!(
+                    band_source(preset.name).is_some_and(|note| !note.is_empty()),
+                    "{} declares its outermost wing cell end at {outermost} with no recorded source",
+                    preset.name
+                );
+                continue;
+            }
             // The inboard station varies with where the centre tank stops,
             // between the A380-800's 0.09 and the A220-300's 0.32. The
             // declared band's inboard edge must sit inside that spread rather
@@ -200,7 +230,7 @@ mod tests {
         let y: Vec<f64> = (0..=100)
             .map(|i| i as f64 * wsg.semi_span / 100.0)
             .collect();
-        let fuel = integral_fuel_running_mass_kg_m(&wsg, &y, 0.25, 0.70);
+        let fuel = integral_fuel_running_mass_kg_m(&wsg, &y, 0.25, 0.70, JET_FUEL_DENSITY_KG_M3);
         assert_eq!(fuel[0], 0.0, "the centreline is inboard of the tank");
         assert_eq!(fuel[100], 0.0, "the tip is outboard of the tank");
         let wet: f64 = fuel.iter().sum();
@@ -209,6 +239,14 @@ mod tests {
         let inboard = fuel[15];
         let outboard = fuel[80];
         assert!(inboard > outboard && outboard > 0.0);
+        // The running mass is proportional to the fuel density, and a density
+        // that is not a positive number carries no fuel.
+        let denser = integral_fuel_running_mass_kg_m(&wsg, &y, 0.25, 0.70, 840.0);
+        assert!((denser[15] / fuel[15] - 840.0 / JET_FUEL_DENSITY_KG_M3).abs() < 1e-12);
+        for density in [0.0, -800.0, f64::NAN] {
+            let none = integral_fuel_running_mass_kg_m(&wsg, &y, 0.25, 0.70, density);
+            assert!(none.iter().all(|mass| *mass == 0.0));
+        }
     }
 
     fn probe_geometry() -> WingStructureGeometry {

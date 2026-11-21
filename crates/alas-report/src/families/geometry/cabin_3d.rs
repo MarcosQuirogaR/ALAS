@@ -8,7 +8,7 @@ use alas_geom::aircraft::airplane::Airplane;
 use alas_payload::geometry::CabinGeometry;
 use alas_payload::layout::{DeckItem, ItemKind, ItemMeta, PayloadLayout, SeatMeta};
 
-use crate::scene::{Camera3D, Color, Fill, Scene, SceneElement, Stroke};
+use crate::scene::{Camera3D, Color, Fill, Scene, SceneElement, Stroke, TextAlign, TextBaseline};
 use crate::theme::get_palette;
 
 use super::cabin::item_color;
@@ -58,24 +58,37 @@ fn cuboid_faces(center: [f64; 3], size: [f64; 3], color: Color) -> Vec<Face3D> {
         .collect()
 }
 
+/// Seat groups by the cabin section's rule (twin aisle, up to 8 abreast: 2-4-2).
+fn display_blocks(abreast: i64, blocks: &[i64]) -> Vec<i64> {
+    if blocks.len() == 3 && abreast >= 6 && blocks.iter().sum::<i64>() == abreast {
+        let outboard = if abreast >= 9 { 3 } else { 2 };
+        let centre = abreast - 2 * outboard;
+        if centre >= 1 {
+            return vec![outboard, centre, outboard];
+        }
+    }
+    blocks.to_vec()
+}
+
+/// Lateral centres of every seat position in a row, symmetric about y = 0.
+///
+/// Partly filled rows still place every position: the filled count says how
+/// many seats are occupied, not where the row's geometry ends, and filling
+/// from one side would shift the whole row off the centreline.
 fn seat_centers(meta: &SeatMeta) -> Vec<f64> {
     let blocks = if meta.blocks.is_empty() {
         vec![meta.abreast.max(0)]
     } else {
-        meta.blocks.clone()
+        display_blocks(meta.abreast, &meta.blocks)
     };
     let seat_count = blocks.iter().sum::<i64>().max(0);
     let total_width =
         seat_count as f64 * meta.seat_w + blocks.len().saturating_sub(1) as f64 * meta.aisle_w;
     let mut cursor = -total_width * 0.5;
-    let mut remaining = meta.filled.max(0);
-    let mut centers = Vec::with_capacity(remaining as usize);
+    let mut centers = Vec::with_capacity(seat_count as usize);
     for (block_index, block) in blocks.iter().enumerate() {
         for _ in 0..(*block).max(0) {
-            if remaining > 0 {
-                centers.push(cursor + meta.seat_w * 0.5);
-                remaining -= 1;
-            }
+            centers.push(cursor + meta.seat_w * 0.5);
             cursor += meta.seat_w;
         }
         if block_index + 1 < blocks.len() {
@@ -226,6 +239,32 @@ fn draw_faces(
     }
 }
 
+/// A pane taller than this multiple of its width gets the lengthwise view.
+const TALL_PANE_RATIO: f64 = 1.5;
+
+/// The camera of a tall, narrow pane.
+///
+/// The cabin is a long thin body. Seen from the isometric default it crosses
+/// a portrait pane on a diagonal and the width, not the height, fixes its
+/// scale, so most of the pane stays empty. Where the camera is still the
+/// untouched isometric default, a portrait pane looks down on the cabin with
+/// its axis running up the pane (nose at the top); the zoom is kept. Any
+/// orbited camera is left as the user set it.
+fn tall_pane_camera(camera: Camera3D, canvas: (f64, f64)) -> Camera3D {
+    let iso = Camera3D::isometric();
+    let untouched = (camera.elev_deg - iso.elev_deg).abs() < 1e-6
+        && (camera.azim_deg - iso.azim_deg).abs() < 1e-6;
+    if untouched && canvas.1 > TALL_PANE_RATIO * canvas.0 {
+        Camera3D {
+            elev_deg: 55.0,
+            azim_deg: 90.0,
+            zoom: camera.zoom,
+        }
+    } else {
+        camera
+    }
+}
+
 /// Project the physical cabin furniture into an orbitable solid preview.
 pub fn figure_cabin_payload_3d(
     layout: &PayloadLayout,
@@ -234,10 +273,43 @@ pub fn figure_cabin_payload_3d(
     camera: Option<Camera3D>,
     theme: Option<&str>,
 ) -> Scene {
+    figure_cabin_payload_3d_sized(layout, plane, config, camera, theme, (800.0, 520.0))
+}
+
+/// [`figure_cabin_payload_3d`] drawn on a canvas of `canvas` points.
+///
+/// The cabin is fitted to the canvas's own shape, so a tall or narrow dock is
+/// filled instead of showing a 800 x 520 picture scaled down into it.
+pub fn figure_cabin_payload_3d_sized(
+    layout: &PayloadLayout,
+    plane: &Airplane,
+    config: &AlasConfig,
+    camera: Option<Camera3D>,
+    theme: Option<&str>,
+    canvas: (f64, f64),
+) -> Scene {
+    figure_cabin_payload_3d_framed(layout, plane, config, camera, theme, canvas, (0.0, 0.0))
+}
+
+/// [`figure_cabin_payload_3d_sized`] with the top `reserved.0` and bottom `reserved.1` points of
+/// the canvas kept free of the model (the dock's controls row and its legend card lie over them):
+/// the cabin is fitted into the area that remains, so nothing drawn over the canvas covers it.
+/// The scene itself keeps the full canvas size.
+pub fn figure_cabin_payload_3d_framed(
+    layout: &PayloadLayout,
+    plane: &Airplane,
+    config: &AlasConfig,
+    camera: Option<Camera3D>,
+    theme: Option<&str>,
+    canvas: (f64, f64),
+    reserved: (f64, f64),
+) -> Scene {
     let pal = get_palette(theme);
-    if layout.items.is_empty() {
-        return super::cabin::empty(theme, "No payload layout available");
-    }
+    // An empty layout still has a hull: it is drawn, and the reason is stated.
+    let empty_reason = layout
+        .items
+        .is_empty()
+        .then(|| super::cabin::empty_layout_reason(layout));
     let Ok(cabin) = CabinGeometry::new(
         plane,
         &config.geometry,
@@ -245,10 +317,21 @@ pub fn figure_cabin_payload_3d(
     ) else {
         return super::cabin::empty(theme, "Cabin geometry unavailable");
     };
-    let mut scene = Scene::new(800.0, 520.0, Some(Color::from_hex(pal.bg)));
-    scene.title = Some("Cabin / Payload - 3D".to_owned());
-    let camera = camera.unwrap_or_default();
-    let viewport = (20.0, 25.0, 760.0, 410.0);
+    let (canvas_w, canvas_h) = (canvas.0.max(120.0), canvas.1.max(90.0));
+    let mut scene = Scene::new(canvas_w, canvas_h, Some(Color::from_hex(pal.bg)));
+    scene.title = Some("Cabin / Payload \u{2013} 3D".to_owned());
+    // The free band: what is left of the canvas under the controls and above the legend (never
+    // thinner than a third of the canvas, so a very short pane still draws the cabin).
+    let top = reserved.0.max(0.0);
+    let free_h = (canvas_h - 16.0 - top - reserved.1.max(0.0)).max((canvas_h - 16.0) / 3.0);
+    let camera = tall_pane_camera(camera.unwrap_or_default(), (canvas_w, free_h + 16.0));
+    // The default canvas keeps its title band and legend margin; a canvas
+    // the dock sized for itself carries no title, so it is used edge to edge.
+    let viewport = if canvas == (800.0, 520.0) {
+        (20.0, 25.0, 760.0, 410.0)
+    } else {
+        (8.0, 8.0 + top, canvas_w - 16.0, free_h)
+    };
     let mut fit_points = Vec::new();
     if let Some(fuselage) = plane.fuselages.first() {
         for section in &fuselage.xsecs {
@@ -280,12 +363,37 @@ pub fn figure_cabin_payload_3d(
     let mut faces = floor_faces(&cabin, layout);
     faces.extend(layout.items.iter().flat_map(item_faces));
     draw_faces(&mut scene, faces, &camera, center, span, viewport);
+    if let Some(reason) = empty_reason {
+        scene.add(SceneElement::Text {
+            text: reason,
+            pos: [0.5 * canvas_w, canvas_h - 14.0],
+            font_size: 11.0,
+            color: Color::from_hex(pal.title),
+            align: TextAlign::Center,
+            baseline: TextBaseline::Bottom,
+            angle_deg: 0.0,
+            bold: true,
+        });
+    }
     scene
 }
 
 #[cfg(test)]
 mod tests {
     use super::*;
+
+    #[test]
+    fn a_portrait_pane_looks_along_the_cabin_unless_the_camera_was_orbited() {
+        let iso = Camera3D::isometric();
+        let tall = tall_pane_camera(iso, (300.0, 900.0));
+        assert_eq!((tall.elev_deg, tall.azim_deg), (55.0, 90.0));
+        assert_eq!(tall_pane_camera(iso, (900.0, 420.0)), iso);
+        let orbited = Camera3D {
+            azim_deg: -60.0,
+            ..iso
+        };
+        assert_eq!(tall_pane_camera(orbited, (300.0, 900.0)), orbited);
+    }
 
     fn assert_rendered_as_polygons(faces: Vec<Face3D>) {
         let mut scene = Scene::new(200.0, 120.0, None);
@@ -335,6 +443,8 @@ mod tests {
             blocks: vec![1, 1],
             seat_w: 0.46,
             aisle_w: 0.51,
+            cg_z: 0.0,
+            floor_z: 0.0,
         };
         let faces = item_faces(&item(ItemKind::SeatRow, ItemMeta::Seat(meta)));
         assert_eq!(faces.len(), 4, "two seats each use two visible surfaces");
@@ -380,10 +490,10 @@ mod tests {
                 net: Some(900.0),
             }),
         ));
-        // Eight normalized profile vertices produce two caps and one quad per
+        // Seven published-contour profile vertices produce two caps and one quad per
         // edge. A six-face cuboid is the rectangular fallback.
-        assert_eq!(faces.len(), 10);
-        assert!(faces.iter().any(|face| face.points.len() == 8));
+        assert_eq!(faces.len(), 9);
+        assert!(faces.iter().any(|face| face.points.len() == 7));
         assert_rendered_as_polygons(faces);
     }
 }

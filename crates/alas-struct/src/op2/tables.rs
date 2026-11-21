@@ -15,11 +15,21 @@ pub(super) fn store(
     let analysis = word_i32(table3, 0)? / 10; // approach code = analysis*10 + device
     let subcase = i64::from(word_i32(table3, 3)?);
     if name.starts_with("OES") {
-        // MSC groups several element layouts in OES1X1. Only element type 144
-        // is CQUAD4 corner stress (87 words); CBAR type 34 and CTRIA3 type 74
-        // must be skipped rather than decoded as quads.
+        // MSC groups several element layouts in OES1X1: element type 144 is
+        // CQUAD4 corner stress (87 words), type 74 CTRIA3 centroid stress (17
+        // words) and type 34 CBAR stress (16 words). Each is decoded by its
+        // own layout; any other is reported unread.
         let element_type = word_i32(table3, 2)?;
         let num_wide = word_i32(table3, 9)?;
+        if element_type == 74 && num_wide == 17 {
+            let table = op2.ctria3_stress.entry(subcase).or_default();
+            read_ctria3_centroid(table4, table)?;
+            return Ok(());
+        }
+        if element_type == 34 && num_wide == 16 {
+            read_cbar_axial(table4, op2.cbar_axial_stress.entry(subcase).or_default())?;
+            return Ok(());
+        }
         if element_type != 144 || num_wide != 87 {
             op2.unread_result_tables
                 .push(UnreadResultTable::ElementStress {
@@ -203,6 +213,43 @@ fn read_cquad4_corner(table4: &[u8], table: &mut StressTable) -> Result<(), Op2E
                 table.data.push(row);
             }
         }
+    }
+    Ok(())
+}
+
+/// Read a CTRIA3-74 DATA record: 17 words per element, `[eid*10+device,
+/// then two fibers x eight]` in the CQUAD4 row layout (fiber distance,
+/// normal x, normal y, shear xy, angle, major, minor, von Mises).
+fn read_ctria3_centroid(table4: &[u8], table: &mut StressTable) -> Result<(), Op2Error> {
+    let total = table4.len() / 4;
+    if total % 17 != 0 {
+        return Err(Op2Error::RecordTooShort);
+    }
+    for start in (0..total).step_by(17) {
+        let eid = i64::from(word_i32(table4, start)? / 10);
+        for fiber in 0..2 {
+            let mut row = [0.0f64; 8];
+            for (component, slot) in row.iter_mut().enumerate() {
+                *slot = f64::from(word_f32(table4, start + 1 + 8 * fiber + component)?);
+            }
+            table.element_ids.push(eid);
+            table.node_ids.push(0);
+            table.data.push(row);
+        }
+    }
+    Ok(())
+}
+
+/// Read a CBAR-34 DATA record: 16 words per element, `[eid*10+device, four
+/// end-A fiber stresses, axial, ...]`; the axial stress is word 5.
+fn read_cbar_axial(table4: &[u8], rows: &mut Vec<(i64, f64)>) -> Result<(), Op2Error> {
+    let total = table4.len() / 4;
+    if total % 16 != 0 {
+        return Err(Op2Error::RecordTooShort);
+    }
+    for start in (0..total).step_by(16) {
+        let eid = i64::from(word_i32(table4, start)? / 10);
+        rows.push((eid, f64::from(word_f32(table4, start + 5)?)));
     }
     Ok(())
 }

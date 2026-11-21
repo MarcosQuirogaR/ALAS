@@ -9,8 +9,9 @@
 //! the benchmark does not contain. This harness solves one product wingbox
 //! mesh at each scale and attributes the stress differences to element zones.
 //!
-//! The solver comes from `ALAS_NASTRAN95_DIR` / `ALAS_NASTRAN95_RUNTIME`; when
-//! unset the test skips, loudly. `ALAS_NASTRAN95_BENCH_DIR` (default
+//! The solver comes from `ALAS_NASTRAN95_DIR` / `ALAS_NASTRAN95_RUNTIME`; the
+//! test is `#[ignore]`d and runs with `--include-ignored`, where a missing
+//! solver is a failure. `ALAS_NASTRAN95_BENCH_DIR` (default
 //! `C:/n95bench`) is the short work directory. Each solve takes about a minute.
 
 #![allow(clippy::unwrap_used, clippy::expect_used, clippy::print_stdout)]
@@ -32,8 +33,16 @@ const SCALES: [f64; 4] = [1.0, 10.0, 100.0, 1000.0];
 fn solver() -> Option<Nastran95Solver> {
     let dir = PathBuf::from(std::env::var("ALAS_NASTRAN95_DIR").ok()?);
     let runtime = std::env::var_os("ALAS_NASTRAN95_RUNTIME").map(PathBuf::from);
-    let stage = std::env::var_os("ALAS_NASTRAN95_RF_STAGE")
-        .map_or_else(|| PathBuf::from("C:/n95bench-rf"), PathBuf::from);
+    let stage = std::env::var_os("ALAS_NASTRAN95_RF_STAGE").map_or_else(
+        || {
+            PathBuf::from(if cfg!(windows) {
+                "C:/n95bench-rf"
+            } else {
+                "/tmp/n95bench-rf"
+            })
+        },
+        PathBuf::from,
+    );
     Nastran95Solver::from_paths(&dir, runtime.as_deref(), Some(&stage), None)
 }
 
@@ -45,11 +54,11 @@ struct Solve {
 }
 
 #[test]
+#[ignore = "needs ALAS_NASTRAN95_DIR (external NASTRAN-95 solver); run with --include-ignored"]
 fn wingbox_stress_scale_sensitivity_is_attributed_to_element_zones() {
-    let Some(solver) = solver() else {
-        println!("skipped: ALAS_NASTRAN95_DIR is not set or the solver is incomplete");
-        return;
-    };
+    let solver = solver().expect(
+        "ALAS_NASTRAN95_DIR must name a complete NASTRAN-95 installation for this ignored test",
+    );
     let config = StructuresConfig {
         num_ribs_override: Some(12),
         ..Default::default()
@@ -93,7 +102,8 @@ fn wingbox_stress_scale_sensitivity_is_attributed_to_element_zones() {
         excluded.len()
     );
     let base = PathBuf::from(
-        std::env::var("ALAS_NASTRAN95_BENCH_DIR").unwrap_or_else(|_| "C:/n95bench".to_owned()),
+        std::env::var("ALAS_NASTRAN95_BENCH_DIR")
+            .unwrap_or_else(|_| default_bench_dir().to_owned()),
     );
     for translations_only in [false] {
         println!(
@@ -206,4 +216,14 @@ fn translations_only_rbe3(deck: &str) -> String {
         .collect::<Vec<_>>()
         .join("\n")
         + "\n"
+}
+
+/// Short work root when `ALAS_NASTRAN95_BENCH_DIR` is unset: a drive root on
+/// Windows, `/tmp` elsewhere (the legacy solver's path buffers are short).
+fn default_bench_dir() -> &'static str {
+    if cfg!(windows) {
+        "C:/n95bench"
+    } else {
+        "/tmp/n95bench"
+    }
 }

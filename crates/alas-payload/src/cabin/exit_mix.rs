@@ -12,16 +12,17 @@
 //! III 35 seats per pair.
 //!
 //! The arrangement follows transport practice: floor-level door pairs of one
-//! type, forward and aft (at least two pairs, which also meets 25.807(g)(5)
-//! and (g)(7)), plus up to two pairs of Type III overwing exits. The door
+//! type, forward and aft (at least two pairs, which also meets 25.807(g)(4)
+//! to (g)(6) and (g)(8): two exits in each side, two of them Type I or larger),
+//! plus up to two pairs of Type III overwing exits. The door
 //! type follows the body: Type A from a 5.0 m diameter (twin-aisle), Type C
 //! from 3.6 m, Type I below, the diameter classes the generic proxy already
-//! used. Under 25.807(g)(6) the Type III exits together allow at most 70
+//! used. Under 25.807(g)(7) the Type III exits together allow at most 70
 //! seats, and two Type III exits in each side separated by fewer than three
 //! seat rows at most 65; a derived arrangement has no exit stations, so two
 //! overwing pairs are taken as adjacent and counted at 65. Above 299 seats no
-//! Type III side exit is used (25.807(g)(9) requires larger side exits for
-//! high-capacity cabins). Of the arrangements whose allowance covers the
+//! Type III side exit is used: a modelling limit of this derivation for
+//! high-capacity cabins, which 25.807(g) itself does not state. Of the arrangements whose allowance covers the
 //! seats, the one with the fewest pairs is chosen, then the one with fewer
 //! door pairs, then the smallest allowance: an A320-class 3.96 m body with
 //! 168 seats gets C-III-III-C (175).
@@ -41,19 +42,19 @@ const MAX_OVERWING_PAIRS: usize = 2;
 /// Fewest floor-level door pairs: one forward and one aft.
 const MIN_DOOR_PAIRS: usize = 2;
 
-/// Largest seating configuration that may still use Type III side exits
-/// (CS 25.807(g)(9)).
+/// Largest seating configuration that may still use Type III side exits in a
+/// derived arrangement (a modelling limit, not a paragraph of 25.807(g)).
 const MAX_SEATS_WITH_TYPE_III: i64 = 299;
 
-/// Combined seat allowance of all Type III exits (CS 25.807(g)(6)).
+/// Combined seat allowance of all Type III exits (CS 25.807(g)(7)).
 const TYPE_III_COMBINED_CAP: i64 = 70;
 
 /// Combined allowance of two Type III exits in each side separated by fewer
-/// than three seat rows (CS 25.807(g)(6)), assumed for overwing pairs whose
+/// than three seat rows (CS 25.807(g)(7)), assumed for overwing pairs whose
 /// stations are not known.
 const ADJACENT_TYPE_III_CAP: i64 = 65;
 
-const SOURCE: &str = "Derived from EASA CS-25 Amdt 27, 25.807(g) passenger-seat allowance per exit (smallest compliant door plus overwing Type III mix; Type III combined allowance per 25.807(g)(6), overwing pairs taken as adjacent)";
+const SOURCE: &str = "Derived from EASA CS-25 Amdt 27, 25.807(g) passenger-seat allowance per exit (smallest compliant door plus overwing Type III mix; Type III combined allowance per 25.807(g)(7), overwing pairs taken as adjacent)";
 
 /// Door types a derived arrangement may use, largest body first.
 const DOOR_TYPES: [&str; 3] = ["A", "C", "I"];
@@ -114,6 +115,7 @@ impl Arrangement {
         CertifiedExitLayout {
             label: &self.label,
             pairs: &self.pairs,
+            upper_deck_pairs: &[],
             station_body_length_m: None,
             source: SOURCE,
         }
@@ -161,7 +163,7 @@ pub fn derived_exit_layout(diameter_m: f64, seats: i64) -> Option<CertifiedExitL
 #[cfg(test)]
 mod tests {
     use super::*;
-    use crate::cabin::layout_rating;
+    use crate::cabin::{band_limit, layout_rating};
 
     /// The CS 25.807(g) allowance of a derived layout, Type III cap included.
     fn allowance(layout: &CertifiedExitLayout) -> i64 {
@@ -186,6 +188,18 @@ mod tests {
         let more = derived_exit_layout(3.96, 176).unwrap();
         assert_eq!(more.label, "C-C-III-C");
         assert_eq!(allowance(&more), 200);
+    }
+
+    #[test]
+    fn a_derived_arrangement_satisfies_the_seat_bands_for_its_seats() {
+        // Two door pairs of Type I or larger take every band of
+        // 25.807(g)(3)-(g)(6) away, so the allowance is the table sum.
+        for (diameter_m, seats) in [(3.0, 60), (3.96, 168), (4.4, 250), (6.0, 400)] {
+            let layout = derived_exit_layout(diameter_m, seats).unwrap();
+            let letters: Vec<&str> = layout.pairs.iter().map(|pair| pair.exit_type).collect();
+            assert_eq!(band_limit(&letters), i64::MAX, "{diameter_m} m");
+            assert!(layout_rating(&layout) >= seats, "{diameter_m} m");
+        }
     }
 
     #[test]

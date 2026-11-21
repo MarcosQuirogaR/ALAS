@@ -14,6 +14,19 @@
 use super::{SparSizing, WingboxSizing};
 use alas_config::materials::MaterialSpec;
 
+/// The larger of two values, `NaN` when either is `NaN`.
+///
+/// `f64::max` returns the other operand when one is `NaN`, which would let an
+/// undefined utilization of one failure mode be replaced by the finite value
+/// of another. For two numbers the result is that of `f64::max`.
+pub(crate) fn max_or_nan(a: f64, b: f64) -> f64 {
+    if a.is_nan() || b.is_nan() {
+        f64::NAN
+    } else {
+        a.max(b)
+    }
+}
+
 /// Cap pair inertia about the section mid-plane, m^4. The caps' centroids
 /// lie half a thickness inside the upper/lower spar surface, as in the deck.
 pub(crate) fn cap_inertia(height: f64, width: f64, thickness: f64) -> f64 {
@@ -81,7 +94,12 @@ pub(crate) fn cover_and_web_ei(
             let width = (outboard.chord_fraction - inboard.chord_fraction) * sizing.chord[station];
             let a = inboard.h[station];
             let b = outboard.h[station];
-            skin.e_pa * sizing.t_skin * width * (a * a + a * b + b * b) / 6.0
+            sizing.cover_shape_at(station)
+                * skin.e_pa
+                * sizing.skin_at(station)
+                * width
+                * (a * a + a * b + b * b)
+                / 6.0
         })
         .sum();
     (
@@ -145,21 +163,26 @@ pub(crate) fn stress_utilization(
     // The maximum fibre, rather than cap centroid, controls normal stress.
     let distance = 0.5 * spar.h[station];
     let cap_stress = cap.e_pa * curvature * distance;
+    // The cover's extreme fibre follows the airfoil contour between the spars, not the
+    // spar heights (see `cover_shape::cover_depth_m`); the frozen laws record no contour
+    // depth and keep the spar-height fibre.
     let cover_distance = sizing
         .spars
         .iter()
         .map(|spar| 0.5 * spar.h[station])
-        .fold(0.0_f64, f64::max);
+        .fold(0.5 * sizing.cover_depth_at(station), f64::max);
     // The covers and the spar flanges are one stiffened skin-stringer panel:
     // its compressive allowable is the lesser of the material allowable and
     // the structural-index curve of the installed smeared thickness.
-    let panel = super::panel::CoverPanel::new(sizing, station);
+    let panel = super::panel::CoverPanel::new(sizing, station, skin);
     let flange = super::panel::flange_area_m2(sizing, station);
-    let utilization = (cap_stress / panel.allowable_pa(cap, flange))
-        .max(super::web::utilization(
-            sizing, station, spar_index, curvature, shear, web,
-        ))
-        .max(skin.e_pa * curvature * cover_distance / panel.allowable_pa(skin, flange));
+    let utilization = max_or_nan(
+        max_or_nan(
+            cap_stress / panel.allowable_pa(cap, flange),
+            super::web::utilization(sizing, station, spar_index, curvature, shear, web),
+        ),
+        skin.e_pa * curvature * cover_distance / panel.skin_allowable_pa(skin, flange),
+    );
     (cap_stress, utilization)
 }
 
@@ -188,7 +211,8 @@ pub(crate) fn update_moment_fractions(
             let b = right.h[station];
             // Megson boom areas t*b/6*(2 + sigma_neighbor/sigma),
             // with compatible stress proportional to depth, for two covers.
-            let scale = skin.e_pa * sizing.t_skin * width / 12.0;
+            let scale =
+                sizing.cover_shape_at(station) * skin.e_pa * sizing.skin_at(station) * width / 12.0;
             cover_ei[pair[0]] += scale * a * (2.0 * a + b);
             cover_ei[pair[1]] += scale * b * (2.0 * b + a);
         }
@@ -229,11 +253,15 @@ mod tests {
         WingboxSizing {
             y_stations: vec![0.0, 10.0],
             axis_cos: Vec::new(),
+            cover_shape: Vec::new(),
+            cover_depth_m: Vec::new(),
+            cover_shear_flow_n_per_m: Vec::new(),
             eta_stations: vec![0.0, 1.0],
             chord: vec![4.0; 2],
             spar_fracs: vec![0.25, 0.75],
             spars: vec![spar(0.25), spar(0.75)],
             t_skin: 0.005,
+            skin_gauge_m: Vec::new(),
             num_ribs: 11,
             rib_spacing_m: 1.0,
             mass_breakdown_kg: MassBreakdown {

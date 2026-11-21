@@ -86,6 +86,31 @@ pub(super) fn add_transition_rbe3(
         return 0;
     }
 
+    // Product (translation-only) rivets tie a transition rib to the window grids
+    // of the nearest full skin rib, upper and lower: a spread, non-coplanar set,
+    // so the equilibrium matrix of the RBE3 is well conditioned (MSC Nastran QRG,
+    // RBE3 remarks: independent grids that are collinear or coplanar leave rigid-
+    // body modes of the element weakly constrained, warning 7343).
+    let mut rib_grids: std::collections::BTreeMap<usize, Vec<i64>> = Default::default();
+    if translations_only {
+        for &((rib, point, _), nid) in nodes.placements() {
+            if !skin_ribs.contains(&rib) {
+                continue;
+            }
+            if let Some((front, rear)) = super::boxed::spar_window(&stations[rib]) {
+                if point < front || point > rear {
+                    continue;
+                }
+            }
+            if deck.grid_xyz(nid).is_some_and(|xyz| xyz[1] >= Y_ROOT_EXCL) {
+                let list = rib_grids.entry(rib).or_default();
+                if !list.contains(&nid) {
+                    list.push(nid);
+                }
+            }
+        }
+    }
+
     let band = SEARCH_BAND_RIB_SPACINGS * semi_span / num_ribs.max(1) as f64;
 
     let mut eid = first_eid;
@@ -145,7 +170,8 @@ pub(super) fn add_transition_rbe3(
                     // independent rotations (the frozen reference deck) a
                     // sliver still constrains the six rigid-body modes.
                     gijs: if translations_only {
-                        well_posed_independents(&ranked, &local)
+                        nearest_rib_window(&rib_grids, stations, station.y_station)
+                            .unwrap_or_else(|| well_posed_independents(&ranked, &local))
                     } else {
                         ranked
                             .iter()
@@ -165,6 +191,23 @@ pub(super) fn add_transition_rbe3(
 /// The three independents of a rivet: the nearest three grids, except that the
 /// third is the nearest grid that makes a non-degenerate triangle when the
 /// nearest three are (almost) collinear.
+/// The window grids of the skin rib nearest `y` in span, when there is one.
+fn nearest_rib_window(
+    rib_grids: &std::collections::BTreeMap<usize, Vec<i64>>,
+    stations: &[RibStation],
+    y: f64,
+) -> Option<Vec<i64>> {
+    rib_grids
+        .iter()
+        .filter(|(_, grids)| grids.len() >= 6)
+        .min_by(|a, b| {
+            (stations[*a.0].y_station - y)
+                .abs()
+                .total_cmp(&(stations[*b.0].y_station - y).abs())
+        })
+        .map(|(_, grids)| grids.clone())
+}
+
 fn well_posed_independents(ranked: &[(f64, i64)], local: &[(i64, [f64; 3])]) -> Vec<i64> {
     let nearest: Vec<i64> = ranked
         .iter()

@@ -3,22 +3,19 @@
 
 //! Declared inputs for the NASA FLOPS airframe and propulsion mass equations.
 //!
-//! The authoritative [`crate::MassArchitecture`] selects the complete
-//! production buildup. This node carries FLOPS technology factors and
-//! overrides; the derived legacy method selectors remain only for schema
-//! migration and explicit comparison compatibility, so no production run can
-//! pair FLOPS airframe groups with legacy systems fractions.
+//! The authoritative [`crate::MassArchitecture`] selects the complete production buildup. This
+//! node carries FLOPS technology factors and overrides; the derived legacy method selectors
+//! remain only for schema migration and explicit comparison compatibility, so no production
+//! run can pair FLOPS airframe groups with legacy systems fractions.
 //!
-//! Every technology factor below is a FLOPS input variable
-//! (NASA/TM-2017-219627 Vol. I, section 5.2-5.3 and Appendix D) with the
-//! FLOPS default. `FCOMP` is the TM's 0..1 composite-utilization factor for
-//! wing structure (0.0 no composites, 1.0 maximum use of composites), not a
-//! measured percentage of composite structural mass; a zero value is the
-//! published metallic-equation endpoint and does not prove that a named
-//! aircraft is all-metal. The wing-bending factor, the landing-gear lengths
-//! and the design landing weight are the quantities FLOPS itself estimates
-//! when the user leaves them blank; the same rule applies here, with the
-//! estimate named in the evaluation record.
+//! Every technology factor below is a FLOPS input variable (NASA/TM-2017-219627 Vol. I,
+//! section 5.2-5.3 and Appendix D) with the FLOPS default. `FCOMP` is the TM's 0..1
+//! composite-utilization factor for wing structure (0.0 no composites, 1.0 maximum use of
+//! composites), not a measured percentage of composite structural mass; a zero value is the
+//! published metallic-equation endpoint and does not prove that a named aircraft is all-metal.
+//! The wing-bending factor, the landing-gear lengths and the design landing weight are the
+//! quantities FLOPS itself estimates when the user leaves them blank; the same rule applies
+//! here, with the estimate named in the evaluation record.
 
 use serde::{Deserialize, Serialize};
 
@@ -101,14 +98,12 @@ impl Leaf for FlopsWingBendingMethod {
     }
 }
 
-/// How the source engine mass treats the starting system that FLOPS equation
-/// 89 prices separately.
+/// How the source engine mass treats the starting system that FLOPS equation 89 prices separately.
 ///
-/// A certified dry mass can include a starter, while the published FLOPS
-/// equation still adds one unless the user declares the scope.  Keeping that
-/// decision as an enum makes an unresolved data-sheet scope visible and lets
-/// the conservative branch retain the published starter term without
-/// pretending the overlap has been measured.
+/// A certified dry mass can include a starter, while the published FLOPS equation still adds
+/// one unless the user declares the scope.  Keeping that decision as an enum makes an
+/// unresolved data-sheet scope visible and lets the conservative branch retain the published
+/// starter term without pretending the overlap has been measured.
 #[derive(Debug, Clone, Copy, PartialEq, Eq, Default, Serialize, Deserialize)]
 #[serde(rename_all = "snake_case")]
 pub enum FlopsStarterScope {
@@ -121,9 +116,8 @@ pub enum FlopsStarterScope {
     /// does not establish that every component of FLOPS' broader starter
     /// *system* is inside the quoted mass. Keep equation 89 conservatively.
     HardwareIncludedSystemUnresolved,
-    /// The source does not resolve the scope; keep equation 89 so the model
-    /// does not silently understate the installation, and retain this status
-    /// for provenance.
+    /// The source does not resolve the scope; keep equation 89 so the model does not silently
+    /// understate the installation, and retain this status for provenance.
     UnknownConservativeSeparate,
 }
 
@@ -150,8 +144,7 @@ impl Leaf for FlopsStarterScope {
     }
 }
 
-/// How the source engine mass treats the exhaust nozzle relative to FLOPS
-/// equations 77-80.
+/// How the source engine mass treats the exhaust nozzle relative to FLOPS equations 77-80.
 #[derive(Debug, Clone, Copy, PartialEq, Eq, Default, Serialize, Deserialize)]
 #[serde(rename_all = "snake_case")]
 pub enum FlopsNozzleScope {
@@ -186,13 +179,11 @@ impl Leaf for FlopsNozzleScope {
     }
 }
 
-/// Technology factors and declared overrides for the FLOPS airframe and
-/// propulsion equations.
+/// Technology factors and declared overrides for the FLOPS airframe and propulsion equations.
 ///
-/// The defaults are the FLOPS defaults for a conventional metallic
-/// transport, so an unmodified group evaluates the published baseline
-/// correlation. Overrides that FLOPS accepts as user inputs are optional:
-/// absent, the FLOPS estimate is used and the evaluation record says so.
+/// The defaults are the FLOPS defaults for a conventional metallic transport, so an unmodified
+/// group evaluates the published baseline correlation. Overrides that FLOPS accepts as user
+/// inputs are optional: absent, the FLOPS estimate is used and the evaluation record says so.
 #[derive(Debug, Clone, PartialEq, Serialize, Deserialize, ConfigNode)]
 #[serde(default, deny_unknown_fields)]
 pub struct FlopsStructureConfig {
@@ -201,23 +192,20 @@ pub struct FlopsStructureConfig {
         advanced,
         options = FlopsWingBendingMethod,
         label = "Wing bending-factor method",
-        help = "FLOPS wing equivalent bending material factor: the simplified trapezoidal fit of equation 10, or the detailed load-path integration of equations 18-32 over the built planform with engine inertia relief."
+        help = "FLOPS wing bending material factor: the simplified trapezoidal fit (eq. 10) or the detailed load-path integration (eqs. 18-32) over the built planform.",
+        long_help = "FLOPS wing equivalent bending material factor: the simplified trapezoidal fit of equation 10, or the detailed load-path integration of equations 18-32 over the built planform with engine inertia relief."
     )]
     pub wing_bending_method: FlopsWingBendingMethod,
 
-    /// Composite utilization factor for wing structure in the FLOPS wing fit,
-    /// `FCOMP`.
-    ///
-    /// NASA/TM-2017-219627 Vol. I nomenclature (p. 78) defines it as ranging
-    /// from 0.0 for no composites to 1.0 for maximum use of composites. It is
-    /// not a percentage of the aircraft's composite material, and no source
-    /// maps a mass percentage to it; registered presets set it from the
-    /// wing-box construction (`preset_flops/composite.rs`).
+    /// Wing composite utilization `FCOMP`: 0.0 none to 1.0 maximum use (NASA/TM-2017-219627 Vol. I
+    /// p. 78), not a material percentage; presets set it from the wing-box construction
+    /// (`preset_flops/composite.rs`).
     #[config(
         advanced,
         label = "Wing composite utilization",
         unit = "0-1",
-        help = "FLOPS FCOMP is the composite utilization factor for wing structure, 0.0 for no composites to 1.0 for maximum use of composites (NASA/TM-2017-219627), not a composite material percentage. At fixed geometry it multiplies bending, shear/control and miscellaneous wing terms by (1 - 0.4 FCOMP), (1 - 0.17 FCOMP) and (1 - 0.3 FCOMP)."
+        help = "FLOPS FCOMP, composite utilization factor for wing structure: 0 for no composites to 1 for maximum use (NASA/TM-2017-219627). Not a material percentage.",
+        long_help = "FLOPS FCOMP is the composite utilization factor for wing structure, 0.0 for no composites to 1.0 for maximum use of composites (NASA/TM-2017-219627), not a composite material percentage. At fixed geometry it multiplies bending, shear/control and miscellaneous wing terms by (1 - 0.4 FCOMP), (1 - 0.17 FCOMP) and (1 - 0.3 FCOMP)."
     )]
     pub composite_utilization: f64,
 
@@ -262,7 +250,8 @@ pub struct FlopsStructureConfig {
         advanced,
         label = "Structural design gross mass",
         unit = "kg",
-        help = "FLOPS DG for the wing, tail, fuselage, surface-control and pod-relief equations. Blank sizes at the takeoff mass of the case being evaluated: the declared MTOW of a fixed aircraft, or the closed takeoff mass while a clean-sheet design is being sized. Declare it when the structure was designed for a heavier weight variant than the MTOW in use."
+        help = "FLOPS DG, design gross mass [kg] for the wing, tail, fuselage, control and pod-relief equations. Blank uses the takeoff mass being evaluated.",
+        long_help = "FLOPS DG for the wing, tail, fuselage, surface-control and pod-relief equations. Blank sizes at the takeoff mass of the case being evaluated: the declared MTOW of a fixed aircraft, or the closed takeoff mass while a clean-sheet design is being sized. Declare it when the structure was designed for a heavier weight variant than the MTOW in use."
     )]
     pub design_gross_mass_kg: Option<f64>,
 
@@ -280,7 +269,8 @@ pub struct FlopsStructureConfig {
         advanced,
         label = "Main-gear oleo length",
         unit = "m",
-        help = "FLOPS XMLG: length of the extended main landing-gear oleo. Blank uses the fuselage ground clearance for a fuselage-mounted main gear, else the FLOPS estimate from nacelle diameter, wing dihedral, outboard engine position and fuselage width (equation 66)."
+        help = "FLOPS XMLG, length of the extended main-gear oleo [m].",
+        long_help = "FLOPS XMLG: length of the extended main landing-gear oleo. Blank uses the fuselage ground clearance for a fuselage-mounted main gear, else the FLOPS estimate from nacelle diameter, wing dihedral, outboard engine position and fuselage width (equation 66)."
     )]
     pub main_gear_oleo_length_m: Option<f64>,
 
@@ -299,17 +289,18 @@ pub struct FlopsStructureConfig {
         advanced,
         label = "Maximum operating altitude",
         unit = "m",
-        help = "Certified maximum operating altitude. The pressurized fuselage method of the regional turboprop class sizes the shell for the cabin pressure differential between an 8,000 ft cabin (CS 25.841(a)) and this altitude in the ISA. Blank uses the cruise altitude requirement."
+        help = "Certified maximum operating altitude [m]. Sizes the pressurized shell of the regional turboprop class for the differential against an 8,000 ft cabin.",
+        long_help = "Certified maximum operating altitude. The pressurized fuselage method of the regional turboprop class sizes the shell for the cabin pressure differential between an 8,000 ft cabin (CS 25.841(a)) and this altitude in the ISA. Blank uses the cruise altitude requirement."
     )]
     pub maximum_operating_altitude_m: Option<f64>,
 
-    /// Maximum zero-fuel mass the pressurized fuselage method sizes the
-    /// fuselage bending at, kg.
+    /// Maximum zero-fuel mass the pressurized fuselage method sizes the fuselage bending at, kg.
     #[config(
         advanced,
         label = "Design zero-fuel mass",
         unit = "kg",
-        help = "Maximum zero-fuel mass for the fuselage bending term of the pressurized fuselage method of the regional turboprop class. Blank uses the structural design gross mass, an upper bound."
+        help = "Maximum zero-fuel mass [kg] for the fuselage bending term of the regional turboprop pressurized fuselage method. Blank uses the structural design gross mass.",
+        long_help = "Maximum zero-fuel mass for the fuselage bending term of the pressurized fuselage method of the regional turboprop class. Blank uses the structural design gross mass, an upper bound."
     )]
     pub design_zero_fuel_mass_kg: Option<f64>,
 
@@ -318,7 +309,8 @@ pub struct FlopsStructureConfig {
         advanced,
         label = "Paint area density",
         unit = "kg/m^2",
-        help = "FLOPS WPAINT applied to the wetted area of wings, tails, fuselage and nacelles. NASA's own validated decks declare 0.037 lbm/ft^2 (0.1807 kg/m^2) and 0.07 lbm/ft^2; the published equation set has no default, and zero means an unpainted aircraft."
+        help = "FLOPS WPAINT, paint mass per wetted area [kg/m^2] on wings, tails, fuselage and nacelles. Validated NASA decks use 0.1807 kg/m^2 (0.037 lbm/ft^2); zero means unpainted.",
+        long_help = "FLOPS WPAINT applied to the wetted area of wings, tails, fuselage and nacelles. NASA's own validated decks declare 0.037 lbm/ft^2 (0.1807 kg/m^2) and 0.07 lbm/ft^2; the published equation set has no default, and zero means an unpainted aircraft."
     )]
     pub paint_area_density_kg_m2: f64,
 
@@ -327,7 +319,8 @@ pub struct FlopsStructureConfig {
         advanced,
         options = PylonMassMethod,
         label = "Pylon mass method",
-        help = "The published FLOPS transport equations have no pylon term, so a podded installation is missing the structure that carries its engines. Select the LTH box-beam relation to charge it from the engine's sea-level static thrust, or leave it off to reproduce the published FLOPS boundary exactly."
+        help = "Published FLOPS has no pylon term.",
+        long_help = "The published FLOPS transport equations have no pylon term, so a podded installation is missing the structure that carries its engines. Select the LTH box-beam relation to charge it from the engine's sea-level static thrust, or leave it off to reproduce the published FLOPS boundary exactly."
     )]
     pub pylon_mass_method: PylonMassMethod,
 
@@ -336,7 +329,8 @@ pub struct FlopsStructureConfig {
         advanced,
         label = "Baseline engine mass",
         unit = "kg",
-        help = "FLOPS WENGB: declared dry mass of the baseline engine. Whether inlet/nozzle and starter hardware are inside the source boundary is recorded by the component-scope controls below; blank uses the FLOPS transport estimate of baseline thrust over 5.5 (equation 76)."
+        help = "FLOPS WENGB, declared dry mass of the baseline engine [kg]. Blank uses the FLOPS estimate of baseline thrust over 5.5 (eq. 76).",
+        long_help = "FLOPS WENGB: declared dry mass of the baseline engine. Whether inlet/nozzle and starter hardware are inside the source boundary is recorded by the component-scope controls below; blank uses the FLOPS transport estimate of baseline thrust over 5.5 (equation 76)."
     )]
     pub baseline_engine_mass_kg: Option<f64>,
 
@@ -353,7 +347,8 @@ pub struct FlopsStructureConfig {
     #[config(
         advanced,
         label = "Engine mass scaling exponent",
-        help = "FLOPS EEXP: exponent on the thrust ratio when the baseline engine is scaled (equation 75). Values below 0.3 are treated as a linear mass-per-thrust slope. The FLOPS default is 1.15."
+        help = "FLOPS EEXP, exponent on the thrust ratio when the baseline engine is scaled (eq. 75). Values below 0.3 give a linear mass-per-thrust slope. Default 1.15.",
+        long_help = "FLOPS EEXP: exponent on the thrust ratio when the baseline engine is scaled (equation 75). Values below 0.3 are treated as a linear mass-per-thrust slope. The FLOPS default is 1.15."
     )]
     pub engine_mass_scaling_exponent: f64,
 
@@ -362,7 +357,8 @@ pub struct FlopsStructureConfig {
         advanced,
         options = FlopsStarterScope,
         label = "Engine starter scope",
-        help = "State whether the declared engine dry mass already includes the starter system. Separate equation 89 is the FLOPS default; included_in_baseline suppresses the separate term only when the full system boundary is proven; hardware_included_system_unresolved and unknown_conservative_separate retain equation 89 while exposing the unresolved overlap."
+        help = "Whether the declared engine dry mass already includes the starter system.",
+        long_help = "State whether the declared engine dry mass already includes the starter system. Separate equation 89 is the FLOPS default; included_in_baseline suppresses the separate term only when the full system boundary is proven; hardware_included_system_unresolved and unknown_conservative_separate retain equation 89 while exposing the unresolved overlap."
     )]
     pub starter_scope: FlopsStarterScope,
 
@@ -371,7 +367,8 @@ pub struct FlopsStructureConfig {
         advanced,
         label = "Baseline inlet mass",
         unit = "kg",
-        help = "FLOPS WINLB: inlet mass of the baseline engine, declared separately from the baseline engine mass (equation 77). Blank means the inlet is already inside the baseline engine mass, which is what an engine catalogue dry mass normally quotes. Declaring it requires an explicit baseline engine mass, so the inlet is not counted twice."
+        help = "FLOPS WINLB, inlet mass of the baseline engine [kg], declared separately (eq. 77). Blank means it is already in the engine mass.",
+        long_help = "FLOPS WINLB: inlet mass of the baseline engine, declared separately from the baseline engine mass (equation 77). Blank means the inlet is already inside the baseline engine mass, which is what an engine catalogue dry mass normally quotes. Declaring it requires an explicit baseline engine mass, so the inlet is not counted twice."
     )]
     pub baseline_inlet_mass_kg: Option<f64>,
 
@@ -388,7 +385,8 @@ pub struct FlopsStructureConfig {
         advanced,
         label = "Baseline nozzle mass",
         unit = "kg",
-        help = "FLOPS WNOZB: nozzle mass of the baseline engine, declared separately from the baseline engine mass (equation 78). Blank means the nozzle is already inside the baseline engine mass. Declaring it requires an explicit baseline engine mass, so the nozzle is not counted twice."
+        help = "FLOPS WNOZB, nozzle mass of the baseline engine [kg], declared separately (eq. 78). Blank means it is already in the engine mass. Needs an explicit baseline engine mass.",
+        long_help = "FLOPS WNOZB: nozzle mass of the baseline engine, declared separately from the baseline engine mass (equation 78). Blank means the nozzle is already inside the baseline engine mass. Declaring it requires an explicit baseline engine mass, so the nozzle is not counted twice."
     )]
     pub baseline_nozzle_mass_kg: Option<f64>,
 
@@ -397,7 +395,8 @@ pub struct FlopsStructureConfig {
         advanced,
         options = FlopsNozzleScope,
         label = "Engine nozzle scope",
-        help = "State whether the baseline engine mass includes the nozzle, declares it as a separate equation 78 term, or leaves it outside/unknown. Outside and unknown scopes do not invent a nozzle mass; they retain the omission status explicitly."
+        help = "Whether the baseline engine mass includes the nozzle, declares it as a separate eq. 78 term, or leaves it outside or unknown (no nozzle mass is invented).",
+        long_help = "State whether the baseline engine mass includes the nozzle, declares it as a separate equation 78 term, or leaves it outside/unknown. Outside and unknown scopes do not invent a nozzle mass; they retain the omission status explicitly."
     )]
     pub nozzle_scope: FlopsNozzleScope,
 
@@ -417,6 +416,15 @@ pub struct FlopsStructureConfig {
     )]
     pub thrust_reversers_installed: bool,
 
+    /// Engines that carry a thrust reverser, when not every nacelle does.
+    #[config(
+        advanced,
+        label = "Engines with thrust reversers",
+        help = "The number of engines fitted with a thrust reverser, when only some reverse. Blank charges equation 86 on every nacelle (FLOPS TNAC).",
+        long_help = "The number of engines fitted with a thrust reverser, for an installation that reverses on some engines only, as the A380 does on its inboard pair. Blank charges equation 86 on every nacelle (FLOPS TNAC)."
+    )]
+    pub thrust_reverser_engine_count: Option<usize>,
+
     /// Additional miscellaneous propulsion mass, FLOPS `WPMISC`.
     #[config(
         advanced,
@@ -434,6 +442,22 @@ pub struct FlopsStructureConfig {
         help = "FLOPS WMARG expressed as a fraction of the computed structural, propulsion and systems mass, added to the empty mass (equation 139). Zero adds no margin."
     )]
     pub empty_mass_margin_fraction: f64,
+    /// Registered aircraft whose wing gust load the wing mass is priced against.
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    #[config(skip)]
+    pub gust_reference_preset: Option<String>,
+    /// Declared carbon main-gear brakes (NASA CR-151970 p. 5-29 credit, military gear class).
+    #[serde(default, skip_serializing_if = "std::ops::Not::not")]
+    #[config(skip)]
+    pub main_gear_carbon_brakes: bool,
+    /// Declared low-pressure main tyres (NASA CR-151970 p. 5-29 increment, military gear class).
+    #[serde(default, skip_serializing_if = "std::ops::Not::not")]
+    #[config(skip)]
+    pub main_gear_low_pressure_tyres: bool,
+    /// Declared kneeling main gear (Raymer 6th ed. K_mp 1.126, p. 577, military gear class).
+    #[serde(default, skip_serializing_if = "std::ops::Not::not")]
+    #[config(skip)]
+    pub main_gear_kneeling: bool,
 }
 
 impl Default for FlopsStructureConfig {
@@ -463,8 +487,13 @@ impl Default for FlopsStructureConfig {
             nozzle_scope: FlopsNozzleScope::IncludedInBaseline,
             nozzle_mass_scaling_exponent: 1.0,
             thrust_reversers_installed: true,
+            thrust_reverser_engine_count: None,
             misc_propulsion_mass_kg: 0.0,
             empty_mass_margin_fraction: 0.0,
+            gust_reference_preset: None,
+            main_gear_carbon_brakes: false,
+            main_gear_low_pressure_tyres: false,
+            main_gear_kneeling: false,
         }
     }
 }
@@ -475,13 +504,8 @@ impl FlopsStructureConfig {
         self == &Self::default()
     }
 
-    /// Interpret the FCOMP value for reports and exports.
-    ///
-    /// A zero value is the metallic-wing endpoint of the TM's 0..1 index;
-    /// where no construction fact is retained it is not evidence that the
-    /// named aircraft contains no composite structure. Nonzero values are
-    /// declared utilization indices and must not be relabelled as material
-    /// percentages.
+    /// Interpret FCOMP for reports: zero is the TM's metallic endpoint, not evidence of no
+    /// composites; nonzero values are indices, not material percentages.
     pub const fn composite_utilization_interpretation(&self) -> &'static str {
         if self.composite_utilization == 0.0 {
             "declared FLOPS metallic wing endpoint (FCOMP 0); not an aircraft material percentage"
@@ -558,12 +582,9 @@ impl FlopsStructureConfig {
                 }
             }
         }
-        // NASA/TM-2017-219627 Vol. I is explicit that `WENGB` "includes inlet
-        // and nozzle weight if they are not specified separately", and the
-        // equation 76 fallback `THRSO / 5.5` is such an all-in baseline.
-        // Declaring a separate inlet or nozzle against that fallback would
-        // add mass the baseline already contains, so an explicit baseline
-        // engine mass is required before either may be declared.
+        // NASA/TM-2017-219627 Vol. I: `WENGB` "includes inlet and nozzle weight if they
+        // are not specified separately" (the equation 76 `THRSO / 5.5` fallback is
+        // all-in), so a separate inlet or nozzle needs an explicit baseline engine mass.
         if (self.baseline_inlet_mass_kg.is_some() || self.baseline_nozzle_mass_kg.is_some())
             && self.baseline_engine_mass_kg.is_none()
         {

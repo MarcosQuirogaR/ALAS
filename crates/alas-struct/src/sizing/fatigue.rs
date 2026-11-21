@@ -79,7 +79,7 @@ fn station_ea(
         .windows(2)
         .map(|pair| {
             let width = (pair[1].chord_fraction - pair[0].chord_fraction) * sizing.chord[station];
-            2.0 * skin.e_pa * sizing.t_skin * width
+            2.0 * skin.e_pa * sizing.skin_at(station) * width
         })
         .sum();
     caps + webs + covers
@@ -109,16 +109,24 @@ fn lower_fibre_stress_pa(
     let total_ea = ea + added_ea;
     let shift = s_first / total_ea;
     let inertia = ei + q_second - s_first * s_first / total_ea;
+    // The lower cover's extreme fibre follows the contour between the spars
+    // (`cover_shape::cover_depth_m`), as for the strength check.
     let half_depth = sizing
         .spars
         .iter()
         .map(|spar| 0.5 * spar.h[station])
-        .fold(0.0_f64, f64::max);
+        .fold(0.5 * sizing.cover_depth_at(station), f64::max);
     modulus_pa * moment_nm.abs() * (half_depth - shift) / inertia
 }
 
 /// Add lower-flange area at every station whose 1 g tensile stress exceeds the
 /// fatigue limit, the smallest area that brings it to the limit.
+///
+/// The added area is searched up to the solid rectangle of the local chord by
+/// the deepest spar, which no flange can exceed. A station whose stress is
+/// undefined, whose limit is not a positive stress, or that still exceeds the
+/// limit at that area has no fatigue area: it is recorded as `NaN`, which the
+/// strength margins and the mass integrals carry as an undefined result.
 pub(super) fn size_lower_cover(
     sizing: &mut WingboxSizing,
     demand: &FatigueDemand<'_>,
@@ -142,7 +150,9 @@ pub(super) fn size_lower_cover(
         let stress = |sizing: &WingboxSizing, lambda: f64| {
             lower_fibre_stress_pa(sizing, station, moment, lambda, symmetric, modulus, cap)
         };
-        if stress(sizing, 0.0) <= demand.limit_pa {
+        let limit_valid = demand.limit_pa.is_finite() && demand.limit_pa > 0.0;
+        let symmetric_stress = stress(sizing, 0.0);
+        if limit_valid && symmetric_stress <= demand.limit_pa {
             continue;
         }
         // Bracket the area by doubling from the existing flange area, then
@@ -150,12 +160,31 @@ pub(super) fn size_lower_cover(
         let flange: f64 = sizing.spars.iter().map(|spar| spar.a_cap[station]).sum();
         let mut upper = flange.max(1.0e-9);
         let mut lower = 0.0;
-        for _ in 0..80 {
-            if stress(sizing, upper) <= demand.limit_pa {
-                break;
+        let depth = sizing
+            .spars
+            .iter()
+            .map(|spar| spar.h[station])
+            .fold(0.0_f64, f64::max);
+        let ceiling = (sizing.chord[station] * depth).max(upper);
+        let mut closed = false;
+        if limit_valid && !symmetric_stress.is_nan() {
+            for _ in 0..80 {
+                if stress(sizing, upper) <= demand.limit_pa {
+                    closed = true;
+                    break;
+                }
+                if upper >= ceiling {
+                    break;
+                }
+                lower = upper;
+                upper = (2.0 * upper).min(ceiling);
             }
-            lower = upper;
-            upper *= 2.0;
+        }
+        if !closed {
+            for spar in &mut sizing.spars {
+                spar.lower_extra_area[station] = f64::NAN;
+            }
+            continue;
         }
         for _ in 0..100 {
             if upper - lower <= 1.0e-12 * upper {
@@ -196,11 +225,15 @@ mod tests {
         WingboxSizing {
             y_stations: vec![0.0, 10.0],
             axis_cos: Vec::new(),
+            cover_shape: Vec::new(),
+            cover_depth_m: Vec::new(),
+            cover_shear_flow_n_per_m: Vec::new(),
             eta_stations: vec![0.0, 1.0],
             chord: vec![4.0; 2],
             spar_fracs: vec![0.25, 0.75],
             spars: vec![spar(0.25), spar(0.75)],
             t_skin: 0.005,
+            skin_gauge_m: Vec::new(),
             num_ribs: 11,
             rib_spacing_m: 1.0,
             mass_breakdown_kg: MassBreakdown {
@@ -236,6 +269,31 @@ mod tests {
             let stress = lower_fibre_stress_pa(&sizing, 0, 1.0e6, lambda, symmetric, al.e_pa, al);
             assert!(stress < previous, "{lambda}: {stress}");
             previous = stress;
+        }
+    }
+
+    #[test]
+    fn a_station_the_search_cannot_close_has_an_undefined_area() {
+        let al = materials::get("Al 7075-T6").unwrap();
+        let moment = 3.0e6;
+        for (moments, limit) in [
+            ([moment, 0.0], 0.0),
+            ([moment, 0.0], f64::NAN),
+            ([moment, 0.0], -1.0e6),
+            ([f64::NAN, 0.0], 1.0e8),
+            // No flange inside the chord-by-depth rectangle reaches 1 Pa.
+            ([moment, 0.0], 1.0),
+        ] {
+            let (mut sizing, _) = section(0.0);
+            let demand = FatigueDemand {
+                moment_1g_nm: &moments,
+                limit_pa: limit,
+            };
+            size_lower_cover(&mut sizing, &demand, al, al, al);
+            for spar in &sizing.spars {
+                assert!(spar.lower_extra_area[0].is_nan(), "limit {limit}");
+                assert_eq!(spar.lower_extra_area[1], 0.0);
+            }
         }
     }
 

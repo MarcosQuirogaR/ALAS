@@ -42,7 +42,9 @@ pub enum FuelScheme {
     FaaFlagSupplemental,
     /// A named conceptual-design convention (the FAST-OAD and N+3 studies use
     /// five percent of trip fuel, a fixed diversion and a fixed hold) whose
-    /// terms are read from this group as given, with no regulatory claim.
+    /// terms are read from this group as given, with no regulatory claim: a
+    /// zero alternate distance carries no alternate quantity (no EASA
+    /// no-alternate hold), and a zero contingency floor none.
     StudyConvention,
     /// No reserves at all. The mission carries trip fuel only, which is the
     /// frozen behaviour of the earlier maximum-available-fuel mission and is
@@ -82,14 +84,16 @@ pub struct FuelPolicyConfig {
     #[config(
         options = FuelScheme,
         label = "Fuel scheme",
-        help = "Operating rule that decomposes the fuel on board into taxi, trip, contingency, alternate, final reserve, additional, extra and discretionary fuel. Selecting one sizes the design mission under that rule; it is a study assumption, not a compliance finding."
+        help = "Operating rule that splits fuel on board into taxi, trip, contingency, alternate, final reserve, additional, extra and discretionary fuel.",
+        long_help = "Operating rule that decomposes the fuel on board into taxi, trip, contingency, alternate, final reserve, additional, extra and discretionary fuel. Selecting one sizes the design mission under that rule; it is a study assumption, not a compliance finding."
     )]
     pub scheme: FuelScheme,
 
     /// Whether the flown mission carries the policy fuel or the maximum load.
     #[config(
         label = "Fly the policy load case",
-        help = "When enabled the route is flown at the takeoff mass the fuel policy requires for it (taxi, trip, contingency, alternate and final reserve), bounded by the takeoff-mass limit and the tank capacity, and the reserves are checked against that flight. When disabled the mission burns the maximum available fuel, the frozen legacy load case, and the reserve plan is reported against it without being carried."
+        help = "On: fly the route at the takeoff mass the fuel policy requires, within mass and tank limits, and check the reserves.",
+        long_help = "When enabled the route is flown at the takeoff mass the fuel policy requires for it (taxi, trip, contingency, alternate and final reserve), bounded by the takeoff-mass limit and the tank capacity, and the reserves are checked against that flight. When disabled the mission burns the maximum available fuel, the frozen legacy load case, and the reserve plan is reported against it without being carried."
     )]
     pub fly_policy_load_case: bool,
 
@@ -97,14 +101,16 @@ pub struct FuelPolicyConfig {
     #[config(
         label = "Taxi time",
         unit = "min",
-        help = "Ground time at idle fuel flow before takeoff, which the ramp mass carries above the takeoff mass. Ten to fifteen minutes is representative of a large hub; the value is an operator assumption every scheme leaves open."
+        help = "Ground time at idle fuel flow before takeoff [min]; the ramp mass carries it above the takeoff mass. 10-15 min is representative of a large hub.",
+        long_help = "Ground time at idle fuel flow before takeoff, which the ramp mass carries above the takeoff mass. Ten to fifteen minutes is representative of a large hub; the value is an operator assumption every scheme leaves open."
     )]
     pub taxi_time_min: f64,
 
     /// Contingency fuel as a share of the planned trip fuel.
     #[config(
         label = "Contingency trip-fuel fraction",
-        help = "Share of the planned trip fuel carried as contingency. The EASA basic scheme uses five percent, or three percent when an en-route alternate is available; the FAA flag rule uses ten percent of the flight time instead, and the domestic rule has no contingency quantity."
+        help = "Contingency fuel as a fraction of planned trip fuel. EASA basic 0.05 (0.03 with an en-route alternate); FAA flag rule 0.10 of flight time; domestic none.",
+        long_help = "Share of the planned trip fuel carried as contingency. The EASA basic scheme uses five percent, or three percent when an en-route alternate is available; the FAA flag rule uses ten percent of the flight time instead, and the domestic rule has no contingency quantity."
     )]
     pub contingency_trip_fraction: f64,
 
@@ -112,7 +118,8 @@ pub struct FuelPolicyConfig {
     #[config(
         label = "Contingency holding floor",
         unit = "min",
-        help = "Minimum contingency fuel, expressed as holding time at the holding altitude above the destination at the estimated landing mass. The EASA basic scheme requires at least five minutes; set zero to remove the floor."
+        help = "Minimum contingency fuel as holding time over the destination at the estimated landing mass [min]. EASA basic requires at least 5 min; zero removes the floor.",
+        long_help = "Minimum contingency fuel, expressed as holding time at the holding altitude above the destination at the estimated landing mass. The EASA basic scheme requires at least five minutes; set zero to remove the floor."
     )]
     pub contingency_minimum_hold_min: f64,
 
@@ -120,7 +127,8 @@ pub struct FuelPolicyConfig {
     #[config(
         label = "Alternate distance",
         unit = "nmi",
-        help = "Still-air distance from the destination to the alternate aerodrome, flown after a missed approach. Zero means no destination alternate, which under the EASA basic scheme adds a fifteen-minute hold at the destination instead. Two hundred nautical miles is the common conceptual-design convention."
+        help = "Still-air distance from destination to alternate aerodrome after a missed approach [nmi].",
+        long_help = "Still-air distance from the destination to the alternate aerodrome, flown after a missed approach. Zero means no destination alternate, which under the EASA basic scheme adds a fifteen-minute hold at the destination instead. Two hundred nautical miles is the common conceptual-design convention."
     )]
     pub alternate_distance_nmi: f64,
 
@@ -128,7 +136,8 @@ pub struct FuelPolicyConfig {
     #[config(
         label = "Final reserve hold",
         unit = "min",
-        help = "Holding time at the holding altitude above the alternate (or destination without one) at the estimated landing mass. Thirty minutes is the turbine value in the EASA basic scheme and the FAA flag rule; the FAA domestic rule uses forty-five minutes at normal cruise consumption instead."
+        help = "Holding time over the alternate (or destination) at the estimated landing mass [min]. 30 min is the EASA basic and FAA flag value; FAA domestic uses 45 min.",
+        long_help = "Holding time at the holding altitude above the alternate (or destination without one) at the estimated landing mass. Thirty minutes is the turbine value in the EASA basic scheme and the FAA flag rule; the FAA domestic rule uses forty-five minutes at normal cruise consumption instead."
     )]
     pub final_reserve_hold_min: f64,
 
@@ -136,14 +145,16 @@ pub struct FuelPolicyConfig {
     #[config(
         label = "Domestic cruise reserve",
         unit = "min",
-        help = "Flight time at normal cruise fuel consumption carried after the alternate under 14 CFR 121.639. Forty-five minutes is the rule; it is read only when the FAA domestic scheme is selected."
+        help = "Flight time at normal cruise consumption carried after the alternate, 14 CFR 121.639 [min]. 45 min is the rule; read only for the FAA domestic scheme.",
+        long_help = "Flight time at normal cruise fuel consumption carried after the alternate under 14 CFR 121.639. Forty-five minutes is the rule; it is read only when the FAA domestic scheme is selected."
     )]
     pub domestic_cruise_reserve_min: f64,
 
     /// Share of the destination flight time carried under the FAA flag rule.
     #[config(
         label = "Flag flight-time fraction",
-        help = "Share of the total flight time to the destination whose fuel is carried as reserve under 14 CFR 121.645(b). Ten percent is the rule; it is read only when the FAA flag/supplemental scheme is selected."
+        help = "Fraction of total flight time to the destination carried as reserve fuel, 14 CFR 121.645(b). 0.10 is the rule; read only for the FAA flag/supplemental scheme.",
+        long_help = "Share of the total flight time to the destination whose fuel is carried as reserve under 14 CFR 121.645(b). Ten percent is the rule; it is read only when the FAA flag/supplemental scheme is selected."
     )]
     pub flag_flight_time_fraction: f64,
 
@@ -159,7 +170,8 @@ pub struct FuelPolicyConfig {
     #[config(
         label = "Additional fuel",
         unit = "kg",
-        help = "Fuel carried for the specific cases the general reserves do not cover, such as an engine failure or depressurisation at the critical point of an extended-diversion route. Zero unless such a case is being studied."
+        help = "Fuel for specific cases the general reserves do not cover, such as engine failure or depressurisation on an extended-diversion route [kg]. Zero unless studied.",
+        long_help = "Fuel carried for the specific cases the general reserves do not cover, such as an engine failure or depressurisation at the critical point of an extended-diversion route. Zero unless such a case is being studied."
     )]
     pub additional_fuel_kg: f64,
 
@@ -181,7 +193,8 @@ pub struct FuelPolicyConfig {
     /// Fuel that cannot be delivered to the engines.
     #[config(
         label = "Unusable fuel fraction",
-        help = "Share of the usable tank capacity that remains undeliverable in the most adverse feed condition. CS 25.959 requires it to be established by test; between a half and one percent is representative of transport integral tanks. It belongs to the operating empty mass, not to the fuel load."
+        help = "Fraction of usable tank capacity left undeliverable in the most adverse feed condition. CS 25.959 requires test; 0.005-0.01 is typical. Counts as operating empty mass.",
+        long_help = "Share of the usable tank capacity that remains undeliverable in the most adverse feed condition. CS 25.959 requires it to be established by test; between a half and one percent is representative of transport integral tanks. It belongs to the operating empty mass, not to the fuel load."
     )]
     pub unusable_fuel_fraction: f64,
 }

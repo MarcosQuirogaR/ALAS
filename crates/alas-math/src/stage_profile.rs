@@ -84,10 +84,22 @@ pub enum Stage {
     PipelineMissionModel,
     /// Pipeline mission stage: planned dispatch iteration of the route.
     PipelinePlannedDispatch,
+    /// Native flight: engine, drag and mass models built from the report.
+    FlightBuildAnalyses,
+    /// Native flight: route, ladder and schedules built for the trip.
+    FlightSchedules,
+    /// Native flight: the guided flight itself (segment solves).
+    FlightGuidance,
+    /// Native flight: reserves, alternate and the other flights of the report supplement.
+    FlightSupplement,
+    /// Native flight: cruise-level policy priced for a sizing pass.
+    FlightCruisePolicy,
+    /// Native flight: route and load case repriced between sizing passes.
+    FlightRepricing,
 }
 
 /// Number of [`Stage`] variants.
-pub const STAGE_COUNT: usize = 24;
+pub const STAGE_COUNT: usize = 30;
 
 /// Every stage, in report order.
 pub const STAGES: [Stage; STAGE_COUNT] = [
@@ -115,6 +127,12 @@ pub const STAGES: [Stage; STAGE_COUNT] = [
     Stage::PipelineFuelLoading,
     Stage::PipelineMissionModel,
     Stage::PipelinePlannedDispatch,
+    Stage::FlightBuildAnalyses,
+    Stage::FlightSchedules,
+    Stage::FlightGuidance,
+    Stage::FlightSupplement,
+    Stage::FlightCruisePolicy,
+    Stage::FlightRepricing,
 ];
 
 impl Stage {
@@ -145,6 +163,12 @@ impl Stage {
             Self::PipelineFuelLoading => "pipeline_mission_fuel_loading",
             Self::PipelineMissionModel => "pipeline_mission_model_build",
             Self::PipelinePlannedDispatch => "pipeline_mission_planned_dispatch",
+            Self::FlightBuildAnalyses => "flight_build_analyses",
+            Self::FlightSchedules => "flight_build_schedules",
+            Self::FlightGuidance => "flight_guided_solve",
+            Self::FlightSupplement => "flight_supplement",
+            Self::FlightCruisePolicy => "flight_cruise_policy",
+            Self::FlightRepricing => "flight_repricing",
         }
     }
 }
@@ -418,12 +442,15 @@ mod tests {
         enable();
         reset();
         let outer = Instant::now();
+        let inner_wall;
         {
             let _evaluation = scope(Stage::Evaluation);
             std::thread::sleep(std::time::Duration::from_millis(20));
             {
                 let _trim = scope(Stage::Trim);
+                let inner = Instant::now();
                 std::thread::sleep(std::time::Duration::from_millis(30));
+                inner_wall = inner.elapsed().as_secs_f64();
             }
         }
         let wall = outer.elapsed().as_secs_f64();
@@ -431,8 +458,22 @@ mod tests {
         let get = |key: &str| report.stages.iter().find(|s| s.0 == key).map(|s| s.1);
         let other = get("other_unattributed").unwrap_or(f64::NAN);
         let trim = get("trim_excl_vlm").unwrap_or(f64::NAN);
-        assert!((0.018..0.2).contains(&other), "other {other}");
-        assert!((0.028..0.2).contains(&trim), "trim {trim}");
-        assert!((report.total_s() - wall).abs() < 0.01);
+        // A sleep lasts at least its duration and, on a loaded machine, any
+        // amount longer: only the lower bounds and the bookkeeping identities
+        // are asserted, with the clock's own readings as the reference.
+        assert!(other >= 0.018, "other {other}");
+        assert!(trim >= 0.028, "trim {trim}");
+        // Exclusive: the outer stage does not also carry the inner sleep.
+        assert!(
+            other <= wall - inner_wall + 1.0e-9,
+            "other {other} wall {wall} inner {inner_wall}"
+        );
+        // The stages sum to no more than the enclosing wall time.
+        assert!(
+            report.total_s() <= wall + 1.0e-9,
+            "total {} wall {wall}",
+            report.total_s()
+        );
+        assert!(report.total_s() >= other + trim - 1.0e-9);
     }
 }

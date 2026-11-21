@@ -34,18 +34,31 @@ use alas_opt::mdo::propulsion::product_orchestrator;
 use crate::feasibility::plan_fuel_loading;
 use crate::full_analysis::AnalysisReport;
 
+mod cruise_level;
+pub mod deck_validity;
 pub mod dispatch;
 mod drag_inputs;
 mod drag_model;
 mod flight;
 mod guidance;
+mod level_change;
+mod native_flight;
+pub mod plan;
+mod propeller_climb;
+mod rate_pass;
+mod rate_search;
+mod rated_climb;
+mod reserve;
 mod schedule;
+pub mod sequence;
+mod standard_flight;
 mod tail_geometry;
 
 pub(crate) use dispatch::{LoadCaseSelection, SelectedLoadCase};
 use drag_inputs::{main_quarter_chord_sweep, main_thickness, tail_thickness};
 use drag_model::{candidate_drag_source, mission_lift_surrogate};
-use guidance::{adapt_failed_climb, adapt_failed_cruise, adapt_failed_descent};
+use guidance::{adapt_failed_cruise, adapt_failed_descent};
+#[cfg(test)]
 use schedule::build_schedule;
 #[cfg(test)]
 use schedule::schedule_horizontal_distance;
@@ -67,29 +80,21 @@ pub(crate) fn evaluate(
     destination: &Airport,
     route_distance_m: f64,
 ) -> Result<(Option<MissionResult>, SelectedLoadCase), String> {
-    let dispatch_profile =
-        alas_math::stage_profile::scope(alas_math::stage_profile::Stage::PipelineRouteDispatch);
-    let (request, mut load_case) =
-        dispatch::select_route_load_case(config, report, origin, destination, route_distance_m)?;
-    drop(dispatch_profile);
-    let _flight_profile =
-        alas_math::stage_profile::scope(alas_math::stage_profile::Stage::PipelineTelemetryFlight);
-    // The one native flight, at the selected mass: telemetry beside the
-    // route the segment model priced; its failure never stops the stage.
-    let native = (|| {
-        let mut analyses = build_analyses(config, report)?;
-        analyses.takeoff_mass_kg = load_case.takeoff_mass_kg;
-        analyses.minimum_mass_kg = Some(load_case.zero_fuel_mass_kg);
-        flight::fly_with_guidance(build_schedule(&request)?, &request, &analyses)
-    })();
-    let result = native
-        .map_err(|error| load_case.native_error = Some(error))
-        .ok();
-    if let Some(summary) = result.as_ref().and_then(MissionResult::completed_summary) {
-        load_case.record_native_trip(summary.trip_fuel_kg);
+    // A propeller aircraft on the default schedule climbs at its best rate of climb, priced and
+    // flown alike (`propeller_climb`).
+    let climbing = propeller_climb::with_best_rate_climb(config, report);
+    let config = &*climbing;
+    if config.mission.plan.has_stages() {
+        return plan::evaluate(config, report, origin, destination, route_distance_m);
     }
-    Ok((result, load_case))
+    standard_flight::evaluate(config, report, origin, destination, route_distance_m)
 }
+
+pub use native_flight::{fly_standard_mission, NativeFlight};
+pub use standard_flight::{
+    planned_standard_mission, planned_standard_schedule, NativeSupplement, ReachCause, ReachNote,
+    SizingOutcome,
+};
 
 // The compatibility variant is only used by the in-crate SUAVE boundary tests.
 #[allow(dead_code)]
@@ -358,7 +363,7 @@ fn mission_wings(
                 .find(|surface| surface.name == "Vertical Stabilizer")
                 // Wing::reference_area is an XY projection and is zero for
                 // this vertical surface; retain its XZ planform area.
-                .map(|surface| surface.unfolded_area())
+                .map(|surface| surface.reference_planform().unfolded_area())
                 .ok_or_else(|| "mission report has no vertical stabilizer".to_owned())?;
             let main = report.airplane.s_ref;
             let ar = report.airplane.b_ref * report.airplane.b_ref / main;
@@ -393,7 +398,9 @@ fn mission_wings(
     };
     Ok(vec![
         wing(
-            geometry_value(report, "mean_aerodynamic_chord_m")?,
+            // The chord of the wetted wing: its Reynolds number reads the sections,
+            // not the chord the coefficients are quoted on.
+            geometry_value(report, "loft_mean_aerodynamic_chord_m")?,
             main_quarter_chord_sweep(report, reference_mode),
             main_thickness(report, reference_mode),
             wing_area,
@@ -483,7 +490,7 @@ fn vlm_geometry(
         .find(|surface| surface.name == "Vertical Stabilizer")
         // `reference_area()` projects onto XY and is zero for the vertical
         // tail.  Its aerodynamic planform is the unfolded XZ area.
-        .map(|surface| surface.unfolded_area())
+        .map(|surface| surface.reference_planform().unfolded_area())
         .ok_or_else(|| {
             "mission reduced geometry requires an explicit vertical stabilizer; no surrogate tail was substituted"
                 .to_owned()
@@ -609,15 +616,45 @@ mod tests {
         let request = build_mission_request(&config, origin, destination, 5_000_000.0);
         let schedule = build_schedule(&request)
             .unwrap_or_else(|error| panic!("default route schedule: {error}"));
-        assert_eq!(schedule.len(), 12);
-        assert_eq!(schedule[0].tag, "takeoff");
-        assert_eq!(schedule[1].tag, "initial_climb");
-        assert_eq!(schedule[2].tag, "cruise_step_1");
-        assert_eq!(schedule[6].tag, "cruise_step_3");
-        assert_eq!(schedule[7].tag, "descent_1");
-        assert_eq!(schedule[10].tag, "descent_4");
-        assert_eq!(schedule[11].tag, "final_landing");
-        let SegmentKind::Descent { altitude_end_m, .. } = schedule[7].kind else {
+        // The level speed-change legs between the scheduled legs are tested on
+        // their own; the reference order is that of the scheduled legs.
+        let schedule: Vec<_> = schedule
+            .into_iter()
+            .filter(|spec| {
+                !schedule::speed_change::is_speed_change(spec) && !spec.tag.contains("_path_")
+            })
+            .collect();
+        // A 5,000 km sector cannot justify a step cruise of the default ladder (steps of 2,000 ft
+        // at the top): the climb goes on through the step levels, on the climb schedule, to the
+        // one cruise level at the top.
+        let tags: Vec<&str> = schedule.iter().map(|spec| spec.tag.as_str()).collect();
+        assert_eq!(
+            tags,
+            [
+                "takeoff",
+                "initial_climb",
+                "step_climb_1",
+                "step_climb_3",
+                "step_climb_4",
+                "cruise_step_3",
+                "descent_1",
+                "descent_2",
+                "descent_3",
+                "descent_4",
+                "final_landing"
+            ]
+        );
+        let climb = &schedule[2];
+        for step in &schedule[3..5] {
+            assert!(step.rating_limited, "{}", step.tag);
+            assert_eq!(step.air_speed_m_s, climb.air_speed_m_s, "{}", step.tag);
+            assert_eq!(
+                step.air_speed_reference, climb.air_speed_reference,
+                "{}",
+                step.tag
+            );
+        }
+        let SegmentKind::Descent { altitude_end_m, .. } = schedule[6].kind else {
             panic!("descent schedule entry");
         };
         assert!((altitude_end_m - 9_144.0).abs() < 1e-12);
@@ -812,10 +849,12 @@ mod tests {
             .iter()
             .map(|segment| segment.tag.as_str())
             .collect();
-        assert!(!tags.contains(&"step_climb_1"));
         assert!(!tags.contains(&"cruise_step_2"));
-        assert!(!tags.contains(&"step_climb_2"));
         assert!(!tags.contains(&"cruise_step_3"));
+        // The climb rungs are climbed through to the one cruise level, which sits at the top.
+        let step_climb_2 = tags.iter().position(|tag| *tag == "step_climb_2");
+        let cruise = tags.iter().position(|tag| *tag == "cruise_step_1");
+        assert!(step_climb_2.is_some() && cruise > step_climb_2, "{tags:?}");
     }
 
     #[test]
@@ -906,7 +945,14 @@ mod tests {
 
     #[test]
     fn a_pipeline_report_can_be_flown_by_the_native_mission() {
-        let config = AlasConfig::default();
+        // One cruise leg at the first level: the profile as configured is what the flight
+        // flies, and the default aircraft cannot climb to the design altitude of the
+        // three-leg ladder at the mass of a 5,000 km route (the flight then says so, see
+        // `a_ladder_above_the_ceiling_is_reported_not_replaced`).
+        let mut config = AlasConfig::default();
+        config.mission.profile.cruise_1_distance_fraction = 1.0;
+        config.mission.profile.cruise_2_distance_fraction = 0.0;
+        config.mission.profile.cruise_3_distance_fraction = 0.0;
         let origin = get_airport(&config.departure_airport)
             .unwrap_or_else(|error| panic!("default origin: {error}"));
         let destination = get_airport(&config.arrival_airport)
@@ -1070,12 +1116,46 @@ mod tests {
         assert!(hot_temperature > cold_temperature);
         assert!(hot_density < cold_density);
 
+        // A constant-speed cruise of zero distance (a route whose climb and
+        // descent footprint leaves no cruise remainder) is a leg of zero
+        // duration: it converges, takes no time and burns no fuel.
+        // The state is one the aircraft holds with thrust to spare: level at
+        // 1,500 m at the speed of the initial climb, clean.
+        let mut zero_leg = build_schedule(&request)
+            .unwrap_or_else(|error| panic!("default route schedule: {error}"))
+            .into_iter()
+            .find(|spec| spec.tag == "initial_climb")
+            .unwrap_or_else(|| panic!("the default route has an initial climb"));
+        zero_leg.tag = "zero_distance_cruise".to_owned();
+        zero_leg.kind = SegmentKind::Cruise {
+            altitude_m: Some(1_500.0),
+            distance_m: 0.0,
+        };
+        zero_leg.air_speed_reference = alas_config::mission::SpeedReference::TrueAirspeed;
+        zero_leg.takeoff_rated = false;
+        zero_leg.entry_speed_m_s = 0.0;
+        zero_leg.exit_speed_m_s = 0.0;
+        zero_leg.speed_profile.clear();
+        let zero = Mission {
+            schedule: vec![zero_leg],
+        }
+        .evaluate(&analyses)
+        .unwrap_or_else(|error| panic!("a zero-distance cruise leg is set up: {error}"));
+        assert!(zero.solutions[0].converged, "{:?}", zero.solutions[0]);
+        assert_eq!(zero.block_time_s(), 0.0);
+        assert_eq!(zero.fuel_burned_kg(), 0.0);
+
         let (result, load_case) = evaluate(&config, &report, origin, destination, 5_000_000.0)
             .unwrap_or_else(|error| panic!("default report flies: {error}"));
         let result =
             result.unwrap_or_else(|| panic!("native flight: {:?}", load_case.native_error));
         assert!((result.initial_mass_kg() - load_case.takeoff_mass_kg).abs() < 1.0e-6);
-        assert_eq!(result.solutions.len(), result.scheduled_segment_count);
+        assert_eq!(
+            result.solutions.len(),
+            result.scheduled_segment_count,
+            "the native flight stopped early: {:?}",
+            load_case.native_error
+        );
         assert!(result
             .solutions
             .iter()
@@ -1087,11 +1167,16 @@ mod tests {
             .segments
             .iter()
             .all(|segment| segment.conditions.len() == 16));
-        assert!(result
-            .segments
-            .iter()
-            .flat_map(|segment| segment.conditions.throttle.iter())
-            .all(|throttle| throttle.is_finite() && (0.0..=1.0).contains(throttle)));
+        // Between the engine's flight-idle net force at each point (a small negative fraction
+        // of the maximum-climb force where it is a drag) and the ceiling of one.
+        assert!(result.segments.iter().all(|segment| {
+            segment
+                .conditions
+                .throttle
+                .iter()
+                .zip(&segment.conditions.available_throttle_floor)
+                .all(|(t, floor)| t.is_finite() && *t >= floor.min(0.0) - 1.0e-3 && *t <= 1.001)
+        }));
         assert!(result.initial_mass_kg() > result.final_mass_kg());
         assert!(result.fuel_burned_kg() > 0.0);
         assert!(result.block_time_s() > 0.0);
@@ -1100,3 +1185,9 @@ mod tests {
 
 #[cfg(test)]
 mod suave_boundary;
+
+#[cfg(test)]
+mod continuation_tests;
+
+#[cfg(test)]
+mod standard_ladder_tests;

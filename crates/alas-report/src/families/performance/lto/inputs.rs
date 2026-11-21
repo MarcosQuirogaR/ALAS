@@ -6,13 +6,13 @@
 use alas_config::airports::Airport;
 use alas_config::AlasConfig;
 use alas_opt::mdo::YawAirframe;
-use alas_perf::performance::{compute_v_speeds_at_masses, FieldPerformance};
+use alas_perf::performance::{compute_v_speeds_at_masses, FieldPerformance, FieldPolar};
 use alas_pipeline::field_performance::{
     calculate_with_airframe, dry_landing_distance_share, report_field_polar,
 };
 use alas_pipeline::field_reference::sea_level_static_thrust_n;
 use alas_pipeline::full_analysis::AnalysisReport;
-use alas_pipeline::report_config::config_for_report;
+use alas_pipeline::report_config::config_for_report_at;
 
 pub(super) fn field_performance(
     report: &AnalysisReport,
@@ -46,7 +46,15 @@ pub(super) fn field_performance(
     }
     // The V speeds use the computed minimum control speed (CS 25.107), the same
     // resolution as the feasibility gate and the ISA reference.
-    let resolved = config_for_report(config, report, takeoff_mass_kg, landing_mass_kg, area_m2);
+    // and the improved-climb V2 of the aerodrome the field is flown at.
+    let resolved = config_for_report_at(
+        config,
+        report,
+        airport,
+        takeoff_mass_kg,
+        landing_mass_kg,
+        area_m2,
+    );
     let config = &*resolved;
     let perf = &config.performance;
     let speeds_at = |field: &Airport| {
@@ -65,7 +73,7 @@ pub(super) fn field_performance(
     // The corrected propeller calculation resolves thrust at each roll speed.
     let (thrust_n, _) = sea_level_static_thrust_n(config, speeds_at(&sea_level).v_r_ms)?;
     let static_tw = thrust_n / (takeoff_mass_kg * config.requirements.gravity_m_s2);
-    let (cd0, k) = if !perf.legacy_field_correlations {
+    let polar = if !perf.legacy_field_correlations {
         let atmosphere =
             alas_atmo::us1976_compute_values(airport.elevation_m, airport.isa_deviation_c);
         report_field_polar(
@@ -76,7 +84,7 @@ pub(super) fn field_performance(
         )?
     } else {
         // The historical replay does not consume the field polar.
-        (0.0, 0.0)
+        FieldPolar::parabola(0.0, 0.0)
     };
     // The propeller failed-engine state needs the fin and the centre of gravity,
     // as in the ISA reference.
@@ -91,8 +99,7 @@ pub(super) fn field_performance(
         takeoff_mass_kg,
         landing_mass_kg,
         static_tw,
-        cd0,
-        k,
+        &polar,
     )?;
     if !perf.legacy_field_correlations {
         // Actual distance under 25.125 becomes the operational dry-runway LFL.

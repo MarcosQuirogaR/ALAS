@@ -2,7 +2,7 @@
 // Copyright (C) 2026 Marcos Quiroga Rodriguez
 
 //! Diagnostic table of the take-off thrust ratio at V2 and of the take-off
-//! thrust checks of every registered jet (lane fix-deck-takeoff). Ignored
+//! thrust checks of every registered jet (deck-takeoff work). Ignored
 //! test; it prints one `DECKTO` line per jet.
 //!
 //! `cargo test -p alas-opt --release deck_takeoff_table -- --ignored --nocapture`
@@ -15,7 +15,7 @@ use crate::mdo::sizing::run_candidate;
 use alas_config::{ActiveEngineModel, AlasConfig};
 use alas_perf::performance::compute_v_speeds_at_masses;
 
-const G0: f64 = 9.806_65;
+const G0: f64 = alas_atmo::STANDARD_GRAVITY;
 
 /// `cargo test -p alas-opt --release deck_takeoff_table -- --ignored --nocapture`
 #[test]
@@ -61,6 +61,11 @@ fn deck_takeoff_table() {
                 s_ref_m2: s_ref,
                 drag: &outcome.sized.fuel_artifacts.drag,
                 installed_tw_sls: installed_tw,
+                aspect_ratio: super::net_path::climb_out_aspect_ratio(
+                    &resolved,
+                    outcome.plane.b_ref,
+                    outcome.plane.s_ref,
+                ),
             },
         );
         let perf = &flown.performance;
@@ -128,6 +133,7 @@ fn deck_takeoff_table() {
                 mach,
                 departure.elevation_m,
                 departure.isa_deviation_c,
+                crate::mdo::drag_table::high_lift_lift_shift(perf.cl_max_to, perf.cl_max_clean),
             ) + perf.oei_climb_delta_cd
                 + perf.takeoff_gear_delta_cd;
             let lift = cl * q * s_ref;
@@ -259,6 +265,11 @@ fn deck_improved_climb_terms() {
             s_ref_m2: s_ref,
             drag: &outcome.sized.fuel_artifacts.drag,
             installed_tw_sls: 0.20,
+            aspect_ratio: super::net_path::climb_out_aspect_ratio(
+                &resolved,
+                outcome.plane.b_ref,
+                outcome.plane.s_ref,
+            ),
         },
     );
     eprintln!(
@@ -268,7 +279,7 @@ fn deck_improved_climb_terms() {
     );
 }
 
-/// Turboprop approach-climb breakdown (lane blockers B). Ignored; prints.
+/// Turboprop approach-climb breakdown (blockers B work). Ignored; prints.
 ///
 /// `cargo test -p alas-opt --release turboprop_climb_breakdown -- --ignored --nocapture`
 #[test]
@@ -335,7 +346,7 @@ fn turboprop_climb_breakdown() {
     }
 }
 
-/// Turboprop cruise-point propeller breakdown (lane blockers B). Ignored.
+/// Turboprop cruise-point propeller breakdown (blockers B work). Ignored.
 ///
 /// `cargo test -p alas-opt --release turboprop_cruise_breakdown -- --ignored --nocapture`
 #[test]
@@ -388,7 +399,7 @@ fn turboprop_cruise_breakdown() {
     }
 }
 
-/// Turboprop nominal-design rows (lane blockers B). Ignored; prints.
+/// Turboprop nominal-design rows (blockers B work). Ignored; prints.
 ///
 /// `cargo test -p alas-opt --release turboprop_nominal_rows -- --ignored --nocapture`
 #[test]
@@ -419,7 +430,7 @@ fn turboprop_nominal_rows() {
     }
 }
 
-/// Mission-closed nominal rows of a turboprop (lane blockers B). Ignored.
+/// Mission-closed nominal rows of a turboprop (blockers B work). Ignored.
 ///
 /// `cargo test -p alas-opt --release turboprop_mission_closed_rows -- --ignored --nocapture`
 #[test]
@@ -456,7 +467,7 @@ fn turboprop_mission_closed_rows() {
 
 /// Clean-sheet turboprop start: climb breakdown and hard rows at the
 /// derived nominal design of the brief file named by `ALAS_PROBE_BRIEF`
-/// (lane cleansheet-turboprop). Ignored; prints.
+/// (cleansheet-turboprop work). Ignored; prints.
 ///
 /// `cargo test -p alas-opt --release clean_sheet_turboprop_start -- --ignored --nocapture`
 #[test]
@@ -539,6 +550,7 @@ fn clean_sheet_turboprop_start() {
                 mach,
                 departure.elevation_m,
                 departure.isa_deviation_c,
+                crate::mdo::drag_table::high_lift_lift_shift(perf.cl_max_to, perf.cl_max_clean),
             );
             let cd0 =
                 drag.cd_at_atmosphere(0.0, mach, departure.elevation_m, departure.isa_deviation_c);

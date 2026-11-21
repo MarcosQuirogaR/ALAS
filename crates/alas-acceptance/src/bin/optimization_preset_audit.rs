@@ -776,7 +776,7 @@ fn evaluate_preset_optimization_inner(
                 "timeout_s": limit.as_secs(),
                 "wall_time_s": observed.as_secs_f64(),
                 // Use the watch's request-to-join interval; worker start and
-                // coordinator guard have different origins under contention.
+                // cancellation guard have different origins under contention.
                 "cancellation_latency_s": telemetry.join_latency_s,
                 "cancellation": cancellation_json(&telemetry),
                 "acknowledgement_contract_s": ACKNOWLEDGEMENT_CONTRACT_S,
@@ -1056,8 +1056,19 @@ fn build_success_row(
         && neutral_point_x.is_some_and(f64::is_finite);
 
     let evidence = preset_design_mission_evidence(name);
-    let design_mission_source_backed = matches!(evidence, DesignMissionEvidence::SourceBacked(_));
-    let design_mission_status = design_mission_status_label(&evidence);
+    let provenance_registered = presets::get(name).is_ok_and(|preset| {
+        preset
+            .reference
+            .mission_provenance
+            .admits_source_backed_promotion()
+    });
+    let design_mission_source_backed =
+        provenance_registered || matches!(evidence, DesignMissionEvidence::SourceBacked(_));
+    let design_mission_status = if provenance_registered {
+        "NOT EVALUATED"
+    } else {
+        design_mission_status_label(&evidence)
+    };
 
     // Every clause a final candidate must satisfy before this harness may call
     // it physically feasible, each named so a failure says which one refused.
@@ -1263,6 +1274,7 @@ fn is_mission_finding(code: FindingCode) -> bool {
         code,
         FindingCode::MissionUnavailable
             | FindingCode::MissionNotConverged
+            | FindingCode::MissionPathFlownLevel
             | FindingCode::InvalidMissionFuelBurn
             | FindingCode::MissionFuelShortfall
     )

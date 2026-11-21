@@ -1,12 +1,12 @@
 // SPDX-License-Identifier: AGPL-3.0-or-later
 // Copyright (C) 2026 Marcos Quiroga Rodriguez
 
-//! The left navigation tree's page model and the detached Advanced Settings
-//! tabs.
+//! The left navigation tree's page model and the Advanced sections of the pages.
 //!
-//! The sidebar shows Setup, Modeling (routine discipline inputs) and Results.
-//! Advanced controls live in the detached Advanced Settings window, whose tabs
-//! come from [`ADVANCED_SETTINGS_PAGES`]. A page over a configuration group
+//! The sidebar shows the Design flow (Aircraft, Mission, Payload, Analyses,
+//! Results) and the Workspace tools. Advanced controls live in the Advanced
+//! sections of Aircraft, Mission and Analyses (and in the Sandbox's detached
+//! window), whose tabs come from [`ADVANCED_SETTINGS_PAGES`]. A page over a configuration group
 //! declares which surface of that group it renders, so one authoritative
 //! configuration is edited from either place without duplicated forms.
 
@@ -17,7 +17,7 @@ pub enum Surface {
     All,
     /// Routine fields only (the Modeling sidebar page).
     Modeling,
-    /// Advanced fields only (the detached Advanced Settings tab).
+    /// Advanced fields only (an Advanced section).
     Advanced,
 }
 
@@ -54,6 +54,14 @@ pub enum PageKind {
     Uav,
     /// The Add-ons page.
     Addons,
+    /// The Mission step (stage editor extension point for 07b).
+    Mission,
+    /// The Payload step (payload editor extension point for 07b).
+    Payload,
+    /// The unified file library.
+    Files,
+    /// The Sandbox entry page.
+    Sandbox,
 }
 
 /// Which aux-preset registry a form page offers a picker for.
@@ -103,6 +111,22 @@ pub struct Page {
     pub preview_title: Option<&'static str>,
     /// Which aux-preset picker, if any, this page offers.
     pub preset_kind: Option<PresetKind>,
+    /// The step-bar number of a Design-flow page, or 0 for pages outside the flow.
+    pub step: u8,
+    /// Whether the page is a sub-page drawn indented under the step above it.
+    pub nested: bool,
+    /// Sections folded in from the former Advanced Settings tabs, shown only
+    /// at the Advanced detail level.
+    pub advanced: &'static [AdvancedSection],
+}
+
+/// A titled section of a flow page, holding the form pages of one discipline.
+#[derive(Debug, Clone, Copy)]
+pub struct AdvancedSection {
+    /// The section heading.
+    pub title: &'static str,
+    /// Ids of the form pages rendered, in order, inside the section.
+    pub pages: &'static [&'static str],
 }
 
 impl Page {
@@ -119,6 +143,9 @@ impl Page {
             preview: None,
             preview_title: None,
             preset_kind: None,
+            step: 0,
+            nested: false,
+            advanced: &[],
         }
     }
 
@@ -135,6 +162,9 @@ impl Page {
             preview: None,
             preview_title: None,
             preset_kind: None,
+            step: 0,
+            nested: false,
+            advanced: &[],
         }
     }
 }
@@ -157,10 +187,108 @@ pub struct NavGroup {
     pub subgroups: &'static [NavSubgroup],
 }
 
-const SETUP_PAGES: &[Page] = &[
-    Page::screen("inputs", "Inputs", PageKind::Inputs),
-    Page::screen("design_space", "Design Space", PageKind::DesignSpace),
-    Page::screen("setup_analyses", "Analyses", PageKind::Analyses),
+/// Advanced sections of the Aircraft page: the geometry, mass, aerodynamic and
+/// propulsion models and the optimizer.
+const AIRCRAFT_ADVANCED: &[AdvancedSection] = &[
+    AdvancedSection {
+        title: "Geometry",
+        pages: &["geometry"],
+    },
+    AdvancedSection {
+        title: "Control Surfaces",
+        pages: &["control_surfaces"],
+    },
+    AdvancedSection {
+        title: "Landing Gear",
+        pages: &["landing_gear"],
+    },
+    AdvancedSection {
+        title: "Mass",
+        pages: &["mass_model", "mass_advanced"],
+    },
+    AdvancedSection {
+        title: "Aerodynamics",
+        pages: &["aerodynamics"],
+    },
+    AdvancedSection {
+        title: "Propulsion",
+        pages: &["engine_designer", "propulsion_advanced"],
+    },
+    AdvancedSection {
+        title: "Optimizer",
+        pages: &["optimizer"],
+    },
+];
+
+const MISSION_ADVANCED: &[AdvancedSection] = &[
+    AdvancedSection {
+        title: "Mission Analysis",
+        pages: &["mission_advanced"],
+    },
+    AdvancedSection {
+        title: "Performance",
+        pages: &["performance"],
+    },
+];
+
+const ANALYSES_ADVANCED: &[AdvancedSection] = &[
+    AdvancedSection {
+        title: "Structures",
+        pages: &["structures", "structures_advanced"],
+    },
+    AdvancedSection {
+        title: "Analysis Fidelity",
+        pages: &["analysis"],
+    },
+    AdvancedSection {
+        title: "MSES Analysis",
+        pages: &["mses"],
+    },
+];
+
+/// The Design flow, in step-bar order.
+const DESIGN_PAGES: &[Page] = &[
+    Page {
+        step: 1,
+        advanced: AIRCRAFT_ADVANCED,
+        ..Page::screen("inputs", "Aircraft", PageKind::Inputs)
+    },
+    Page {
+        nested: true,
+        description: Some("Passenger-class layout and cargo-deck loading that drive the detailed cabin/payload interior and its mass & CG contribution. Selecting this page shows the interior in the Live Preview."),
+        ..Page::form("cabin", "Cabin", "cabin")
+    },
+    Page {
+        step: 2,
+        advanced: MISSION_ADVANCED,
+        ..Page::screen("mission", "Mission", PageKind::Mission)
+    },
+    Page {
+        step: 3,
+        ..Page::screen("payload", "Payload", PageKind::Payload)
+    },
+    // The design space bounds the optimiser, so it comes after the
+    // requirements (Aircraft, Mission, Payload) and before the run.
+    Page {
+        step: 4,
+        ..Page::screen("design_space", "Design Space", PageKind::DesignSpace)
+    },
+    Page {
+        step: 5,
+        advanced: ANALYSES_ADVANCED,
+        ..Page::screen("setup_analyses", "Analyses", PageKind::Analyses)
+    },
+    Page {
+        step: 6,
+        ..Page::screen("results", "Results", PageKind::Results)
+    },
+];
+
+/// Workspace tools that sit beside the Design flow.
+const WORKSPACE_PAGES: &[Page] = &[
+    Page::screen("files", "Files", PageKind::Files),
+    Page::screen("sandbox", "Sandbox", PageKind::Sandbox),
+    Page::screen("setup_tools", "External Tools", PageKind::Setup),
     Page {
         description: Some("Select source-provenanced hardware, set mission and airframe assumptions, and verify generated UAV geometry with the shared production physics core."),
         ..Page::screen("uav", "Fixed-Wing UAV", PageKind::Uav)
@@ -177,7 +305,7 @@ const AIRFOIL_SECTIONS: &[ExtraSection] = &[
     ExtraSection {
         title: "Tail airfoil section",
         path: "/geometry/empennage",
-        names: &["tail_airfoil"],
+        names: &["tail_airfoil", "vstab_airfoil"],
     },
 ];
 
@@ -202,14 +330,10 @@ const PROPULSION_MASS_FACTORS: &[ExtraSection] = &[ExtraSection {
 
 const MODELING_PAGES: &[Page] = &[
     Page {
-        description: Some("Passenger-class layout and cargo-deck loading that drive the detailed cabin/payload interior and its mass & CG contribution. Selecting this page shows the interior in the Live Preview."),
-        ..Page::form("cabin", "Cabin & Cargo", "cabin")
-    },
-    Page {
-        description: Some("Mass-method and CG-solver assumptions: Torenbeek/Raymer structural relations, compatibility-only MTOW fractions for systems and furnishings, or the architecture-dependent NASA FLOPS transport component build-up. FLOPS inputs, high-lift mass loads and propulsion mass factors are in Advanced Settings."),
+        description: Some("Mass-method and CG-solver assumptions: Torenbeek/Raymer structural relations, compatibility-only MTOW fractions for systems and furnishings, or the architecture-dependent NASA FLOPS transport component build-up. FLOPS inputs, high-lift mass loads and propulsion mass factors are in the Advanced level of this section."),
         surface: Surface::Modeling,
         preview: Some("mass_cg"),
-        preview_title: Some("LOAD & TRIM SHEET"),
+        preview_title: Some("Load & trim sheet"),
         ..Page::form("mass_model", "Mass", "mass_model")
     },
     Page {
@@ -220,7 +344,7 @@ const MODELING_PAGES: &[Page] = &[
         ..Page::form("aerodynamics", "Aerodynamics", "drag_model")
     },
     Page {
-        description: Some("Wingbox layout, materials and gauges for the main-wing structural sizing, plus the gear load limits used by the gear-load checks. Solver cases are selected on Analyses; rib, mesh and excitation settings are in Advanced Settings."),
+        description: Some("Wingbox layout, materials and gauges for the main-wing structural sizing, plus the gear load limits used by the gear-load checks. Solver cases are selected on Analyses; rib, mesh and excitation settings are in the Advanced level of this section."),
         surface: Surface::Modeling,
         extra: GEAR_LOAD_LIMITS,
         preview: Some("structures"),
@@ -228,7 +352,7 @@ const MODELING_PAGES: &[Page] = &[
         ..Page::form("structures", "Structures", "structures")
     },
     Page {
-        description: Some("On-design turbofan cycle assumptions (component efficiencies and pressure ratios) of the selected engine. Rating anchors, installation and nacelle placement are in Advanced Settings > Propulsion."),
+        description: Some("On-design turbofan cycle assumptions (component efficiencies and pressure ratios) of the selected engine. Rating anchors, installation and nacelle placement are in the Advanced level of this section."),
         surface: Surface::Modeling,
         preview: Some("engine"),
         preview_title: Some("Thermodynamic cycle preview"),
@@ -239,7 +363,7 @@ const MODELING_PAGES: &[Page] = &[
 /// The detached Advanced Settings window's tabs, in order.
 pub const ADVANCED_SETTINGS_PAGES: &[Page] = &[
     Page {
-        description: Some("The fixed geometric scaffold the design vector morphs against: fuselage, empennage and nacelle placement that is not part of the optimizer search space. Airfoil sections are chosen under Modeling > Aerodynamics. A preset aircraft keeps this geometry protected; use the sandbox for manual geometry experiments."),
+        description: Some("The fixed geometric scaffold the design vector morphs against: fuselage, empennage and nacelle placement that is not part of the optimizer search space. Airfoil sections are chosen in the Aerodynamics section. A preset aircraft keeps this geometry protected; use the sandbox for manual geometry experiments."),
         preview: Some("geometry"),
         preview_title: Some("Three-view schematic"),
         ..Page::form("geometry", "Geometry", "geometry")
@@ -292,7 +416,7 @@ pub const ADVANCED_SETTINGS_PAGES: &[Page] = &[
         ..Page::form("mission_advanced", "Mission Analysis", "mission")
     },
     Page {
-        description: Some("Search settings for the mission-sized L-SHADE optimizer. Whether a run optimizes at all is chosen on Inputs; the selected catalogue engine remains fixed."),
+        description: Some("Search settings for the mission-sized L-SHADE optimizer. Whether a run optimizes at all is chosen on the Aircraft page; a clean-sheet run sizes the selected engine to its thrust requirements unless that is switched off."),
         detail: &[
             "Each candidate is mass-balanced, trimmed and closed by the design mission, then ranked against the selected fuel, mass or efficiency objective subject to hard requirements.",
             "The search uses L-SHADE under epsilon constraints, seeded by a screening sample of the design box, with bounded feasibility restoration. It reports convergence, stagnation, an evaluation-budget or time-limit stop, or cancellation; convergence is the algorithm's stopping test, not a proof of global optimality.",
@@ -307,7 +431,6 @@ pub const ADVANCED_SETTINGS_PAGES: &[Page] = &[
         ],
         ..Page::form("mses", "MSES Analysis", "mses")
     },
-    Page::screen("setup_tools", "External Tools", PageKind::Setup),
 ];
 
 /// Pages that are neither sidebar entries nor Advanced Settings tabs. Airfoil
@@ -319,29 +442,20 @@ const STANDALONE_PAGES: &[Page] = &[Page::screen(
     PageKind::AirfoilScreening,
 )];
 
-const RESULTS_PAGES: &[Page] = &[Page::screen("results", "Results", PageKind::Results)];
-
 /// The whole navigation tree, in display order.
 pub const NAV: &[NavGroup] = &[
     NavGroup {
-        title: "Setup",
+        title: "Design",
         subgroups: &[NavSubgroup {
             title: None,
-            pages: SETUP_PAGES,
+            pages: DESIGN_PAGES,
         }],
     },
     NavGroup {
-        title: "Modeling",
+        title: "Workspace",
         subgroups: &[NavSubgroup {
             title: None,
-            pages: MODELING_PAGES,
-        }],
-    },
-    NavGroup {
-        title: "Results",
-        subgroups: &[NavSubgroup {
-            title: None,
-            pages: RESULTS_PAGES,
+            pages: WORKSPACE_PAGES,
         }],
     },
 ];
@@ -352,6 +466,7 @@ pub fn all_pages() -> impl Iterator<Item = &'static Page> {
     NAV.iter()
         .flat_map(|g| g.subgroups.iter())
         .flat_map(|s| s.pages.iter())
+        .chain(MODELING_PAGES.iter())
         .chain(ADVANCED_SETTINGS_PAGES.iter())
         .chain(STANDALONE_PAGES.iter())
 }
@@ -399,49 +514,62 @@ mod tests {
     }
 
     #[test]
-    fn the_sidebar_is_setup_modeling_and_results_with_the_five_modeling_disciplines() {
+    fn the_sidebar_is_the_design_flow_then_the_workspace() {
         let titles: Vec<&str> = NAV.iter().map(|group| group.title).collect();
-        assert_eq!(titles, ["Setup", "Modeling", "Results"]);
-        let modeling: Vec<&str> = NAV[1].subgroups[0]
+        assert_eq!(titles, ["Design", "Workspace"]);
+        let design: Vec<(&str, u8)> = NAV[0].subgroups[0]
+            .pages
+            .iter()
+            .map(|page| (page.title, page.step))
+            .collect();
+        assert_eq!(
+            design,
+            [
+                ("Aircraft", 1),
+                ("Cabin", 0),
+                ("Mission", 2),
+                ("Payload", 3),
+                ("Design Space", 4),
+                ("Analyses", 5),
+                ("Results", 6),
+            ]
+        );
+        let workspace: Vec<&str> = NAV[1].subgroups[0]
             .pages
             .iter()
             .map(|page| page.title)
             .collect();
-        assert_eq!(
-            modeling,
-            [
-                "Cabin & Cargo",
-                "Mass",
-                "Aerodynamics",
-                "Structures",
-                "Propulsion"
-            ]
-        );
+        assert_eq!(&workspace[..3], ["Files", "Sandbox", "External Tools"]);
         assert!(NAV.iter().all(|group| group.title != "Advanced Settings"));
     }
 
     #[test]
-    fn geometry_control_surfaces_and_external_tools_live_only_in_advanced_settings() {
-        for id in [
-            "geometry",
-            "control_surfaces",
-            "setup_tools",
-            "optimizer",
-            "mses",
-        ] {
+    fn every_former_advanced_tab_is_an_advanced_section_of_a_flow_page() {
+        let hosted: Vec<&str> = NAV
+            .iter()
+            .flat_map(|group| group.subgroups.iter())
+            .flat_map(|sub| sub.pages.iter())
+            .flat_map(|page| page.advanced.iter())
+            .flat_map(|section| section.pages.iter().copied())
+            .collect();
+        for tab in ADVANCED_SETTINGS_PAGES {
             assert!(
-                ADVANCED_SETTINGS_PAGES.iter().any(|page| page.id == id),
-                "{id} missing from the Advanced Settings tabs"
-            );
-            assert!(
-                !NAV.iter()
-                    .flat_map(|g| g.subgroups.iter())
-                    .flat_map(|s| s.pages.iter())
-                    .any(|page| page.id == id),
-                "{id} still in the sidebar"
+                hosted.contains(&tab.id) || tab.id == "setup_tools",
+                "{} has no Advanced section",
+                tab.id
             );
         }
+        for id in &hosted {
+            assert_eq!(page(id).map(|p| p.kind), Some(PageKind::Form), "{id}");
+        }
+    }
+
+    #[test]
+    fn external_tools_is_a_workspace_page_and_not_an_advanced_tab() {
         assert_eq!(page("setup_tools").map(|p| p.kind), Some(PageKind::Setup));
+        assert!(ADVANCED_SETTINGS_PAGES
+            .iter()
+            .all(|page| page.id != "setup_tools"));
     }
 
     #[test]

@@ -127,6 +127,7 @@ fn an_unavailable_yaw_model_is_reported_without_ranking_and_a_tiny_fin_is_a_viol
         plane: &plane,
         cg_x_m: outcome.cg_x,
         takeoff_mass_kg: outcome.sized.takeoff_mass_kg,
+        minimum_mass_kg: f64::NAN,
         landing_mass_kg: outcome.sized.design_landing_mass_kg,
         s_ref_m2: outcome.plane.s_ref,
         static_per_engine_n: None,
@@ -149,6 +150,15 @@ fn an_unavailable_yaw_model_is_reported_without_ranking_and_a_tiny_fin_is_a_viol
     let rows = vmc_residuals(&failure, ResidualRole::Constraint);
     assert!(rows[0].violated());
     assert_eq!(rows[0].role, ResidualRole::Constraint);
+    // Controllable down to the bottom of the search: no minimum control
+    // speed, so no ratio is held against the ceiling.
+    let not_limiting = VmcOutcome {
+        at_airport: Err(VmcFailure::NotLimiting { below_m_s: 5.0 }),
+        at_sea_level: Err(VmcFailure::NotLimiting { below_m_s: 5.0 }),
+        ..failure
+    };
+    let rows = vmc_residuals(&not_limiting, ResidualRole::Constraint);
+    assert!(rows.iter().all(|row| row.id != "vmc_over_vsr"));
 }
 
 /// The VMC table of every registered preset, at the preset's nominal take-off
@@ -176,7 +186,7 @@ fn vmc_table() {
                 a.bank_deg,
                 a.limit,
                 a.fin_area_ratio_for_ceiling,
-                vmc.crosswind.map(|c| (c.sideslip_deg, c.rudder_deg)),
+                vmc.crosswind.map(|c| (c.sideslip_deg, c.rudder_deg, c.cn_beta_per_rad)),
             ),
             (a, _) => eprintln!("VMC {:14} {a:?}", registered.name),
         }
@@ -265,7 +275,9 @@ fn trim_table() {
 fn every_registered_preset_has_a_computed_vmc_below_the_certification_ceiling() {
     // Certified aircraft cannot exceed 1.13 VSR; a computed value above it
     // would be a calibration gap of the fin model, not of the aircraft. The
-    // lower bound guards against a model that stopped limiting control.
+    // lower bound guards against a model that stopped limiting control; it is
+    // 0.5, not 0.6, since the fin sidewash of Raymer Eq. (16.51) put the LJ60
+    // at 0.600 (no published LJ60 VMCA to check it against).
     for registered in alas_config::presets::registry() {
         if registered.name == "DC-10" {
             // Known open finding, covered by the expected-failure test below.
@@ -278,12 +290,17 @@ fn every_registered_preset_has_a_computed_vmc_below_the_certification_ceiling() 
             .clone()
             .unwrap_or_else(|error| panic!("{}: {error:?}", registered.name));
         assert!(
-            (0.6..VMC_CEILING_OVER_VSR).contains(&assessment.vmc_over_vsr),
+            (0.5..VMC_CEILING_OVER_VSR).contains(&assessment.vmc_over_vsr),
             "{}: VMC/VSR {}",
             registered.name,
             assessment.vmc_over_vsr
         );
         assert!(assessment.bank_deg <= 5.0 + 1e-9, "{}", registered.name);
+        assert!(
+            assessment.thrust_iteration_converged,
+            "{}: the thrust at VMCA did not close on the speed",
+            registered.name
+        );
         assert!(!vmc.capped_to_declared, "{}", registered.name);
         let resolved = performance_with_vmc(&config, &vmc);
         let perf = &resolved.performance;
@@ -304,18 +321,13 @@ fn every_registered_preset_has_a_computed_vmc_below_the_certification_ceiling() 
     }
 }
 
-/// Expected failure, open finding (final pass 2026-10-16). CS 25.149(c): VMC
-/// may not exceed 1.13 VSR, and the DC-10 is certificated, so a computed
-/// 1.189 is a model artefact, not a property of the aircraft. VMC (fin and
-/// rudder authority) does not depend on CLmax, VSR scales as 1/sqrt(CLmax_TO);
-/// the class default 2.10 gave about 1.10, the handbook double-slotted value
-/// 2.469 (Raymer Eq. 12.21, flap type of the DC-10 assumed, not documented)
-/// gives 1.189. The 1.13 ceiling bounds the DC-10 CLmax_TO near 2.23. The
-/// test is strict and must fail until the DC-10 take-off lift is resolved;
-/// remove the marker then.
+/// CS 25.149(c): VMC may not exceed 1.13 VSR, and the DC-10 is certificated.
+/// An earlier model gave 1.189 here; with
+/// the rudder side force of Roskam Part VI Eq. (10.123a) and the least-demand
+/// trim found by bisection the DC-10 reads 0.71, inside
+/// the band.
 #[test]
-#[should_panic(expected = "DC-10: VMC/VSR")]
-fn dc10_computed_vmc_is_below_the_certification_ceiling_known_failure() {
+fn dc10_computed_vmc_is_below_the_certification_ceiling() {
     let (config, outcome) = candidate("DC-10");
     let vmc = evaluate_candidate(&outcome, &config);
     let assessment = vmc
@@ -337,9 +349,16 @@ fn the_weathercock_stability_is_positive_on_a_transport_and_negative_stability_i
     clean_sheet.optimizer.design_space.mode = DesignMode::CleanSheet;
     let vmc = evaluate_candidate(&outcome, &clean_sheet);
     let crosswind = vmc.crosswind.unwrap();
-    // Fuselage plus fin only: 0.053 per rad on the A320 (probe 2026-10-19).
+    // Fuselage plus fin, with the DATCOM Method 1 effective fin aspect ratio
+    // and the fin sidewash of Raymer 6th ed. Eq. (16.51): 0.335 per rad on the
+    // A320. Flight derivatives of jet transports in the approach
+    // (Heffley and Jewell, Aircraft Handling Qualities Data, NASA CR-2144
+    // (1972)): C-5A 0.075 (Table X-1, p. 248), CV-880M 0.145 (Table VIII-2,
+    // p. 199), B-747 0.184 per rad (Table IX-1, p. 216); the model gives the
+    // B747-400 0.184. The band is the +0.1 to +0.4 per rad of stable aircraft
+    // (Sadraey, Aircraft Design: A Systems Engineering Approach, 2013, p. 282).
     assert!(
-        (0.02..0.10).contains(&crosswind.cn_beta_per_rad),
+        (0.10..0.40).contains(&crosswind.cn_beta_per_rad),
         "{}",
         crosswind.cn_beta_per_rad
     );
@@ -363,4 +382,34 @@ fn the_weathercock_stability_is_positive_on_a_transport_and_negative_stability_i
         .find(|r| r.id == "directional_stability")
         .unwrap();
     assert!(row.violated());
+}
+
+#[test]
+fn the_design_crosswind_follows_cs_25_237() {
+    // CS 25.237(a)(3)(ii): the greater of 20 kt or 0.2 VSR0, need not exceed 25 kt.
+    let kt = 0.514_444_444;
+    assert!((design_crosswind_m_s(80.0 * kt) - 20.0 * kt).abs() < 1e-9);
+    assert!((design_crosswind_m_s(110.0 * kt) - 22.0 * kt).abs() < 1e-9);
+    assert!((design_crosswind_m_s(150.0 * kt) - 25.0 * kt).abs() < 1e-9);
+}
+
+#[test]
+fn the_published_vmca_is_a_validation_gate_and_never_feeds_the_computed_speed() {
+    // `landing_gear.published_vmca_m_s` only decides whether the computed
+    // VMCA is trusted (alas_pipeline::report_config::vmca_validates); the
+    // yaw balance must give the same speeds with any or no published value.
+    let (config, outcome) = candidate("A320-200");
+    let mut altered = config.clone();
+    altered.landing_gear.published_vmca_m_s = Some(1.0);
+    let mut absent = config.clone();
+    absent.landing_gear.published_vmca_m_s = None;
+    let reference = evaluate_candidate(&outcome, &config).at_airport.unwrap();
+    for other in [&altered, &absent] {
+        let vmc = evaluate_candidate(&outcome, other).at_airport.unwrap();
+        assert_eq!(vmc.vmca_m_s.to_bits(), reference.vmca_m_s.to_bits());
+        assert_eq!(
+            vmc.vmcg_m_s.map(f64::to_bits),
+            reference.vmcg_m_s.map(f64::to_bits)
+        );
+    }
 }

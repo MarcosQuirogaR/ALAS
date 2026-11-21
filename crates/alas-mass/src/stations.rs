@@ -34,11 +34,11 @@
 //! gets [`StationError::MainGearStationNotMeasured`] rather than a placement;
 //! see [`main_gear_station`].
 //!
-//! Validation: the A320-200 operating-empty CG lands near 34 % MAC against
-//! the nominal 26.5 % MAC of the Airbus A320 ACAP (June 2024, 2-3-0 p. 3), a
-//! reference value, not a calibration target. No rule here contradicts a
-//! published placement rule at hand, so the residual is reported, not tuned;
-//! see `alas-pipeline/tests/oew_cg_station_review.rs`.
+//! Validation: A320-200 OEW CG near 35 % MAC with the seats on the layout, bounded by its
+//! ACAP light states 17 % fwd and 26.5 % aft (`alas_config::oew_reference`). Each group
+//! station agrees with the Torenbeek group rules (Scholz, Aircraft Design notes ch. 10, Figs. 10.7-10.8);
+//! the jet OEW CG spread follows the sourced LEMAC/L, which no class fraction absorbs. Reported, not tuned:
+//! `alas-pipeline` example `oew_group_ledger_probe`, `alas-pipeline/tests/oew_cg_station_review.rs`.
 
 use alas_config::{
     DesignRequirements, GeometryConfig, LandingGearConfig, MassModelConfig, StructuresConfig,
@@ -50,16 +50,22 @@ use alas_geom::aircraft::wing::Wing;
 use crate::wing_centroid::wing_structural_centroid;
 
 mod coordinates;
+mod error;
+mod ground_plane;
 mod landing_gear;
 mod propulsion;
 pub use coordinates::NOSE_GEAR_MASS_FRACTION;
+pub use error::StationError;
+pub use ground_plane::{ground_plane_bases, ClearanceSample, GroundPlaneBasis};
 pub(crate) use landing_gear::fuselage_mounted_main_gear_leg_m;
+pub use landing_gear::{
+    clearance_sample, ground_clearance_for, ground_plane_z_for, ground_plane_z_m,
+};
 #[cfg(test)]
 use landing_gear::{
     fuselage_crown_z_m, weighted_main_gear_station, wing_root_above_fuselage_crown,
     GEAR_MASS_CENTROID_STRUT_FRACTION,
 };
-pub use landing_gear::{ground_plane_z_m, FALLBACK_BELLY_CLEARANCE_DIAMETER_FRACTION};
 use landing_gear::{main_gear_station, nose_gear_station};
 use propulsion::propulsion_stations;
 
@@ -108,46 +114,9 @@ pub struct ComponentStations {
     pub operating_items: ComponentStation,
     /// Lumped payload centroid, used when no per-item payload layout exists.
     pub payload_fallback: ComponentStation,
-}
-
-/// Why component stations could not be resolved.
-///
-/// `Eq` is deliberately not derived: [`Self::MainGearStationNotMeasured`]
-/// carries the two SI heights that decided it, and an exact-equality trait on
-/// floating-point evidence would invite comparisons that are not meaningful.
-#[derive(Debug, Clone, Copy, PartialEq, thiserror::Error)]
-pub enum StationError {
-    /// The built airplane has no wing named `"Main Wing"`.
-    #[error("the built airplane has no wing named \"Main Wing\"")]
-    MissingMainWing,
-    /// The built airplane has no fuselage.
-    #[error("the built airplane has no fuselage")]
-    MissingFuselage,
-    /// A resolved station's position or extent is not finite.
-    #[error("component station \"{0}\" has a non-finite position or extent")]
-    NonFiniteGeometry(&'static str),
-    /// No longitudinal main-gear station is available for this aircraft: the
-    /// configuration registers no source-backed gear stations, and the
-    /// wing-mounted fallback rule that would otherwise stand in does not
-    /// apply to this layout (see [`main_gear_station`]).
-    ///
-    /// This is a missing-datum failure, not a marginal result. It is raised
-    /// rather than returning a station so that no consumer can accept a
-    /// balance, reaction load or centre-of-gravity envelope computed from a
-    /// main-gear station this model never measured or derived.
-    #[error(
-        "no main-gear longitudinal station is available: the landing-gear configuration registers \
-         no reference_mlg_x_fractions anchor, and the wing-mounted fallback \
-         (mlg_x_fraction_mac aft of the MAC leading edge) does not apply because the wing root \
-         leading edge sits at z = {wing_root_z_m} m, above the fuselage crown at \
-         z = {fuselage_crown_z_m} m, so no wing-root gear bay exists on this layout"
-    )]
-    MainGearStationNotMeasured {
-        /// Wing root leading-edge height in the geometry frame, m.
-        wing_root_z_m: f64,
-        /// Fuselage outer top surface at the wing root station, m.
-        fuselage_crown_z_m: f64,
-    },
+    /// Flight-crew seats, placed from the built nose loft; `None` when the loft is unavailable or never
+    /// reaches the seated-pilot envelope ahead of the cabin start (FLOPS 0.05 L fallback then applies).
+    pub flight_crew: Option<ComponentStation>,
 }
 
 /// Derive every component's placement and extent from the built geometry.
@@ -240,13 +209,7 @@ fn component_stations_internal(
         nose_gear: nose_gear_station(fuselage, main_wing, geometry, mass_model, landing_gear),
         main_gear: main_gear_station(fuselage, main_wing, geometry, mass_model, landing_gear)?,
         propulsion_units: propulsion_stations(plane, geometry.engine.turboprop.is_some()),
-        systems: cabin_station(
-            fuselage,
-            geometry,
-            0.45,
-            "cabin_start + 0.45 cabin length",
-            [0.0, 0.0],
-        ),
+        systems: systems_station(fuselage, geometry),
         furnishings: cabin_station(
             fuselage,
             geometry,
@@ -262,6 +225,7 @@ fn component_stations_internal(
             [geometry.fuselage.diameter_m, 2.0],
         ),
         payload_fallback: payload_fallback_station(fuselage, geometry, requirements, mass_model),
+        flight_crew: flight_crew_station_from_loft(fuselage, geometry),
     };
     validate_finite(&stations)?;
     Ok(stations)
@@ -348,6 +312,9 @@ fn wing_station(
     requirements: &DesignRequirements,
     structures: &StructuresConfig,
 ) -> ComponentStation {
+    // A mass station of the wing structure: the carried box inside the body.
+    let wing = wing.carried_box();
+    let wing: &Wing = &wing;
     let extent_m = [
         wing.mean_aerodynamic_chord(),
         wing.reference_span(),
@@ -370,6 +337,9 @@ fn wing_station(
 /// The horizontal-tail station: Raymer's 42%-MAC/38%-semispan point, with
 /// the same lifting-surface extent convention as the main wing.
 fn horizontal_tail_station(hstab: &Wing) -> ComponentStation {
+    // The station rule is stated on the theoretical planform.
+    let hstab = hstab.reference_planform();
+    let hstab = &*hstab;
     ComponentStation {
         position_m: raymer_component_point(hstab, 0.42, 0.38),
         extent_m: [
@@ -386,6 +356,9 @@ fn horizontal_tail_station(hstab: &Wing) -> ComponentStation {
 /// measures that, and the extent's height comes from the xsecs' own z-range
 /// rather than a spanwise dimension.
 fn vertical_tail_station(vstab: &Wing) -> ComponentStation {
+    // The station rule is stated on the theoretical planform.
+    let vstab = vstab.reference_planform();
+    let vstab = &*vstab;
     let (min_z, max_z) = vstab.xsecs.iter().fold(
         (f64::INFINITY, f64::NEG_INFINITY),
         |(min_z, max_z), xsec| (min_z.min(xsec.xyz_le[2]), max_z.max(xsec.xyz_le[2])),
@@ -398,27 +371,43 @@ fn vertical_tail_station(vstab: &Wing) -> ComponentStation {
     }
 }
 
-/// Whether every configured engine sits close enough to the centreline to
-/// be fuselage- or tail-mounted rather than wing-mounted.
+/// Whether the engines hang from the fuselage rather than the wing: a declared
+/// rear-fuselage mount, which stands its pods off the body (the LJ60 axis is
+/// 1.32 m out on a 1.96 m body), or every engine within the body half width.
 ///
 /// An aircraft with no configured engines is treated as wing-mounted, the
 /// more common transport layout, rather than vacuously fuselage-mounted.
 fn engines_are_fuselage_mounted(geometry: &GeometryConfig) -> bool {
     let half_width = geometry.fuselage.diameter_m / 2.0;
-    !geometry.engine.spanwise_positions_m.is_empty()
-        && geometry
+    if geometry.engine.spanwise_positions_m.is_empty() {
+        return false;
+    }
+    geometry.engine.rear_fuselage_mount().is_some()
+        || geometry
             .engine
             .spanwise_positions_m
             .iter()
             .all(|y| y.abs() <= half_width)
 }
 
-/// The fuselage station: 0.45 of fuselage length from the nose for
-/// wing-mounted engines, 0.50 for fuselage/tail-mounted engines (Raymer).
+/// Fuselage-group fractions, Torenbeek 1982 Table 8-15 (p. 294): propellers 38-40 (midpoint), rear
+/// pods 47. Wing jets 42-45: the table does not choose; 0.45 (its upper end, also Raymer) fits the
+/// class OEW CG band of p. 299 better than the midpoint across the wing-jet presets.
+pub const WING_MOUNTED_PROPELLER_FUSELAGE_FRACTION: f64 = 0.39;
+const JET: f64 = 0.45;
+const POD: f64 = 0.47;
+
+/// The fuselage station by engine arrangement.
 fn fuselage_station(fuselage: &Fuselage, geometry: &GeometryConfig) -> ComponentStation {
     let (start_x, length, z) = fuselage_datum(fuselage);
-    let fuselage_mounted = engines_are_fuselage_mounted(geometry);
-    let fraction = if fuselage_mounted { 0.50 } else { 0.45 };
+    let prop = WING_MOUNTED_PROPELLER_FUSELAGE_FRACTION;
+    let (fraction, method) = if engines_are_fuselage_mounted(geometry) {
+        (POD, "0.47 fuselage length (rear engines)")
+    } else if geometry.engine.turboprop.is_some() {
+        (prop, "0.39 fuselage length (wing propellers)")
+    } else {
+        (JET, "0.45 fuselage length (wing jets)")
+    };
     ComponentStation {
         position_m: [start_x + length * fraction, 0.0, z],
         extent_m: [
@@ -426,12 +415,76 @@ fn fuselage_station(fuselage: &Fuselage, geometry: &GeometryConfig) -> Component
             geometry.fuselage.diameter_m,
             geometry.fuselage.effective_height_m(),
         ],
-        method: if fuselage_mounted {
-            "0.50 fuselage length (fuselage/tail-mounted engines)"
-        } else {
-            "0.45 fuselage length (wing-mounted engines)"
-        },
+        method,
     }
+}
+
+/// Seated-pilot envelope height, m: eye 32 in above the seat reference point plus the 10 in head-clearance
+/// radius, Raymer, *Aircraft Design: A Conceptual Approach*, 6th ed., ch. 9.2 pp. 235-237 (Fig. 9.1, p. 236).
+const SEATED_PILOT_ENVELOPE_HEIGHT_M: f64 = (32.0 + 10.0) * 0.0254;
+
+/// The flight-crew station from the built nose loft: the midpoint between the first loft station whose
+/// cross-section height holds the seated-pilot envelope and `cabin_start_x_m`, so the crew sits on the
+/// flight deck between the forward pressure bulkhead and the cockpit/cabin bulkhead. Raymer p. 237 gives a
+/// two-crew cockpit length of about 2.5 m but no seat reference point inside it, hence the midpoint.
+/// `None` when the loft has no such station ahead of the cabin start.
+fn flight_crew_station_from_loft(
+    fuselage: &Fuselage,
+    geometry: &GeometryConfig,
+) -> Option<ComponentStation> {
+    let (start_x, _, z) = fuselage_datum(fuselage);
+    let cabin_x = start_x + geometry.fuselage.cabin_start_x_m;
+    let mut first_x = None;
+    for pair in fuselage.xsecs.windows(2) {
+        let (a, b) = (&pair[0], &pair[1]);
+        if a.height >= SEATED_PILOT_ENVELOPE_HEIGHT_M {
+            first_x = Some(a.xyz_c[0]);
+            break;
+        }
+        if b.height >= SEATED_PILOT_ENVELOPE_HEIGHT_M && b.height > a.height {
+            let t = (SEATED_PILOT_ENVELOPE_HEIGHT_M - a.height) / (b.height - a.height);
+            first_x = Some(a.xyz_c[0] + t * (b.xyz_c[0] - a.xyz_c[0]));
+            break;
+        }
+    }
+    let first_x = first_x.filter(|x| x.is_finite() && *x < cabin_x)?;
+    let x = 0.5 * (first_x + cabin_x);
+    Some(ComponentStation {
+        position_m: [x, 0.0, z],
+        extent_m: [cabin_x - first_x, 0.0, SEATED_PILOT_ENVELOPE_HEIGHT_M],
+        method: "midpoint of first seated-pilot-height loft station and cabin start",
+    })
+}
+
+/// Systems-group centre of gravity, fraction of the fuselage length from the nose. Roskam,
+/// *Airplane Design* Part V ch. 10, as reproduced in Scholz, *Aircraft Design* lecture notes ch. 10
+/// (p. 10-18) after Marckwardt with Torenbeek's data: fixed equipment and systems sit at 40-50 % of
+/// the fuselage length for turbofans (0.45) and 38-40 % for wing-mounted propellers (0.39). Both are
+/// the midpoint of range, not fitted. Tied to the whole fuselage and not to the pressurised cabin:
+/// a rear-engined type has a short cabin and a long tail cone. This is the station of the whole
+/// group; the itemised path places the explicitly located items and solves the remainder so the
+/// group centroid is this station.
+const SYSTEMS_JET_FUSELAGE_FRACTION: f64 = 0.45;
+const SYSTEMS_PROPELLER_FUSELAGE_FRACTION: f64 = 0.39;
+
+/// The systems-group station; the extent stays the installed cabin length the systems rod was
+/// sized on.
+fn systems_station(fuselage: &Fuselage, geometry: &GeometryConfig) -> ComponentStation {
+    let (start_x, length, _) = fuselage_datum(fuselage);
+    let (fraction, method) = if geometry.engine.turboprop.is_some() {
+        (
+            SYSTEMS_PROPELLER_FUSELAGE_FRACTION,
+            "0.39 fuselage length (systems, midpoint of 38-40 %)",
+        )
+    } else {
+        (
+            SYSTEMS_JET_FUSELAGE_FRACTION,
+            "0.45 fuselage length (systems, midpoint of 40-50 %)",
+        )
+    };
+    let mut station = cabin_station(fuselage, geometry, 0.0, method, [0.0, 0.0]);
+    station.position_m[0] = start_x + fraction * length;
+    station
 }
 
 /// The systems, furnishings and operating-items station: `fraction` of the
@@ -632,9 +685,11 @@ mod tests {
             .expect("the main gear lies under the fuselage")[0];
         let belly_clearance = section.xyz_c[2] - section.height / 2.0 - ground_z;
         assert!(
-            // Geometry phase 1: the fitted fuselage loft stands the belly 6.5 mm above the 1.79 m
-            // published ground clearance (1.7965 m, +0.36 %).
-            (belly_clearance - 1.796_474_176_864_616_8).abs() < 1.0e-9,
+            // The fitted fuselage loft stands the belly 1.796_468_014_712_344 m above the ground, 6.5 mm above the 1.79 m
+            // published ground clearance (+0.36 %). The A320 forward curves are unchanged (max |da|, |de|, |dzc| below 6e-13 m between
+            // the two data files); the polyline view `xsecs` is sampled adaptively from all the knots, so the
+            // new aft knots move the stations and the linear interpolation at the main gear by 6 um.
+            (belly_clearance - 1.796_468_014_712_344).abs() < 1.0e-9,
             "belly {belly_clearance} m above the ground under the main gear"
         );
     }
@@ -1045,6 +1100,11 @@ mod tests {
             )],
             symmetric: true,
             reference: None,
+            planform_datum: None,
+            dynamic_pressure_ratio: 1.0,
+            reference_xsecs: None,
+            tip_te_flare_m: 0.0,
+            twist_about_pitch_axis: false,
         };
         assert_eq!(
             wing_root_above_fuselage_crown(&wing_at(1.0), &fuselage),

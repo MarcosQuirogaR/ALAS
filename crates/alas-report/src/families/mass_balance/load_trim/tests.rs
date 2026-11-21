@@ -3,6 +3,7 @@
 
 use super::sequences::potato_and_paths;
 use super::*;
+use crate::scene::{Point2D, SceneElement};
 use crate::theme::{PALETTE_DARK, PALETTE_LIGHT};
 use alas_payload::loading_sequence::{LoadingPoint, LoadingSequence};
 
@@ -87,6 +88,7 @@ fn sample() -> LoadTrimSheetData {
                 aft_pct_mac: 45.0,
             },
         ],
+        en_route_above_mlw: None,
         potato,
         sequences,
         takeoff_limits: vec![
@@ -106,6 +108,7 @@ fn sample() -> LoadTrimSheetData {
                 aft_pct_mac: 37.0,
             },
         ],
+        lines: CgLines::default(),
         zfw_limits: vec![
             LimitVertex {
                 mass_kg: 42_000.0,
@@ -132,6 +135,7 @@ fn sample() -> LoadTrimSheetData {
                 mass_kg: 62_500.0,
             },
         ],
+        loading_curves: Vec::new(),
         fuel_curve: vec![(zfw, 27.0), (60_000.0, 29.0), (70_000.0, 28.0)],
         steps: vec![
             LoadStep {
@@ -157,6 +161,55 @@ fn sample() -> LoadTrimSheetData {
             },
         ],
     }
+}
+
+/// The sheet of a run whose flown route differs from the sizing loading:
+/// the maximum-fuel takeoff is plotted and tabulated, the flown rows say so,
+/// and the header line states both bases.
+#[test]
+fn a_sheet_with_the_maximum_fuel_state_names_its_two_mass_bases() {
+    let mut data = sample();
+    let gate = |mass: f64, phase: GatePhase| StepGate {
+        state: alas_opt::ModelCgLoadingState::AnalyzedTakeoff,
+        phase,
+        cg_pct_mac: 25.0,
+        fwd_pct_mac: 10.0,
+        aft_pct_mac: 40.0,
+        fwd_governance: alas_opt::envelope::ForwardLimitGovernance::MaxNoseLoadHandling,
+        violated: mass < 0.0,
+    };
+    for step in &mut data.steps {
+        if step.state != "DOW" {
+            step.gate = Some(gate(1.0, GatePhase::Takeoff));
+        }
+    }
+    data.steps.push(LoadStep {
+        item: "Maximum fuel".to_owned(),
+        state: "max-fuel TOW".to_owned(),
+        mass_kg: 78_000.0,
+        pct_mac: 24.5,
+        gate: Some(gate(1.0, GatePhase::Takeoff)),
+    });
+    let line = panel::basis_line(&data);
+    assert!(line.contains("Flown route: TOW 70.0 t"), "{line}");
+    assert!(line.contains("MTOW sizing basis: 78.0 t"), "{line}");
+    let scene = figure_load_trim_sheet(&data, &PALETTE_LIGHT);
+    let texts: Vec<&str> = scene
+        .elements
+        .iter()
+        .filter_map(|e| match e {
+            SceneElement::Text { text, .. } => Some(text.as_str()),
+            _ => None,
+        })
+        .collect();
+    assert!(texts.contains(&"TOW (flown route)"), "{texts:?}");
+    assert!(texts.contains(&"max-fuel TOW"), "{texts:?}");
+    // Without the maximum-fuel state the sheet keeps the plain state names.
+    data.steps.pop();
+    let scene = figure_load_trim_sheet(&data, &PALETTE_LIGHT);
+    assert!(!scene.elements.iter().any(|e| matches!(
+        e, SceneElement::Text { text, .. } if text.contains("flown route")
+    )));
 }
 
 #[test]
@@ -242,9 +295,9 @@ fn plotted_points_map_back_to_their_mass_and_cg() {
     let data = sample();
     let frame = frame_for(&data);
     for s in &data.steps {
-        let (index, mass) = frame.unmap(frame.map(data.index_at(s.mass_kg, s.pct_mac), s.mass_kg));
+        let (pct, mass) = frame.unmap(frame.map(s.pct_mac, s.mass_kg));
         assert!((mass - s.mass_kg).abs() < 1e-6);
-        assert!((data.pct_at(index, mass) - s.pct_mac).abs() < 1e-9);
+        assert!((pct - s.pct_mac).abs() < 1e-9);
     }
 }
 
@@ -257,474 +310,292 @@ fn the_sheet_renders_without_non_finite_coordinates_in_both_themes() {
             "{} theme",
             pal.name
         );
-        assert!(svg.contains("LIMIT DEFINITIONS") && svg.contains("LOADING POINTS"));
-        assert!(svg.contains("Sized TOW 78 000 kg") && svg.contains("%MAC"));
+        assert!(svg.contains("Chart key") && svg.contains("Weight and balance"));
+        assert!(svg.contains("MTOW 78 000 kg") && svg.contains("MLW 66 000 kg"));
+        assert!(svg.contains("Fwd limit") && svg.contains("Aft limit") && svg.contains("%MAC"));
     }
 }
 
-fn polylines_with_dash(scene: &crate::scene::Scene, dash: Option<&[f64]>) -> usize {
-    scene
-        .elements
-        .iter()
-        .filter(|e| {
-            matches!(e, crate::scene::SceneElement::Polyline { stroke, .. }
-                if stroke.dash_array.as_deref() == dash && stroke.width > 1.5)
-        })
-        .count()
-}
-
-#[test]
-fn every_limit_set_is_drawn_in_its_own_style() {
-    let scene = figure_load_trim_sheet(&sample(), &PALETTE_LIGHT);
-    // Two lines (forward, aft) per set present in the sample.
-    assert_eq!(
-        polylines_with_dash(&scene, Some(&[7.0, 4.0])),
-        2,
-        "ground dashed"
-    );
-    assert_eq!(
-        polylines_with_dash(&scene, Some(&[1.5, 3.5])),
-        2,
-        "flight dotted"
-    );
-    assert_eq!(
-        polylines_with_dash(&scene, Some(&[8.0, 3.0, 1.5, 3.0])),
-        2,
-        "landing dash-dot"
-    );
-    assert_eq!(polylines_with_dash(&scene, None), 2, "takeoff solid");
-}
-
-#[test]
-fn the_potato_lies_inside_the_reorder_polygon_and_inside_the_ground_limits() {
-    let data = sample();
-    let polygon = loading_envelope_polygon(42_000.0, X_LEMAC + 0.265 * MAC, &items(), X_LEMAC, MAC);
-    let n = items().len();
-    let chain = |pts: &[(f64, f64)], m: f64| {
-        let (a, b) = pts
-            .windows(2)
-            .find(|w| m >= w[0].0 - 1e-9 && m <= w[1].0 + 1e-9)
-            .map(|w| (w[0], w[1]))
-            .expect("mass inside chain");
-        a.1 + (m - a.0) / (b.0 - a.0) * (b.1 - a.1)
+/// The sample sheet with per-mechanism lines.
+fn with_mechanisms() -> LoadTrimSheetData {
+    let line = |mechanism, a: f64, b: f64| MechanismLine {
+        mechanism,
+        points: vec![(42_000.0, a), (78_000.0, b)],
+        applies_kg: (f64::NEG_INFINITY, f64::INFINITY),
     };
-    let fwd = &polygon[..=n];
-    let mut aft: Vec<(f64, f64)> = polygon[n..].to_vec();
-    aft.reverse();
-    assert!(!data.potato.is_empty());
-    for level in &data.potato {
-        let (lo, hi) = (chain(fwd, level.mass_kg), chain(&aft, level.mass_kg));
+    let mut data = sample();
+    data.lines.mechanisms = vec![
+        line(Mechanism::NoseGearLoad, 10.0, 10.0),
+        line(Mechanism::Rotation, 15.0, 20.0),
+        line(Mechanism::LandingTrim, 18.0, 18.0),
+        line(Mechanism::StaticMargin, 40.0, 38.0),
+        line(Mechanism::MinNoseLoad, 44.0, 44.0),
+        line(Mechanism::TipBack, 50.0, 50.0),
+    ];
+    data
+}
+
+#[test]
+fn each_envelope_takes_the_mechanisms_the_gate_scopes_to_its_phase() {
+    let data = with_mechanisms();
+    let rotation_at_60t = 15.0 + 5.0 * (60_000.0 - 42_000.0) / 36_000.0;
+    // Takeoff: rotation and the ground and static-margin mechanisms.
+    assert!(
+        (data.envelope_limit_at(EnvelopeKind::Takeoff, 60_000.0, true) - rotation_at_60t).abs()
+            < 1e-9
+    );
+    // Landing and zero fuel: landing trim in place of rotation.
+    for kind in [EnvelopeKind::Landing, EnvelopeKind::ZeroFuel] {
         assert!(
-            level.fwd_pct_mac >= lo - 0.05 && level.aft_pct_mac <= hi + 0.05,
-            "potato at {} kg outside the reorder polygon",
-            level.mass_kg
+            (data.envelope_limit_at(kind, 60_000.0, true) - 18.0).abs() < 1e-9,
+            "{kind:?}"
         );
     }
-    assert_eq!(data.potato_ground_exceedance_pct_mac(), 0.0);
-    let mut tight = data.clone();
-    tight.ground_limits[0].aft_pct_mac = 26.0;
-    tight.ground_limits[1].aft_pct_mac = 26.0;
-    assert!(tight.potato_ground_exceedance_pct_mac() > 0.0);
-}
-
-#[test]
-fn the_sheet_omits_loading_envelope_and_prose_but_keeps_numbered_states() {
-    let data = sample();
-    let scene = figure_load_trim_sheet(&data, &PALETTE_LIGHT);
-    let svg = crate::svg::render_svg(&scene);
-    assert!(!svg.contains("Each item adds") && !svg.contains("Index I ="));
-    assert!(!svg.contains("Boarding potato") && !svg.contains("One composed order"));
-    for step in 1..=data.steps.len() {
-        assert!(scene.elements.iter().any(|element| matches!(
-            element, crate::scene::SceneElement::Text { text, .. }
-                if text == &step.to_string()
-        )));
+    // Aft: the most forward of static margin (39 at 60 t), minimum nose load
+    // and tip-back.
+    let aft = 40.0 - 2.0 * (60_000.0 - 42_000.0) / 36_000.0;
+    for kind in EnvelopeKind::ALL {
+        assert!(
+            (data.envelope_limit_at(kind, 60_000.0, false) - aft).abs() < 1e-9,
+            "{kind:?}"
+        );
     }
-    let mut no_envelope = data.clone();
-    no_envelope.potato.clear();
-    no_envelope.sequences.clear();
-    // Loading orders are computational data; none contribute rendered paths.
-    let count_paths = |scene: &crate::scene::Scene| {
-        scene
-            .elements
-            .iter()
-            .filter(|element| {
-                matches!(
-                    element,
-                    crate::scene::SceneElement::Polyline { .. }
-                        | crate::scene::SceneElement::Polygon { .. }
-                )
-            })
-            .count()
-    };
     assert_eq!(
-        count_paths(&scene),
-        count_paths(&figure_load_trim_sheet(&no_envelope, &PALETTE_LIGHT))
+        data.governing_mechanism(EnvelopeKind::Takeoff, 60_000.0, true),
+        Some(Mechanism::Rotation)
+    );
+    assert_eq!(
+        data.governing_mechanism(EnvelopeKind::Landing, 60_000.0, true),
+        Some(Mechanism::LandingTrim)
+    );
+    assert_eq!(
+        data.governing_mechanism(EnvelopeKind::Takeoff, 60_000.0, false),
+        Some(Mechanism::StaticMargin)
+    );
+    // The gate's ground mechanisms bound the empty weight alone.
+    assert_eq!(
+        data.governing_mechanism(EnvelopeKind::ZeroFuel, 42_000.0, true),
+        Some(Mechanism::LandingTrim)
     );
 }
 
 #[test]
-fn coincident_model_masses_preserve_provenance_in_one_label_below_the_cap() {
-    for takeoff_role in [MassRole::SizedTakeoff, MassRole::AnalyzedTakeoff] {
-        let takeoff_label = takeoff_role.label();
-        let mut data = sample();
-        let takeoff_mass = data.weight(MassRole::SizedTakeoff).unwrap();
-        data.weight_lines[0].role = takeoff_role;
-        data.weight_lines
-            .iter_mut()
-            .find(|line| line.role == MassRole::DesignLanding)
+fn an_envelope_runs_from_the_minimum_weight_to_its_own_top_weight() {
+    let data = sample();
+    let envelopes = data.envelopes();
+    assert_eq!(
+        envelopes.iter().map(|e| e.kind).collect::<Vec<_>>(),
+        EnvelopeKind::ALL
+    );
+    for envelope in &envelopes {
+        assert_eq!(envelope.bottom_kg, 42_000.0, "{:?}", envelope.kind);
+        assert_eq!(envelope.vertices.first().map(|v| v.mass_kg), Some(42_000.0));
+        assert_eq!(
+            envelope.vertices.last().map(|v| v.mass_kg),
+            Some(envelope.top_kg)
+        );
+        let outline = envelope.outline();
+        assert_eq!(outline.len(), 2 * envelope.vertices.len());
+        assert!(outline.iter().all(|p| p.0.is_finite() && p.1.is_finite()));
+    }
+    let top = |kind| envelopes.iter().find(|e| e.kind == kind).map(|e| e.top_kg);
+    assert_eq!(top(EnvelopeKind::Takeoff), Some(78_000.0));
+    assert_eq!(top(EnvelopeKind::Landing), Some(66_000.0));
+    assert_eq!(top(EnvelopeKind::ZeroFuel), Some(62_500.0));
+}
+
+#[test]
+fn collinear_vertices_are_dropped_and_corners_kept() {
+    let v = |m: f64, f: f64, a: f64| LimitVertex {
+        mass_kg: m,
+        fwd_pct_mac: f,
+        aft_pct_mac: a,
+    };
+    let kept = simplified(vec![
+        v(0.0, 10.0, 40.0),
+        v(1.0, 11.0, 40.0),
+        v(2.0, 12.0, 40.0),
+        v(3.0, 12.0, 38.0),
+        v(4.0, 12.0, 36.0),
+    ]);
+    assert_eq!(
+        kept.iter().map(|k| k.mass_kg).collect::<Vec<_>>(),
+        [0.0, 2.0, 4.0]
+    );
+}
+
+#[test]
+fn a_band_whose_forward_limit_lies_aft_of_its_aft_limit_is_found_and_shaded() {
+    let mut data = sample();
+    data.takeoff_limits = vec![
+        LimitVertex {
+            mass_kg: 42_000.0,
+            fwd_pct_mac: 17.0,
+            aft_pct_mac: 40.0,
+        },
+        LimitVertex {
+            mass_kg: 78_000.0,
+            fwd_pct_mac: 45.0,
+            aft_pct_mac: 37.0,
+        },
+    ];
+    let takeoff = data
+        .envelopes()
+        .into_iter()
+        .find(|e| e.kind == EnvelopeKind::Takeoff)
+        .expect("takeoff envelope");
+    let bands = takeoff.crossed_bands();
+    assert_eq!(bands.len(), 1);
+    assert!(bands[0].0 > 42_000.0 && (bands[0].1 - 78_000.0).abs() < 1e-6);
+    let ink = super::render::Ink::for_palette(&PALETTE_LIGHT);
+    let scene = figure_load_trim_sheet(&data, &PALETTE_LIGHT);
+    let red = scene.elements.iter().filter(
+        |e| matches!(e, SceneElement::Polygon { fill: Some(f), .. } if f.color == ink.crossed()),
+    );
+    assert_eq!(red.count(), 1);
+    assert!(sample()
+        .envelopes()
+        .iter()
+        .all(|e| e.crossed_bands().is_empty()));
+}
+
+#[test]
+fn only_the_takeoff_envelope_is_filled_and_the_others_are_outlines() {
+    let data = sample();
+    let ink = super::render::Ink::for_palette(&PALETTE_LIGHT);
+    let scene = figure_load_trim_sheet(&data, &PALETTE_LIGHT);
+    for kind in EnvelopeKind::ALL {
+        let (fill, edge) = ink.envelope(kind);
+        let drawn = scene
+            .elements
+            .iter()
+            .filter(|e| match e {
+                SceneElement::Polygon {
+                    fill: f,
+                    stroke: Some(s),
+                    points,
+                } => {
+                    s.color == edge
+                        && s.width <= 1.5
+                        && points.len() >= 4
+                        && f.is_some_and(|f| f.color == fill) == (kind == EnvelopeKind::Takeoff)
+                }
+                _ => false,
+            })
+            .count();
+        assert_eq!(drawn, 1, "{kind:?}");
+    }
+}
+
+#[test]
+fn the_zero_fuel_top_is_labelled_analysed_when_no_mzfw_is_registered() {
+    let mut data = sample();
+    let label = |d: &LoadTrimSheetData| {
+        d.envelopes()
+            .iter()
+            .find(|e| e.kind == EnvelopeKind::ZeroFuel)
             .unwrap()
-            .mass_kg = takeoff_mass;
+            .label
+    };
+    assert_eq!(label(&data), "ZFW (analysed)");
+    data.weight_lines.push(WeightLine {
+        role: MassRole::MaximumZeroFuel,
+        mass_kg: 62_500.0,
+    });
+    assert_eq!(label(&data), "MZFW");
+}
+
+/// The estimated box of a horizontal text.
+fn text_box(element: &SceneElement) -> Option<(String, [f64; 4])> {
+    let SceneElement::Text {
+        text,
+        pos,
+        font_size,
+        align,
+        angle_deg,
+        ..
+    } = element
+    else {
+        return None;
+    };
+    let (w, h) = (
+        super::geom::text_width(text, *font_size),
+        super::geom::text_height(*font_size),
+    );
+    let (w, h) = if angle_deg.abs() > 45.0 {
+        (h, w)
+    } else {
+        (w, h)
+    };
+    let left = match align {
+        crate::scene::TextAlign::Left => pos[0],
+        crate::scene::TextAlign::Right => pos[0] - w,
+        _ => pos[0] - w / 2.0,
+    };
+    Some((
+        text.clone(),
+        [left, pos[1] - h / 2.0, left + w, pos[1] + h / 2.0],
+    ))
+}
+
+#[test]
+fn chart_labels_never_overlap_each_other() {
+    for data in [sample(), with_mechanisms()] {
         let scene = figure_load_trim_sheet(&data, &PALETTE_LIGHT);
-        let frame = frame_for(&data);
-        let cap_y = frame.map(frame.i_range.0, takeoff_mass)[1];
+        let frame = frame_in(&data, super::geom::Geom::standard().chart);
+        let inside = |b: &[f64; 4]| {
+            b[0] > frame.left && b[2] < frame.right() && b[1] > frame.top && b[3] < frame.bottom()
+        };
         let labels: Vec<_> = scene
             .elements
             .iter()
-            .filter_map(|element| match element {
-                crate::scene::SceneElement::Text {
-                    text,
-                    pos,
-                    baseline,
-                    ..
-                } if text.contains(takeoff_label) || text.contains("Design LW") => {
-                    Some((text, pos, baseline))
-                }
-                _ => None,
-            })
+            .filter_map(text_box)
+            .filter(|(_, b)| inside(b))
             .collect();
-        assert_eq!(labels.len(), 1);
-        assert!(labels[0]
-            .0
-            .contains(&format!("{takeoff_label} / Design LW")));
-        assert!(labels[0].1[1] > cap_y);
-        assert_eq!(*labels[0].2, crate::scene::TextBaseline::Top);
-    }
-}
-#[test]
-fn hidden_loading_envelopes_do_not_change_the_frame_or_rendered_sheet() {
-    let data = sample();
-    let expected = crate::svg::render_svg(&figure_load_trim_sheet(&data, &PALETTE_LIGHT));
-    let mut changed = data.clone();
-    changed.potato = vec![PotatoLevel {
-        mass_kg: 1.0e9,
-        fwd_pct_mac: -1000.0,
-        aft_pct_mac: 1000.0,
-    }];
-    changed.sequences = vec![NamedPath {
-        name: "Extreme hidden order".to_owned(),
-        points: vec![(1.0e9, -1000.0), (2.0e9, 1000.0)],
-    }];
-    assert_eq!(frame_for(&data).i_range, frame_for(&changed).i_range);
-    assert_eq!(frame_for(&data).w_range_kg, frame_for(&changed).w_range_kg);
-    assert_eq!(
-        expected,
-        crate::svg::render_svg(&figure_load_trim_sheet(&changed, &PALETTE_LIGHT))
-    );
-    changed.potato.clear();
-    changed.sequences.clear();
-    assert_eq!(
-        expected,
-        crate::svg::render_svg(&figure_load_trim_sheet(&changed, &PALETTE_LIGHT))
-    );
-}
-
-#[test]
-fn visible_fuel_curve_and_phase_limits_fit_the_frame() {
-    let mut data = sample();
-    data.fuel_curve.push((90_000.0, 70.0));
-    data.flight_limits.push(LimitVertex {
-        mass_kg: 85_000.0,
-        fwd_pct_mac: -30.0,
-        aft_pct_mac: 75.0,
-    });
-    let frame = frame_for(&data);
-    for (mass, pct) in [(90_000.0, 70.0), (85_000.0, -30.0), (85_000.0, 75.0)] {
-        let index = data.index_at(mass, pct);
-        assert!(mass >= frame.w_range_kg.0 && mass <= frame.w_range_kg.1);
-        assert!(index >= frame.i_range.0 && index <= frame.i_range.1);
-    }
-}
-
-#[test]
-fn missing_payload_layout_preserves_assessed_zero_fuel_mass_and_cg() {
-    use alas_config::{design_variables::DesignVector, AlasConfig};
-    use alas_mass::breakdown::{FUEL, PAYLOAD};
-
-    let mut config = AlasConfig::default();
-    let design = DesignVector::default();
-    alas_payload::apply_cabin_preset(&mut config, Some(&design)).unwrap();
-    let airplane = alas_geom::builder::AircraftBuilder::new(Some(config.geometry.clone()))
-        .build(Some(&design), true)
-        .unwrap();
-    let mut report = super::super::quick_preview_report(airplane, &config, design).unwrap();
-    // A finite synthetic neutral point enables this mass-accounting fixture;
-    // the test does not validate aerodynamic limits.
-    report.x_neutral_point = report.physical_cg[0] + report.airplane.c_ref;
-    report.payload_layout = None;
-    assert!(report.component_masses[PAYLOAD] > 0.0);
-    let data = super::data::load_trim_data_from_report(&report, &config).unwrap();
-    let step = |name: &str| data.steps.iter().find(|s| s.state == name).unwrap();
-    let expected_zfw: f64 = report
-        .component_masses
-        .iter()
-        .filter(|(name, _)| name.as_str() != FUEL)
-        .map(|(_, mass)| mass)
-        .sum();
-    let expected_moment: f64 = report
-        .component_masses
-        .iter()
-        .filter(|(name, _)| name.as_str() != FUEL)
-        .map(|(name, mass)| mass * report.mass_coordinates[name][0])
-        .sum();
-    let frame = report.airplane.mac_frame().unwrap();
-    assert!((step("ZFW").mass_kg - expected_zfw).abs() < 1e-9);
-    assert!((step("ZFW").pct_mac - frame.pct_mac(expected_moment / expected_zfw)).abs() < 1e-9);
-    assert!(
-        (step("ZFW").mass_kg - step("DOW").mass_kg - report.component_masses[PAYLOAD]).abs() < 1e-9
-    );
-    assert!(
-        (step("TOW").mass_kg - step("ZFW").mass_kg - report.component_masses[FUEL]).abs() < 1e-9
-    );
-    assert_eq!(
-        data.weight(MassRole::AnalyzedZeroFuel),
-        Some(step("ZFW").mass_kg)
-    );
-    assert!(data.fuel_curve.is_empty() && data.sequences.is_empty());
-    assert_eq!(
-        data.weight(MassRole::AnalyzedTakeoff),
-        Some(step("TOW").mass_kg)
-    );
-    assert!(data.weight(MassRole::SizedTakeoff).is_none());
-    assert_eq!(
-        data.steps
-            .iter()
-            .map(|step| step.state.as_str())
-            .collect::<Vec<_>>(),
-        ["DOW", "ZFW", "TOW", "LW"]
-    );
-}
-
-#[test]
-fn phase_limit_index_extrema_between_vertices_fit_the_frame() {
-    let mut data = sample();
-    data.flight_limits = vec![
-        LimitVertex {
-            mass_kg: 10_000.0,
-            fwd_pct_mac: 325.0,
-            aft_pct_mac: 326.0,
-        },
-        LimitVertex {
-            mass_kg: 90_000.0,
-            fwd_pct_mac: 25.0,
-            aft_pct_mac: 26.0,
-        },
-    ];
-    let frame = frame_for(&data);
-    for mass in (10_000..=90_000).step_by(1000) {
-        for forward in [true, false] {
-            let index = data.index_at(
-                f64::from(mass),
-                limit_at(&data.flight_limits, f64::from(mass), forward),
-            );
-            assert!(index >= frame.i_range.0 && index <= frame.i_range.1);
+        assert!(labels.len() >= 5, "{}", labels.len());
+        for (i, (a, ab)) in labels.iter().enumerate() {
+            for (b, bb) in &labels[i + 1..] {
+                let apart = ab[2] <= bb[0] || bb[2] <= ab[0] || ab[3] <= bb[1] || bb[3] <= ab[1];
+                assert!(apart, "labels '{a}' and '{b}' overlap");
+            }
         }
     }
 }
 
 #[test]
-fn model_mass_annotations_do_not_claim_structural_maxima() {
+fn every_state_is_labelled_beside_its_point() {
     let data = sample();
-    for palette in [&PALETTE_LIGHT, &PALETTE_DARK] {
-        let svg = crate::svg::render_svg(&figure_load_trim_sheet(&data, palette));
-        for label in ["Sized TOW", "Design LW", "Analyzed ZFW"] {
-            assert!(svg.contains(label), "missing semantic mass label: {label}");
-        }
-        for label in ["MTOW", "MLW", "MZFW"] {
+    let scene = figure_load_trim_sheet(&data, &PALETTE_LIGHT);
+    let frame = frame_in(&data, super::geom::Geom::standard().chart);
+    let texts: Vec<_> = scene.elements.iter().filter_map(text_box).collect();
+    for step in &data.steps {
+        let at = frame.map(step.pct_mac, step.mass_kg);
+        let near = texts.iter().any(|(t, b)| {
+            t.starts_with(&step.state)
+                && (b[0] - 40.0..=b[2] + 40.0).contains(&at[0])
+                && (b[1] - 40.0..=b[3] + 40.0).contains(&at[1])
+        });
+        assert!(near, "state {}", step.state);
+    }
+}
+
+#[test]
+fn every_fixed_text_the_sheet_draws_is_in_the_catalog_list() {
+    let data = with_mechanisms();
+    for scene in [
+        figure_load_trim_sheet(&data, &PALETTE_LIGHT),
+        figure_load_trim_sheet_sized(&data, &PALETTE_LIGHT, 700.0),
+    ] {
+        for element in &scene.elements {
+            let SceneElement::Text { text, .. } = element else {
+                continue;
+            };
+            let numeric = text.chars().any(|c| c.is_ascii_digit()) || *text == data.title;
+            let state = matches!(text.as_str(), "DOW" | "ZFW" | "TOW" | "LW" | "max-fuel TOW");
             assert!(
-                !svg.contains(label),
-                "model mass is not a structural maximum: {label}"
+                numeric || state || SHEET_TEXT.contains(&text.as_str()),
+                "'{text}' is neither a number nor in SHEET_TEXT"
             );
-        }
-        assert!(!svg.contains("Published reference") && !svg.contains("Limits are"));
-    }
-}
-
-#[test]
-fn mass_annotation_backplates_fit_localized_labels_and_leave_mass_lines_visible() {
-    use crate::scene::{
-        Color, SceneElement, CONSERVATIVE_ADVANCE_EM, CSS_PIXELS_PER_POINT, TEXT_LINE_HEIGHT_EM,
-    };
-
-    let mut data = sample();
-    let takeoff_mass = data.weight(MassRole::SizedTakeoff).unwrap();
-    for line in &mut data.weight_lines {
-        line.mass_kg = takeoff_mass;
-    }
-    let translated = format!(
-        "TOW dimensionada / LW de dise\u{f1}o / ZFW analizada {} kg",
-        super::panel::kg(takeoff_mass)
-    );
-    for palette in [&PALETTE_LIGHT, &PALETTE_DARK] {
-        let scene = figure_load_trim_sheet(&data, palette);
-        let frame = frame_for(&data);
-        let line_y = frame.map(frame.i_range.0, takeoff_mass)[1];
-        let (index, font_size, position) = scene
-            .elements
-            .iter()
-            .enumerate()
-            .find_map(|(index, element)| match element {
-                SceneElement::Text {
-                    text,
-                    font_size,
-                    pos,
-                    ..
-                } if text.contains("Sized TOW /") => Some((index, *font_size, *pos)),
-                _ => None,
-            })
-            .unwrap();
-        let SceneElement::Rect {
-            x,
-            y,
-            width,
-            height,
-            fill: Some(fill),
-            ..
-        } = &scene.elements[index - 1]
-        else {
-            panic!("mass annotation requires a backplate");
-        };
-        assert_eq!(fill.color, Color::from_hex(palette.bg));
-        let translated_width = translated.chars().count() as f64
-            * font_size
-            * CSS_PIXELS_PER_POINT
-            * CONSERVATIVE_ADVANCE_EM;
-        assert!(position[0] >= *x && position[0] + translated_width <= x + width);
-        assert!(
-            position[1] >= *y
-                && position[1] + font_size * CSS_PIXELS_PER_POINT * TEXT_LINE_HEIGHT_EM
-                    <= y + height
-        );
-        assert!(*x >= frame.left && x + width <= frame.right());
-        assert!(*y > line_y && y + height <= frame.bottom());
-    }
-}
-
-#[test]
-fn zero_fuel_backplate_stays_above_its_mass_line_in_both_themes() {
-    use crate::scene::{
-        SceneElement, CONSERVATIVE_ADVANCE_EM, CSS_PIXELS_PER_POINT, TEXT_LINE_HEIGHT_EM,
-    };
-    let data = sample();
-    let mass = data.weight(MassRole::AnalyzedZeroFuel).unwrap();
-    let translated = format!("ZFW analizada {} kg", super::panel::kg(mass));
-    for palette in [&PALETTE_LIGHT, &PALETTE_DARK] {
-        let scene = figure_load_trim_sheet(&data, palette);
-        let frame = frame_for(&data);
-        let line_y = frame.map(frame.i_range.0, mass)[1];
-        let (index, size, position) = scene
-            .elements
-            .iter()
-            .enumerate()
-            .find_map(|(index, element)| match element {
-                SceneElement::Text {
-                    text,
-                    font_size,
-                    pos,
-                    ..
-                } if text.starts_with("Analyzed ZFW ") => Some((index, *font_size, *pos)),
-                _ => None,
-            })
-            .unwrap();
-        let SceneElement::Rect {
-            x,
-            y,
-            width,
-            height,
-            ..
-        } = &scene.elements[index - 1]
-        else {
-            panic!("zero-fuel annotation requires a backplate");
-        };
-        assert!(
-            position[0]
-                + translated.chars().count() as f64
-                    * size
-                    * CSS_PIXELS_PER_POINT
-                    * CONSERVATIVE_ADVANCE_EM
-                <= x + width
-        );
-        assert!(position[1] - size * CSS_PIXELS_PER_POINT * TEXT_LINE_HEIGHT_EM >= *y);
-        assert!(position[1] <= y + height && y + height < line_y);
-        assert!(*x >= frame.left && x + width <= frame.right() && *y >= frame.top);
-    }
-}
-
-/// Rectangles of the panel boxes: paper-filled, stroked, right of the chart
-/// and wider than the key swatch.
-fn panel_boxes(scene: &crate::scene::Scene, frame: &Frame) -> Vec<[f64; 4]> {
-    scene
-        .elements
-        .iter()
-        .filter_map(|element| match element {
-            crate::scene::SceneElement::Rect {
-                x,
-                y,
-                width,
-                height,
-                stroke: Some(_),
-                fill: Some(_),
-                ..
-            } if *x > frame.right() && *width > 100.0 => Some([*x, *y, x + width, y + height]),
-            _ => None,
-        })
-        .collect()
-}
-
-#[test]
-fn the_side_panel_spans_the_chart_height_for_any_number_of_states() {
-    for states in 1..=9 {
-        let mut data = sample();
-        let template = data.steps[1].clone();
-        data.steps.truncate(1);
-        for k in 1..states {
-            let mut step = template.clone();
-            step.state = format!("S{k}");
-            step.mass_kg = 42_000.0 + 3_000.0 * k as f64;
-            data.steps.push(step);
-        }
-        for palette in [&PALETTE_LIGHT, &PALETTE_DARK] {
-            let scene = figure_load_trim_sheet(&data, palette);
-            let frame = frame_for(&data);
-            let boxes = panel_boxes(&scene, &frame);
-            assert_eq!(boxes.len(), 3, "{states} states");
-            assert!((boxes[0][1] - frame.top).abs() < 0.5);
-            assert!(
-                (boxes[2][3] - frame.bottom()).abs() < 0.5,
-                "{states} states: panel ends at {} for a chart bottom at {}",
-                boxes[2][3],
-                frame.bottom()
-            );
-            for pair in boxes.windows(2) {
-                assert!(pair[0][3] < pair[1][1], "boxes overlap: {pair:?}");
-            }
-            for rect in &boxes {
-                assert!(rect[2] <= scene.width && rect[3] <= scene.height);
-            }
-            // No panel text leaves its box.
-            for element in &scene.elements {
-                if let crate::scene::SceneElement::Text { pos, .. } = element {
-                    if pos[0] > frame.right() + 20.0 {
-                        assert!(
-                            boxes.iter().any(|b| pos[0] >= b[0]
-                                && pos[0] <= b[2]
-                                && pos[1] >= b[1]
-                                && pos[1] <= b[3]),
-                            "panel text at {pos:?} outside the boxes"
-                        );
-                    }
-                }
-            }
         }
     }
 }
@@ -747,136 +618,35 @@ fn alert_rings(scene: &crate::scene::Scene, palette: &crate::theme::Palette) -> 
 }
 
 #[test]
-fn every_state_the_gate_failed_and_only_those_is_ringed_on_the_chart() {
+fn a_state_the_gate_failed_is_ringed_on_the_chart_and_in_the_table_and_no_other() {
     use alas_opt::ModelCgLoadingState as State;
     let gate = |state, violated| {
         Some(StepGate {
             state,
             phase: GatePhase::of(state),
-            cg_pct_mac: 27.0,
+            cg_pct_mac: 30.0,
             fwd_pct_mac: 15.0,
             aft_pct_mac: 40.0,
+            fwd_governance: alas_opt::envelope::ForwardLimitGovernance::MaxNoseLoadHandling,
             violated,
         })
     };
-    let mut inside = sample();
-    inside.steps[0].gate = gate(State::OperatingEmpty, false);
-    inside.steps[2].gate = gate(State::AnalyzedTakeoff, false);
-    for palette in [&PALETTE_LIGHT, &PALETTE_DARK] {
-        assert!(alert_rings(&figure_load_trim_sheet(&inside, palette), palette).is_empty());
+    let mut data = sample();
+    data.steps[0].gate = gate(State::OperatingEmpty, false);
+    data.steps[1].gate = gate(State::AnalyzedZeroFuel, true);
+    data.steps[2].gate = gate(State::AnalyzedTakeoff, false);
+    let scene = figure_load_trim_sheet(&data, &PALETTE_LIGHT);
+    let frame = frame_in(&data, super::geom::Geom::standard().chart);
+    let rings = alert_rings(&scene, &PALETTE_LIGHT);
+    for (k, step) in data.steps.iter().enumerate() {
+        let at = frame.map(step.pct_mac, step.mass_kg);
+        let ringed = rings
+            .iter()
+            .any(|c| (c[0] - at[0]).hypot(c[1] - at[1]) < 1e-6);
+        assert_eq!(ringed, k == 1, "{}", step.state);
     }
-    // The ring follows the gate's verdict, not the plotted point: a CG drawn
-    // well outside the limits stays unringed while the gate passes it, and
-    // a state with no verdict (step 2) is never ringed.
-    let mut outside = inside.clone();
-    outside.steps[1].pct_mac = 60.0;
-    outside.steps[0].gate = gate(State::OperatingEmpty, true);
-    outside.steps[2].gate = gate(State::AnalyzedTakeoff, true);
-    for palette in [&PALETTE_LIGHT, &PALETTE_DARK] {
-        let scene = figure_load_trim_sheet(&outside, palette);
-        let frame = frame_for(&outside);
-        let rings = alert_rings(&scene, palette);
-        for (k, step) in outside.steps.iter().enumerate() {
-            let at = frame.map(outside.index_at(step.mass_kg, step.pct_mac), step.mass_kg);
-            let ringed = rings
-                .iter()
-                .any(|c| (c[0] - at[0]).hypot(c[1] - at[1]) < 1e-6);
-            assert_eq!(ringed, k != 1, "state {} ({})", k + 1, step.state);
-        }
-        // The key explains the ring only when one is drawn.
-        let svg = crate::svg::render_svg(&scene);
-        assert!(svg.contains(super::panel::KEY_OUTSIDE));
-    }
-    let svg = crate::svg::render_svg(&figure_load_trim_sheet(&inside, &PALETTE_LIGHT));
-    assert!(!svg.contains(super::panel::KEY_OUTSIDE));
-}
-
-#[test]
-fn mass_label_reservations_cover_both_shipped_languages() {
-    for (role, spanish) in [
-        (MassRole::SizedTakeoff, "TOW dimensionada"),
-        (MassRole::AnalyzedTakeoff, "TOW analizada"),
-        (MassRole::DesignLanding, "LW de dise\u{f1}o"),
-        (MassRole::AnalyzedZeroFuel, "ZFW analizada"),
-    ] {
-        let longest = role.label().chars().count().max(spanish.chars().count());
-        assert!(role.reserved_chars() >= longest, "{role:?}");
-    }
-}
-
-#[test]
-fn a_state_on_its_limit_reads_a_zero_margin_without_a_sign() {
-    assert_eq!(super::panel::signed_tenths(-0.04), "0.0");
-    assert_eq!(super::panel::signed_tenths(0.04), "0.0");
-    assert_eq!(super::panel::signed_tenths(-0.06), "-0.1");
-    assert_eq!(super::panel::signed_tenths(2.26), "+2.3");
-}
-
-/// Mass-label backplates of `scene`, `[x0, y0, x1, y1]`, in drawing order.
-fn label_plates(scene: &crate::scene::Scene) -> Vec<[f64; 4]> {
-    scene
-        .elements
-        .windows(2)
-        .filter_map(|pair| match pair {
-            [crate::scene::SceneElement::Rect {
-                x,
-                y,
-                width,
-                height,
-                stroke: None,
-                ..
-            }, crate::scene::SceneElement::Text { text, .. }]
-                if text.ends_with(" kg") =>
-            {
-                Some([*x, *y, x + width, y + height])
-            }
-            _ => None,
-        })
-        .collect()
-}
-
-#[test]
-fn mass_labels_keep_clear_of_every_mass_line_and_of_each_other() {
-    // Spread lines, then a landing mass 1 % under takeoff, then all three
-    // within a few hundred kilograms: the labels must move, not overlap.
-    for (landing, zero_fuel) in [
-        (66_000.0, 62_500.0),
-        (77_200.0, 62_500.0),
-        (77_600.0, 77_200.0),
-    ] {
-        let mut data = sample();
-        for line in &mut data.weight_lines {
-            match line.role {
-                MassRole::DesignLanding => line.mass_kg = landing,
-                MassRole::AnalyzedZeroFuel => line.mass_kg = zero_fuel,
-                _ => {}
-            }
-        }
-        let scene = figure_load_trim_sheet(&data, &PALETTE_LIGHT);
-        let frame = frame_for(&data);
-        let plates = label_plates(&scene);
-        assert_eq!(plates.len(), 3);
-        for (k, plate) in plates.iter().enumerate() {
-            assert!(plate[0] >= frame.left && plate[2] <= frame.right());
-            assert!(plate[1] >= frame.top && plate[3] <= frame.bottom());
-            for line in &data.weight_lines {
-                let y = frame.map(frame.i_range.0, line.mass_kg)[1];
-                assert!(
-                    plate[3] <= y - 5.0 || plate[1] >= y + 5.0,
-                    "label {k} {plate:?} crowds the line at y = {y} ({landing}, {zero_fuel})"
-                );
-            }
-            for other in &plates[..k] {
-                assert!(
-                    plate[2] <= other[0]
-                        || other[2] <= plate[0]
-                        || plate[3] <= other[1]
-                        || other[3] <= plate[1],
-                    "labels overlap: {plate:?} {other:?}"
-                );
-            }
-        }
-    }
+    // Chart ring, table ring and key ring.
+    assert_eq!(rings.len(), 3);
 }
 
 #[test]
@@ -897,62 +667,317 @@ fn a_gate_phase_has_the_mechanisms_the_gate_scopes_to_its_state() {
             "{state:?}"
         );
     }
+    // Above the MLW an en-route state has its own phase: no landing trim and
+    // no rotation, the static-margin floor aft.
+    assert_eq!(
+        GatePhase::EnRouteAboveMlw.limits(),
+        PhaseLimits::EN_ROUTE_ABOVE_MLW
+    );
 }
 
-/// The ringed states of a run's sheet are exactly the gated states the
-/// run's own CG gate failed, on a passing and a failing preset.
+/// A state the gate scoped above the maximum landing mass is its own phase:
+/// its row keeps the gate's own limits, and the table names the forward
+/// limit the gate reported for it (not the landing trim of the flight
+/// phase), as the mechanism its governance maps to.
 #[test]
-fn the_ringed_states_are_the_states_the_run_gate_failed() {
+fn a_state_gated_above_the_mlw_is_its_own_phase_and_names_its_forward_limit() {
+    use alas_opt::envelope::ForwardLimitGovernance as Fwd;
     use alas_opt::ModelCgLoadingState as State;
-    let mut outcomes = Vec::new();
-    for preset in ["A320-200", "ATR72-600"] {
-        let config = alas_config::AlasConfig::from_value(&serde_json::json!({"preset": preset}))
-            .expect("registered preset");
-        let options = alas_pipeline::PipelineOptions {
-            optimize: false,
-            compare_baseline: false,
-            quiet: true,
-            seed: Some(42),
-            ..Default::default()
-        };
-        let result = alas_pipeline::DesignPipeline::new(config)
-            .run(&options, &alas_pipeline::RunEnvironment::default())
-            .expect("analysis run");
-        let gate = result.feasibility.model_cg.as_ref().expect("CG gate");
-        let failed = |state: State| {
-            gate.loading_states
-                .iter()
-                .find(|s| s.state == state)
-                .is_some_and(|s| {
-                    s.constraints
-                        .iter()
-                        .any(|c| c.violated && !c.constraint.is_diagnostic())
-                })
-        };
-        let data = super::data::load_trim_data_from_pipeline(&result).expect("sheet data");
-        let scene = figure_load_trim_sheet(&data, &PALETTE_LIGHT);
-        let frame = frame_for(&data);
-        let rings = alert_rings(&scene, &PALETTE_LIGHT);
-        let mut any_failed = false;
-        for step in &data.steps {
-            let at = frame.map(data.index_at(step.mass_kg, step.pct_mac), step.mass_kg);
-            let ringed = rings
-                .iter()
-                .any(|c| (c[0] - at[0]).hypot(c[1] - at[1]) < 1e-6);
-            let expected = match step.state.as_str() {
-                "DOW" => failed(State::OperatingEmpty),
-                "ZFW" => failed(State::AnalyzedZeroFuel),
-                "TOW" => failed(State::AnalyzedTakeoff),
-                "LW" => failed(State::OperationalReserve),
-                _ => false,
-            };
-            any_failed |= expected;
-            assert_eq!(ringed, expected, "{preset} {}", step.state);
-        }
-        outcomes.push((preset, any_failed));
+    for (governance, mechanism) in [
+        (Fwd::MaxNoseLoadHandling, Mechanism::NoseGearLoad),
+        (Fwd::RotationNoseWheelLiftoff, Mechanism::Rotation),
+        (Fwd::TakeoffTrimStabiliserStop, Mechanism::Rotation),
+        (Fwd::ScissorPlotEstimate, Mechanism::LandingTrim),
+        (Fwd::LandingTrimDesignRule, Mechanism::LandingTrim),
+        (Fwd::LandingTrimSourcedTravel, Mechanism::LandingTrim),
+    ] {
+        assert_eq!(Mechanism::of_forward_governance(governance), mechanism);
+        assert!(mechanism.is_forward());
     }
-    assert!(
-        outcomes.iter().any(|o| o.1) && outcomes.iter().any(|o| !o.1),
-        "one passing and one failing preset expected: {outcomes:?}"
+    let mut data = with_mechanisms();
+    assert!(super::gate::table_notes(&data.steps)
+        .iter()
+        .all(|(lead, _)| *lead != super::gate::NOTE_ABOVE_MLW));
+    let reserve = LoadStep {
+        item: "Trip fuel burn".to_owned(),
+        state: "LW".to_owned(),
+        mass_kg: 68_000.0,
+        pct_mac: 28.0,
+        gate: Some(StepGate {
+            state: State::OperationalReserve,
+            phase: GatePhase::EnRouteAboveMlw,
+            cg_pct_mac: 28.0,
+            fwd_pct_mac: 12.3,
+            aft_pct_mac: 38.0,
+            fwd_governance: Fwd::MaxNoseLoadHandling,
+            violated: false,
+        }),
+    };
+    data.steps.push(reserve);
+    let notes = super::gate::table_notes(&data.steps);
+    assert_eq!(
+        notes.last(),
+        Some(&(super::gate::NOTE_ABOVE_MLW, Some("nose-gear load")))
     );
+    let scene = figure_load_trim_sheet(&data, &PALETTE_LIGHT);
+    let drawn = |wanted: &str| {
+        scene
+            .elements
+            .iter()
+            .any(|e| matches!(e, SceneElement::Text { text, .. } if text == wanted))
+    };
+    assert!(drawn(super::gate::NOTE_ABOVE_MLW) && drawn("nose-gear load"));
+    // The table states the gate's own forward limit for the row.
+    assert!(drawn("12.3"));
+}
+
+#[test]
+fn the_envelope_scopes_agree_with_the_gate_scopes() {
+    use alas_opt::envelope::PhaseLimits;
+    for (kind, scope) in [
+        (EnvelopeKind::Takeoff, PhaseLimits::TAKEOFF),
+        (EnvelopeKind::Landing, PhaseLimits::LANDING),
+        (EnvelopeKind::ZeroFuel, PhaseLimits::FLIGHT),
+    ] {
+        assert_eq!(kind.admits(Mechanism::Rotation), scope.rotation, "{kind:?}");
+        assert_eq!(
+            kind.admits(Mechanism::LandingTrim),
+            scope.landing_trim,
+            "{kind:?}"
+        );
+        assert_eq!(
+            kind.admits(Mechanism::StaticMargin),
+            scope.static_margin,
+            "{kind:?}"
+        );
+        for ground in [
+            Mechanism::NoseGearLoad,
+            Mechanism::MinNoseLoad,
+            Mechanism::TipBack,
+        ] {
+            assert!(kind.admits(ground));
+        }
+    }
+}
+
+#[test]
+fn the_panel_stands_beside_the_chart_on_a_wide_card_and_stacks_below_on_a_narrow_one() {
+    let data = with_mechanisms();
+    let frame_of = |width: f64| {
+        let scene = figure_load_trim_sheet_sized(&data, &PALETTE_LIGHT, width);
+        let panel_title = scene
+            .elements
+            .iter()
+            .find_map(|e| match e {
+                SceneElement::Text { text, pos, .. } if text == "Chart key" => Some(*pos),
+                _ => None,
+            })
+            .expect("key title");
+        (scene.width, scene.height, panel_title)
+    };
+    let (wide_w, wide_h, wide_title) = frame_of(1400.0);
+    let (narrow_w, narrow_h, narrow_title) = frame_of(640.0);
+    // Beside: the panel starts right of the chart and near the top.
+    assert!(wide_title[0] > 0.6 * wide_w && wide_title[1] < 0.3 * wide_h);
+    // Stacked: the panel starts at the left, below the chart.
+    assert!(narrow_title[0] < 0.2 * narrow_w && narrow_title[1] > 0.5 * narrow_h);
+    for (w, h) in [(wide_w, wide_h), (narrow_w, narrow_h)] {
+        assert!(w.is_finite() && h.is_finite() && h > 300.0);
+    }
+    // Nothing the panel draws leaves the canvas.
+    for width in [640.0, 900.0, 1100.0, 1400.0, 1900.0] {
+        let scene = figure_load_trim_sheet_sized(&data, &PALETTE_LIGHT, width);
+        for element in &scene.elements {
+            if let Some((t, b)) = text_box(element) {
+                assert!(
+                    b[0] >= -1.0
+                        && b[2] <= scene.width + 1.0
+                        && b[1] >= -1.0
+                        && b[3] <= scene.height + 1.0,
+                    "'{t}' leaves the {width} px canvas: {b:?} of {} x {}",
+                    scene.width,
+                    scene.height
+                );
+            }
+        }
+    }
+}
+
+#[test]
+fn a_certified_line_is_drawn_dashed_in_its_own_colour_and_named_in_the_key() {
+    let mut data = with_mechanisms();
+    data.lines.published = vec![PublishedLine {
+        source: "Test Manual, Table 1".to_owned(),
+        reference: "Test Manual, Table 1, p1".to_owned(),
+        forward: true,
+        points: vec![(45_000.0, 14.0), (70_000.0, 16.0)],
+    }];
+    let ink = super::render::Ink::for_palette(&PALETTE_LIGHT);
+    let scene = figure_load_trim_sheet(&data, &PALETTE_LIGHT);
+    let dashed = scene.elements.iter().filter(|e| {
+        matches!(e, SceneElement::Polyline { stroke, .. }
+            if stroke.color == ink.certified && stroke.dash_array.is_some())
+    });
+    assert_eq!(dashed.count(), 1);
+    let svg = crate::svg::render_svg(&scene);
+    assert!(svg.contains("Test Manual, Table 1"));
+}
+
+#[test]
+fn published_envelopes_exist_only_for_the_sourced_presets() {
+    use super::published::published_for;
+    assert!(published_for("A320-200", 11.0, 4.2).is_empty());
+    assert!(!published_for("A220-300", 11.0, 4.2).is_empty());
+    assert!(!published_for("B747-400", 11.0, 4.2).is_empty());
+    let atr = published_for("ATR72-600", 13.604, 2.303);
+    assert_eq!(atr.iter().filter(|l| l.forward).count(), 2);
+    assert_eq!(atr[0].points.last(), Some(&(22_970.0, 20.8)));
+    assert!(atr.iter().all(|l| l.reference.contains("EASA.A.084")));
+    // The C-295 TCDS (EASA.A.186 Issue 08, Section 5 item 14) refers the CG
+    // range to the AFM: no published envelope.
+    assert!(published_for("C295", 11.0, 4.2).is_empty());
+}
+
+/// A gated state at `mass_kg` scoped to `scope`, with the mechanisms of the
+/// sample sheet: nose-gear load 10, landing trim 18, rotation 20 forward;
+/// static margin 38, minimum nose load 44, tip-back 50 aft (%MAC).
+fn gated_state(
+    state: alas_opt::ModelCgLoadingState,
+    scope: alas_opt::envelope::PhaseLimits,
+    mass_kg: f64,
+) -> alas_opt::ModelCgLoadingAssessment {
+    use alas_opt::envelope::{AftLimitGovernance, ForwardLimitGovernance, PhysicalCgLimits};
+    let all = PhysicalCgLimits {
+        aft_limit_pct_mac: 38.0,
+        aft_limit_governance: AftLimitGovernance::Aerodynamic,
+        clean_np_pct_mac: 45.0,
+        aerodynamic_aft_pct_mac: 38.0,
+        ground_aft_pct_mac: 44.0,
+        tip_back_aft_pct_mac: 50.0,
+        fwd_limit_pct_mac: 20.0,
+        fwd_limit_governance: ForwardLimitGovernance::RotationNoseWheelLiftoff,
+        max_nose_load_fwd_pct_mac: 10.0,
+        scissor_plot_fwd_pct_mac: 8.0,
+        rotation_fwd_pct_mac: 20.0,
+        takeoff_trim_fwd_pct_mac: f64::NEG_INFINITY,
+        clean_trim_fwd_pct_mac: f64::NEG_INFINITY,
+        landing_approach_fwd_pct_mac: f64::NEG_INFINITY,
+        landing_flare_fwd_pct_mac: f64::NEG_INFINITY,
+        rotation_longitudinal_force_shift_pct_mac: 0.0,
+        rotation_tail_lift_coefficient: -1.3,
+        rotation_stabilizer_nose_up_deg: None,
+        landing_trim_fwd_pct_mac: 18.0,
+        iced_tail_fwd_pct_mac: 9.0,
+        landing_tail_lift_coefficient: -0.8,
+        landing_tail_trim_limited: false,
+        landing_tail_sourced: false,
+        landing_trim_condition: "design rule",
+        usable_range_pct_mac: 18.0,
+    };
+    alas_opt::ModelCgLoadingAssessment {
+        state,
+        scope,
+        mass_kg,
+        cg_x_m: X_LEMAC + 0.3 * MAC,
+        h_cg_m: 3.0,
+        cg_pct_mac: 30.0,
+        static_margin: 0.1,
+        critical_static_margin: 0.1,
+        nose_gear_load_fraction: 0.08,
+        ground_reactions_admissible: true,
+        physical_limits: all.scoped(scope),
+        constraints: Vec::new(),
+    }
+}
+
+/// The en-route states the gate scoped above the MLW are a limit set of
+/// their own, from the MLW to the heaviest of them, at their own scope (no
+/// landing trim, no rotation): drawn as an outline in its own style and keyed
+/// by the mechanism the gate reported bounding them forward, read from the
+/// heaviest such state's verdict.
+#[test]
+fn the_en_route_states_above_the_mlw_are_their_own_set_drawn_and_keyed_apart() {
+    use super::limits::{limit_sets, Bands};
+    use alas_opt::envelope::{ForwardLimitGovernance, PhaseLimits};
+    use alas_opt::ModelCgLoadingState as State;
+    let mut states = vec![
+        gated_state(State::OperatingEmpty, PhaseLimits::GROUND, 42_000.0),
+        gated_state(State::AnalyzedZeroFuel, PhaseLimits::FLIGHT, 60_000.0),
+        gated_state(State::OperationalReserve, PhaseLimits::FLIGHT, 64_000.0),
+        gated_state(
+            State::OperationalMidMission,
+            PhaseLimits::EN_ROUTE_ABOVE_MLW,
+            71_000.0,
+        ),
+        gated_state(State::AnalyzedTakeoff, PhaseLimits::TAKEOFF, 78_000.0),
+    ];
+    let bands = Bands {
+        zfw_kg: 60_000.0,
+        takeoff_kg: 78_000.0,
+        landing_kg: 66_000.0,
+    };
+    let sets = limit_sets(&states.iter().collect::<Vec<_>>(), bands);
+    // Five sets; the flight (landing-trim) set ends at the MLW.
+    for (name, set) in [
+        ("ground", &sets.ground),
+        ("takeoff", &sets.takeoff),
+        ("flight", &sets.flight),
+        ("landing", &sets.landing),
+    ] {
+        assert!(!set.is_empty(), "{name}");
+    }
+    assert!(sets.flight.iter().all(|v| v.mass_kg <= 66_000.0 + 1.0));
+    let above = sets.en_route_above_mlw.expect("an en-route-above-MLW set");
+    let masses: Vec<f64> = above.vertices.iter().map(|v| v.mass_kg).collect();
+    assert_eq!(masses, vec![66_000.0, 71_000.0]);
+    for v in &above.vertices {
+        // Nose-gear load forward (not landing trim 18, not rotation 20) and
+        // the static-margin floor aft.
+        assert_eq!((v.fwd_pct_mac, v.aft_pct_mac), (10.0, 38.0));
+    }
+    assert_eq!(above.forward_bound, Mechanism::NoseGearLoad);
+
+    // The key names what the verdict says, not a fixed mechanism.
+    states[3].physical_limits.fwd_limit_governance = ForwardLimitGovernance::LandingTrimDesignRule;
+    let relabelled = limit_sets(&states.iter().collect::<Vec<_>>(), bands);
+    assert_eq!(
+        relabelled.en_route_above_mlw.map(|s| s.forward_bound),
+        Some(Mechanism::LandingTrim)
+    );
+    // No state above the MLW: no set.
+    states.remove(3);
+    assert!(limit_sets(&states.iter().collect::<Vec<_>>(), bands)
+        .en_route_above_mlw
+        .is_none());
+
+    // Drawn as its own outline and keyed with its forward bound.
+    let mut data = with_mechanisms();
+    let style = super::render::Ink::for_palette(&PALETTE_LIGHT).above_mlw_stroke();
+    let unstyled = figure_load_trim_sheet(&data, &PALETTE_LIGHT);
+    data.en_route_above_mlw = Some(above);
+    let scene = figure_load_trim_sheet(&data, &PALETTE_LIGHT);
+    let styled = |scene: &crate::scene::Scene| {
+        scene
+            .elements
+            .iter()
+            .filter(|e| match e {
+                SceneElement::Polygon {
+                    stroke: Some(s), ..
+                }
+                | SceneElement::Line { stroke: s, .. } => *s == style,
+                _ => false,
+            })
+            .count()
+    };
+    assert_eq!(styled(&unstyled), 0);
+    // The outline on the chart and the sample line in the key.
+    assert_eq!(styled(&scene), 2);
+    let drawn = |wanted: &str| {
+        scene
+            .elements
+            .iter()
+            .any(|e| matches!(e, SceneElement::Text { text, .. } if text == wanted))
+    };
+    assert!(drawn(super::panel::KEY_ABOVE_MLW) && drawn("nose-gear load"));
+    assert!(super::panel::SHEET_TEXT.contains(&super::panel::KEY_ABOVE_MLW));
 }

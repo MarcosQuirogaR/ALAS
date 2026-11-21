@@ -39,9 +39,14 @@ pub struct Airport {
     pub icao: String,
     /// Field elevation above mean sea level, in metres.
     pub elevation_m: f64,
-    /// Takeoff distance available on the longest runway, in metres.
+    /// Usable take-off distance in metres: the best, over the aerodrome's
+    /// runway directions, of `min(TORA, ASDA)` (until TORA and ASDA are
+    /// separate fields): a balanced-field take-off and its rejection use neither
+    /// clearway nor stopway beyond that. Rows not checked against the AIP say so
+    /// in their notes.
     pub toda_m: f64,
-    /// Landing distance available on the longest runway, in metres.
+    /// Usable landing distance in metres: the best declared landing distance
+    /// over the aerodrome's runway directions.
     pub lda_m: f64,
     /// How far above the standard atmosphere a hot day here runs, in kelvin
     /// of temperature difference.
@@ -129,6 +134,55 @@ pub fn database_with_custom() -> Vec<Airport> {
     airports
 }
 
+/// `notes` with the provenance of a stated landing distance appended.
+pub fn stated_landing_note(notes: &str) -> String {
+    let note = "landing distance available stated for this case (design field length)";
+    if notes.is_empty() {
+        note.to_owned()
+    } else {
+        format!("{notes}; {note}")
+    }
+}
+
+/// `notes` with the provenance of a stated take-off distance appended, so a
+/// report that prints them never misdescribes where the value came from.
+pub fn stated_takeoff_note(notes: &str) -> String {
+    let note = "take-off distance available stated for this case (design field length)";
+    if notes.is_empty() {
+        note.to_owned()
+    } else {
+        format!("{notes}; {note}")
+    }
+}
+
+/// `base` with the stated distances available applied (each `None` keeps the
+/// derived one; a distance longer than the base's is refused, so a stated
+/// value never lengthens the runway). Records are interned, so repeated calls
+/// with the same values allocate once.
+pub fn with_declared_distances(
+    base: &'static Airport,
+    toda_m: Option<f64>,
+    lda_m: Option<f64>,
+) -> &'static Airport {
+    // A stated distance can only shorten the requirement (landing by
+    // analogy): a longer one never lengthens the runway.
+    let toda_m = toda_m.filter(|toda| *toda < base.toda_m);
+    let lda_m = lda_m.filter(|lda| *lda < base.lda_m);
+    if toda_m.is_none() && lda_m.is_none() {
+        return base;
+    }
+    let mut stated = base.clone();
+    if let Some(toda) = toda_m {
+        stated.toda_m = toda;
+        stated.notes = stated_takeoff_note(&stated.notes);
+    }
+    if let Some(lda) = lda_m {
+        stated.lda_m = lda;
+        stated.notes = stated_landing_note(&stated.notes);
+    }
+    crate::airport_io::intern_airport(stated)
+}
+
 /// Look one aerodrome up by display name or by ICAO code.
 ///
 /// Both are accepted because the configuration stores the display name while
@@ -156,14 +210,10 @@ struct Table {
 }
 
 /// Parse the embedded table. See [`crate::materials`] for why a parse failure
-/// degrades rather than panicking.
+/// stops the program instead of yielding an empty table.
 fn parse() -> Table {
-    serde_json::from_str(AIRPORTS_JSON).unwrap_or_else(|error| {
-        tracing::error!(%error, "crates/alas-config/data/airports.json failed to parse");
-        Table {
-            airports: Vec::new(),
-        }
-    })
+    serde_json::from_str(AIRPORTS_JSON)
+        .unwrap_or_else(|error| panic!("embedded airports.json failed to parse: {error}"))
 }
 
 // A test asserts on values it constructed here directly, so a failed unwrap

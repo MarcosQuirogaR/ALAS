@@ -72,27 +72,44 @@ fn v2_request_retains_geometry_airfoil_control_and_si_solver_contract() {
 
 #[test]
 fn adapter_result_requires_explicit_frames_and_native_samples() {
-    let parsed = parse_result("ALAS_FLOWUNSTEADY_RESULT_V1\narea_m2=100\nchord_m=4\nspan_m=30\nmoment_reference_m=1,0,0\nlifting_surfaces_only=true\nlift_is_wind_axis=true\npitch_moment_is_body_axis=true\npoint=2,0.2,0,0.4,-0.03\n").unwrap_or_else(|error| panic!("parse: {error}"));
+    let parsed = parse_result("ALAS_FLOWUNSTEADY_RESULT_V1\narea_m2=100\nchord_m=4\nspan_m=30\nmoment_reference_m=1,0,0\nlifting_surfaces_only=true\nlift_is_wind_axis=true\npitch_moment_is_body_axis=true\nmodel=vortex_particle_wake\npoint=2,0.2,0,0.4,-0.03\n").unwrap_or_else(|error| panic!("parse: {error}"));
     assert_eq!(parsed.points.len(), 1);
+    assert_eq!(parsed.wake_model, FlowUnsteadyWakeModel::FreeVortexParticle);
     assert!(parse_result("ALAS_FLOWUNSTEADY_RESULT_V1\n").is_err());
 }
 
 #[test]
+fn the_declared_wake_model_is_required_and_quasi_steady_is_reduced_fidelity() {
+    let full = "ALAS_FLOWUNSTEADY_RESULT_V1\narea_m2=100\nchord_m=4\nspan_m=30\nmoment_reference_m=1,0,0\nlifting_surfaces_only=true\nlift_is_wind_axis=true\npitch_moment_is_body_axis=true\nmodel=vortex_particle_wake\npoint=2,0.2,0,0.4,-0.03\n";
+    let quasi = full.replace("vortex_particle_wake", "quasi_steady_vortex_lattice");
+    let parsed = parse_result(&quasi).unwrap_or_else(|error| panic!("parse: {error}"));
+    assert!(parsed.wake_model.is_reduced_fidelity());
+    assert_eq!(
+        parse_result(&full.replace("model=vortex_particle_wake\n", "")),
+        Err(FlowUnsteadyError::Missing("model"))
+    );
+    assert!(matches!(
+        parse_result(&full.replace("vortex_particle_wake", "panel")),
+        Err(FlowUnsteadyError::InvalidValue { field: "model", .. })
+    ));
+}
+
+#[test]
 fn malformed_result_field_counts_are_rejected_without_indexing_panics() {
-    let base = "ALAS_FLOWUNSTEADY_RESULT_V1\narea_m2=100\nchord_m=4\nspan_m=30\nmoment_reference_m=1,0,0\nlifting_surfaces_only=true\nlift_is_wind_axis=true\npitch_moment_is_body_axis=true\n";
+    let base = "ALAS_FLOWUNSTEADY_RESULT_V1\narea_m2=100\nchord_m=4\nspan_m=30\nmoment_reference_m=1,0,0\nlifting_surfaces_only=true\nlift_is_wind_axis=true\npitch_moment_is_body_axis=true\nmodel=vortex_particle_wake\n";
     let extra_point = format!("{base}point=2,0.2,0,0.4,-0.03,unexpected\n");
     assert_eq!(
         parse_result(&extra_point),
         Err(FlowUnsteadyError::Missing("five point columns"))
     );
-    let extra_origin = "ALAS_FLOWUNSTEADY_RESULT_V1\narea_m2=100\nchord_m=4\nspan_m=30\nmoment_reference_m=1,0,0,unexpected\nlifting_surfaces_only=true\nlift_is_wind_axis=true\npitch_moment_is_body_axis=true\npoint=2,0.2,0,0.4,-0.03\n".to_owned();
+    let extra_origin = "ALAS_FLOWUNSTEADY_RESULT_V1\narea_m2=100\nchord_m=4\nspan_m=30\nmoment_reference_m=1,0,0,unexpected\nlifting_surfaces_only=true\nlift_is_wind_axis=true\npitch_moment_is_body_axis=true\nmodel=vortex_particle_wake\npoint=2,0.2,0,0.4,-0.03\n".to_owned();
     assert_eq!(
         parse_result(&extra_origin),
         Err(FlowUnsteadyError::Missing(
             "three moment_reference_m coordinates"
         ))
     );
-    let bad_flag = "ALAS_FLOWUNSTEADY_RESULT_V1\narea_m2=100\nchord_m=4\nspan_m=30\nmoment_reference_m=1,0,0\nlifting_surfaces_only=maybe\nlift_is_wind_axis=true\npitch_moment_is_body_axis=true\npoint=2,0.2,0,0.4,-0.03\n";
+    let bad_flag = "ALAS_FLOWUNSTEADY_RESULT_V1\narea_m2=100\nchord_m=4\nspan_m=30\nmoment_reference_m=1,0,0\nlifting_surfaces_only=maybe\nlift_is_wind_axis=true\npitch_moment_is_body_axis=true\nmodel=vortex_particle_wake\npoint=2,0.2,0,0.4,-0.03\n";
     assert!(matches!(
         parse_result(bad_flag),
         Err(FlowUnsteadyError::InvalidValue {

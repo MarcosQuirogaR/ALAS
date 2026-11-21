@@ -1,7 +1,7 @@
 // SPDX-License-Identifier: AGPL-3.0-or-later
 // Copyright (C) 2026 Marcos Quiroga Rodriguez
 
-//! Study harness (never committed): reference quantities of a preset's built geometry.
+//! Diagnostic: reference quantities of a preset's built geometry.
 //! usage: stepb_probe <preset>...   (JSON lines on stdout; x aft from the nose, metres)
 
 #![allow(clippy::print_stdout)]

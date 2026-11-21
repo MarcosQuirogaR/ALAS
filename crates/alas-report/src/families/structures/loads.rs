@@ -10,7 +10,9 @@
 //! doc comment in the previous stub implied otherwise; verified against
 //! `visualization.py` L5819-5906 directly.
 
-use crate::scene::{Axes2D, Color, Fill, Scene, SceneElement, Stroke, TextAlign, TextBaseline};
+use crate::scene::{
+    Axes2D, Color, Fill, Scale, Scene, SceneElement, Stroke, TextAlign, TextBaseline,
+};
 use crate::theme::{get_palette, Palette};
 use alas_pipeline::structural::StructuralAnalysisResult;
 use alas_struct::analytical::LoadCaseResult;
@@ -92,7 +94,13 @@ fn draw_stiffness_moment_panel(
     let ei_max = analysis.ei_nm2.iter().copied().fold(0.0_f64, f64::max) / 1e9;
     let (m_lo, m_hi) = autoscale_padded(governing.moment_nm.iter().map(|&m| m / 1e6));
 
-    let axes_ei = Axes2D::new(rect, (0.0, y_max), (0.0, (ei_max * 1.08).max(1e-6)));
+    // Both scales must put zero on the same horizontal line. EI is never
+    // negative; when the moment range reaches below zero, extend the EI scale
+    // below zero by the same fraction of the frame.
+    let ei_top = (ei_max * 1.08).max(1e-6);
+    let zero_fraction = (-m_lo / (m_hi - m_lo)).clamp(0.0, 0.9);
+    let ei_lo = -ei_top * zero_fraction / (1.0 - zero_fraction);
+    let axes_ei = Axes2D::new(rect, (0.0, y_max), (ei_lo, ei_top));
     let axes_m = Axes2D::new(rect, (0.0, y_max), (m_lo, m_hi));
     axes_ei.draw_frame_with_labels(
         scene,
@@ -158,7 +166,7 @@ fn draw_stiffness_moment_panel(
         scene,
         "Bending moment M [MN.m]",
         "tab:orange",
-        (rect.0 + rect.2 + 46.0, rect.1 + rect.3 * 0.5),
+        (rect.0 + rect.2 + 40.0, rect.1 + rect.3 * 0.5),
     );
 
     crate::chart_kit::draw_legend(
@@ -268,10 +276,17 @@ fn draw_deflection_panel(
 
     if let Some(nastran) = result.nastran.as_ref() {
         if nastran.static_solve.status == ResultStatus::Ok {
-            for (_, tip_defl) in nastran.static_solve.tip_deflection_m.iter() {
+            for (label, tip_defl) in nastran.static_solve.tip_deflection_m.iter() {
                 let color = Color::from_hex(MSC_NASTRAN_COLOR);
                 let center = axes.map_point(y_max, tip_defl);
                 draw_diamond(scene, center, 6.0, color);
+                annotate_tip_error(
+                    scene,
+                    pal,
+                    center,
+                    tip_error_fraction(analysis, label, tip_defl),
+                    10.0,
+                );
             }
             legend_entries.push((
                 "MSC NASTRAN SOL 101 tips".to_owned(),
@@ -282,10 +297,17 @@ fn draw_deflection_panel(
 
     if let Some(nastran95) = result.nastran95.as_ref() {
         if nastran95.static_solve.status == ResultStatus::Ok {
-            for (_, tip_defl) in nastran95.static_solve.tip_deflection_m.iter() {
+            for (label, tip_defl) in nastran95.static_solve.tip_deflection_m.iter() {
                 let color = Color::from_hex(NASTRAN95_COLOR);
                 let center = axes.map_point(y_max, tip_defl);
                 draw_circle_marker(scene, center, 5.0, color);
+                annotate_tip_error(
+                    scene,
+                    pal,
+                    center,
+                    tip_error_fraction(analysis, label, tip_defl),
+                    10.0,
+                );
             }
             legend_entries.push((
                 "NASTRAN-95 SOL 101 tips".to_owned(),
@@ -310,6 +332,18 @@ fn draw_deflection_panel(
         }
     }
 
+    scene.add(SceneElement::Text {
+        text: "Markers: FE tip deflection; label = FE minus analytical tip, flagged above 15 %"
+            .to_owned(),
+        pos: [rect.0 + 8.0, rect.1 + 8.0],
+        font_size: 8.0,
+        color: Color::from_hex(pal.tick),
+        align: TextAlign::Left,
+        baseline: TextBaseline::Top,
+        angle_deg: 0.0,
+        bold: false,
+    });
+
     crate::chart_kit::draw_horizontal_legend_columns(
         scene,
         [70.0, 530.0],
@@ -317,6 +351,56 @@ fn draw_deflection_panel(
         pal,
         7.5,
     );
+}
+
+/// FE tip errors above this fraction of the analytical tip are flagged.
+const TIP_ERROR_FLAG: f64 = 0.15;
+
+/// Relative FE-minus-analytical tip deflection for the load case `label`,
+/// or `None` when no analytical case of that name has a finite, non-zero tip.
+fn tip_error_fraction(
+    analysis: &alas_struct::analytical::StructuralAnalysisReport,
+    label: &str,
+    fe_tip_m: f64,
+) -> Option<f64> {
+    let analytical = analysis
+        .load_cases
+        .iter()
+        .find(|lc| lc.name == label)?
+        .deflection_m
+        .last()
+        .copied()?;
+    let error = (fe_tip_m - analytical) / analytical;
+    (analytical.abs() > 1e-12 && error.is_finite()).then_some(error)
+}
+
+/// Write the signed FE-vs-analytical tip error beside its marker, in the
+/// failure red and bold above [`TIP_ERROR_FLAG`].
+fn annotate_tip_error(
+    scene: &mut Scene,
+    pal: &Palette,
+    marker: [f64; 2],
+    error: Option<f64>,
+    gap: f64,
+) {
+    let Some(error) = error else {
+        return;
+    };
+    let flagged = error.abs() > TIP_ERROR_FLAG;
+    scene.add(SceneElement::Text {
+        text: format!(
+            "{:+.0} %{}",
+            error * 100.0,
+            if flagged { " (> 15 %)" } else { "" }
+        ),
+        pos: [marker[0] - gap, marker[1]],
+        font_size: 8.0,
+        color: Color::from_hex(if flagged { "#c0392b" } else { pal.tick }),
+        align: TextAlign::Right,
+        baseline: TextBaseline::Middle,
+        angle_deg: 0.0,
+        bold: flagged,
+    });
 }
 
 /// Keep a retained solver diagnostic legible in the narrow figure footer.
@@ -393,9 +477,10 @@ fn draw_axis_ticks(
     color: &str,
     left: bool,
 ) {
-    for i in 0..=4 {
-        let frac = i as f64 / 4.0;
-        let val = axes.y_min + frac * (axes.y_max - axes.y_min);
+    // Round values (0, 0.5, 1.0 ...), not quarters of the padded axis range
+    // (58.3, 43.0, 27.8 ...).
+    let step = crate::chart_kit::tick_step(axes.y_min, axes.y_max, Scale::Linear, 5);
+    for val in crate::chart_kit::major_ticks(axes.y_min, axes.y_max, Scale::Linear, 5) {
         let p = axes.map_point(axes.x_min, val);
         let (x, align) = if left {
             (rect.0 - 4.0, TextAlign::Right)
@@ -410,7 +495,7 @@ fn draw_axis_ticks(
             stroke: Stroke::new(Color::from_hex(color), 1.0),
         });
         scene.add(SceneElement::Text {
-            text: format!("{val:.1}"),
+            text: crate::chart_kit::format_tick(val, step, None),
             pos: [x, p[1]],
             font_size: 8.0,
             color: Color::from_hex(color),
@@ -512,7 +597,7 @@ mod tests {
             nastran,
             nastran95: None,
             patran: None,
-            torenbeek_wing_mass_kg: 15000.0,
+            ledger_complete_wing_mass_kg: 15000.0,
             wing_mass: None,
             evaluation_inputs: None,
         }

@@ -77,7 +77,7 @@ fn fixture_replays_renderer_inputs_before_comparing_mlg_count() {
     );
 
     // The loads, positions and derived capacities are the intermediate
-    // evidence handed to the diagnosis owner; they are not new tolerances.
+    // evidence for diagnosis; they are not new tolerances.
     for (field, actual) in [
         ("x_nlg", layout.x_nlg),
         ("x_mlg", layout.x_mlg),

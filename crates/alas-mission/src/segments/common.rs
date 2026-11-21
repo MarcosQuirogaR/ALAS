@@ -17,12 +17,23 @@
 //! flow. What is left over: the force that does not balance the
 //! acceleration, is the residual the solver drives to zero.
 
+use alas_aero::drag_buildup::DragBreakdown;
 use alas_atmo::Us1976Values;
+use alas_prop::system::{PropulsionDemand, PropulsionRating};
 
 use super::analyses::MissionAnalyses;
 use super::conditions::{Conditions, Initials};
 use super::frames::compute_gravity;
-use crate::numerics::integrate_row;
+use crate::numerics::{integrate_row, Differentials};
+use crate::point_memo::PointMemo;
+
+/// The throttle share and the body angle (radians) a take-off-rated leg's unknowns start at. The
+/// root find is local, and the default start (half the maximum-climb force, 3 degrees) left the
+/// root of a climb at the safety speed out of reach above about 1,700 ft/min on the A220-300 (the
+/// solver stalled with the command on its bound, though 87 % of the rating flies 2,200 ft/min): a
+/// take-off-rated leg operates at 70-90 % of the rating and at a high-lift angle of attack of the
+/// order of 10 degrees, so it starts there.
+pub const TAKEOFF_RATED_START: (f64, f64) = (0.85, 10.0 * std::f64::consts::PI / 180.0);
 
 /// Altitude is the negated `z` of the inertial position, nothing more.
 pub fn update_altitude(conditions: &mut Conditions) {
@@ -65,6 +76,30 @@ pub fn update_gravity(conditions: &mut Conditions) {
     }
 }
 
+/// `update_differentials_altitude`: how long a ramp discretized in altitude takes.
+///
+/// The overall time is the dimensionless integration operator's last row, scaled by the altitude
+/// change, contracted against the reciprocal of the vertical velocity (a quadrature of
+/// `dz / vz`) and the node grid is then that time. Written exactly as upstream contracts it,
+/// because the factor `dz` is folded into the operator row before the contraction rather than
+/// after.
+pub fn update_differentials_altitude(conditions: &mut Conditions, numerics: &Differentials) {
+    let points = conditions.len();
+    if points == 0 {
+        return;
+    }
+    let dz = conditions.position_vector_m[points - 1][2] - conditions.position_vector_m[0][2];
+    let span: f64 = numerics.integrate[points - 1]
+        .iter()
+        .zip(&conditions.velocity_vector_m_s)
+        .map(|(&weight, velocity)| (weight * dz) * (1.0 / velocity[2]))
+        .sum();
+    let initial_time = conditions.time_s[0];
+    for (time, &node) in conditions.time_s.iter_mut().zip(&numerics.control_points) {
+        *time = initial_time + node * span;
+    }
+}
+
 /// Speed, Mach, Reynolds number and dynamic pressure from the velocity vector.
 ///
 /// The speed is formed as the square root of the summed squares of all three
@@ -94,9 +129,11 @@ pub fn update_freestream(conditions: &mut Conditions) {
 /// translated as a branch nothing can enter.
 pub fn update_thrust(
     conditions: &mut Conditions,
-    analyses: &MissionAnalyses,
+    memo: &mut PointMemo<'_>,
     atmosphere: &[Us1976Values],
+    leg_takeoff_rated: bool,
 ) {
+    let analyses = memo.analyses();
     let mut thrusts = Vec::with_capacity(conditions.len());
     for (point, values) in atmosphere.iter().enumerate() {
         let commanded = conditions.throttle[point];
@@ -104,6 +141,17 @@ pub fn update_thrust(
         let velocity_m_s = conditions.velocity_m_s[point];
         let mach = conditions.mach[point];
         let gravity_m_s2 = conditions.gravity_m_s2[point];
+        let mut deck = |demand| {
+            memo.thrust(
+                point,
+                values,
+                altitude_m,
+                velocity_m_s,
+                mach,
+                gravity_m_s2,
+                demand,
+            )
+        };
         // The deck is only ever asked for commands it defines. Outside that
         // interval the *force* follows the deck's own normalized-force
         // relation instead: `NormalizedForce(f)` delivers `f` times the force
@@ -129,19 +177,39 @@ pub fn update_thrust(
         } else {
             commanded
         };
-        let (output, idle_floor_limited) = analyses.thrust_with_domain(
-            values,
-            altitude_m,
-            velocity_m_s,
-            mach,
-            gravity_m_s2,
-            evaluated,
-        );
+        let takeoff_rated = analyses.enforce_throttle_envelope && leg_takeoff_rated;
+        let (output, idle_floor_limited) = if takeoff_rated {
+            // A take-off-rated leg: the command is the share of the take-off rating's force at
+            // this very point, so no published point can ask more than the rating gives.
+            (
+                deck(PropulsionDemand::RatedFraction {
+                    rating: PropulsionRating::TakeoffGoAround,
+                    fraction: evaluated,
+                })
+                .0,
+                false,
+            )
+        } else {
+            deck(PropulsionDemand::NormalizedForce(evaluated))
+        };
         let mut throttle_floor = 0.0;
         let mut thrust_n = output.thrust_n;
         if analyses.enforce_throttle_envelope {
-            if commanded > 1.0 {
-                // Above the rating `output` is already `F(1)`.
+            if takeoff_rated {
+                // Outside `[0, 1]` (a trial the root find may probe, refused by `converge_root`)
+                // the force follows `f F_TO`, the fuel stays the nearest rating point's.
+                if commanded != evaluated {
+                    let rated = deck(PropulsionDemand::RatedFraction {
+                        rating: PropulsionRating::TakeoffGoAround,
+                        fraction: 1.0,
+                    })
+                    .0;
+                    if rated.thrust_n.is_finite() {
+                        thrust_n = commanded * rated.thrust_n;
+                    }
+                }
+            } else if commanded > 1.0 {
+                // Above the maximum-climb rating `output` is already `F(1)`.
                 thrust_n = output.thrust_n * commanded;
             } else if idle_floor_limited {
                 // The deck answered from its own flight-idle floor, so the
@@ -176,20 +244,41 @@ pub fn update_thrust(
                 // unbounded relation finds in 43. The continuation is a
                 // numerical escape from a flat region, not a propulsion
                 // model, and truncating it only hides roots that exist.
-                let rated = analyses
-                    .thrust(values, altitude_m, velocity_m_s, mach, gravity_m_s2, 1.0)
-                    .thrust_n;
+                let rated = deck(PropulsionDemand::NormalizedForce(1.0)).0.thrust_n;
                 if rated.is_finite() && rated > 0.0 && output.thrust_n.is_finite() {
                     throttle_floor = output.thrust_n / rated;
                     thrust_n = commanded * rated;
                 }
+            } else if commanded < 0.0 {
+                // The deck's command interval is `[0, 1]` and its zero is zero net force
+                // wherever the flight-idle net force is negative (ram drag above the idle
+                // gross thrust: a high-speed descent). The engine can run lower: the
+                // `Rating(FlightIdle)` point is a net drag. The mission command continues the
+                // deck's own relation `f F(1)` below zero down to that point, so a descent can
+                // use the drag the engine really has, and the lowest command the engine can
+                // hold is `F_idle / F(1)`, reported as the (negative) available throttle floor.
+                // Below it the same relation is carried on as a gradient for the root find and
+                // `converge_root` refuses the point; fuel flow is the idle value throughout.
+                let rated = deck(PropulsionDemand::NormalizedForce(1.0)).0.thrust_n;
+                if rated.is_finite() && rated > 0.0 {
+                    thrust_n = commanded * rated;
+                    let idle = deck(PropulsionDemand::RatedFraction {
+                        rating: PropulsionRating::FlightIdle,
+                        fraction: 1.0,
+                    })
+                    .0;
+                    if idle.thrust_n.is_finite() && idle.thrust_n < 0.0 {
+                        throttle_floor = idle.thrust_n / rated;
+                    }
+                }
             }
         }
-        // Only the force is continued. Fuel flow stays at the value the deck
-        // produced at the bound: the point is rejected either way, and
-        // extrapolating a burn the engine cannot produce - or a burn below
-        // idle that it never stops producing - would feed the mass ODE a mass
-        // it never lost.
+        // The force is what the deck delivers at the (possibly continued) command; the fuel
+        // flow is the deck's at the point it was evaluated: the maximum-climb deck, the
+        // take-off rating at its share on a take-off-rated leg, the idle flow for a flown
+        // command below zero. A continued point past the envelope is refused by
+        // `converge_root`, so its fuel is never booked; extrapolating a burn the engine cannot
+        // produce would feed the mass ODE a mass it never lost.
         conditions.available_throttle_floor[point] = throttle_floor;
         conditions.thrust_force_vector_n[point] = [thrust_n, 0.0, 0.0];
         conditions.vehicle_mass_rate_kg_s[point] = output.fuel_flow_rate_kg_s;
@@ -198,16 +287,34 @@ pub fn update_thrust(
     conditions.thrust = thrusts;
 }
 
+/// Add the flap, slat and gear increment of a leg flown out of the clean
+/// configuration to a clean drag breakdown. The increment is a miscellaneous
+/// (configuration) drag, so it is recorded in `miscellaneous_total` and in the
+/// sums that contain it (`untrimmed`, `trim_corrected`, `total`): the plotted
+/// components still add up to the total.
+fn add_configuration_drag(breakdown: &mut DragBreakdown, configuration_delta_cd: f64) {
+    breakdown.miscellaneous_total += configuration_delta_cd;
+    breakdown.untrimmed += configuration_delta_cd;
+    breakdown.trim_corrected += configuration_delta_cd;
+    breakdown.total += configuration_delta_cd;
+}
+
 /// Run the aerodynamics analysis and dimensionalize its two coefficients.
 ///
 /// The lift and drag coefficients are zeroed wherever the dynamic pressure is
 /// not positive, and clamped to `+/- maximum_lift_coefficient`. Both are
 /// translated; neither fires on this program's inputs, because a segment
 /// always has airspeed and the clamp is `np.inf`.
-pub fn update_aerodynamics(conditions: &mut Conditions, analyses: &MissionAnalyses) {
+pub fn update_aerodynamics(
+    conditions: &mut Conditions,
+    memo: &mut PointMemo<'_>,
+    configuration_delta_cd: f64,
+) {
+    let analyses = memo.analyses();
     let mut breakdowns = Vec::with_capacity(conditions.len());
     for point in 0..conditions.len() {
-        let solution = analyses.aerodynamics(
+        let solution = memo.aerodynamics(
+            point,
             conditions.angle_of_attack_rad[point],
             conditions.mach[point],
             conditions.temperature_k[point],
@@ -216,7 +323,9 @@ pub fn update_aerodynamics(conditions: &mut Conditions, analyses: &MissionAnalys
 
         let dynamic_pressure = conditions.dynamic_pressure_pa[point];
         let mut lift_coefficient = solution.lift_coefficient;
-        let mut drag_coefficient = solution.drag.total;
+        let mut breakdown = solution.drag;
+        add_configuration_drag(&mut breakdown, configuration_delta_cd);
+        let mut drag_coefficient = breakdown.total;
         if dynamic_pressure <= 0.0 {
             lift_coefficient = 0.0;
             drag_coefficient = 0.0;
@@ -241,7 +350,7 @@ pub fn update_aerodynamics(conditions: &mut Conditions, analyses: &MissionAnalys
         conditions.wing_lift_coefficient[point] = solution.wing_lift_coefficient;
         conditions.wing_induced_drag_coefficient[point] = solution.wing_induced_drag_coefficient;
         conditions.surrogate_domain[point] = solution.surrogate_domain;
-        breakdowns.push(solution.drag);
+        breakdowns.push(breakdown);
     }
     conditions.drag_breakdown = breakdowns;
 }
@@ -299,6 +408,26 @@ pub fn update_weights(conditions: &mut Conditions, integrate: &[Vec<f64>]) {
 #[cfg(test)]
 mod tests {
     use super::*;
+
+    #[test]
+    fn the_configuration_increment_is_a_component_of_the_total() {
+        let mut breakdown = super::super::drag::MissionDragCoefficients {
+            parasite: 0.020,
+            induced: 0.100,
+            wave: 0.001,
+        }
+        .breakdown();
+        add_configuration_drag(&mut breakdown, 0.0114);
+        let sum = breakdown.parasite_total
+            + breakdown.induced_total
+            + breakdown.compressible_total
+            + breakdown.miscellaneous_total;
+        assert!((breakdown.total - 0.1324).abs() < 1e-15);
+        assert!((breakdown.total - sum).abs() < 1e-15);
+        assert_eq!(breakdown.miscellaneous_total, 0.0114);
+        assert_eq!(breakdown.untrimmed, breakdown.total);
+        assert_eq!(breakdown.trim_corrected, breakdown.total);
+    }
 
     #[test]
     fn altitude_is_the_negated_down_coordinate() {

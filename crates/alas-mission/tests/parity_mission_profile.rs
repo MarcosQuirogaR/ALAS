@@ -124,8 +124,19 @@ fn mission_request_matches_the_reference() {
                 .clone(),
         )
         .expect("reference mission profile input");
-        let origin = airports::get(&case.origin).expect("origin airport");
-        let dest = airports::get(&case.dest).expect("destination airport");
+        // The reference was built with the reference airport table: apply the declared
+        // corrections backwards so this test measures the builder, not table corrections.
+        let reference_airport = |icao: &str| {
+            let mut airport = airports::get(icao).expect("airport").clone();
+            if let Some(correction) = alas_testkit::airport_corrections::correction_for(icao) {
+                airport.elevation_m = correction.reference[0];
+                airport.toda_m = correction.reference[1];
+                airport.lda_m = correction.reference[2];
+            }
+            airport
+        };
+        let origin = &reference_airport(&case.origin);
+        let dest = &reference_airport(&case.dest);
 
         let request = build_mission_request(&config, origin, dest, case.route_distance_m);
         let actual = serde_json::to_value(&request).expect("the request serializes");

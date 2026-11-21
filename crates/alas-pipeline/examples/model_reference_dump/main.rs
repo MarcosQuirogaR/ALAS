@@ -10,6 +10,8 @@
 #![allow(clippy::print_stdout, clippy::print_stderr, missing_docs)]
 // Standalone fixture diagnostics fail immediately when their curated inputs are invalid.
 #![allow(clippy::unwrap_used, clippy::expect_used)]
+// The dump macro nests deeper than the default expansion limit.
+#![recursion_limit = "256"]
 
 use std::collections::BTreeMap;
 use std::path::PathBuf;
@@ -19,7 +21,7 @@ use alas_atmo::Atmosphere;
 use alas_config::{presets, ActiveEngineModel, AlasConfig};
 use alas_geom::builder::AircraftBuilder;
 use alas_payload::{build_payload_layout, ItemMeta};
-use alas_perf::landing_gear::size_landing_gear_with_group_stations;
+use alas_perf::landing_gear::size_landing_gear_at_design_state;
 use alas_pipeline::full_analysis::FullAnalysis;
 use alas_pipeline::gear_stations::resolved_gear_stations;
 use serde_json::{json, Value};
@@ -136,12 +138,18 @@ fn dump(name: &str) -> Result<Value, String> {
     )
     .map_err(|refusal| format!("main_gear_station_not_measured: {refusal}"))?;
     let gear_mass_kg: f64 = report.component_masses.values().copied().sum();
-    let gear_layout = size_landing_gear_with_group_stations(
+    let (tip_back, tip_back_governing) = validation_exports::tip_back_basis(&config, dv, &report);
+    let gear_layout = size_landing_gear_at_design_state(
         gear_mass_kg,
+        None,
         gear_stations.x_nlg_m,
         gear_stations.x_mlg_m,
         aero_fwd_x,
         aero_aft_x,
+        // The analysed loading CG the model reaches on the ground.
+        Some(report.physical_cg[0]),
+        config.mass_model.pct_load_nlg_min,
+        tip_back,
         config.geometry.fuselage.diameter_m,
         config.geometry.fuselage.diameter_m * 1.1,
         &gear_stations.main_gear_x_m,
@@ -279,6 +287,8 @@ fn dump(name: &str) -> Result<Value, String> {
     let cg = json!({
         "coordinate_frame": "aircraft nose-relative station, m; x forward, y right, z up",
         "model_lemac_from_nose_m": x_lemac,
+        "mac_frame_lemac_m": report.airplane.mac_frame().map(|frame| frame.x_lemac_m),
+        "mac_frame_chord_m": report.airplane.mac_frame().map(|frame| frame.chord_m),
         "model_mac_m": mac,
         "physical_cg_x_m": report.physical_cg[0],
         "physical_cg_y_m": report.physical_cg[1],
@@ -320,9 +330,29 @@ fn dump(name: &str) -> Result<Value, String> {
         },
         "nlg_tire_class": gear_layout.nlg_tire.code,
         "mlg_tire_class": gear_layout.mlg_tire.code,
+        "mlg_tire_rated_kg": gear_layout.mlg_tire.rated_load_kg,
+        "mlg_tire_basis": format!("{:?}", gear_layout.mlg_tire.rating_basis),
+        "nlg_tire_rated_kg": gear_layout.nlg_tire.rated_load_kg,
+        "nlg_tire_basis": format!("{:?}", gear_layout.nlg_tire.rating_basis),
+        "tire_overloaded": gear_layout.tire_overloaded,
+        "mlg_tire_margin": gear_layout.mlg_tire_margin,
+        "nlg_tire_margin": gear_layout.nlg_tire_margin,
+        "tire_ratio_main_static": gear_layout.tire_load_ratios.main_static,
+        "tire_ratio_nose_static": gear_layout.tire_load_ratios.nose_static,
+        "tire_ratio_nose_dynamic": gear_layout.tire_load_ratios.nose_dynamic,
         "strut_material": gear_layout.strut_material,
         "design_nlg_reaction_kg": gear_layout.r_nlg_design_kg,
         "design_mlg_reaction_kg": gear_layout.r_mlg_total_design_kg,
+        "design_nlg_aft_reaction_kg": gear_layout.r_nlg_aft_design_kg,
+        "aero_aft_limit_pulled_back": gear_layout.aero_aft_limit_pulled_back,
+        "design_weight_kg": gear_mass_kg,
+        "tip_back_angle_deg": gear_layout.tip_back_angle_deg,
+        "tip_back_ok": gear_layout.tip_back_ok,
+        "required_tip_back_deg": gear_layout.required_tip_back_deg,
+        "tip_back_cg_x_m": tip_back.most_aft_ground_cg_x_m,
+        "tip_back_governing": tip_back_governing,
+        "scrape_angle_deg": tip_back.scrape_angle_deg,
+        "r_nlg_aft_raw_kg": gear_layout.r_nlg_aft_raw_kg,
         "turnover_angle_deg": gear_layout.turnover_angle_deg,
         "turnover_ok": gear_layout.turnover_ok,
         "positions": gear_layout
@@ -403,15 +433,13 @@ fn dump(name: &str) -> Result<Value, String> {
         },
     );
     let capacity = cargo_manager.capacity_summary();
-    let hold_volume_m3: f64 = alas_payload::cargo::derive_hold_compartments(
-        &cabin_geometry,
-        &cargo_manager.slots,
-        None,
-        &config.cabin.cargo.hold_compartments,
-    )
-    .iter()
-    .map(|compartment| compartment.volume_m3)
-    .sum();
+    // The holds as the layout built them, with the cabin extent that bounds a
+    // body's main-deck baggage compartments (the layout's own capacity summary).
+    let installed = match &layout.summary {
+        alas_payload::LayoutSummary::Passenger(summary) => summary.hold_capacity,
+        alas_payload::LayoutSummary::Cargo(summary) => summary.installed,
+    };
+    let hold_volume_m3 = installed.hold_volume_m3;
     let cabin_payload = json!({
         "seats_modelled": seats,
         "seats_requested": config.requirements.num_passengers,
@@ -422,7 +450,9 @@ fn dump(name: &str) -> Result<Value, String> {
         "available_container_internal_volume_m3": capacity.container_internal_volume_m3,
         "available_bulk_nominal_volume_m3": capacity.bulk_nominal_volume_m3,
         "cargo_hold_volume_m3": hold_volume_m3,
-        "cargo_hold_volume_status": "sum of derived or declared hold compartments (rectangular width x height integral)",
+        "cargo_hold_volume_status": "volume the derived or declared hold compartments enclose (section area integral), before stowage losses",
+        "cargo_volume_m3": installed.usable_volume_m3(),
+        "cargo_volume_status": "usable cargo volume: compartments x stowage factor (declared volumes as stated), plus main-deck pallet loads",
         "container_positions_fwd": cargo_manager.installed_positions("FWD-", false),
         "container_positions_aft": cargo_manager.installed_positions("AFT-", false),
         "bulk_positions_fwd": cargo_manager.installed_positions("FWD-", true),
@@ -452,7 +482,7 @@ fn dump(name: &str) -> Result<Value, String> {
         &report.airplane,
         sweep,
         Some(config.geometry.clone()),
-        Some(config.drag_model.clone()),
+        Some(config.resolved_drag_model()),
         Some(fine.clone()),
     )
     .run_sweep(

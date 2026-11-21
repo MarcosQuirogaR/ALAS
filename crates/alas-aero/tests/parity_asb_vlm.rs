@@ -52,10 +52,11 @@ use std::collections::HashMap;
 
 use alas_aero::asb_vlm::{self, VlmResult};
 use alas_aero::operating_point::OperatingPoint;
-use alas_atmo::Atmosphere;
+use alas_atmo::{Atmosphere, GAS_CONSTANT_AIR};
 use alas_geom::asb::airfoil::Airfoil;
 use alas_geom::asb::airplane::Airplane;
 use alas_geom::asb::wing::{Wing, WingXSec};
+use alas_testkit::reference_ambient::reference_ambient;
 use alas_testkit::{Comparison, Tier};
 use serde::Deserialize;
 
@@ -178,9 +179,28 @@ fn build_airplane(fixture: &Fixture) -> Airplane {
     }
 }
 
+/// The standard atmosphere at the case altitude with the temperature that
+/// gives the density the reference's fitted atmosphere returned there.
+///
+/// The solve reads the ambient state only through the dynamic pressure
+/// `q = rho V^2 / 2` (forces and moments are `q` times the coefficients, which
+/// carry no atmosphere), and `V` is an input, so the density is the one
+/// quantity to match. The fixture was generated with the reference's fitted
+/// atmosphere, which differs from the U.S. Standard Atmosphere, 1976 the
+/// product evaluates by up to 1.7 % in density; its state at the altitude is
+/// read from `golden/atmo/differentiable.json`. The product's gas constant
+/// differs from the reference's by 7e-7, so the pressure is not matched, the
+/// density is.
+fn atmosphere_with_reference_density(altitude_m: f64) -> Atmosphere {
+    let reference = reference_ambient(altitude_m);
+    let level = Atmosphere::new(altitude_m);
+    let temperature = level.pressure() / (GAS_CONSTANT_AIR * reference.density_kg_m3);
+    level.with_temperature_deviation(temperature - level.temperature())
+}
+
 fn build_op_point(inputs: &Inputs) -> OperatingPoint {
     OperatingPoint::new(
-        Atmosphere::new(inputs.altitude_m),
+        atmosphere_with_reference_density(inputs.altitude_m),
         inputs.velocity,
         inputs.alpha,
         inputs.beta,

@@ -184,6 +184,21 @@ pub struct WingAnalysisOutcome {
     pub diagnostics: WingSolveDiagnostics,
     /// Whether the reported angle came from a lift-coefficient target.
     pub alpha_from_lift_target: bool,
+    /// Lift-coefficient miss `|CL - target|` of the angle the lift-target
+    /// iteration returned; `None` when the angle was given.
+    pub lift_target_residual: Option<f64>,
+}
+
+impl WingAnalysisOutcome {
+    /// Whether the lift-target iteration closed within its tolerance.
+    ///
+    /// `Some(false)`: the iteration ended on its limit and the reported angle
+    /// is its last iterate, which misses the target by
+    /// [`Self::lift_target_residual`]. `None` when the angle was given.
+    pub fn lift_target_closed(&self) -> Option<bool> {
+        self.lift_target_residual
+            .map(|residual| residual <= super::solve::LIFT_TARGET_TOLERANCE)
+    }
 }
 
 /// Why a wing analysis could not produce an outcome.

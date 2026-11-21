@@ -69,7 +69,9 @@ mod closed_form;
 mod completeness;
 mod deck;
 mod field;
+mod install_check;
 mod modal_search;
+mod private_dir;
 mod quad_guard;
 mod run;
 mod section;
@@ -86,6 +88,8 @@ pub use deck::{
     build_static_deck_product_at_length_scale, Dialect,
 };
 pub use field::{real, Card, ContinuationTags, Field};
+pub use install_check::{installation_self_check, INSTALL_CHECK_NAME};
+pub use modal_search::request_modes_figure;
 pub use quad_guard::{
     degeneracy_message, degenerate_quads, DegenerateQuad, GUARD_MARGIN, QUAD4_DEGENERACY_LIMIT,
 };

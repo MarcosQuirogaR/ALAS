@@ -1,21 +1,23 @@
 # External Tools Guide
 
-The core pipeline (vortex-lattice aerodynamics, turbofan cycles, wingbox
-sizing, weight and balance, mission trajectories) is native Rust and needs no
-external solver. Higher-fidelity stages and independent cross-checks run
-external tools as separate child processes, and all of them are optional. The
-Windows package includes AVL; NASTRAN-95 is included only when the release
-staged it; the XFOIL OSMAP transition data for MSES ships under `assets/mses/`.
-Everything else is user-supplied under its own licence (see [Licensing](licensing.md)).
+ALAS runs its core multidisciplinary pipeline (vortex-lattice aerodynamics,
+turbofan cycles, wingbox sizing, weight and balance, mission trajectories) as
+a single native Rust application, no external solver required. For higher
+fidelity or an independent cross-check, it can also drive a handful of
+specialized external tools as separate child processes. This guide covers
+where to point ALAS at each tool, what each produces, and how to read results.
+
+The v1.3.2 release is a native Rust build. External solver stages remain
+optional and user-supplied; their configuration is independent of the core
+binary and its portable Windows and Linux packages.
 
 ## Setting Up External Tools
 
-Everything lives in the **External Tools** menu (also the **External Tools**
-tab of **Advanced Settings**). Each tool has a card with a browse field and an
-**Open folder** button, plus an official acquisition link for the user-supplied
-ones (MSES, MSC Nastran, MSC Patran, NASTRAN-95, OpenVSP/VSPAERO, OpenFOAM, Gmsh,
-ParaView, FLOWUnsteady/Julia). An **Availability for the next run** panel shows
-whether each path resolves, is absent or is incomplete before you start.
+Everything lives on **Workspace → External Tools**. Each solver has its own card
+with a browse field for its install location and an **Open folder** button to
+inspect it in the system file explorer. A live **Availability for the next
+run** panel shows whether each path resolves, is absent, or is incomplete
+(e.g., a launcher present with no solver binary) before you start an analysis.
 
 The same page also holds mission-routing settings unrelated to solvers: a
 **SimBrief username** and **Fetch timeout [s]** for importing a filed flight
@@ -28,15 +30,15 @@ without touching the project's own config files. Headless and scripted runs read
 the same solver settings from the run's YAML/JSON config instead (`mses` and
 `structures` sections, plus CLI overrides).
 
-### Optional downloads
+## One-click installer
 
-The External Tools window also lists the data ALAS can fetch for you, each with
-its source and an explicit consent checkbox (or **I consent to every download in
-this group** with **Download all**): the X-Plane community navigation data for
-airway routing, the XFOIL Orr-Sommerfeld transition data MSES uses, AVL 3.52
-on Windows, the OpenVSP native-preview runtime (Windows only) and a Julia
-download for FLOWUnsteady. Nothing is downloaded without that consent. The
-NASA Blue Marble route texture is bundled inside ALAS and needs no download.
+The **Install external tools** card at the top of the page downloads the
+redistributable tools (OpenVSP/VSPAERO on Windows, Gmsh and ParaView on Windows and Linux) into `%LOCALAPPDATA%\ALAS\external tools` after a single
+consent. Every archive is checked against a pinned SHA-256 and each tool is run
+on a tiny case before it counts as installed. Licence-gated or
+administrator-only tools (MSES, MSC Nastran, OpenFOAM, NASTRAN-95,
+FLOWUnsteady) show their steps instead. The same flow is available headless
+with `alas --install-tools [--yes]`. Details: `docs/tool-installer.md`.
 
 ## Athena AVL
 
@@ -84,15 +86,12 @@ executables (`mset.exe`, `mses.exe`, `mplot.exe`) pointed at from the **Install
 directory** field on the MSES card.
 
 Natural-transition (e^N) runs also need an Orr–Sommerfeld amplification-rate
-table. The installed Windows MSES build only accepts the double-precision form
-(`osmapDP.dat`); the single-precision version some XFOIL builds ship is
-rejected by ALAS's format check. ALAS packages a compatible GPL
-double-precision `osmapDP.dat` (with its XFOIL source archive and provenance
-note) under `assets/mses/` and passes it to the installed solver by absolute
-path, so free-transition runs do not depend on the working directory. The
-External Tools window can also download it. To use your own, set the
-`mses.osmap_path` config entry or the `MSES_OSMAP` environment variable ALAS
-passes to the process.
+table. As tested here, the installed Windows MSES build only accepts the
+double-precision form (`osmapDP.dat`); the single-precision version some
+XFOIL builds ship is rejected by ALAS's format check. This file isn't included
+either; configure a verified, compatible resource from your own MSES/XFOIL
+setup, either through the hidden `mses.osmap_path` config entry or the
+`MSES_OSMAP` environment variable ALAS passes to the process.
 
 MSES can converge cleanly at one angle of attack and fail to at the next, so
 ALAS checks for the solver's own `"Converged on tolerance"` line in its output
@@ -110,7 +109,7 @@ at all, the figures are marked unavailable.
 
 For finite-element cross-checks against ALAS's own analytical wingbox sizing,
 configure **MSC Nastran** (Hexagon, commercial license) and/or **NASTRAN-95**
-(NASA Open Source Agreement 1.3; user-supplied unless the release bundles it) on the NASTRAN card. Beyond the
+(NASA Open Source Agreement 1.3, user-supplied) on the NASTRAN card. Beyond the
 main **Executable path**, a **MSC solver override** covers Student Edition
 installs where the visible launcher and the solver kernel are split; point it
 at `analysis.exe` under Patran's `servermode` tree. NASTRAN-95 adds its own
@@ -136,17 +135,9 @@ successful SOL 101 solve, exporting deformation contour images per load case.
 Without Patran, ALAS's own analytical deformation plots are still there in the
 Structural Analysis results.
 
-## OpenFOAM, Gmsh and ParaView
-
-These three serve the **Airfoil CFD** window (Analysis menu), not the
-whole-aircraft run. Gmsh meshes the section, OpenFOAM solves it and ParaView is
-used for post-processing. Configure them on their cards; Airfoil CFD reports
-what is missing. They are never bundled; their licences are listed in
-[Licensing](licensing.md).
-
 ## FLOWUnsteady Adapter
 
-[FLOWUnsteady](https://github.com/byuflowlab/FLOWUnsteady) (typically run in
+[FLOWUnsteady](https://github.com/byu-cpc/FLOWUnsteady) (typically run in
 Julia) is an optional path for unsteady lifting-surface or rotor analysis.
 ALAS doesn't bundle Julia or FLOWUnsteady itself; instead, point ALAS at your
 own adapter script or wrapper, either with the FLOWUnsteady path on the
@@ -157,7 +148,7 @@ Tools page (a persisted tool preference) or with the
 ## Reading Statuses and Evidence
 
 Every external tool reports one of a small set of outcomes, shown on its card
-in the **External analyses** section of the Results Summary tab: `not_configured`/absent (no usable
+under **Results → External tool evidence**: `not_configured`/absent (no usable
 install found), `incomplete` (a folder exists but a required binary doesn't),
 `invalid_timeout` (the configured timeout is not a finite number of seconds
 greater than zero, so the tool was not started),

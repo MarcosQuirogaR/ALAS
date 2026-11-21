@@ -43,10 +43,15 @@ cargo xtask gate    # what has to pass before a commit
 
 | Path | What is in it |
 |---|---|
-| `crates/` | The workspace. One crate per discipline; `docs/ARCHITECTURE.md` explains the layering. |
-| `golden/` | Reference values generated from the Python implementation, and the generators that produce them. |
-| `xtask/` | Repository checks and the backup task. `cargo xtask` lists them. |
-| `docs/` | Architecture, current project status, the parity and provenance records, and the methods the models come from. |
+| `crates/` | The workspace. One crate per discipline; `docs/ARCHITECTURE.md` explains the layering and `docs/architecture/crates.md` lists every crate's responsibility. |
+| `golden/`, `tests/golden/` | Reference values generated from the Python implementation, the generators that produce them, and one test fixture. |
+| `xtask/` | Repository tasks: gate, checks, capability map, packaging, test tiers, backup. `cargo xtask` lists them. |
+| `docs/` | Documentation index in `docs/README.md`; architecture, the parity and provenance records, the methods the models come from, and the decision records in `docs/adr/`. |
+| `tools/` | Utility scripts (CFD post-processing, parity audits, the cabin renderer). |
+| `assets/`, `external tools/` | Compile-time textures and MSES data; third-party payloads tracked for packaging (AVL, schemas). |
+| `site/` | The public website. |
+
+`CONTRIBUTING.md` has the rules for a change.
 
 ---
 

@@ -183,7 +183,8 @@ fn gestures_on_floating_controls_never_orbit_the_camera_or_drag_handles() {
     assert_eq!(state.sandbox.focus().map(|d| d.id()), Some("wing"));
 
     // The same gesture on the empty design space still orbits.
-    let empty = pos2(640.0, 560.0);
+    // Left of the Wing window, which opens wide enough for its station table.
+    let empty = pos2(300.0, 700.0);
     assert!(!pointer_over_overlay(&overlay_rects(&ctx), Some(empty)));
     let before = *state.preview_camera_mut(SANDBOX_CAMERA_ID);
     drag(&ctx, &mut state, empty);

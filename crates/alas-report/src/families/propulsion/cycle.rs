@@ -15,9 +15,7 @@ use crate::chart_kit::draw_title;
 use crate::scene::{Axes2D, Color, Fill, Scene, SceneElement, Stroke, TextAlign, TextBaseline};
 use crate::theme::get_palette;
 use alas_config::AlasConfig;
-use alas_prop::cycle::{
-    anchor_mass_flow_kg_s, classify_engine_by_bpr, compute_turbofan_cycle, TurbofanCycleResult,
-};
+use alas_prop::cycle::{classify_engine_by_bpr, compute_turbofan_cycle, TurbofanCycleResult};
 
 /// Station labels for the eight-bar temperature chart, in the order
 /// `visualization.py`'s `stations`/`temps` lists build them.
@@ -82,7 +80,8 @@ pub fn figure_propulsion_cycle_summary(config: &AlasConfig, theme: Option<&str>)
 
     let max_t = temps.iter().copied().fold(0.0f64, f64::max);
     let axes = Axes2D::new((70.0, 60.0, 580.0, 330.0), (0.0, 8.0), (0.0, max_t * 1.2));
-    axes.draw_frame_with_labels(&mut scene, pal, "", "");
+    // Categorical bars carry their own station labels; numeric x ticks would be noise.
+    crate::chart_kit::draw_axes_without_x_tick_labels(&axes, &mut scene, pal, Some(""), Some(""));
     scene.add(SceneElement::Text {
         text: "Stagnation temperature [K]".to_owned(),
         pos: [axes.left - 43.0, axes.top + axes.height * 0.5],
@@ -165,17 +164,26 @@ pub fn propulsion_cycle_summary(config: &AlasConfig) -> Vec<String> {
 /// anchors. Both distinguish reference
 /// cycle closure from the physical open engine path.
 pub fn figure_engine_designer_preview(config: &AlasConfig, theme: Option<&str>) -> Scene {
-    if let Some(scene) = super::technology::binding_error_scene(config, theme, (900.0, 560.0)) {
+    figure_engine_designer_preview_sized(config, theme, super::ts_preview::DEFAULT_CANVAS)
+}
+
+/// The same preview on a `canvas` of the caller's choosing (scene units).
+pub fn figure_engine_designer_preview_sized(
+    config: &AlasConfig,
+    theme: Option<&str>,
+    canvas: (f64, f64),
+) -> Scene {
+    if let Some(scene) = super::technology::binding_error_scene(config, theme, canvas) {
         return scene;
     }
     if super::is_turboprop(config) {
-        return super::turboprop_cycle::figure_turboprop_cycle_preview(config, theme);
+        return super::turboprop_cycle::figure_turboprop_cycle_preview(config, theme, canvas);
     }
-    let eng = match super::turbofan_or_status(config, theme, (900.0, 560.0)) {
+    let eng = match super::turbofan_or_status(config, theme, canvas) {
         Ok(eng) => eng,
         Err(scene) => return scene,
     };
-    super::ts_preview::preview(config, eng, theme)
+    super::ts_preview::preview(config, eng, theme, canvas)
 }
 
 /// Text lines for the on-design cycle summary panel. `verbose` retains the
@@ -196,20 +204,12 @@ fn propulsion_cycle_summary_lines(
         Ok(eng) => eng,
         Err(message) => return vec![message],
     };
-    let cyc_cfg = &config.propulsion_cycle;
 
-    let (mdot_total, _static) = anchor_mass_flow_kg_s(
-        eng.rated_thrust_kn,
-        eng.overall_pressure_ratio,
-        eng.fan_pressure_ratio,
-        eng.bypass_ratio,
-        eng.turbine_inlet_temp_k,
-        cyc_cfg,
-    );
-    let cruise_thrust_kn = if mdot_total.is_nan() {
-        f64::NAN
-    } else {
-        out.specific_thrust_ms * mdot_total / 1000.0
+    let cruise = super::cruise_cycle(config, eng);
+    let cruise_thrust_kn = cruise.thrust_n / 1000.0;
+    let deck_tsfc_line = match &cruise.matched {
+        Ok(deck) => format!("TSFC (mission deck)    = {:6.2} mg/(N.s)", deck.tsfc_mg_ns),
+        Err(_) => "TSFC (mission deck)    =    n/a".to_owned(),
     };
     let n_eng = engine.spanwise_positions_m.len();
     let cruise_line = if cruise_thrust_kn.is_nan() {
@@ -229,22 +229,27 @@ fn propulsion_cycle_summary_lines(
     let cruise_mach = config.requirements.cruise_mach;
     let cruise_alt_km = config.requirements.cruise_altitude_m / 1000.0;
     let bpr = eng.bypass_ratio;
-    let opr = eng.overall_pressure_ratio;
-    let fpr = eng.fan_pressure_ratio;
-    let tit = eng.turbine_inlet_temp_k;
+    let opr = cruise.inputs.overall_pressure_ratio;
+    let fpr = cruise.inputs.fan_pressure_ratio;
+    let tit = cruise.inputs.turbine_inlet_temperature_k;
+    let tit_takeoff = cruise.takeoff_tit_k;
     let sfn = out.specific_thrust_ms;
     let tsfc_computed = out.tsfc_mg_ns;
-    let tsfc_reference = eng.cruise_tsfc_kg_kgf_hr / (9.81 * 3600.0) * 1.0e6;
+    let tsfc_reference =
+        eng.cruise_tsfc_kg_kgf_hr / (super::STANDARD_GRAVITY_M_S2 * 3600.0) * 1.0e6;
     let thrust_static_kn = eng.rated_thrust_kn;
 
     let mut lines = vec![
         format!("Engine: {engine_name}  ({engine_class})"),
         format!("Design point: M{cruise_mach:.2} @ {cruise_alt_km:.1} km"),
         String::new(),
-        format!("BPR = {bpr:.1}    OPR = {opr:.1}    FPR = {fpr:.2}    TIT = {tit:.0} K"),
+        format!(
+            "BPR = {bpr:.1}    OPR = {opr:.1}    FPR = {fpr:.2}    TIT = {tit:.0} K    TIT (take-off) = {tit_takeoff:.0} K"
+        ),
         String::new(),
         format!("Specific thrust   SFn = {sfn:6.1} m/s"),
         format!("TSFC (computed)        = {tsfc_computed:6.2} mg/(N.s)"),
+        deck_tsfc_line,
         format!("TSFC (reference)       = {tsfc_reference:6.2} mg/(N.s)"),
     ];
     if verbose {
@@ -266,6 +271,29 @@ fn propulsion_cycle_summary_lines(
         cruise_line,
         total_line,
     ]);
+    // Say so when the figures above are not the throttled, deck-matched point.
+    if let Some(reason) = &cruise.solver_failure {
+        lines.push(String::new());
+        lines.push(format!(
+            "Note: no throttled operating point ({reason}); the cycle above is the catalogue (take-off) design point."
+        ));
+    }
+    if let Err(reason) = &cruise.matched {
+        lines.push(String::new());
+        lines.push(format!(
+            "Note: no mission-deck match ({reason}); the cycle above is the catalogue (take-off) design point."
+        ));
+    }
+    if let Ok(deck) = &cruise.matched {
+        if deck.capped_at_maximum_climb {
+            lines.push(String::new());
+            lines.push(format!(
+                "Note: the catalogue cruise thrust here, {:.1} kN per engine, exceeds the deck's maximum climb thrust; the cycle is matched to the deck's {:.1} kN.",
+                deck.catalogue_thrust_n / 1000.0,
+                deck.thrust_n / 1000.0
+            ));
+        }
+    }
     lines
 }
 
@@ -302,6 +330,7 @@ fn push_infeasible_text(scene: &mut Scene, reason: &str, cx: f64, cy: f64) {
 mod tests {
     use super::*;
     use crate::svg::render_svg;
+    use alas_prop::cycle::anchor_mass_flow_kg_s;
 
     #[test]
     fn the_default_config_cycle_is_feasible_and_renders_all_eight_bars() {
@@ -377,6 +406,69 @@ mod tests {
     }
 
     #[test]
+    fn the_cruise_cycle_is_throttled_to_the_deck_thrust_and_every_figure_shows_it() {
+        for preset in ["A320-200", "A380-800", "B787-9"] {
+            let config = AlasConfig::from_value(&serde_json::json!({ "preset": preset }))
+                .expect("registered preset");
+            let eng = super::super::turbofan_spec(&config).expect("turbofan binding");
+            let cruise = super::super::cruise_cycle(&config, eng);
+            let deck = cruise
+                .matched
+                .clone()
+                .unwrap_or_else(|reason| panic!("{preset}: no deck match: {reason}"));
+            // Throttled below the take-off temperature, on a feasible cycle.
+            let tit = cruise.inputs.turbine_inlet_temperature_k;
+            assert!(tit < eng.turbine_inlet_temp_k, "{preset}: {tit} K");
+            let out = compute_turbofan_cycle(&cruise.inputs, &config.propulsion_cycle);
+            assert!(out.cycle_feasible, "{preset}");
+            // The matched cycle delivers the deck's thrust at the same point.
+            assert!(
+                (cruise.thrust_n - deck.thrust_n).abs() < 1.0e-3 * deck.thrust_n,
+                "{preset}: {} N against the deck's {} N",
+                cruise.thrust_n,
+                deck.thrust_n
+            );
+            // The throttled engine runs at the compatibility pressure ratios,
+            // not the design ones (the cruise inlet is colder, so the ratio
+            // Tt4/Tt2 differs from the static design cycle's).
+            assert!(
+                (cruise.inputs.overall_pressure_ratio - eng.overall_pressure_ratio).abs() > 1.0e-3
+            );
+            // The figures and the text panel read the one operating point.
+            assert_eq!(super::super::design_point(&config, eng), cruise.inputs);
+            let lines = propulsion_cycle_summary(&config);
+            let line = |label: &str| {
+                lines
+                    .iter()
+                    .find(|l| l.contains(label))
+                    .unwrap_or_else(|| panic!("{preset}: no line {label}"))
+                    .clone()
+            };
+            assert!(line("TSFC (computed)").contains(&format!("{:.2}", out.tsfc_mg_ns)));
+            assert!(line("TSFC (mission deck)").contains(&format!("{:.2}", deck.tsfc_mg_ns)));
+            assert!(line("BPR =").contains(&format!("TIT = {tit:.0} K")));
+            assert!(line("BPR =").contains("TIT (take-off)"));
+            assert!(line("this cruise pt").contains(&format!("{:.1} kN", cruise.thrust_n / 1000.0)));
+        }
+    }
+
+    #[test]
+    fn the_turboprop_summary_names_the_engines_own_continuous_rating() {
+        // The summary used to print the PW127M's 1,864 kW for every turboprop.
+        for (preset, rating_kw) in [("A400M", "7971"), ("ATR72-600", "1864")] {
+            let config = AlasConfig::from_value(&serde_json::json!({ "preset": preset }))
+                .expect("registered preset");
+            let lines = propulsion_cycle_summary(&config);
+            assert!(
+                lines
+                    .iter()
+                    .any(|l| l.contains(&format!("of the {rating_kw} kW sea-level rating"))),
+                "{preset}: {lines:?}"
+            );
+        }
+    }
+
+    #[test]
     fn compact_verbose_false_drops_only_the_fuel_air_ratio_line() {
         let config = AlasConfig::default();
         let eng = super::super::turbofan_spec(&config).expect("turbofan binding");
@@ -420,7 +512,7 @@ mod tests {
             .collect();
         assert!(texts.contains(&"Core flow"));
         assert!(texts.contains(&"Bypass flow"));
-        assert!(texts.contains(&"s - s0 [kJ/(kg*K)]"));
+        assert!(texts.contains(&"s \u{2212} s0 [kJ/(kg\u{00b7}K)]"));
     }
 
     #[test]
@@ -434,7 +526,9 @@ mod tests {
                 _ => None,
             })
             .collect();
-        assert!(texts.iter().any(|text| text.contains("s - s0 [kJ/(kg*K)]")));
+        assert!(texts
+            .iter()
+            .any(|text| text.contains("s \u{2212} s0 [kJ/(kg\u{00b7}K)]")));
         assert!(texts
             .iter()
             .any(|text| text.contains("T [K]") || text.contains("Temperature T")));

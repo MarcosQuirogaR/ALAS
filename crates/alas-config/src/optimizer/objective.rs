@@ -79,9 +79,11 @@ pub enum MtowSizing {
     /// feasible there at `m` is feasible here with the same constraint
     /// values. The mission must fit under `m` (fuel capped at the tanks).
     MtowBand,
-    /// The takeoff mass is closed with no ceiling at the configured payload
-    /// on the selected route, or on the design range when one is set, with
-    /// the fuel-policy reserves, seeded from the declared MTOW.
+    /// The takeoff mass is closed with no ceiling on the design range when
+    /// one is set (the objective's, else the preset's charted point), else
+    /// on the selected route, with the fuel-policy reserves, seeded from the
+    /// declared MTOW, at the configured payload; on the charted point no
+    /// more than the payload its chart pairs with it.
     PayloadAdjusted,
 }
 
@@ -160,7 +162,8 @@ pub struct ObjectiveConfig {
     #[config(
         label = "Design range",
         unit = "nmi",
-        help = "Still-air distance from takeoff to the intended destination that the design mission is flown over, with the design payload. Zero uses the great-circle distance between the selected departure and arrival aerodromes. Reserve segments never receive range credit."
+        help = "Still-air distance from takeoff to the intended destination flown by the design mission with the design payload [nmi].",
+        long_help = "Still-air distance from takeoff to the intended destination that the design mission is flown over, with the design payload. Zero uses the great-circle distance between the selected departure and arrival aerodromes. Reserve segments never receive range credit."
     )]
     pub design_range_nmi: f64,
 
@@ -168,7 +171,8 @@ pub struct ObjectiveConfig {
     #[config(
         options = MtowSizing,
         label = "Takeoff mass sizing",
-        help = "Whether the maximum takeoff mass is the fixed requirement value, is iterated by the mission up to the requirement value, or is iterated by the mission with the requirement used only to seed the first pass. Sizing by mission makes the structural mass follow the closed takeoff mass, which is what lets a lighter wing pay for itself. Unconstrained runs the same mission-sized iteration with the requirement dropped as a ceiling after the seed, for asking what the closure converges to on its own rather than for producing a design bounded by a declared requirement. MTOW band relaxes the fixed requirement: the takeoff mass becomes a design variable inside the target plus or minus the band fraction, and the aircraft is evaluated at the chosen mass exactly as the fixed requirement evaluates it at its own value, so a design feasible at a fixed mass inside the band stays feasible here. Payload adjusted closes the takeoff mass with no ceiling at the configured payload on the route, or on the design range when one is set, with the structure sized at the closed mass."
+        help = "How takeoff mass is set: fixed requirement, mission-iterated up to it or seeded by it, MTOW band around the target, or payload-adjusted with no ceiling.",
+        long_help = "Whether the maximum takeoff mass is the fixed requirement value, is iterated by the mission up to the requirement value, or is iterated by the mission with the requirement used only to seed the first pass. Sizing by mission makes the structural mass follow the closed takeoff mass, which is what lets a lighter wing pay for itself. Unconstrained runs the same mission-sized iteration with the requirement dropped as a ceiling after the seed, for asking what the closure converges to on its own rather than for producing a design bounded by a declared requirement. MTOW band relaxes the fixed requirement: the takeoff mass becomes a design variable inside the target plus or minus the band fraction, and the aircraft is evaluated at the chosen mass exactly as the fixed requirement evaluates it at its own value, so a design feasible at a fixed mass inside the band stays feasible here. Payload adjusted closes the takeoff mass with no ceiling at the configured payload on the route, or on the design range when one is set, with the structure sized at the closed mass."
     )]
     pub mtow_sizing: MtowSizing,
 
@@ -176,14 +180,16 @@ pub struct ObjectiveConfig {
     #[config(
         label = "MTOW target",
         unit = "kg",
-        help = "Centre of the MTOW band: the search starts at this takeoff mass, and the band extends by the band fraction on either side. Zero uses the requirement MTOW. Read only by the MTOW band mode."
+        help = "Centre of the MTOW band [kg]: the search starts at this takeoff mass and the band extends by the band fraction either side. Zero uses the requirement MTOW.",
+        long_help = "Centre of the MTOW band: the search starts at this takeoff mass, and the band extends by the band fraction on either side. Zero uses the requirement MTOW. Read only by the MTOW band mode."
     )]
     pub mtow_target_kg: f64,
 
     /// Half-width of the MTOW band as a fraction of its target.
     #[config(
         label = "MTOW band fraction",
-        help = "Half-width of the MTOW band as a fraction of the target: the search may choose any takeoff mass from the target times one minus this fraction to the target times one plus it, and nothing pulls it toward the target beyond the structural mass it saves. Read only by the MTOW band mode."
+        help = "Half-width of the MTOW band as a fraction of the target: the search may pick any takeoff mass from target x (1 - f) to target x (1 + f).",
+        long_help = "Half-width of the MTOW band as a fraction of the target: the search may choose any takeoff mass from the target times one minus this fraction to the target times one plus it, and nothing pulls it toward the target beyond the structural mass it saves. Read only by the MTOW band mode."
     )]
     pub mtow_band_fraction: f64,
 
@@ -207,7 +213,8 @@ pub struct ObjectiveConfig {
     #[config(
         label = "Re-trim CG tolerance",
         unit = "% MAC",
-        help = "When the takeoff mass is sized by the mission, the sizing loop re-trims the aircraft and re-evaluates its drag polar at the updated mass whenever the centre of gravity has moved by more than this fraction of the mean aerodynamic chord since the last trim, so the converged design is trimmed at its own weight. Zero keeps the single trim at the takeoff-mass ceiling."
+        help = "When takeoff mass is mission-sized, re-trim and re-evaluate the drag polar whenever the CG has moved more than this fraction of MAC since the last trim.",
+        long_help = "When the takeoff mass is sized by the mission, the sizing loop re-trims the aircraft and re-evaluates its drag polar at the updated mass whenever the centre of gravity has moved by more than this fraction of the mean aerodynamic chord since the last trim, so the converged design is trimmed at its own weight. Zero keeps the single trim at the takeoff-mass ceiling."
     )]
     pub retrim_cg_tolerance_pct_mac: f64,
 
@@ -215,7 +222,8 @@ pub struct ObjectiveConfig {
     #[config(
         options = AerodromeReferenceCode,
         label = "Aerodrome reference code",
-        help = "ICAO Annex 14 aerodrome reference code letter that caps the wingspan of a clean-sheet design, strictly below the band edge: A 15 m, B 24 m, C 36 m, D 52 m, E 65 m, F 80 m (Table 1-1). Auto, the default for a new aircraft that names no preset, takes the letter whose band holds the wingspan the brief implies and re-derives it whenever the brief is committed; a letter chosen here is never replaced. A reference adaptation of a registered aircraft uses that aircraft's own letter instead. Unrestricted disables the limit. No code is inferred from an ICAO identifier or runway length."
+        help = "ICAO Annex 14 aerodrome code letter capping clean-sheet wingspan below the band edge (A 15 m, B 24 m, C 36 m, D 52 m, E 65 m, F 80 m). Auto picks it from the brief.",
+        long_help = "ICAO Annex 14 aerodrome reference code letter that caps the wingspan of a clean-sheet design, strictly below the band edge: A 15 m, B 24 m, C 36 m, D 52 m, E 65 m, F 80 m (Table 1-1). Auto, the default for a new aircraft that names no preset, takes the letter whose band holds the wingspan the brief implies and re-derives it whenever the brief is committed; a letter chosen here is never replaced. A reference adaptation of a registered aircraft uses that aircraft's own letter instead. Unrestricted disables the limit. No code is inferred from an ICAO identifier or runway length."
     )]
     pub aerodrome_reference_code: AerodromeReferenceCode,
 
@@ -229,7 +237,8 @@ pub struct ObjectiveConfig {
     #[config(
         label = "Maximum approach speed",
         unit = "kt",
-        help = "Upper bound on reference approach speed at maximum landing mass for the selected operating/aerodrome category. The category and source must be selected explicitly; the configuration does not infer them from an ICAO identifier. Zero disables the limit."
+        help = "Upper bound on reference approach speed at maximum landing mass for the selected operating or aerodrome category [kt].",
+        long_help = "Upper bound on reference approach speed at maximum landing mass for the selected operating/aerodrome category. The category and source must be selected explicitly; the configuration does not infer them from an ICAO identifier. Zero disables the limit."
     )]
     pub max_approach_speed_kt: f64,
 
@@ -237,7 +246,8 @@ pub struct ObjectiveConfig {
     #[serde(alias = "soft_penalty_weight")]
     #[config(
         label = "Preference weight",
-        help = "Dimensionless w in the ranking cost J = Q/Qref + w*P, where P sums normalized preference violations; an infeasible candidate adds 1 + H. Feasibility is ranked before J; hard constraints are always enforced."
+        help = "Dimensionless w in the ranking cost J = Q/Qref + w*P, where P sums normalized preference violations; an infeasible candidate adds 1 + H.",
+        long_help = "Dimensionless w in the ranking cost J = Q/Qref + w*P, where P sums normalized preference violations; an infeasible candidate adds 1 + H. Feasibility is ranked before J; hard constraints are always enforced."
     )]
     pub preference_weight: f64,
 }
@@ -263,7 +273,7 @@ impl Default for ObjectiveConfig {
 
 /// Default half-width of the MTOW band, as a fraction of the target.
 ///
-/// Engineering estimate (owner decision 2026-10-15): plus or minus ten per cent
+/// Engineering estimate: plus or minus ten per cent
 /// spans the MTOW steps between successive weight variants of one transport
 /// type, so the search can trade structure against mission capability across
 /// them.

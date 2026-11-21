@@ -390,6 +390,8 @@ mod tests {
                 blocks,
                 seat_w: 0.46,
                 aisle_w: 0.5,
+                cg_z: 0.0,
+                floor_z: 0.0,
             }),
         }
     }
@@ -405,6 +407,8 @@ mod tests {
             total_mass,
             cg_x,
             cg_y,
+            balance: None,
+            all_coach_capacity: None,
             summary: LayoutSummary::Passenger(Box::new(crate::layout::PassengerSummary {
                 total_pax: rows as i64 * 6,
                 seated_pax: rows as i64 * 6,
@@ -414,6 +418,7 @@ mod tests {
                 galleys: 0,
                 accessible_lavatories: 0,
                 wheelchair_stowages: 0,
+                dropped_monuments: Vec::new(),
                 exit_type: "III",
                 exit_pairs: 0,
                 exit_capacity: 0,
@@ -429,6 +434,7 @@ mod tests {
                 hold_capacity_t: 0.0,
                 hold_used_t: 0.0,
                 hold_ulds: 0,
+                hold_capacity: crate::cargo::CargoCapacity::default(),
                 forward_hold_baggage_fraction: 0.0,
                 hold_compartment_masses_kg: Vec::new(),
                 overload_kg: 0.0,
@@ -438,6 +444,7 @@ mod tests {
                 deck_utilization: Vec::new(),
                 cg_pct_mac: 0.0,
                 double_deck: false,
+                min_cabin_crew: 0,
             })),
         }
     }

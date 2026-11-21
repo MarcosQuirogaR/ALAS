@@ -23,7 +23,7 @@ function applicability(preset, section, key, reference) {
   if (key === 'cl_alpha_per_rad') return 'Reference wing-alone/low-speed conditions differ from the model cruise aircraft and reported alpha axis.';
   if (section === 'aerodynamics' && key !== 'cruise_mach') return 'Literature/model estimate; Mach, Reynolds number, lift, trim and reference-area definitions must match before calibration.';
   if (section === 'geometry' && ['mac_m', 'lemac_from_nose_m', 'taper_ratio'].includes(key)) return 'Physical planform integral versus certified reference geometry or estimated equivalent planform; datum/planform equivalence is unverified.';
-  if (preset === 'B787-9' && ['wing_area_m2', 'aspect_ratio', 'wing_loading_kg_m2'].includes(key)) return 'Reference uses 377 m²; preset uses NASA 360.464 m² convention. Do not tune coefficients or geometry across these area definitions.';
+  if (preset === 'B787-9' && ['wing_area_m2', 'aspect_ratio', 'wing_loading_kg_m2'].includes(key)) return 'Reference uses 377 m²; preset uses the 359.535 m² Boeing (Wimpress) reference area. Do not tune coefficients or geometry across these area definitions.';
   if (preset === 'DC-10' && (section === 'mass' || key === 'uld_positions')) return 'Reference includes a different ACAP weight row or freighter layout; passenger 572k-option equivalence is unverified.';
   if (preset === 'A220-300' && key === 'fan_diameter_m') return 'Reference is fan-case diameter; model is fan-tip diameter.';
   if (reference.cite === 'alas_preset_input') return 'Reference copied from the preset; agreement is not independent evidence.';

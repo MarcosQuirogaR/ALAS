@@ -16,16 +16,22 @@ use crate::mission_turbofan::components::part_power_fuel_fraction;
 use crate::system::*;
 
 mod correlation;
+mod domain;
 mod flat_rating;
+mod flight_idle;
 mod installation;
 pub mod max_climb;
+mod point;
 mod ratings;
+mod sfc_loops;
 pub mod takeoff_chart;
 use correlation::*;
 use flat_rating::*;
-pub use installation::InstallationLosses;
+use flight_idle::FlightIdleTable;
 use installation::{tsfc_shape, CoreFlowBasis};
+pub use installation::{InstallationLosses, BLEED_THRUST_LOSS_SLOPE, FRESH_AIR_PER_OCCUPANT_KG_S};
 use max_climb::*;
+use sfc_loops::{SfcLoopTable, LOOP_MINIMUM_MACH};
 
 /// Data required by the empirical thrust and fuel deck.
 #[derive(Debug, Clone, PartialEq)]
@@ -66,9 +72,6 @@ pub struct EmpiricalTurbofanDeck {
     /// It is intentionally optional so construction cannot invent a universal
     /// aircraft-independent rate.
     pub max_climb_rate_ft_min: Option<f64>,
-    /// Flight-idle fraction of the take-off rating (which is never below the
-    /// maximum-climb rating at the same condition).
-    pub flight_idle_fraction: f64,
     /// Ambient temperature at sea-level static up to which the rating is flat,
     /// K (the engine certificate's flat-rating temperature, per engine);
     /// `None` when no datum is known, in which case no thrust is lost to hot
@@ -98,13 +101,29 @@ pub struct EmpiricalTurbofanModel {
     tsfc: TsfcBasis,
     climb_reference: ClimbReference,
     core_flow: CoreFlowBasis,
+    /// Flight-idle net thrust and fuel-flow shape ([flight_idle]).
+    idle: FlightIdleTable,
+    /// In-flight part-power TSFC shape ([sfc_loops]).
+    sfc_loops: SfcLoopTable,
+    /// The engine's installed idle fuel flow at sea-level static, kg/s: its
+    /// ICAO take-off fuel flow times the 7 % LTO point.
+    idle_fuel_static_kg_s: f64,
 }
 
 /// Standard gravity defining the kilogram-force, m/s^2 (CGPM 1901).
-const STANDARD_GRAVITY_M_S2: f64 = 9.806_65;
+const STANDARD_GRAVITY_M_S2: f64 = alas_atmo::STANDARD_GRAVITY;
+
+/// Lowest rating utilization the part-power fuel shape is evaluated at: the
+/// 7 % point of the ICAO LTO cycle.
+const MINIMUM_UTILIZATION: f64 = 0.07;
 
 /// Highest Mach number accepted by [validate_flight].
 const MAXIMUM_DECK_MACH: f64 = 0.9;
+
+/// Provenance note of a cruise TSFC anchor below the bucket of the flight SFC
+/// loop at the reference Mach number ([sfc_loops]): the closure then rescales
+/// the full-rating TSFC by the loop rise instead of carrying it unchanged.
+const SUB_BUCKET_ANCHOR_NOTE: &str = "cruise TSFC anchor below the SFC-loop bucket";
 
 /// Full-rating thrust-specific fuel consumption closed on the deck's two
 /// declared anchors.
@@ -169,7 +188,6 @@ impl EmpiricalTurbofanModel {
             deck.bypass_ratio,
             deck.takeoff_fuel_flow_kg_s,
             deck.cruise_reference_tsfc_kg_kgf_h,
-            deck.flight_idle_fraction,
         ];
         if values.iter().any(|value| !value.is_finite())
             || deck.takeoff_thrust_n <= 0.0
@@ -192,7 +210,6 @@ impl EmpiricalTurbofanModel {
             || deck
                 .max_climb_rate_ft_min
                 .is_some_and(|rate| !rate.is_finite() || rate < 0.0)
-            || !(0.0..1.0).contains(&deck.flight_idle_fraction)
             || !flat_rating_temperature_is_valid(deck.flat_rating_temperature_k)
             || !deck.installation.is_valid()
         {
@@ -228,14 +245,30 @@ impl EmpiricalTurbofanModel {
                 value: catalogue_cruise_over_maximum_climb,
             });
         }
-        let reference_full_rating_tsfc_kg_n_s = deck.cruise_reference_tsfc_kg_kgf_h
-            / (STANDARD_GRAVITY_M_S2 * 3_600.0)
-            / tsfc_shape(
-                catalogue_cruise_over_maximum_climb,
-                deck.max_climb_reference_altitude_m,
-                deck.max_climb_reference_altitude_m,
-                deck.part_power_fuel_flow_ratios,
-            );
+        let sfc_loops = SfcLoopTable::new(deck.bypass_ratio);
+        // The anchor's rating basis: the maximum-climb thrust at the
+        // reference point as a corrected thrust FN/(delta FN*).
+        let reference_full_rating_x = max_climb_thrust_n
+            / (reference.pressure_pa / sea_level.pressure_pa * deck.takeoff_thrust_n);
+        let anchor_shape = tsfc_shape(
+            catalogue_cruise_over_maximum_climb,
+            deck.max_climb_reference_mach,
+            Some(reference_full_rating_x),
+            &sfc_loops,
+            deck.part_power_fuel_flow_ratios,
+        );
+        // Every catalogue anchor sits at or above the bucket (shape one); one
+        // below it is accepted but reported, not silently rescaled.
+        let mut provenance = provenance;
+        if (anchor_shape - 1.0).abs() > 1.0e-12 {
+            provenance.sources.push(format!(
+                "{SUB_BUCKET_ANCHOR_NOTE}: full-rating TSFC = cruise TSFC / {anchor_shape:.4} \
+                 (Jenkinson, Simpkin & Rhodes, Civil Jet Aircraft Design (1999), \
+                 Figs. 9.19(e)-9.21(e), pp. 208, 211, 214)"
+            ));
+        }
+        let reference_full_rating_tsfc_kg_n_s =
+            deck.cruise_reference_tsfc_kg_kgf_h / (STANDARD_GRAVITY_M_S2 * 3_600.0) / anchor_shape;
         let mach_slope = (reference_full_rating_tsfc_kg_n_s
             / (static_tsfc_kg_n_s * (reference_temperature_k / sea_level_temperature_k).sqrt())
             - 1.0)
@@ -256,6 +289,10 @@ impl EmpiricalTurbofanModel {
         };
         Ok(Self {
             core_flow: CoreFlowBasis::new(&fuel_model)?,
+            idle: FlightIdleTable::new(deck.bypass_ratio),
+            sfc_loops,
+            idle_fuel_static_kg_s: deck.takeoff_fuel_flow_kg_s
+                * deck.part_power_fuel_flow_ratios[0],
             deck,
             fuel_model,
             provenance,
@@ -312,10 +349,11 @@ impl EmpiricalTurbofanModel {
                 MAXIMUM_CRUISE_OVER_MAXIMUM_CLIMB,
                 MAXIMUM_CRUISE_OVER_MAXIMUM_CLIMB * self.climb_available_n(flight, Some(0.0)),
             )),
-            PropulsionDemand::Rating(PropulsionRating::FlightIdle) => Ok((
-                self.deck.flight_idle_fraction,
-                self.deck.flight_idle_fraction * self.takeoff_available_n(flight),
-            )),
+            // Flight idle is the lowest rating the part-power fuel shape
+            // knows; its fuel is the idle chart flow (see `evaluate`).
+            PropulsionDemand::Rating(PropulsionRating::FlightIdle) => {
+                Ok((MINIMUM_UTILIZATION, self.idle_net_thrust_n(flight)))
+            }
             PropulsionDemand::RatedFraction { rating, fraction }
                 if fraction.is_finite() && (0.0..=1.0).contains(&fraction) =>
             {
@@ -338,85 +376,24 @@ impl EmpiricalTurbofanModel {
 
 impl PropulsionSystemModel for EmpiricalTurbofanModel {
     fn evaluate(&self, request: &PropulsionRequest) -> Result<PropulsionResult, PropulsionError> {
-        if request.mode != OperatingMode::Normal {
-            return Err(PropulsionError::UnsupportedMode(request.mode));
-        }
-        if request.failure != FailureState::None {
-            return Err(PropulsionError::UnsupportedFailureState);
-        }
-        let loads = installation::checked_loads(request.loads)?;
-        validate_flight(request.flight)?;
-        let (rating_utilization, thrust_n, achieved_demand, active_limits) = match request.demand {
-            PropulsionDemand::NormalizedForce(requested_fraction)
-                if requested_fraction.is_finite() && (0.0..=1.0).contains(&requested_fraction) =>
-            {
-                let maximum_climb =
-                    self.climb_available_n(request.flight, self.deck.max_climb_rate_ft_min);
-                let requested_thrust_n = requested_fraction * maximum_climb;
-                let idle_thrust =
-                    self.deck.flight_idle_fraction * self.takeoff_available_n(request.flight);
-                if requested_thrust_n < idle_thrust {
-                    let achieved_fraction = if maximum_climb > 0.0 {
-                        idle_thrust / maximum_climb
-                    } else {
-                        requested_fraction
-                    };
-                    // Below flight idle the engine delivers idle thrust, so
-                    // fuel is scheduled from the achieved idle utilization of
-                    // the maximum-climb rating, not from the request:
-                    // every saturated request burns the same idle fuel.
-                    (
-                        achieved_fraction,
-                        idle_thrust,
-                        PropulsionDemand::NormalizedForce(achieved_fraction),
-                        vec![ActiveLimit {
-                            name: "flight-idle-thrust".to_owned(),
-                            utilization: 1.0,
-                        }],
-                    )
-                } else {
-                    (
-                        requested_fraction,
-                        requested_thrust_n,
-                        request.demand,
-                        Vec::new(),
-                    )
-                }
-            }
-            demand => {
-                let (utilization, thrust) =
-                    self.rating_fraction_and_thrust(request.flight, demand)?;
-                (utilization, thrust, demand, Vec::new())
-            }
-        };
-        if !thrust_n.is_finite() {
-            return Err(PropulsionError::InvalidInput {
-                field: "empirical turbofan thrust",
-                value: thrust_n,
-            });
-        }
-        // Fuel scheduling must use utilization of the active flight rating,
-        // not thrust divided by sea-level-static takeoff thrust. The latter
-        // mistakes a fully commanded high-altitude engine for part power and
-        // has no thermodynamic meaning.
-        let rating_utilization = rating_utilization.clamp(0.07, 1.0);
-        // Fuel flow is TSFC (interpolated, not absolute flow) times the thrust,
-        // the part-power shape and the installed-to-uninstalled load factor.
-        let shape = tsfc_shape(
-            rating_utilization,
-            request.flight.altitude_m,
-            self.deck.max_climb_reference_altitude_m,
-            self.deck.part_power_fuel_flow_ratios,
+        let point::SolvedPoint {
+            thrust_n,
+            fuel_flow_kg_s: fuel_flow,
+            achieved_demand,
+            active_limits,
+        } = self.solve_point(request)?;
+        let validity = self.chart_validity(
+            request.flight,
+            domain::charts_read(request.demand, !active_limits.is_empty()),
+            matches!(
+                request.demand,
+                PropulsionDemand::Rating(PropulsionRating::MaximumContinuous)
+                    | PropulsionDemand::RatedFraction {
+                        rating: PropulsionRating::MaximumContinuous,
+                        ..
+                    }
+            ),
         );
-        let fuel_flow = self.full_rating_tsfc_kg_n_s(request.flight)
-            * thrust_n
-            * shape
-            * self.installation_sfc_factor(request.flight, loads);
-        if !fuel_flow.is_finite() || fuel_flow < 0.0 {
-            return Err(PropulsionError::NonFiniteOutput(
-                "ICAO-LTO fuel interpolation",
-            ));
-        }
         Ok(PropulsionResult {
             body_force_n: [thrust_n, 0.0, 0.0],
             body_moment_nm: [0.0; 3],
@@ -438,10 +415,21 @@ impl PropulsionSystemModel for EmpiricalTurbofanModel {
             achieved_demand,
             active_limits,
             residuals: Vec::new(),
-            validity: ValidityStatus::Extrapolated {
-                reason: "maximum-climb thrust is read from Jenkinson's engine charts (Civil Jet Aircraft Design, Figs. 9.18(b)-9.21(b), BPR 3-13, reading uncertainty +-0.01-0.02 of the static thrust), maximum cruise is 0.93 of it (Torenbeek 2013 Sec. 9.2, Jenkinson Figs. 9.19(c), 9.21(c)), take-off is read from the take-off charts of the same book (Figs. 9.18(a)-9.21(a); the Bartel-Young/OpenAP correlation is the comparison source of the take-off band); fuel is TSFC times lapsed thrust, with TSFC joining the ICAO takeoff and cruise-TSFC anchors through a Mach/temperature form and remaining uncalibrated between anchors".to_owned(),
-            },
+            validity,
             provenance: self.provenance.clone(),
+            trace: None,
+        })
+    }
+
+    fn evaluate_point(
+        &self,
+        request: &PropulsionRequest,
+    ) -> Result<PropulsionPoint, PropulsionError> {
+        let point = self.solve_point(request)?;
+        Ok(PropulsionPoint {
+            body_force_n: [point.thrust_n, 0.0, 0.0],
+            jet_a_mass_flow_kg_s: Some(point.fuel_flow_kg_s),
+            active_limits: point.active_limits,
             trace: None,
         })
     }
@@ -461,16 +449,17 @@ impl PropulsionSystemModel for EmpiricalTurbofanModel {
                 0.0,
                 0.0,
             ],
-            minimum_body_force_n: [
-                self.deck.flight_idle_fraction * self.takeoff_available_n(flight),
-                0.0,
-                0.0,
-            ],
+            minimum_body_force_n: [self.idle_net_thrust_n(flight), 0.0, 0.0],
             maximum_shaft_power_w: None,
             active_limits: Vec::new(),
-            validity: ValidityStatus::Extrapolated {
-                reason: "Jenkinson-chart empirical mission thrust deck".to_owned(),
-            },
+            validity: self.chart_validity(
+                flight,
+                &[
+                    domain::ChartRead::MaximumClimb,
+                    domain::ChartRead::FlightIdle,
+                ],
+                false,
+            ),
             provenance: self.provenance.clone(),
         })
     }
@@ -501,6 +490,9 @@ impl PropulsionSystemModel for EmpiricalTurbofanModel {
 #[allow(clippy::unwrap_used, clippy::expect_used)]
 #[cfg(test)]
 mod tests {
+    mod domain;
+    mod leap_1c_anchor;
+
     use super::*;
     use crate::mission_turbofan::{
         size_turbofan_to_static_rating, TurbofanInputs, VehicleBuilderParams,
@@ -521,7 +513,6 @@ mod tests {
             cruise_reference_tsfc_kg_kgf_h: 0.58,
             part_power_fuel_flow_ratios: [0.0893, 0.2767, 0.8222, 1.0],
             max_climb_rate_ft_min,
-            flight_idle_fraction: 0.07,
             flat_rating_temperature_k: None,
             cruise_reference_is_engine_datum: false,
             cruise_reference_is_maximum_climb: false,
@@ -544,7 +535,6 @@ mod tests {
             cruise_reference_tsfc_kg_kgf_h: 0.60,
             part_power_fuel_flow_ratios: [0.089_316_99, 0.276_707_53, 0.822_241_68, 1.0],
             max_climb_rate_ft_min: None,
-            flight_idle_fraction: 0.07,
             flat_rating_temperature_k: None,
             cruise_reference_is_engine_datum: false,
             cruise_reference_is_maximum_climb: false,
@@ -552,13 +542,51 @@ mod tests {
         })
     }
 
+    /// Two PW305A as the mission builds them from the engine catalogue:
+    /// 20.46 kN, bypass ratio 4.4, the PW305B column cruise pair carried to
+    /// the rating (4,324 N at 40,000 ft, M 0.8, an engine datum), cruise TSFC
+    /// 0.675 and the catalogue take-off fuel flow and part-power ratios.
+    fn lj60_class_model() -> EmpiricalTurbofanModel {
+        model_from_deck(lj60_class_deck())
+    }
+
+    fn lj60_class_deck() -> EmpiricalTurbofanDeck {
+        EmpiricalTurbofanDeck {
+            takeoff_thrust_n: 2.0 * 20_460.0,
+            max_climb_reference_thrust_n: 2.0 * 4_324.0,
+            max_climb_reference_altitude_m: 12_192.0,
+            max_climb_reference_mach: 0.8,
+            bypass_ratio: 4.4,
+            takeoff_fuel_flow_kg_s: 2.0 * 0.25,
+            cruise_reference_tsfc_kg_kgf_h: 0.675,
+            part_power_fuel_flow_ratios: [0.09, 0.28, 0.82, 1.0],
+            max_climb_rate_ft_min: None,
+            flat_rating_temperature_k: None,
+            cruise_reference_is_engine_datum: true,
+            cruise_reference_is_maximum_climb: false,
+            installation: InstallationLosses::NONE,
+        }
+    }
+
     fn model_from_deck(deck: EmpiricalTurbofanDeck) -> EmpiricalTurbofanModel {
+        model_from_deck_cycle(deck, 27.1, 1.6, 1_600.0)
+    }
+
+    /// As [`model_from_deck`] on a stated cycle (overall and fan pressure
+    /// ratio, turbine inlet temperature): a high-bypass deck needs a cycle
+    /// whose fan work the core can drive.
+    fn model_from_deck_cycle(
+        deck: EmpiricalTurbofanDeck,
+        overall_pressure_ratio: f64,
+        fan_pressure_ratio: f64,
+        turbine_inlet_temperature_k: f64,
+    ) -> EmpiricalTurbofanModel {
         let inputs = TurbofanInputs {
             number_of_engines: 2.0,
             bypass_ratio: deck.bypass_ratio,
-            overall_pressure_ratio: 27.1,
-            fan_pressure_ratio: 1.6,
-            turbine_inlet_temperature_k: 1_600.0,
+            overall_pressure_ratio,
+            fan_pressure_ratio,
+            turbine_inlet_temperature_k,
             cruise_mach: deck.max_climb_reference_mach,
             cruise_altitude_m: deck.max_climb_reference_altitude_m,
             design_thrust_total_n: deck.takeoff_thrust_n,
@@ -685,6 +713,7 @@ mod tests {
             (6.5, 0.0, 0.4, 0.558),
             (6.5, 10_000.0, 0.6, 0.406),
             (8.0, 36_000.0, 0.7, 0.194),
+            (13.0, 25_000.0, 0.6, 0.276),
             (13.0, 30_000.0, 0.8, 0.220),
             (13.0, 45_000.0, 0.6, 0.124),
             (3.0, 30_000.0, 0.6, 0.272),
@@ -856,6 +885,62 @@ mod tests {
     }
 
     #[test]
+    fn a_reference_point_up_to_the_chart_top_anchors_the_deck() {
+        // The bound is the top of the charts, 45,000 ft = 13,716 m.
+        assert!((ANCHOR_MAXIMUM_ALTITUDE_M - 13_716.0).abs() < 1.0e-9);
+        assert_eq!(
+            ANCHOR_MAXIMUM_ALTITUDE_M,
+            max_climb::TABLE_HEIGHTS_FT[max_climb::TABLE_HEIGHTS_FT.len() - 1] * 0.3048
+        );
+        // 40,000 ft (12,192 m) is accepted: the PW305A datum, FN/FN* 0.2114
+        // at M 0.8, over 0.93 of the BPR 4.4 chart there (0.6 x 0.181 +
+        // 0.4 x 0.156 = 0.1710) is a factor of 1.329, inside the accepted
+        // range, and maximum cruise meets the datum.
+        let model = lj60_class_model();
+        let factor = model.engine_scale().expect("anchored");
+        let expected = (4_324.0 / 20_460.0) / (MAXIMUM_CRUISE_OVER_MAXIMUM_CLIMB * 0.1710);
+        assert!((factor - expected).abs() < 1.0e-3, "{factor} vs {expected}");
+        assert!((0.7..=1.4).contains(&factor), "{factor}");
+        let ratio = model.catalogue_cruise_over_maximum_climb();
+        assert!(
+            (ratio - MAXIMUM_CRUISE_OVER_MAXIMUM_CLIMB).abs() < 1.0e-12,
+            "{ratio}"
+        );
+        assert!((0.07..=MAXIMUM_CATALOGUE_CRUISE_OVER_MAXIMUM_CLIMB).contains(&ratio));
+        let flight = standard_flight(12_192.0, 0.8);
+        let (_, cruise) = model
+            .rating_fraction_and_thrust(flight, PropulsionDemand::Rating(PropulsionRating::Cruise))
+            .unwrap_or_else(|error| panic!("cruise: {error}"));
+        assert!((cruise / (2.0 * 4_324.0) - 1.0).abs() < 1.0e-12, "{cruise}");
+        // At the chart top it is accepted (a datum near the chart there,
+        // 0.93 x (0.6 x 0.138 + 0.4 x 0.129) of the take-off thrust); above
+        // it, rejected by the deck validation.
+        let mut deck = lj60_class_deck();
+        deck.max_climb_reference_altitude_m = ANCHOR_MAXIMUM_ALTITUDE_M;
+        deck.max_climb_reference_thrust_n = 0.93 * 0.1344 * deck.takeoff_thrust_n;
+        let base = lj60_class_model();
+        let top = EmpiricalTurbofanModel::new(deck, base.fuel_model, base.provenance)
+            .unwrap_or_else(|error| panic!("chart top: {error}"));
+        let top_factor = top.engine_scale().expect("anchored");
+        assert!((top_factor - 1.0).abs() < 0.01, "{top_factor}");
+        for altitude_m in [ANCHOR_MAXIMUM_ALTITUDE_M + 1.0, 13_800.0] {
+            let mut deck = lj60_class_deck();
+            deck.max_climb_reference_altitude_m = altitude_m;
+            let base = lj60_class_model();
+            assert!(
+                matches!(
+                    EmpiricalTurbofanModel::new(deck, base.fuel_model, base.provenance),
+                    Err(PropulsionError::InvalidInput {
+                        field: "empirical turbofan deck",
+                        ..
+                    })
+                ),
+                "{altitude_m} m"
+            );
+        }
+    }
+
+    #[test]
     fn an_engine_scale_far_from_the_chart_is_rejected() {
         let base = a320_class_model();
         let mut deck = base.deck.clone();
@@ -926,21 +1011,19 @@ mod tests {
     }
 
     #[test]
-    fn named_idle_is_seven_percent_not_seven_percent_squared() {
+    fn named_idle_is_the_chart_net_thrust_not_a_fraction_of_take_off() {
         let model = model();
-        let (_, takeoff) = model
-            .rating_fraction_and_thrust(
-                sea_level_static(),
-                PropulsionDemand::Rating(PropulsionRating::TakeoffGoAround),
-            )
-            .unwrap_or_else(|error| panic!("takeoff: {error}"));
         let (_, idle) = model
             .rating_fraction_and_thrust(
                 sea_level_static(),
                 PropulsionDemand::Rating(PropulsionRating::FlightIdle),
             )
             .unwrap_or_else(|error| panic!("idle: {error}"));
-        assert!((idle / takeoff - 0.07).abs() < 1.0e-12);
+        let ratio = flight_idle::FlightIdleTable::new(5.9).net_thrust_ratio(0.0, 1.0);
+        assert!((idle - 235_800.0 * ratio).abs() < 1.0e-9, "{idle}");
+        // Gross idle thrust is paid back by the ram drag: the net force is a
+        // small fraction of the rated thrust, not the 7 % of the former deck.
+        assert!(idle.abs() < 0.02 * 235_800.0, "{idle}");
     }
 
     #[test]
@@ -1088,22 +1171,17 @@ mod tests {
     }
 
     #[test]
-    fn normalized_force_saturates_at_the_advertised_flight_idle_limit() {
+    fn normalized_force_zero_is_the_idle_floor_where_it_is_positive_and_zero_force_below_it() {
         let model = model();
-        let flight = sea_level_static();
+        // Approach speed: the net idle thrust is positive, the floor is the
+        // sourced idle thrust and the deck reports it as the idle limit.
+        let slow = standard_flight(500.0, 0.22);
         let capability = model
-            .capability(flight, FailureState::None)
+            .capability(slow, FailureState::None)
             .unwrap_or_else(|error| panic!("capability: {error}"));
+        assert!(capability.minimum_body_force_n[0] > 0.0);
         let result = model
-            .evaluate(&PropulsionRequest {
-                flight,
-                demand: PropulsionDemand::NormalizedForce(0.0),
-                mode: OperatingMode::Normal,
-                failure: FailureState::None,
-                loads: PropulsionLoads::default(),
-                state: PropulsionState::default(),
-                time_step_s: None,
-            })
+            .evaluate(&request_at(slow, PropulsionDemand::NormalizedForce(0.0)))
             .unwrap_or_else(|error| panic!("normalized idle: {error}"));
         assert!((result.body_force_n[0] - capability.minimum_body_force_n[0]).abs() < 1.0e-9);
         assert!(matches!(
@@ -1111,14 +1189,34 @@ mod tests {
             PropulsionDemand::NormalizedForce(value) if value > 0.0
         ));
         assert_eq!(result.active_limits[0].name, "flight-idle-thrust");
-        assert_eq!(result.active_limits[0].utilization, 1.0);
+        // Low height at speed: the ram drag exceeds the idle gross thrust, the
+        // capability minimum is net drag, and a command in [0, 1] stops at
+        // zero force, with no floor to report.
+        let fast = standard_flight(1_500.0, 0.6);
+        let capability = model
+            .capability(fast, FailureState::None)
+            .unwrap_or_else(|error| panic!("capability: {error}"));
+        assert!(capability.minimum_body_force_n[0] < 0.0);
+        let result = model
+            .evaluate(&request_at(fast, PropulsionDemand::NormalizedForce(0.0)))
+            .unwrap_or_else(|error| panic!("normalized zero: {error}"));
+        assert_eq!(result.body_force_n[0], 0.0);
+        assert!(result.active_limits.is_empty());
+        let idle = model
+            .evaluate(&request_at(
+                fast,
+                PropulsionDemand::Rating(PropulsionRating::FlightIdle),
+            ))
+            .unwrap_or_else(|error| panic!("idle rating: {error}"));
+        assert!((idle.body_force_n[0] - capability.minimum_body_force_n[0]).abs() < 1.0e-9);
     }
 
     #[test]
-    fn fuel_follows_the_achieved_thrust_and_equals_idle_fuel_at_the_floor() {
+    fn fuel_never_falls_below_idle_and_rises_with_the_command() {
         let model = model();
         for flight in [
             sea_level_static(),
+            standard_flight(500.0, 0.22),
             standard_flight(3_000.0, 0.45),
             standard_flight(10_668.0, 0.8),
         ] {
@@ -1132,33 +1230,13 @@ mod tests {
                 (
                     result.body_force_n[0],
                     result.resource_flows[0].mass_flow_kg_s.unwrap(),
-                    result.achieved_demand,
                 )
             };
-            let (idle_thrust_n, idle_fuel_kg_s, achieved) = evaluate(0.0);
-            let PropulsionDemand::NormalizedForce(idle_fraction) = achieved else {
-                panic!("achieved demand is a normalized force");
-            };
-            assert!(idle_fuel_kg_s > 0.0);
-            // Every request at or below the idle floor delivers the same
-            // thrust and burns the same fuel as the floor itself.
-            for fraction in [
-                0.0,
-                0.25 * idle_fraction,
-                0.5 * idle_fraction,
-                idle_fraction,
-            ] {
-                let (thrust_n, fuel_kg_s, _) = evaluate(fraction);
-                assert!((thrust_n - idle_thrust_n).abs() < 1.0e-9 * idle_thrust_n);
-                assert!(
-                    (fuel_kg_s - idle_fuel_kg_s).abs() < 1.0e-12 * idle_fuel_kg_s,
-                    "{fraction}: {fuel_kg_s} vs idle {idle_fuel_kg_s}"
-                );
-            }
-            // Above the floor, fuel never decreases as achieved thrust rises.
-            let (mut last_thrust_n, mut last_fuel_kg_s) = (idle_thrust_n, idle_fuel_kg_s);
+            let idle_fuel_kg_s = model.idle_fuel_flow_kg_s(flight);
+            let (mut last_thrust_n, mut last_fuel_kg_s) = evaluate(0.0);
+            assert!(last_fuel_kg_s >= idle_fuel_kg_s * (1.0 - 1.0e-12));
             for step in 0..=40 {
-                let (thrust_n, fuel_kg_s, _) = evaluate(f64::from(step) / 40.0);
+                let (thrust_n, fuel_kg_s) = evaluate(f64::from(step) / 40.0);
                 assert!(thrust_n >= last_thrust_n - 1.0e-9);
                 assert!(
                     fuel_kg_s >= last_fuel_kg_s * (1.0 - 1.0e-12),
@@ -1189,6 +1267,49 @@ mod tests {
             .unwrap_or_else(|error| panic!("normalized maximum: {error}"));
         assert!((result.body_force_n[0] - capability.maximum_body_force_n[0]).abs() < 1.0e-9);
         assert!(result.active_limits.is_empty());
+    }
+
+    /// The mission commands the deck with `NormalizedForce` (the throttle of a
+    /// mission segment); the priced route model commands it with named ratings.
+    /// Both must name the same thrust: a unit throttle is the maximum-climb
+    /// rating at every flight condition, not only at the reference point, and a
+    /// part throttle is that fraction of it above the flight-idle floor. The
+    /// take-off rating is a distinct, higher rating the throttle does not reach.
+    #[test]
+    fn the_throttle_is_a_fraction_of_the_maximum_climb_rating_at_every_condition() {
+        for model in [model(), a320_class_model()] {
+            for altitude_m in [0.0, 3_000.0, 6_000.0, 9_000.0, 11_000.0] {
+                for mach in [0.25, 0.5, 0.7, 0.82] {
+                    let flight = standard_flight(altitude_m, mach);
+                    let force = |demand| {
+                        model
+                            .evaluate(&request_at(flight, demand))
+                            .unwrap_or_else(|error| panic!("{altitude_m} m M{mach}: {error}"))
+                            .body_force_n[0]
+                    };
+                    let climb = force(PropulsionDemand::Rating(PropulsionRating::MaximumClimb));
+                    let full = force(PropulsionDemand::NormalizedForce(1.0));
+                    assert!(
+                        (full - climb).abs() <= 1.0e-9 * climb,
+                        "{altitude_m} m M{mach}: throttle 1 {full} N, maximum climb {climb} N"
+                    );
+                    for fraction in [0.6, 0.8, 0.95] {
+                        let part = force(PropulsionDemand::NormalizedForce(fraction));
+                        assert!(
+                            (part - fraction * climb).abs() <= 1.0e-9 * climb,
+                            "{altitude_m} m M{mach} throttle {fraction}: {part} N, expected {} N",
+                            fraction * climb
+                        );
+                    }
+                    let takeoff =
+                        force(PropulsionDemand::Rating(PropulsionRating::TakeoffGoAround));
+                    assert!(
+                        takeoff >= climb,
+                        "{altitude_m} m M{mach}: take-off rating {takeoff} N below maximum climb {climb} N"
+                    );
+                }
+            }
+        }
     }
 
     #[test]
@@ -1257,8 +1378,9 @@ mod tests {
         // the maximum-climb rating. The mission commands the deck with
         // NormalizedForce relative to that rating; at the reference condition
         // a unit demand is the maximum-climb anchor, and the demand that
-        // delivers the cruise thrust delivers the declared TSFC.
-        for model in [model(), a320_class_model()] {
+        // delivers the cruise thrust delivers the declared TSFC. The PW305A
+        // class deck holds its anchor above the tropopause (40,000 ft).
+        for model in [model(), a320_class_model(), lj60_class_model()] {
             let flight = standard_flight(
                 model.deck.max_climb_reference_altitude_m,
                 model.deck.max_climb_reference_mach,
@@ -1278,23 +1400,52 @@ mod tests {
                 (tsfc - model.deck.cruise_reference_tsfc_kg_kgf_h).abs() < 1.0e-12,
                 "TSFC {tsfc}"
             );
-            // At the anchor altitude the sea-level ICAO dip is not carried
-            // (it is not measured there): TSFC is flat in throttle above the
-            // utilization where f(u)/u crosses one, and keeps the sourced
-            // low-power rise below it.
-            let ratio =
-                |u: f64| part_power_fuel_fraction(u, model.deck.part_power_fuel_flow_ratios) / u;
-            for utilization in [0.5, 0.95, 1.0] {
+            // In flight the sea-level ICAO dip is not carried (it is a static
+            // property): TSFC is flat in throttle from the bucket of the
+            // flight SFC loop to the full rating, and rises below it as the
+            // loop does (Jenkinson Figs. 9.19(e)-9.21(e)).
+            let delta = flight.pressure_pa / 101_325.0;
+            let full_x =
+                model.climb_available_n(flight, None) / (delta * model.deck.takeoff_thrust_n);
+            let shape = |u: f64| {
+                tsfc_shape(
+                    u,
+                    flight.mach,
+                    Some(full_x),
+                    &model.sfc_loops,
+                    model.deck.part_power_fuel_flow_ratios,
+                )
+            };
+            // The cruise anchor sits at or above the loop bucket, so the
+            // closure keeps the full-rating TSFC unscaled; a sub-bucket
+            // anchor would rescale it and is reported in the provenance.
+            let anchor = shape(model.catalogue_cruise_over_maximum_climb());
+            assert!((anchor - 1.0).abs() < 1.0e-12, "anchor shape {anchor}");
+            assert!(!model
+                .provenance
+                .sources
+                .iter()
+                .any(|source| source.contains(SUB_BUCKET_ANCHOR_NOTE)));
+            let ratio = |u: f64| shape(u) / anchor;
+            for utilization in [0.95, 1.0] {
                 let part = evaluated_tsfc_kg_kgf_h(
                     &model,
                     flight,
                     PropulsionDemand::NormalizedForce(utilization),
                 );
                 assert!(
-                    (part - model.deck.cruise_reference_tsfc_kg_kgf_h).abs() < 1.0e-12,
+                    (part - model.deck.cruise_reference_tsfc_kg_kgf_h * ratio(utilization)).abs()
+                        < 1.0e-9,
                     "u {utilization}"
                 );
             }
+            let half =
+                evaluated_tsfc_kg_kgf_h(&model, flight, PropulsionDemand::NormalizedForce(0.5));
+            assert!(ratio(0.5) > 1.0, "{}", ratio(0.5));
+            assert!(
+                (half - model.deck.cruise_reference_tsfc_kg_kgf_h * ratio(0.5)).abs() < 1.0e-9,
+                "u 0.5: {half}"
+            );
             let fraction = 0.1;
             let low = evaluated_tsfc_kg_kgf_h(
                 &model,
@@ -1307,7 +1458,17 @@ mod tests {
             let utilization = MAXIMUM_CRUISE_OVER_MAXIMUM_CLIMB * fraction;
             let expected = model.deck.cruise_reference_tsfc_kg_kgf_h * ratio(utilization);
             assert!(ratio(utilization) > 1.0);
-            assert!((low - expected).abs() < 1.0e-12, "low {low} vs {expected}");
+            // The part-power form is the fuel of this setting unless the idle
+            // chart flow is larger: the engine never burns less than idle.
+            let thrust_kgf = MAXIMUM_CRUISE_OVER_MAXIMUM_CLIMB
+                * fraction
+                * model.climb_available_n(flight, None)
+                / STANDARD_GRAVITY_M_S2;
+            let idle_tsfc = model.idle_fuel_flow_kg_s(flight) * 3_600.0 / thrust_kgf;
+            assert!(
+                (low - expected.max(idle_tsfc)).abs() < 1.0e-9,
+                "low {low} vs {expected} (idle {idle_tsfc})"
+            );
         }
     }
 
@@ -1444,7 +1605,7 @@ mod tests {
                 let flight = standard_flight(altitude_m, mach);
                 let takeoff = model.takeoff_available_n(flight);
                 let climb = model.climb_available_n(flight, model.deck.max_climb_rate_ft_min);
-                let idle = model.deck.flight_idle_fraction * takeoff;
+                let idle = model.idle_net_thrust_n(flight);
                 if mach > TAKEOFF_CORRELATION_MAXIMUM_MACH {
                     assert!(
                         idle < climb && climb <= takeoff,
@@ -1502,7 +1663,7 @@ mod tests {
         // The chart anchor against Mattingly's high-bypass maximum thrust,
         // alpha = delta0 (1 - 0.49 sqrt(M)) (coefficients as recalled, not
         // re-read), at FL350-FL390, M 0.8: within +-15 %. The earlier Howe
-        // anchor was 17-25 % above it (audit PROP-06).
+        // anchor was 17-25 % above it.
         let model = a320_class_model();
         for feet in [35_000.0, 39_000.0] {
             let altitude_m = feet * 0.3048;
@@ -1552,6 +1713,35 @@ mod tests {
         assert!(
             (ratio_hot - expected).abs() < 1.0e-12,
             "{ratio_hot} vs {expected}"
+        );
+    }
+
+    /// Packs-on customer bleed at the take-off rating costs thrust by Raymer
+    /// Eq. (13.8): `C_bleed` (2.0) times bleed over core flow.
+    #[test]
+    fn take_off_bleed_takes_thrust_at_the_take_off_rating_only() {
+        let model = model();
+        let flight = standard_flight(0.0, 0.2);
+        let takeoff = PropulsionDemand::Rating(PropulsionRating::TakeoffGoAround);
+        let base = model.evaluate(&request_at(flight, takeoff)).unwrap();
+        let (total_pa, total_k) = installation::total_conditions(flight);
+        let corrected = (total_pa / 101_325.0) / (total_k / 288.15).sqrt();
+        let core_kg_s = model.core_flow.static_core_flow_kg_s * corrected * model.core_flow.engines;
+        let mut request = request_at(flight, takeoff);
+        request.loads.bleed_mass_flow_kg_s = 0.01 * core_kg_s;
+        let loaded = model.evaluate(&request).unwrap();
+        let ratio = loaded.body_force_n[0] / base.body_force_n[0];
+        assert!(
+            (ratio - (1.0 - 0.01 * BLEED_THRUST_LOSS_SLOPE)).abs() < 1.0e-12,
+            "{ratio}"
+        );
+        let climb = PropulsionDemand::Rating(PropulsionRating::MaximumClimb);
+        let mut request = request_at(flight, climb);
+        let unloaded = model.evaluate(&request).unwrap();
+        request.loads.bleed_mass_flow_kg_s = 0.01 * core_kg_s;
+        assert_eq!(
+            model.evaluate(&request).unwrap().body_force_n,
+            unloaded.body_force_n
         );
     }
 
@@ -1658,5 +1848,49 @@ mod tests {
             EmpiricalTurbofanModel::new(deck, legacy, provenance),
             Err(PropulsionError::InvalidInput { .. })
         ));
+    }
+
+    #[test]
+    fn the_solver_point_is_the_evaluated_point_bit_for_bit() {
+        // Every demand kind, the idle floor, and rejected demands: the point
+        // and its errors are those of the full evaluation (Debug text, so a
+        // NaN in an error compares equal and -0.0 differs from 0.0).
+        let model = a320_class_model();
+        let demands = [
+            PropulsionDemand::NormalizedForce(0.0),
+            PropulsionDemand::NormalizedForce(0.02),
+            PropulsionDemand::NormalizedForce(0.6),
+            PropulsionDemand::NormalizedForce(1.0),
+            PropulsionDemand::NormalizedForce(1.5),
+            PropulsionDemand::NormalizedForce(f64::NAN),
+            PropulsionDemand::Rating(PropulsionRating::TakeoffGoAround),
+            PropulsionDemand::Rating(PropulsionRating::MaximumClimb),
+            PropulsionDemand::Rating(PropulsionRating::MaximumContinuous),
+            PropulsionDemand::Rating(PropulsionRating::Cruise),
+            PropulsionDemand::Rating(PropulsionRating::FlightIdle),
+            PropulsionDemand::RatedFraction {
+                rating: PropulsionRating::TakeoffGoAround,
+                fraction: 0.9,
+            },
+            PropulsionDemand::RatedFraction {
+                rating: PropulsionRating::MaximumClimb,
+                fraction: 2.0,
+            },
+            PropulsionDemand::RequiredBodyForceN([1.0e4, 0.0, 0.0]),
+        ];
+        for altitude_m in [0.0, 1_500.0, 6_000.0, 11_000.0, 13_500.0] {
+            for mach in [0.0, 0.25, 0.5, 0.78, 0.9] {
+                for demand in demands {
+                    let request = request_at(standard_flight(altitude_m, mach), demand);
+                    let point = model.evaluate_point(&request);
+                    let full = model.evaluate(&request).map(PropulsionPoint::from);
+                    assert_eq!(
+                        format!("{point:?}"),
+                        format!("{full:?}"),
+                        "{altitude_m} m, M{mach}, {demand:?}"
+                    );
+                }
+            }
+        }
     }
 }

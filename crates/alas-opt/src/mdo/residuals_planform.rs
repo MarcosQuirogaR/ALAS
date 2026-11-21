@@ -257,6 +257,11 @@ mod tests {
         let (config, design, mut plane) = fixture();
         let baseline = residuals(&plane, &design, &config, ResidualRole::Constraint);
         plane.wings[0].xsecs[0].chord *= 0.5;
+        // The root box depth is stated on the design root chord, the
+        // planform datum's when the wing carries one (`Wing::design_root`).
+        if let Some(datum) = plane.wings[0].planform_datum.as_mut() {
+            datum.root_chord_m *= 0.5;
+        }
         let changed = residuals(&plane, &design, &config, ResidualRole::Constraint);
         assert!((changed[0].actual / baseline[0].actual - 0.5).abs() < 1e-12);
     }

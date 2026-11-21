@@ -536,15 +536,8 @@ not digitised from the figure), times its span fraction, and
 delta_e,max = -25 deg (Sadraey Table 12.3), one class-generic documented
 assumption. The download is limited to the tail section's stall,
 `CL_h,max = 0.9 c_l,max cos(Lambda_c/4)` (Raymer; c_l,max of the symmetric
-NACA tail section from Abbott and von Doenhoff). No take-off stabiliser trim
-beyond the built incidence is credited. Drag is
-omitted; its moment `D (h_D - h_cg)` is bounded by about 1 %MAC.
-
-These are implementation and plausibility checks: the derived CL_h of the
-registered presets is now -0.85 to -0.97 (the thin-airfoil upper bound gave
--1.22 to -1.42), the section cap does not bind, and the rotation boundaries
-lie forward of the A220 flight-envelope and A320 ACAP (17) limits (A320 1.3,
-A220 -13.5 %MAC, with the 4.3 deg trimmable-stabiliser setting; 9.2 and -3.0 at
-the built -2 deg incidence) but aft of the A340 ACAP 20.3 (22.0 %MAC; 28.3 at
-the built incidence), a known residual (`published_forward_cg_limits.rs`). These
-are checks, not calibration targets, and not a validation of the boundary.
+NACA tail section from Abbott and von Doenhoff). A trimmable stabiliser holds
+its takeoff nose-up setting, 4.3 deg (a lower bound published for 26.3 %MAC, Airbus
+Safety First 7). Drag is omitted; its moment `D (h_D - h_cg)` is bounded by about 1 %MAC.
+These are implementation and plausibility checks. The cap binds for the A320, A220 and A340 at the 4.3 deg setting (CL_h -1.17, -1.19 and -1.17 against the section cap of the same value), so their rotation boundaries are cap-limited: the A320 0.9, the A220 -0.2 and the A340 21.2 %MAC (manufacturer MAC frame as converted by the test, 4.3 deg trimmable-stabiliser setting held at every CG; 28.3 for the A340 at the built incidence). The A340 value is 0.9 %MAC aft of its ACAP 20.3 and so inside the 1.0 %MAC tolerance of `published_forward_cg_limits.rs`; its margin rests on the tail-section c_l,max estimate [E] (lower end of the Abbott scatter, not re-read) and on the 4.3 deg setting, a lower bound published for 26.3 %MAC; a more nose-up setting forward of that CG, as a crew selects, lies in the cap's saturated region and gives no more download. These are checks, not calibration targets, and not
+a validation of the boundary.

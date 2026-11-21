@@ -2,16 +2,16 @@
 // Copyright (C) 2026 Marcos Quiroga Rodriguez
 
 //! Station states of the on-design turbofan cycle for a temperature-entropy
-//! preview (clarified Advanced Settings rework, Propulsion, decision D12).
+//! preview.
 //!
 //! The states come from the same walk as [`super::compute_turbofan_cycle`];
 //! nothing is fabricated beyond what that model computes:
 //!
 //! * **Stagnation** ("total") states at the numbered stations, in the order
-//!   the flow meets them. Core path: 0 (freestream, ram), 2 (fan/LPC face),
-//!   25 (LPC exit), 3 (HPC exit, combustor inlet), 4 (combustor exit,
-//!   turbine inlet), 45 (HPT exit), 5 (LPT exit), 6 (core nozzle inlet).
-//!   Bypass path: 2, 13 (fan exit).
+//!   the flow meets them. Core path: 0 (freestream, ram), 2 (fan face),
+//!   21 (fan hub exit), 25 (booster/LPC exit), 3 (HPC exit, combustor
+//!   inlet), 4 (combustor exit, turbine inlet), 45 (HPT exit), 5 (LPT exit), 6 (core nozzle inlet).
+//!   Bypass path: 2, 13 (fan bypass exit).
 //! * **Static** nozzle-exit states 9 (core) and 19 (bypass) after the
 //!   expansion to ambient pressure or the choke pressure.
 //! * The freestream **static** state, which is the entropy reference.
@@ -32,7 +32,7 @@ use super::{walk_cycle, CycleWalk, TurbofanCycleInputs};
 /// Which flow path a station belongs to.
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
 pub enum CycleBranch {
-    /// Shared inlet up to the fan/LPC face.
+    /// Shared inlet up to the fan face.
     Inlet,
     /// Core compressors, combustor, turbines and core nozzle.
     Core,
@@ -191,6 +191,8 @@ pub fn compute_turbofan_cycle_states(
         pt2,
         tt13,
         pt13,
+        tt21,
+        pt21,
         tt25,
         pt25,
         tt3,
@@ -224,8 +226,25 @@ pub fn compute_turbofan_cycle_states(
         )),
         core: vec![
             station("0", "Freestream (ram)", Inlet, Stagnation, Cold, tt0, pt0),
-            station("2", "Fan/LPC face", Inlet, Stagnation, Cold, tt2, pt2),
-            station("25", "LPC exit", Core, Stagnation, Cold, tt25, pt25),
+            station("2", "Fan face", Inlet, Stagnation, Cold, tt2, pt2),
+            station(
+                "21",
+                "Fan hub exit (core)",
+                Core,
+                Stagnation,
+                Cold,
+                tt21,
+                pt21,
+            ),
+            station(
+                "25",
+                "Booster (LPC) exit",
+                Core,
+                Stagnation,
+                Cold,
+                tt25,
+                pt25,
+            ),
             station("3", "HPC exit", Core, Stagnation, Cold, tt3, pt3),
             station("4", "Combustor exit", Core, Stagnation, Hot, tt4, pt4),
             station("45", "HPT exit", Core, Stagnation, Hot, tt45, pt45),
@@ -234,8 +253,16 @@ pub fn compute_turbofan_cycle_states(
             station("9", "Core nozzle exit (static)", Core, Static, Hot, t9, p9),
         ],
         bypass: vec![
-            station("2", "Fan/LPC face", Inlet, Stagnation, Cold, tt2, pt2),
-            station("13", "Fan exit", Bypass, Stagnation, Cold, tt13, pt13),
+            station("2", "Fan face", Inlet, Stagnation, Cold, tt2, pt2),
+            station(
+                "13",
+                "Fan exit (bypass)",
+                Bypass,
+                Stagnation,
+                Cold,
+                tt13,
+                pt13,
+            ),
             station(
                 "19",
                 "Fan nozzle exit (static)",
@@ -282,7 +309,7 @@ mod tests {
         let result = compute_turbofan_cycle(&cruise(), &cfg);
         let states = compute_turbofan_cycle_states(&cruise(), &cfg);
         assert!(states.cycle_feasible && result.cycle_feasible);
-        assert_eq!(states.core.len(), 9);
+        assert_eq!(states.core.len(), 10);
         assert_eq!(states.bypass.len(), 3);
         let by = |station: &str| {
             states
@@ -329,9 +356,12 @@ mod tests {
             );
         }
         assert!(entropy(&states.core, "4") > entropy(&states.core, "3") + 100.0);
-        assert_eq!(states.core[4].gas, CycleGas::Hot);
-        assert_eq!(states.core[3].gas, CycleGas::Cold);
-        assert_eq!(states.core[8].kind, StateKind::Static);
+        assert_eq!(states.core[5].gas, CycleGas::Hot);
+        assert_eq!(states.core[4].gas, CycleGas::Cold);
+        assert_eq!(states.core[9].kind, StateKind::Static);
+        // The core stream crosses the fan hub before the booster: 21 = 13 < 25.
+        assert_eq!(by("21"), result.temperature_t13_k);
+        assert!(by("25") > by("21"));
         assert_eq!(states.bypass[2].kind, StateKind::Static);
     }
 

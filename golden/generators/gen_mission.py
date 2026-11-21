@@ -477,6 +477,7 @@ def _record_initials(segment) -> dict | None:
 def _stage_solve() -> None:
     """Run the SUAVE mission and write both fixtures."""
     _framework.add_suave_to_path()
+    _framework.use_suave_geopotential_altitude()
 
     import numpy as np  # noqa: PLC0415
     import SUAVE  # noqa: PLC0415

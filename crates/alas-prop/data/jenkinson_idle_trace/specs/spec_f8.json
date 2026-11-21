@@ -1,0 +1,13 @@
+{
+  "pdf": "Jenkinson, Simpkin and Rhodes, Civil Jet Aircraft Design (1999)",
+  "page": 226, "scale": 4,
+  "ytick": [[1320, 0.016], [1798, 0.008]],
+  "xtick": [[575, 0.2], [1205, 0.8]],
+  "rows": [1400, 2020],
+  "left_col": 360, "right_col": 1228, "init_col": 370,
+  "labels": ["SL","10","15","25","30","36","40","45"],
+  "nodes": [0.0, 0.1, 0.2, 0.3, 0.4, 0.5, 0.6, 0.7, 0.8],
+  "erase": [],
+  "overlay": "img/ov_f8.png",
+  "crop": [220, 1260, 1560, 2100]
+}

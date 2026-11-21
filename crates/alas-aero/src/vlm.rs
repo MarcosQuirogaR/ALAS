@@ -87,8 +87,11 @@ pub use stability_derivatives::{
     run_with_stability_derivatives, run_with_stability_derivatives_reference_compatibility,
     run_with_stability_derivatives_with_steps, CoefficientDerivatives, VlmStabilityResult,
 };
-pub use streamlines::{calculate_streamlines, PanelSample};
-pub use system::{VlmGeometryCache, VlmSystem};
+pub use streamlines::{calculate_streamlines, velocity_at_points, PanelSample};
+pub use system::{
+    lattice_components, lattice_grouping_diagnostics, LatticeGroupingDiagnostic, VlmGeometryCache,
+    VlmSystem,
+};
 pub use trefftz::trefftz_induced_drag_coefficient;
 
 /// The Kaufmann vortex core smoothing radius `VortexLatticeMethod`'s
@@ -140,13 +143,18 @@ pub enum VlmError {
     /// boundary instead, and this is the backstop for callers that construct
     /// a [`super::VlmSystem`] directly.
     #[error(
-        "the panel influence matrix is too ill-conditioned to trust \
-         (pivot ratio {pivot_ratio:.3e}); the spanwise panel resolution is \
-         far finer than the geometry supports"
+        "the panel influence matrix is too ill-conditioned to trust: pivot \
+         ratio {pivot_ratio:.3e} against a limit of {limit:.0e}. A control \
+         point lies almost on another panel's vortex, because a trailing wake \
+         runs through a lifting surface behind it or because the panels are \
+         far finer than the geometry supports; change the tail height, \
+         incidence or dihedral, or the aerodynamic panel resolution"
     )]
     IllConditionedAic {
         /// `max |pivot| / min |pivot|` from the factorization.
         pivot_ratio: f64,
+        /// The largest ratio the solver trusts.
+        limit: f64,
     },
     /// A finite-difference derivative step was not finite and positive.
     #[error("stability-derivative steps must be finite and positive")]
@@ -160,6 +168,17 @@ pub enum VlmError {
     /// A solve produced a non-finite force, moment, coefficient, or residual.
     #[error("the VLM solve produced a non-finite result")]
     NonFiniteResult,
+    /// The circulation solve does not reproduce its right-hand side: the
+    /// normalized residual is above the bound of a solved system.
+    #[error(
+        "the VLM circulation solve left a normalized residual of {normalized_residual:.3e}, above the {limit:.3e} of a solved system"
+    )]
+    UnboundedResidual {
+        /// Normalized residual of the solve.
+        normalized_residual: f64,
+        /// The largest normalized residual that counts as a solution.
+        limit: f64,
+    },
 }
 
 /// Every field `run`'s upstream docstring lists, plus the solved circulation
@@ -270,8 +289,12 @@ pub fn run_reference_compatibility(
     spanwise_resolution: usize,
     chordwise_resolution: usize,
 ) -> Result<VlmResult, VlmError> {
-    VlmSystem::assemble(airplane, spanwise_resolution, chordwise_resolution)?
-        .solve_reference_compatibility(op_point)
+    VlmSystem::assemble_reference_compatibility(
+        airplane,
+        spanwise_resolution,
+        chordwise_resolution,
+    )?
+    .solve_reference_compatibility(op_point)
 }
 
 // A test asserts on values it constructed here directly, so a failed unwrap

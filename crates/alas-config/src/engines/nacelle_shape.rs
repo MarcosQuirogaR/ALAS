@@ -101,6 +101,54 @@ impl NacelleShape {
     }
 }
 
+/// What a drawn nacelle has that a revolve of [`NacelleShape`] or
+/// [`NacelleShapeV2`] cannot make. Optional: an engine without it stays a
+/// revolve, bit for bit.
+///
+/// The lists replace the outline over their own stations, each independently;
+/// the sections stay ellipses, now with their own width, height and centre. Two
+/// points 1 mm apart draw a step. Frame: x metres aft of the inlet ring, z
+/// metres above the centre of that ring, half-width metres from the axis.
+#[derive(Debug, Clone, PartialEq, Serialize, Deserialize)]
+#[serde(deny_unknown_fields)]
+pub struct NacelleDrawnOutline {
+    /// Plan outline, `[x, half-width]`.
+    #[serde(default, skip_serializing_if = "Vec::is_empty")]
+    pub half_width: Vec<[f64; 2]>,
+    /// Upper line of the side outline, `[x, z]`.
+    #[serde(default, skip_serializing_if = "Vec::is_empty")]
+    pub top: Vec<[f64; 2]>,
+    /// Lower line of the side outline, `[x, z]`.
+    #[serde(default, skip_serializing_if = "Vec::is_empty")]
+    pub bottom: Vec<[f64; 2]>,
+    /// How far the lower lip stands aft of the upper lip in the side view of a
+    /// scarfed inlet, m. The upper lip keeps its station.
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub lip_setback_m: Option<f64>,
+    /// The drawing these were read from.
+    pub provenance: String,
+}
+
+impl NacelleDrawnOutline {
+    /// The same outline at a rubber-engine scale, as [`NacelleShapeV2::scaled`].
+    #[must_use]
+    pub fn scaled(&self, length_factor: f64, radius_factor: f64) -> Self {
+        let list = |points: &[[f64; 2]]| -> Vec<[f64; 2]> {
+            points
+                .iter()
+                .map(|p| [p[0] * length_factor, p[1] * radius_factor])
+                .collect()
+        };
+        Self {
+            half_width: list(&self.half_width),
+            top: list(&self.top),
+            bottom: list(&self.bottom),
+            lip_setback_m: self.lip_setback_m.map(|s| s * length_factor),
+            provenance: self.provenance.clone(),
+        }
+    }
+}
+
 /// The core cowl starts, behind the fan-nozzle exit, at this fraction of the
 /// way from the core-nozzle radius to the fan-nozzle radius. Template
 /// (confidence C): the CFM56-5B drawing shows the core cowl at roughly 60 %
@@ -121,7 +169,7 @@ pub struct NacelleParamSource {
 }
 
 /// The G2 nacelle outline: the six numbers of [`NacelleShape`] plus the seven
-/// that the lofted revolve needs (design 2026-10-10, section 3.1).
+/// that the lofted revolve needs.
 ///
 /// Frame and units as [`NacelleShape`]: metres aft of the inlet face, radii
 /// over the maximum external radius `R` (= `nacelle_max_radius_m`, the
@@ -160,13 +208,45 @@ pub struct NacelleShapeV2 {
     /// Downward shift of the section centre at maximum radius, m, scaled
     /// with the local radius along the body (0: axisymmetric).
     pub droop_m: f64,
+    /// Core-cowl radius at the fan-nozzle exit over `R`, when the drawing
+    /// shows it; absent: [`CORE_COWL_START_FRACTION`]. A value also makes the
+    /// core cowl a straight cone, as drawn.
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub core_start_radius_ratio: Option<f64>,
+    /// Plug radius at the core-nozzle exit over `R`, when the drawing shows a
+    /// step from the nozzle lip to the plug; absent: no step. A value also
+    /// makes the plug a straight cone, as drawn.
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub plug_start_radius_ratio: Option<f64>,
+    /// Inclination of the engine axis, degrees, positive when the aft end is
+    /// lower than the inlet; measured about the inlet-face centre, so the
+    /// inlet stays where the installation puts it. Absent: level.
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub axis_pitch_deg: Option<f64>,
     /// Source and confidence of every number above.
     #[serde(default, skip_serializing_if = "Vec::is_empty")]
     pub provenance: Vec<NacelleParamSource>,
 }
 
 impl NacelleShapeV2 {
-    /// The six pre-existing numbers as a [`NacelleShape`].
+    /// The shape of the same engine family at another rating: the absolute
+    /// axial lengths scale with `length_factor` (Raymer Eq. 10.1, `x^0.4`),
+    /// the absolute radial sizes with `radius_factor` (Eq. 10.2, `x^0.5`);
+    /// every ratio and angle is the family's own. Factors of one return the
+    /// shape unchanged bit for bit.
+    #[must_use]
+    pub fn scaled(&self, length_factor: f64, radius_factor: f64) -> Self {
+        Self {
+            fan_cowl_length_m: self.fan_cowl_length_m * length_factor,
+            core_cowl_length_m: self.core_cowl_length_m * length_factor,
+            te_thickness_m: self.te_thickness_m * radius_factor,
+            plug_tip_radius_m: self.plug_tip_radius_m * radius_factor,
+            droop_m: self.droop_m * radius_factor,
+            ..self.clone()
+        }
+    }
+
+    /// The six base numbers as a [`NacelleShape`].
     pub fn legacy(&self) -> NacelleShape {
         NacelleShape {
             highlight_radius_ratio: self.highlight_radius_ratio,
@@ -222,6 +302,19 @@ impl NacelleShapeV2 {
             && (0.5..=2.0).contains(&self.ellipticity)
             && self.droop_m.is_finite()
             && self.droop_m.abs() < r
+            && self.core_start_radius_ratio.is_none_or(|v| {
+                v.is_finite()
+                    && v > self.core_nozzle_radius_ratio
+                    && v * r < self.fan_nozzle_radius_ratio * r - self.te_thickness_m
+            })
+            && self.plug_start_radius_ratio.is_none_or(|v| {
+                v.is_finite()
+                    && v <= self.core_nozzle_radius_ratio
+                    && v * r > self.plug_tip_radius_m
+            })
+            && self
+                .axis_pitch_deg
+                .is_none_or(|v| v.is_finite() && v.abs() < 15.0)
     }
 }
 
@@ -288,6 +381,9 @@ mod tests {
             plug_tip_radius_m: 0.04,
             ellipticity: 1.0,
             droop_m: 0.0,
+            core_start_radius_ratio: None,
+            plug_start_radius_ratio: None,
+            axis_pitch_deg: None,
             provenance: Vec::new(),
         }
     }

@@ -4,7 +4,7 @@
   "family": "xtra_challenge",
   "name": "XtraChallenge 2025, Clubs category, liquid payload",
   "status": "provisional",
-  "citation": "XtraChallenge 2025 Reglamento Tecnico, Categoria Clubes v1.20 (17.03.2025), s6 requirements, s7.6 circuit, s8 scoring (eq. 1-10); local copy refs/competitions/XC_XC_25_TRC_V1.20.pdf. Provisional for 2026: the 2026 rules were not located, so this edition's formulas are the nearest primary text; the 2026 missions (secondary source only) differ. The Academic 2025 document was not found.",
+  "citation": "XtraChallenge 2025 Reglamento Tecnico, Categoria Clubes v1.20 (17.03.2025), s6 requirements, s7.6 circuit, s8 scoring (eq. 1-10). Provisional for 2026: the 2026 rules were not located, so this edition's formulas are the nearest primary text; the 2026 missions (secondary source only) differ. The Academic 2025 document was not found.",
   "gates": [
     {
       "id": "mtow",

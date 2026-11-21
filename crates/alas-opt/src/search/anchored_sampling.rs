@@ -82,7 +82,6 @@ mod tests {
     use super::*;
     use crate::{search::screening, DesignOptimizer};
     use alas_config::{presets, AlasConfig};
-    use alas_geom::builder::AircraftBuilder;
 
     #[test]
     fn coupled_samples_keep_nominal_and_bounds_and_replay_as_a_prefix() {
@@ -104,15 +103,23 @@ mod tests {
                     assert!((lo..=hi).contains(&value), "{}: {value}", preset.name);
                 }
             }
-            let plane = AircraftBuilder::new(Some(config.geometry.clone()))
-                .build(Some(&preset.design_vector), false)
-                .expect("reference builds");
+            // The projection mirrors the design planform the builder lofts from,
+            // `TransportPlanform::reference_area_m2`. The built wing's own
+            // projected area is not that datum: inside the body its sections lie
+            // on the edge lines with the projected trailing edge carried at the
+            // side-of-body twist, and a wingtip device's
+            // trailing-edge flare widens the built tip.
+            let planform = config
+                .geometry
+                .wing
+                .transport_planform(&preset.design_vector)
+                .expect("reference planform");
             let area = projection.area_m2(&preset.design_vector.to_array());
             assert!(
-                (area - plane.wings[0].projected_area()).abs() < 64.0 * f64::EPSILON * area,
-                "{}: analytical {area}, built {}",
+                (area - planform.reference_area_m2()).abs() < 64.0 * f64::EPSILON * area,
+                "{}: analytical {area}, planform {}",
                 preset.name,
-                plane.wings[0].projected_area()
+                planform.reference_area_m2()
             );
         }
     }

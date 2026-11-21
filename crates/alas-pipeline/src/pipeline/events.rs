@@ -2,7 +2,7 @@
 // Copyright (C) 2026 Marcos Quiroga Rodriguez
 
 //! Typed run events, stage timers and external-tool diagnostics emitted by
-//! the pipeline coordinator.
+//! the pipeline orchestrator.
 
 use std::time::Instant;
 
@@ -15,6 +15,15 @@ use crate::openvsp::OpenVspExportResult;
 use crate::runs::{RunEvent, RunEventKind, RunEventSeverity};
 use crate::structural::StructuralAnalysisResult;
 use crate::vspaero::VspaeroAnalysisResult;
+
+mod search_events;
+pub(super) use search_events::with_search_progress;
+
+/// Run the downstream analysis `component` with the external programs it
+/// launches logged under its stage, `downstream/<component>`.
+pub(super) fn staged<T>(component: &str, work: impl FnOnce() -> T) -> T {
+    alas_exec::supervise::with_launch_stage(&format!("downstream/{component}"), work)
+}
 
 const PIPELINE_STAGE_COUNT: u8 = 7;
 
@@ -425,5 +434,32 @@ fn status_with_detail(status: String, error: Option<&str>) -> String {
         format!("{status}: {detail} \u{2026}")
     } else {
         format!("{status}: {detail}")
+    }
+}
+
+impl super::DesignPipeline {
+    /// Execute the same run as [`Self::run_with_environment_and_events`] with
+    /// cooperative cancellation, for a caller that keeps the configuration's
+    /// own design space (the headless server). Cancellation is observed only
+    /// at safe stage boundaries; an active external process is allowed to
+    /// finish its supervised call.
+    pub fn run_with_events_and_cancel(
+        &self,
+        options: &crate::PipelineOptions,
+        environment: &RunEnvironment,
+        events: &(dyn Fn(RunEvent) + Sync),
+        cancel: &std::sync::atomic::AtomicBool,
+    ) -> Result<crate::PipelineResult, String> {
+        self.run_inner(
+            options,
+            environment,
+            None,
+            None,
+            None,
+            None,
+            Some(events),
+            Some(cancel),
+            None,
+        )
     }
 }

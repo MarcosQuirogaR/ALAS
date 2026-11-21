@@ -71,3 +71,139 @@ pub enum WingStructureError {
     #[error("the wing planform is not physically constructible")]
     InvalidPlanform,
 }
+
+/// Spanwise lift of the main wing as two unit shapes, the classical basic and
+/// additional loading (USAF DATCOM 4.1.4; Abbott & von Doenhoff, ch. 8): the lift
+/// per unit span fraction of a case with total semi-wing lift `F` is
+/// `F * additional(eta) + F_level * basic(eta)`, with `F_level` the level-flight
+/// semi-wing lift (the design-point dynamic pressure fixes the basic load).
+/// `additional` integrates to one over `eta in [0, 1]` (lift per unit total lift,
+/// untwisted), `basic` integrates to zero (the zero-lift load from twist and
+/// camber, as a fraction of the level semi-wing lift). Both come from the strip
+/// sums of two vortex-lattice solves of the wing alone.
+#[derive(Debug, Clone, PartialEq)]
+pub struct SpanLoadShape {
+    /// Strip-centre span fractions, ascending, in `(0, 1)`.
+    pub eta: Vec<f64>,
+    /// Additional loading at each strip centre (unit integral).
+    pub additional: Vec<f64>,
+    /// Basic loading at each strip centre (zero integral).
+    pub basic: Vec<f64>,
+    /// Where the shape comes from, for labelling reports.
+    pub label: &'static str,
+}
+
+impl SpanLoadShape {
+    /// Build from strip data; additional is normalised to unit integral and
+    /// the basic load is made exactly lift-free. `None` for empty, non-finite
+    /// or lift-free data.
+    pub fn new(
+        eta: Vec<f64>,
+        additional: Vec<f64>,
+        basic: Vec<f64>,
+        label: &'static str,
+    ) -> Option<Self> {
+        let n = eta.len();
+        if n < 2 || additional.len() != n || basic.len() != n {
+            return None;
+        }
+        if eta
+            .iter()
+            .chain(&additional)
+            .chain(&basic)
+            .any(|v| !v.is_finite())
+        {
+            return None;
+        }
+        let mut shape = Self {
+            eta,
+            additional,
+            basic,
+            label,
+        };
+        let total = integral(&shape.nodes(&shape.additional));
+        if total <= 0.0 {
+            return None;
+        }
+        for v in &mut shape.additional {
+            *v /= total;
+        }
+        let lift = integral(&shape.nodes(&shape.basic));
+        let a = shape.additional.clone();
+        for (b, a) in shape.basic.iter_mut().zip(&a) {
+            *b -= lift * a;
+        }
+        Some(shape)
+    }
+
+    fn nodes(&self, values: &[f64]) -> Vec<(f64, f64)> {
+        let mut nodes = vec![(0.0, values[0])];
+        nodes.extend(self.eta.iter().copied().zip(values.iter().copied()));
+        nodes.push((1.0, 0.0));
+        nodes
+    }
+
+    fn at(&self, values: &[f64], eta: f64) -> f64 {
+        if !(0.0..=1.0).contains(&eta) {
+            return 0.0;
+        }
+        let nodes = self.nodes(values);
+        for p in nodes.windows(2) {
+            if eta <= p[1].0 {
+                let span = p[1].0 - p[0].0;
+                if span <= 0.0 {
+                    return p[1].1;
+                }
+                return p[0].1 + (p[1].1 - p[0].1) * (eta - p[0].0) / span;
+            }
+        }
+        0.0
+    }
+
+    /// Additional loading per unit `eta` at `eta`: linear between strip
+    /// centres, constant to the root, falling to zero at the tip.
+    pub fn density_at(&self, eta: f64) -> f64 {
+        self.at(&self.additional, eta)
+    }
+
+    /// Basic loading per unit `eta` at `eta`, same interpolation.
+    pub fn basic_at(&self, eta: f64) -> f64 {
+        self.at(&self.basic, eta)
+    }
+}
+
+impl SpanLoadShape {
+    /// Label of the Schrenk shape.
+    pub const SCHRENK_LABEL: &'static str =
+        "Schrenk approximation (mean of planform and ellipse), no basic loading";
+
+    /// Schrenk's approximation to the additional loading: the mean of the
+    /// planform chord distribution and the ellipse of equal area and span
+    /// (Schrenk, "A Simple Approximation Method for Obtaining the Spanwise Lift
+    /// Distribution", NACA TM 948, 1940). `chord(eta)` is the local chord; the
+    /// basic loading is zero (twist is not represented).
+    pub fn schrenk(chord: impl Fn(f64) -> f64) -> Option<Self> {
+        const N: usize = 24;
+        let eta: Vec<f64> = (0..N).map(|i| (i as f64 + 0.5) / N as f64).collect();
+        let c: Vec<f64> = eta.iter().map(|&e| chord(e)).collect();
+        let area: f64 = c.iter().sum::<f64>() / N as f64;
+        if !(area.is_finite() && area > 0.0) {
+            return None;
+        }
+        let additional: Vec<f64> = eta
+            .iter()
+            .zip(&c)
+            .map(|(&e, &ch)| {
+                0.5 * (ch / area + 4.0 / std::f64::consts::PI * (1.0 - e * e).max(0.0).sqrt())
+            })
+            .collect();
+        Self::new(eta, additional, vec![0.0; N], Self::SCHRENK_LABEL)
+    }
+}
+
+fn integral(nodes: &[(f64, f64)]) -> f64 {
+    nodes
+        .windows(2)
+        .map(|p| 0.5 * (p[0].1 + p[1].1) * (p[1].0 - p[0].0))
+        .sum()
+}

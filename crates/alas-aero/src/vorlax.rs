@@ -192,6 +192,12 @@ pub fn run(
             {
                 return Err(VlmError::NonFiniteNumericalDiagnostics);
             }
+            if !diagnostics.residual_is_bounded() {
+                return Err(VlmError::UnboundedResidual {
+                    normalized_residual: diagnostics.normalized_residual,
+                    limit: alas_math::linalg::MAX_NORMALIZED_RESIDUAL,
+                });
+            }
 
             let results = members
                 .iter()

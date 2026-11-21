@@ -10,6 +10,10 @@ use super::{
 #[path = "mesh_render.rs"]
 mod render;
 pub(super) use render::{characteristic_lengths, domain_bounds, leading_edge_size, wake_box};
+#[path = "mesh_layers.rs"]
+mod layers;
+pub(super) use layers::geometric_layer_sum;
+use layers::{layers_reaching_size, layers_spanning_thickness};
 
 /// Build an exact polygonal Gmsh source and evidence report.
 ///
@@ -28,9 +32,11 @@ pub fn build_gmsh_geo(
     let sizing = boundary_layer_sizing(config)?;
     let chord = config.chord_m;
     let (min_x, max_x, _min_y, _max_y) = bounds(&points);
+    let topology = classify_topology(&points, min_x, max_x)?;
+    let snapshot_count = points.len();
+    let (points, curve_bulge_unit) = smooth_facets(&points);
     let signed_area_unit = signed_area(&points);
     let signed_area_m2 = signed_area_unit * chord * chord;
-    let topology = classify_topology(&points, min_x, max_x)?;
     let (domain_min_x_m, domain_max_x_m, domain_min_y_m, domain_max_y_m) =
         render::domain_bounds(config);
     let extrusion_span_m =
@@ -68,7 +74,8 @@ pub fn build_gmsh_geo(
             coordinate_hash: airfoil.coordinate_hash.clone(),
             input_coordinate_count: airfoil.coordinates.len(),
             emitted_coordinate_count: points.len(),
-            removed_closing_duplicate: airfoil.coordinates.len() != points.len(),
+            inserted_curve_points: points.len() - snapshot_count,
+            removed_closing_duplicate: airfoil.coordinates.len() != snapshot_count,
             signed_area_m2,
             chord_m: chord,
             domain_min_x_m,
@@ -78,7 +85,7 @@ pub fn build_gmsh_geo(
             extrusion_span_m,
             topology,
             exact_polygon_geometry: true,
-            geometry_resampling_error_m: 0.0,
+            geometry_resampling_error_m: curve_bulge_unit * chord,
             boundary_layer: sizing,
         },
     })
@@ -171,11 +178,24 @@ pub fn boundary_layer_sizing(config: &CfdStudyConfig) -> Result<BoundaryLayerSiz
     } else {
         // The configured count is a floor, never a ceiling: a user asking for
         // more layers than the estimate needs still gets them.
+        // The stack also grows until its outermost layer reaches the
+        // isotropic near-wall size, so the graded region hands over to the
+        // background mesh without a jump in normal spacing.  At high lift the
+        // suction-side layer near the trailing edge is several times the
+        // flat-plate estimate (NACA 0012, alpha 10 deg, Re 6e6: delta* 1.65 %
+        // c at x/c 0.99 against a 1.6 % c flat-plate delta), and the outer
+        // part of it lives on these cells.
+        let (_, _, surface_size_m) = render::characteristic_lengths(config, config.chord_m);
         layers_spanning_thickness(
             first_layer_thickness_m,
             BOUNDARY_LAYER_EXPANSION_RATIO,
             target_total_thickness_m,
         )
+        .max(layers_reaching_size(
+            first_layer_thickness_m,
+            BOUNDARY_LAYER_EXPANSION_RATIO,
+            surface_size_m,
+        ))
         .max(configured_n_layers)
         .min(MAX_DERIVED_BOUNDARY_LAYERS.max(configured_n_layers))
     };
@@ -216,6 +236,118 @@ pub fn boundary_layer_sizing(config: &CfdStudyConfig) -> Result<BoundaryLayerSiz
         estimated_skin_friction_coefficient,
     })
 }
+/// Largest change of surface direction between consecutive emitted facets on
+/// a smooth part of the section, degrees.
+const MAX_FACET_TURN_DEG: f64 = 2.0;
+/// A snapshot vertex whose facets turn by more than this is a corner (a
+/// trailing edge) and is kept sharp.
+const CORNER_TURN_DEG: f64 = 45.0;
+
+/// Direction change at `b` between facets `a-b` and `b-c`, degrees.
+fn facet_turn_deg(a: (f64, f64), b: (f64, f64), c: (f64, f64)) -> f64 {
+    let (u, v) = ((b.0 - a.0, b.1 - a.1), (c.0 - b.0, c.1 - b.1));
+    (u.0 * v.1 - u.1 * v.0)
+        .atan2(u.0 * v.0 + u.1 * v.1)
+        .abs()
+        .to_degrees()
+}
+
+/// Point at parameter `t` of the centripetal Catmull-Rom segment between `p1`
+/// and `p2` (Barry-Goldman evaluation; C. Yuksel, S. Schaefer and J. Keyser,
+/// "Parameterization and applications of Catmull-Rom curves", Computer-Aided
+/// Design 43(7), 2011, pp. 747-755: the centripetal form has no cusps or
+/// self-intersections within a segment).
+fn catmull_rom(p: [(f64, f64); 4], fraction: f64) -> (f64, f64) {
+    let knot = |a: (f64, f64), b: (f64, f64)| distance_sq(a, b).sqrt().sqrt().max(1.0e-300);
+    let t0 = 0.0;
+    let t1 = t0 + knot(p[0], p[1]);
+    let t2 = t1 + knot(p[1], p[2]);
+    let t3 = t2 + knot(p[2], p[3]);
+    let t = t1 + fraction * (t2 - t1);
+    let lerp = |a: (f64, f64), b: (f64, f64), ta: f64, tb: f64| {
+        let (wa, wb) = ((tb - t) / (tb - ta), (t - ta) / (tb - ta));
+        (wa * a.0 + wb * b.0, wa * a.1 + wb * b.1)
+    };
+    let a1 = lerp(p[0], p[1], t0, t1);
+    let a2 = lerp(p[1], p[2], t1, t2);
+    let a3 = lerp(p[2], p[3], t2, t3);
+    let b1 = lerp(a1, a2, t0, t2);
+    let b2 = lerp(a2, a3, t1, t3);
+    lerp(b1, b2, t1, t2)
+}
+
+/// Subdivide the facets of the snapshot polygon on a smooth curve through
+/// its own coordinates, so no smooth part turns by more than
+/// [`MAX_FACET_TURN_DEG`] between emitted facets.
+///
+/// Every snapshot coordinate stays a vertex, in order; points are only
+/// inserted between two consecutive ones, never across the closing (trailing
+/// edge) segment and never next to a corner, so the edge topology and the
+/// first and last points are unchanged.  A 131-point NACA 0012 snapshot
+/// turns 15.6 deg at its leading-edge vertex and 10-15 deg at each of its
+/// neighbours; the mesh resolves those kinks as surface corners, which raised
+/// the 10 deg drag by about a sixth over the NASA Turbulence Modeling
+/// Resource value, and refining the leading-edge cells made it worse.
+///
+/// Returns the points and the largest distance of an inserted point from the
+/// snapshot facet it subdivides, in chord units.
+fn smooth_facets(points: &[(f64, f64)]) -> (Vec<(f64, f64)>, f64) {
+    let n = points.len();
+    if n < 4 {
+        return (points.to_vec(), 0.0);
+    }
+    // The chain is open: its two ends meet the closing segment and count as
+    // corners.
+    let turn: Vec<f64> = (0..n)
+        .map(|i| {
+            if i == 0 || i == n - 1 {
+                f64::INFINITY
+            } else {
+                facet_turn_deg(points[i - 1], points[i], points[i + 1])
+            }
+        })
+        .collect();
+    // A corner turns far more than its neighbours (a slope discontinuity of
+    // the section, such as a wedge shoulder); a sampled smooth curve turns by
+    // about as much at a vertex as at the next.  Corners stay sharp.
+    let corner: Vec<bool> = (0..n)
+        .map(|i| {
+            if i == 0 || i == n - 1 || turn[i] >= CORNER_TURN_DEG {
+                return true;
+            }
+            let neighbours = [turn[i - 1], turn[i + 1]]
+                .into_iter()
+                .filter(|value| value.is_finite())
+                .fold(0.0_f64, f64::max);
+            turn[i] > 2.0 * neighbours + MAX_FACET_TURN_DEG
+        })
+        .collect();
+    let mut out = Vec::with_capacity(n);
+    let mut bulge = 0.0_f64;
+    for i in 0..n - 1 {
+        out.push(points[i]);
+        if corner[i] || corner[i + 1] || i == 0 || i + 2 >= n {
+            continue;
+        }
+        let worst = turn[i].max(turn[i + 1]);
+        let pieces = (worst / MAX_FACET_TURN_DEG).ceil().max(1.0) as usize;
+        let (a, b) = (points[i], points[i + 1]);
+        let length = distance_sq(a, b).sqrt();
+        for piece in 1..pieces {
+            let q = catmull_rom(
+                [points[i - 1], a, b, points[i + 2]],
+                piece as f64 / pieces as f64,
+            );
+            let offset = ((b.0 - a.0) * (q.1 - a.1) - (b.1 - a.1) * (q.0 - a.0)).abs()
+                / length.max(f64::MIN_POSITIVE);
+            bulge = bulge.max(offset);
+            out.push(q);
+        }
+    }
+    out.push(points[n - 1]);
+    (out, bulge)
+}
+
 fn validated_points(
     config: &CfdStudyConfig,
     airfoil: &AirfoilSnapshot,
@@ -386,37 +518,6 @@ fn classify_topology(
         leading_edge_points: leading.len(),
         trailing_edge_points: trailing.len(),
     })
-}
-
-pub(super) fn geometric_layer_sum(first: f64, ratio: f64, n_layers: u32) -> f64 {
-    if n_layers == 0 {
-        return 0.0;
-    }
-    first * (ratio.powi(n_layers as i32) - 1.0) / (ratio - 1.0)
-}
-
-/// Smallest layer count whose geometric sum reaches `target`.
-///
-/// Inverting the geometric sum analytically keeps this exact for the sizes in
-/// use; the result is still confirmed by [`geometric_layer_sum`] so a rounding
-/// step down cannot leave the stack short of `target`.  Non-finite or
-/// non-growing inputs fall back to one layer rather than an unbounded count.
-pub(super) fn layers_spanning_thickness(first: f64, ratio: f64, target: f64) -> u32 {
-    if !first.is_finite() || first <= 0.0 || !target.is_finite() || target <= 0.0 {
-        return 1;
-    }
-    if !ratio.is_finite() || ratio <= 1.0 {
-        return ((target / first).ceil() as u32).clamp(1, MAX_DERIVED_BOUNDARY_LAYERS);
-    }
-    let exact = (1.0 + target * (ratio - 1.0) / first).ln() / ratio.ln();
-    if !exact.is_finite() {
-        return MAX_DERIVED_BOUNDARY_LAYERS;
-    }
-    let mut count = (exact.ceil() as i64).clamp(1, i64::from(MAX_DERIVED_BOUNDARY_LAYERS)) as u32;
-    while count < MAX_DERIVED_BOUNDARY_LAYERS && geometric_layer_sum(first, ratio, count) < target {
-        count += 1;
-    }
-    count
 }
 
 pub(super) fn positive_finite(value: f64, name: &str) -> Result<f64, MeshError> {

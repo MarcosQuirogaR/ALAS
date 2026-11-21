@@ -131,3 +131,55 @@ pub(super) fn is_zero_vector(value: [f64; 3]) -> bool {
 fn add(left: [f64; 3], right: [f64; 3]) -> [f64; 3] {
     [left[0] + right[0], left[1] + right[1], left[2] + right[2]]
 }
+
+/// Give each imported wing section whose CPACS rotation about x differs from
+/// the dihedral its leading-edge line implies the plane that rotation states.
+///
+/// The writer stores every section's frame as that rotation: the bisector of
+/// the adjacent leading-edge segments for an ordinary section, and the kept
+/// plane of one with a [`WingXSec::span_axis`] (a wingtip device's root and
+/// path stations). Reading the rotation back only where it differs leaves every
+/// ordinary section on the derived frame it had, and restores the kept planes.
+pub(super) fn keep_section_planes(sections: &mut [WingXSec], rotations_deg: &[f64]) {
+    /// Rotation differences below this (degrees) are rounding, not a stated plane.
+    const PLANE_TOLERANCE_DEG: f64 = 1.0e-6;
+    let derived: Vec<Option<f64>> = (0..sections.len())
+        .map(|index| derived_section_dihedral_deg(sections, index))
+        .collect();
+    for (index, section) in sections.iter_mut().enumerate() {
+        let (Some(derived), Some(&given)) = (derived[index], rotations_deg.get(index)) else {
+            continue;
+        };
+        if (given - derived).abs() > PLANE_TOLERANCE_DEG {
+            let angle = given.to_radians();
+            section.span_axis = Some([0.0, angle.cos(), angle.sin()]);
+        }
+    }
+}
+
+/// The dihedral (degrees) of the frame a section with no kept plane takes from
+/// its adjacent leading-edge segments, projected on the YZ plane, or `None`
+/// for a single section or a segment with no YZ extent.
+fn derived_section_dihedral_deg(sections: &[WingXSec], index: usize) -> Option<f64> {
+    let yz = |from: &WingXSec, to: &WingXSec| {
+        let (dy, dz) = (to.xyz_le[1] - from.xyz_le[1], to.xyz_le[2] - from.xyz_le[2]);
+        let length = dy.hypot(dz);
+        (length > 1.0e-12).then(|| [dy / length, dz / length])
+    };
+    let last = sections.len().checked_sub(1)?;
+    if last == 0 {
+        return None;
+    }
+    let direction = if index == 0 {
+        yz(&sections[0], &sections[1])?
+    } else if index == last {
+        yz(&sections[last - 1], &sections[last])?
+    } else {
+        let (before, after) = (
+            yz(&sections[index - 1], &sections[index])?,
+            yz(&sections[index], &sections[index + 1])?,
+        );
+        [before[0] + after[0], before[1] + after[1]]
+    };
+    Some(direction[1].atan2(direction[0]).to_degrees())
+}

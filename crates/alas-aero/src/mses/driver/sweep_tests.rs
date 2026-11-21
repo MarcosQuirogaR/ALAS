@@ -219,3 +219,36 @@ fn bridge_convergence_without_extracted_row_remains_failed() {
         MsesPolarPointStatus::NotConverged
     );
 }
+
+#[test]
+fn a_tool_failure_mid_sweep_keeps_the_converged_angles_and_records_the_stop() {
+    // Requested 1, 2, 3, 4 deg; 1 and 2 converged, the solver then timed out
+    // at 3 deg (a mocked failure: the loop's error, as a killed process gives).
+    let alphas = [1.0, 2.0, 3.0, 4.0];
+    let mut recovery = RequestedPolarRecovery::new(&alphas);
+    recovery.visited_count = 3;
+    recovery.points[0] = Some(recovered_test_point(1.0));
+    recovery.points[1] = Some(recovered_test_point(2.0));
+    let failure = MsesFailure::from_run(RunError::Timeout {
+        command: "mses.exe".to_owned(),
+        seconds: 1.0,
+    });
+    let outcome = conclude_sweep(Err(failure), &alphas, recovery, SweepOutcome::default());
+    assert_eq!(outcome.accumulated["alpha"], vec![1.0, 2.0]);
+    let stop = outcome.stopped.expect("the stop is recorded");
+    assert_eq!(stop.alpha_deg, 3.0);
+    assert_eq!(stop.status, MsesStatus::Timeout);
+    assert!(stop.message.contains("mses.exe"), "{}", stop.message);
+}
+
+#[test]
+fn a_sweep_without_failure_records_no_stop() {
+    let alphas = [1.0, 2.0];
+    let mut recovery = RequestedPolarRecovery::new(&alphas);
+    recovery.visited_count = 2;
+    recovery.points[0] = Some(recovered_test_point(1.0));
+    recovery.points[1] = Some(recovered_test_point(2.0));
+    let outcome = conclude_sweep(Ok(()), &alphas, recovery, SweepOutcome::default());
+    assert_eq!(outcome.accumulated["alpha"], alphas);
+    assert!(outcome.stopped.is_none());
+}

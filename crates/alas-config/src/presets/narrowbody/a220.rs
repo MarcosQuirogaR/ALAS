@@ -17,6 +17,7 @@ pub fn a220_300() -> AircraftPreset {
     AircraftPreset {
         name: "A220-300",
         display_name: "Airbus A220-300",
+        class: crate::presets::AircraftClass::Transport,
         description: "BD-500-1A11 legacy-weight A220-300 with PW1521G-3 engines.",
         identity: AircraftVariantIdentity {
             model: "BD-500-1A11",
@@ -27,7 +28,7 @@ pub fn a220_300() -> AircraftPreset {
         },
         reference: AircraftReferenceData {
             // ICAO Annex 14 Vol. I Table 1-1 (aerodrome reference code) applied to the
-            // preset wingspan of 35.10 m (Airbus A220-300 airport-planning dimensions):
+            // preset wingspan of 34.984 m (Airbus A220-300 airport-planning dimensions):
             // 24 m <= b < 36 m is code C.
             aerodrome_reference_code: Some(crate::AerodromeReferenceCode::C),
             mrw_kg: Some(68_039.0),
@@ -35,7 +36,7 @@ pub fn a220_300() -> AircraftPreset {
             mlw_kg: Some(58_740.0),
             mzfw_kg: Some(55_792.0),
             oew_kg: crate::oew_reference::preset_reference_oew_kg("A220-300"),
-            // ACAP BD500-3AB48-13800-00 (2023-09-12) PDF p.26, Maximum fuel tank
+            // ACAP BD500-3AB48-13800-00 PDF p.26, Maximum fuel tank
             // capacity, BD-500-1A11 column: 5,790 USG (21 918 L), the 149,000 lb MTOW
             // basis of this preset. Mass = volume x fuel_density_kg_l (0.8089).
             usable_fuel_volume_l: Some(21_918.0),
@@ -43,9 +44,12 @@ pub fn a220_300() -> AircraftPreset {
             fuel_density_kg_l: Some(0.8089),
             planning_seats: Some(140),
             design_point: Some(crate::PayloadRangeDesignPoint {
-                range_nmi: 2_150.0,
-                payload_kg: Some(18_643.0),
-                source: "Airbus A220 Airport Planning (ACP Issue 013, 2025-11) p.239 Figure 1 zero-fuel weight vs range, ISA, applicability S/N 55001-59999: maximum-zero-fuel-weight corner read as 2,150 nmi (+-25 nmi), drawn for a 156,300 lb MTOW variant, so a heavier weight variant than this 149,000 lb preset; payload is the preset MZFW minus its reference OEW",
+                long_range_cruise: None,
+                cruise: None,
+                range_nmi: 3_100.0,
+                payload_kg: Some(13_957.0),
+                source: "Airbus Canada A220-300 Airport Planning ACP Issue 001 (2015-10-29), DM BD500-A-J00-00-00-13AAB-030A-A Figure 1 page 3 (zero fuel weight vs range, ISA still air, MTOW 149,000 lb, MZFW 123,000 lb): '3100 NM RANGE' with '81750 lb OWE & 140 PAX', payload 30,770 lb = 13,957 kg; reserves not printed. The current ACP Issue 013 chart is drawn for the heavier 156,300 lb variant and is not used",
+                reserve: None,
             }),
             // EASA's BD-500 type-certificate data sheet sets 145 as the
             // baseline maximum passenger seating capacity for the selected
@@ -91,9 +95,32 @@ pub fn a220_300() -> AircraftPreset {
                     source: "Airbus A220-300 APP Issue 031, 2023-10-19, data module BD500-A-J00-00-00-13AAB-030A-A pp.2-3, Figure 1",
                 },
             ],
+            // Design mission, one provenance row per datum: the 140-passenger design-range point
+            // of ACP Issue 001, drawn for this 149,000 lb MTOW variant. No reserve basis is printed.
+            mission_provenance: crate::DesignMissionProvenanceSet {
+                range: Some(crate::MissionDatumProvenance::exact(
+                    crate::MissionEvidenceTier::Manufacturer,
+                    "ISA still air, MTOW 149,000 lb, MZFW 123,000 lb: '3100 NM RANGE' at the MTOW line with '81750 lb OWE & 140 PAX'; the chart prints no reserve basis",
+                    "Airbus Canada A220-300 Airport Planning ACP Issue 001 (2015-10-29), DM BD500-A-J00-00-00-13AAB-030A-A Figure 1 (zero fuel weight vs range, ISA) page 3",
+                )),
+                payload: Some(crate::MissionDatumProvenance::exact(
+                    crate::MissionEvidenceTier::Manufacturer,
+                    "140 passengers at 81,750 lb OWE, ZFW 112,520 lb: payload 30,770 lb = 13,957 kg",
+                    "Airbus Canada A220-300 Airport Planning ACP Issue 001, DM 13AAB Figure 1 page 3",
+                )),
+                profile: Some(crate::MissionDatumProvenance::exact(
+                    crate::MissionEvidenceTier::Manufacturer,
+                    "ISA still air; the chart prints no cruise Mach, climb or descent schedule, so the model's configured cruise Mach and speed schedules apply",
+                    "Airbus Canada A220-300 Airport Planning ACP Issue 001, DM 13AAB Figure 1 page 3",
+                )),
+                reserve_fuel: Some(crate::MissionDatumProvenance::regulatory_reserve(
+                    "reference chart prints no reserve basis; the design mission applies the regulatory policy: contingency, alternate and 30 min final reserve fuel, at the alternate distance and holding height of the preset's configured fuel policy. The range comparison carries this reserve-basis uncertainty",
+                )),
+            },
             cg_evidence: CgEnvelopeEvidence::PublicPlanning,
             reference_wing_area_m2: Some(112.3),
             planning_cg_envelope: Some(crate::presets::cg_envelope::A220_300_PLANNING_CG_ENVELOPE),
+            usable_cg_range: Some(crate::presets::usable_cg_range::A220_300),
             aft_cg_nose_load: Some(crate::presets::gear_load::A220_300),
             sources: vec![
                 "Airbus FAST 63 (2019), Flying the A220; Airbus A220 airframe features (July 2025), composite wing: https://www.aircraft.airbus.com/en/newsroom/stories/2025-07-the-clean-sheet-single-aisle-aircraft-at-the-vanguard-of-innovation",
@@ -103,6 +130,10 @@ pub fn a220_300() -> AircraftPreset {
                 "Airbus A220 Aircraft Characteristics - Airport and Maintenance Planning, A220-ACP-Issue013-00-27Nov2025, DM BD500-A-J06-10-00-00AAA-030A-A Rev 2023-11-01, pp.150-156 (nominal nose-tip drawing frame; dimensions vary with weight/CG)",
                 "EASA.IM.A.570 BD-500 TCDS Issue 24, 2026-02-20, Section 2 BD-500-1A11 III.19 p.23 (baseline MPSC 145; Option C25631002 is required for 149)",
             ],
+            operating_speed_limits: Some(crate::presets::operating_limits::A220_300),
+            high_speed_protection: Some(
+                crate::presets::operating_limits::A220_HIGH_SPEED_PROTECTION,
+            ),
             ..AircraftReferenceData::default()
         },
         engine_name: "PW1500G",
@@ -110,6 +141,10 @@ pub fn a220_300() -> AircraftPreset {
         landing_gear: LandingGearConfig {
             n_nlg_wheels: 2,
             n_mlg_struts: 2,
+            // Main tire: A220 ACP Table 29 prints H42 x 15.0 R21 26 PR. No data book rates it,
+            // so the rated load is the dominated-envelope lower bound H40x14.5-19/26PR.
+            mlg_tire: "H42x15.0R21/26PR".to_owned(),
+            nlg_tire: "27x8.5R12/16PR".to_owned(),
             wheels_per_mlg_strut: 2,
             track_diameter_factor: 6.731 / 3.50,
             // Airbus' ACP side/ground drawing gives the A220-300 nominal
@@ -136,20 +171,24 @@ pub fn a220_300() -> AircraftPreset {
             // tailcone loft understates it): keep the Raymer/Roskam 15 deg floor on
             // top of the tail-down criterion.
             min_tip_back_deg: 15.0,
-            takeoff_stabilizer_nose_up_deg: Some(crate::landing_gear::TRANSPORT_THS_TAKEOFF_NOSE_UP_DEG),
+            // Tail-scrape requirement: no published tail-strike attitude found (Airbus A220 ACP Issue 013, Airbus
+            // Safety First, FCOM excerpts searched), so the 10 deg default (an assumption) stands.
+            trimmable_stabilizer: true,
+            // ACP Issue 013, A220-300 section 4.3, Tables 6 and 7 (ACN at the
+            // most forward CG): 157,000 lb gross, 143,077 lb on the main gear,
+            // so 13,923 lb (6,315 kg) on the nose gear at the maximum ramp
+            // weight; 13,661-13,923 lb from 134,000 to 157,000 lb.
+            nose_gear_max_static_load_kg: Some(13_923.0 * 0.453_592_37),
             ..LandingGearConfig::default()
         },
         design_vector: DesignVector {
-            span_m: 35.10,
-            // geo/close 2026-10-12 (owner: TE meets the fuselage at 90 deg): centreline chord 5.80 -> 7.334 m so the inboard TE is a straight, unswept line to the kink (A320 convention: centreline-extended); with the SOB station below
-            root_chord_m: 7.0710, // geo/close pass 2: TE x 19.85 m (drawn inboard TE) minus root LE 12.779 m; pass 1 was 7.334
-            break_chord_m: 3.7000, // geo/close 2026-10-12: kink moved inboard to the drawn TE corner (0.3827 -> 0.34 span, TE x 19.85 m on the same outboard TE line); was 3.5336599999999994 // geometry round 2 (wing lane): the sourced straight-edge tip chord is kept; this kink chord closes the published reference area behind the swept-back tip
-            tip_chord_m: 1.1, // chord the straight edges reach at the tip (the extreme tip chord is the rake chord below)
-            // Leading-edge sweep read off the plan view of the A220 ACP
-            // Issue 013 (DM BD500-A-J06-10-00-00AAA-030A-A, Figure 1 sheet
-            // 2): a straight 29.5 deg from the side of the body to the
-            // winglet on both wings. No quarter-chord value is published;
-            // with this taper the outboard quarter chord is 27.0 deg.
+            span_m: 34.984, // ACP Issue 013 Table 3, locator E: 1377.32 in over the winglets, baseline span; was the rounded 35.10 m
+            // Datum on the centreline: the unswept inboard TE (x 19.90 m, ACP Issue 013 Fig 1 sheet 2 plan view) minus the straight-LE datum 12.775 m.
+            root_chord_m: 7.1250,
+            break_chord_m: 3.5800, // TE corner: outboard TE line (x 19.93 m at y 6.32 m) less the LE line, plan view
+            tip_chord_m: 1.2750, // Straight-edge tip chord: TE line x 21.97 m at y 12 m, 23.43 m at y 16 m, plan view
+            // Leading-edge sweep, plan view of the A220 ACP Issue 013 (DM BD500-A-J06-10-00-00AAA-030A-A, Figure 1 sheet 2): a straight 29.5 deg
+            // from the end of the root fillet (y 2.2 m) to the winglet. No quarter-chord value is published.
             sweep_deg: 29.5,
             tip_twist_deg: -1.5,
             wing_x_shift_m: 0.0,
@@ -160,35 +199,33 @@ pub fn a220_300() -> AircraftPreset {
             airfoil_camber_scale: 1.0,
             ..DesignVector::default()
         },
+        speed_schedule_source: crate::presets::SpeedScheduleSource::SourcedLadder,
         airfoil_class_source: "Design-era declaration: the A220-300 (CSeries, EIS 2016) wing is of the supercritical-section generation; manufacturer section data are not public. Drawn with NASA SC2-0714 root and SC(2)-0410 tip sections (Harris, NASA TP-2969, 1990).",
         geometry: GeometryConfig {
             wing: WingConfig {
-                // Reference wing = the manufacturer's published values (geometry freeze 2026-10-12, owner decision); the drawn planform stays the geometry.
-                // S 112.3 m2: Airbus A220 ACP Table 6 'ESDU wing area' (incl. ailerons, flaps, spoilers and the area within the fuselage); MAC 3.781 m (148.86 in) and LEMAC 16.5353 m
+                // Reference wing = the manufacturer's published values; the drawn planform stays the geometry.
+                // S 112.3 m2: Airbus A220 ACP Issue 013, DM BD500-A-J06-10-00-00AAA-030A-A Table 6 p.11, 'ESDU wing area' 1208.88 sq ft (incl. ailerons, flaps, spoilers and the area within the fuselage); MAC 3.781 m (148.86 in) and LEMAC 16.5353 m
                 // (FS 818.998 in, FS0 168.0 in ahead of the nose): A220 Aircraft Recovery Publication BD500-3AB48-10400-00 (May 2026) J06-20-01 p.14; cg_envelope.rs.
+                // The 112.3 m2 is an equivalent straight-tapered reference wing, not the drawn area: fitted to this S and MAC on span E with the drawn LE extended to the centreline (taper 0.156), it puts LEMAC within 0.012 m of the published one. The ACP plan view (Fig 1 sheet 2 p.8) draws 97.5 m2 exposed and 121.3 m2 under the Airbus side-of-body rule (Aerodynamic Design of Transport Aircraft (2009), ch. 24 p. 269, fig. 24.144); the preset builds 119.06 m2 under that rule.
                 reference_wing: crate::ReferenceWingConfig::published(112.3, Some(3.781), Some(16.5353492)),
-                // Puts the model's quarter-MAC point on the published one
-                // (LEMAC 16.535 m + 0.25 x 3.781 m reference chord, the
-                // planning MAC reference below); the model MAC is 0.8 %
-                // shorter, so its own LEMAC sits 0.09 m aft of 16.535 m.
-                root_datum_x_m: 12.7791, // geometry round 2 (wing lane): was 12.76; keeps the published quarter-MAC station with the swept-back tip, the closed kink chord and the re-converted sweep
-                root_z_m: -1.0651, // geometry round 2 (wing lane); was -1.0
-                break_z_m: -0.3461, // geo/close 2026-10-12: height of the C2 dihedral line at the new kink 0.34; was -0.2598 at 0.3827 // geometry round 2 (wing lane); was -0.2
-                // Step B (ACP front view: tip top 5.81 m above ground vs ACP Table 7 L 5.85-5.95 m; upper edge rises ~1.2 m/m over the outer 1.15 m, measure/A220-300, B):
-                // the raked outer panel climbs 1.2 m above the rake-start station (new 0.934 station below), so the tip LE z = 0.937 + 1.213 = 2.15 m; was 1.1320 (round 2), 1.5 earlier.
-                tip_z_m: 2.15,
+                root_datum_x_m: 12.7750, // LE line through x 14.01 m at y 2.2 m and 19.52 m at y 12 m (plan view); the 34.2 deg crank was the root fillet read as sweep
+                root_z_m: -1.1300, // Datum on the line of the 0.10 and 0.20 stations; the carried section takes the 0.10 height
+                break_z_m: -0.2500, // ACP Fig 1 front view, on the crown-registered upper-surface line (see dihedral stations)
+                // ACP Fig 1 front view: winglet upper edge rises 1.28 m/m from the knee at y 16.4 m to the top at z 2.33 m (crown-registered).
+                tip_z_m: 2.3000,
                 root_twist_deg: 3.0,
                 break_twist_deg: 1.0,
-                break_span_fraction: 0.34, // geo/close 2026-10-12; was 0.37
-                // geo/close 2026-10-12: side of body at half the 3.50 m body width over the 17.55 m semispan; chord 6.341 m there (TE x = kink TE) = 0.8647 of the 7.334 m centreline chord; was None
+                break_span_fraction: 0.36, // follows the kink
+                // Side of body at half the 3.50 m body width over the 17.55 m semispan.
                 side_of_body_span_fraction: Some(0.1000),
-                side_of_body_chord_ratio: Some(0.8595), // pass 2 (SOB chord 6.078 m over 7.071 m)
-                kink_span_fraction: Some(0.34), // geo/close 2026-10-12: drawn TE corner (top sheet: the unswept inboard TE meets the outboard TE line 0.76 m inboard of the old kink); was 0.382_736_255_076_680_5
+                side_of_body_chord_ratio: Some(0.8606), // Before the fillet: TE x 19.90 m less the LE line 13.768 m = 6.132 m over the datum chord (plan view)
+                inboard_le_sweep_deg: None, // Plan view: LE straight at the design sweep past the root fillet
+                kink_span_fraction: Some(0.36), // Plan view: drawn TE corner, y 6.32 m
                 outboard_sweep_decrement_deg: 1.5,
                 root_airfoil: "SC2-0714".to_owned(),
                 tip_airfoil: "sc20410".to_owned(),
-                airfoil_class: crate::AirfoilClass::Supercritical,
-                                // Thickness profile (geometry round 2): the NASA Common Research Model t/c 0.154 at the
+                airfoil_class: crate::AirfoilClass::SupercriticalAdvanced,
+                                // Thickness profile: the NASA Common Research Model t/c 0.154 at the
                 // centreline, 0.138 at the side of body, 0.105 at the yehudi break and 0.095 at the tip
                 // (Vassberg, DeHaan, Rivers and Wahls, AIAA 2008-6919, Table 2) is the public transport-wing
                 // distribution; the multipliers below act on the root-kink-tip section blend above.
@@ -202,7 +239,7 @@ pub fn a220_300() -> AircraftPreset {
                         thickness_scale: 0.9890, // t/c 0.1395 -> 0.1380
                     },
                     crate::WingThicknessStation {
-                        span_fraction: 0.3400, // geo/close 2026-10-12: follows the kink; was 0.3827
+                        span_fraction: 0.3600, // follows the kink
                         thickness_scale: 0.7525, // t/c 0.1395 -> 0.1050
                     },
                     crate::WingThicknessStation {
@@ -210,113 +247,128 @@ pub fn a220_300() -> AircraftPreset {
                         thickness_scale: 0.9539, // t/c 0.0996 -> 0.0950
                     },
                 ],
-                // Swept-back tip (geometry round 2): the leading and trailing edges follow the straight lines to the
-                // design tip chord; outboard of the rake start the leading edge sweeps further aft so that the chord at the
-                // extreme tip is 0.59 m (silhouette of the drawing 0.15 m inboard of the tip), the trailing edge staying one line.
-                // The design tip chord closes the published reference area including the rake.
-                tip_rake_tip_chord_m: Some(0.59),
-                tip_rake_start_span_fraction: Some(0.9340),
-                // Spanwise dihedral (geometry round 2): leading-edge heights at interior stations fitted to the upper edge of the
-                // manufacturer front view (symmetrised drawing aligned on the fuselage crown, same measurement on the model).
+                // Swept-back winglet in plan (ACP Fig 1 sheet 2): both edges leave the straight lines near y 16.1 m. TE steps aft to x 23.76 m at y 16.45 m, a notch to
+                // x 23.73 m at y 16.63 m, then straight to the tip corner x 24.37 m. LE runs straight from x 22.56 m at y 16.63 m to the tip corner x 23.89 m. Tip chord 0.48 m.
+                // The rake holds the tip TE on the straight line (x 23.95 m), so the tip section is moved aft by the tip edge station below.
+                tip_rake_tip_chord_m: Some(0.48),
+                tip_rake_start_span_fraction: Some(0.9200),
+                // Offsets read off the plan view: root fillet (x 13.30 m at the side of body, 13.72 m at y 1.97 m) and winglet edges (see above).
+                edge_stations: vec![
+                    crate::WingEdgeStation { span_fraction: 0.1000, le_offset_m: -0.470, te_offset_m: 0.0 },
+                    crate::WingEdgeStation { span_fraction: 0.1125, le_offset_m: -0.170, te_offset_m: 0.0 },
+                    crate::WingEdgeStation { span_fraction: 0.1250, le_offset_m: 0.0, te_offset_m: 0.0 },
+                    crate::WingEdgeStation { span_fraction: 0.9302, le_offset_m: -0.102, te_offset_m: 0.123 },
+                    crate::WingEdgeStation { span_fraction: 0.9404, le_offset_m: -0.095, te_offset_m: 0.188 },
+                    crate::WingEdgeStation { span_fraction: 0.9506, le_offset_m: 0.071, te_offset_m: 0.089 },
+                    crate::WingEdgeStation { span_fraction: 1.0000, le_offset_m: 0.4235, te_offset_m: 0.4235 },
+                ],
+                // Spanwise dihedral: leading-edge heights fitted to ACP Fig 1 front view upper and lower edges with the view registered on the fuselage crown
+                // (upper line 5.8 deg), which agrees with the side view; the wing sits about 0.4 m lower than the former fit to the fairing-biased registration.
                 dihedral_stations: vec![
                     crate::WingDihedralStation {
                         span_fraction: 0.1000,
-                        z_m: -0.8561,
+                        z_m: -0.8500,
                         flight_rise_m: None,
                     },
                     crate::WingDihedralStation {
                         span_fraction: 0.2000,
-                        z_m: -0.6440,
+                        z_m: -0.5750,
                         flight_rise_m: None,
                     },
                     crate::WingDihedralStation {
                         span_fraction: 0.3000,
-                        z_m: -0.4257,
+                        z_m: -0.3780,
                         flight_rise_m: None,
                     },
                     crate::WingDihedralStation {
                         span_fraction: 0.5000,
-                        z_m: -0.0276,
+                        z_m: 0.0160,
                         flight_rise_m: None,
                     },
                     crate::WingDihedralStation {
                         span_fraction: 0.6500,
-                        z_m: 0.2480,
+                        z_m: 0.3200,
                         flight_rise_m: None,
                     },
                     crate::WingDihedralStation {
                         span_fraction: 0.8000,
-                        z_m: 0.5416,
+                        z_m: 0.5930,
                         flight_rise_m: None,
                     },
-                    // Step B: rake-start station (0.934 = tip_rake_start_span_fraction), on the former straight line 0.8 -> tip (0.5416 -> 1.1320), so the inner wing keeps its round-2 shape.
-                    // geo/close 2026-10-12 (owner: odd dihedral near the tip in the front view): the C2 spline through the single 0.8 / 0.934 / 1.0 knee overshot below the chord line
-                    // (lower-surface dip at ~0.9 span). Stations on the same two straight lines (0.8 -> 0.934 and 0.934 -> tip, 46 deg) pin the spline; knee height and tip unchanged.
                     crate::WingDihedralStation {
                         span_fraction: 0.8800,
-                        z_m: 0.7778,
+                        z_m: 0.7550,
                         flight_rise_m: None,
                     },
                     crate::WingDihedralStation {
-                        span_fraction: 0.9340,
-                        z_m: 0.9371,
+                        // The drawn tip edge station is at 0.9302; this front-view corner sat 0.0038 semispans
+                        // (0.07 m) outboard of it, a sliver panel the lattice cannot condition. It takes the edge station, same height.
+                        span_fraction: 0.9302,
+                        z_m: 0.9100,
                         flight_rise_m: None,
                     },
                     crate::WingDihedralStation {
                         span_fraction: 0.9670,
-                        z_m: 1.5436,
+                        z_m: 1.5600,
                         flight_rise_m: None,
                     },
                 ],
-                // Step B (loft-wing-2026-10-11): C2 cubic spline through the dihedral, twist and thickness stations; was Linear (default).
+                // C2 cubic spline through the dihedral, twist and thickness stations.
                 wing_profile_interpolation: crate::WingProfileInterpolation::C2Spline,
                 ..WingConfig::default()
             },
             empennage: EmpennageConfig {
+                // Drawn tip corners read off the ACP Fig 1 plan and side views; analysis stays on the trapezoid.
+                hstab_edge_stations: vec![
+                    crate::TailEdgeStation { span_fraction: 0.98, le_offset_m: 0.0, te_offset_m: 0.0 },
+                    crate::TailEdgeStation { span_fraction: 0.99, le_offset_m: 0.03, te_offset_m: -0.03 },
+                    crate::TailEdgeStation { span_fraction: 0.995, le_offset_m: 0.14, te_offset_m: -0.05 },
+                    crate::TailEdgeStation { span_fraction: 1.0, le_offset_m: 0.29, te_offset_m: -0.10 },
+                ],
+                vstab_edge_stations: vec![
+                    // Fin LE top corner, ACP Fig 1 sheet 1 side view: drawn LE aft of the straight LE line.
+                    crate::TailEdgeStation { span_fraction: 0.94, le_offset_m: 0.0, te_offset_m: 0.0 },
+                    crate::TailEdgeStation { span_fraction: 0.96, le_offset_m: 0.03, te_offset_m: 0.0 },
+                    crate::TailEdgeStation { span_fraction: 0.97, le_offset_m: 0.08, te_offset_m: 0.0 },
+                    crate::TailEdgeStation { span_fraction: 0.98, le_offset_m: 0.17, te_offset_m: 0.0 },
+                    crate::TailEdgeStation { span_fraction: 0.99, le_offset_m: 0.35, te_offset_m: 0.0 },
+                    crate::TailEdgeStation { span_fraction: 1.0, le_offset_m: 0.48, te_offset_m: 0.0 },
+                ],
                 tail_airfoil: "naca0012".to_owned(),
-                // ACP Issue 013: 36.6 m^2 tailplane area (Table 6), 12.263 m
-                // span (locator D, derived), tip trailing edge 37.82 m aft of
+                // ACP Issue 013: 29.13 m^2 tailplane area (DM J06-10 Table 6; the
+                // 36.6 m^2 of DM 12AAB Table 6 does not fit this span and these
+                // chords), 12.263 m span (locator D), tip trailing edge 37.82 m aft of
                 // the nose (H) and 4.94 m aft of the root leading edge (V,
                 // role read off the drawing), at the previous 0.2895 taper.
                 // Apex moved 0.73 m forward with the tip leading edge (36.4 m) and
                 // the chords held: the ACP plan view draws a 34.75 deg leading
                 // edge, the former apex gave 30.5 deg. Area and span stand.
-                // geo/tailfit 2026-10-11: tailplane straight-edge fit to the drawing, centreline values; was off 6.55, chords 4.629/1.340, tip (4.26, 6.1315, 0.710)
-                hstab_offset_from_tail_m: 6.4,
-                hstab_z_m: 0.620, // geometry round 2 (wing lane): upper surface at the root matched to the front view; was 0.7
+                // Tail fit: tailplane straight-edge fit to the drawing, centreline values.
+                hstab_offset_from_tail_m: 6.31, // ACP Fig 1 plan view: tailplane 0.07 m forward of the former position (tip TE 37.82 m, locator H), the built TE ran 0.09 m aft of the drawn one
+                hstab_z_m: 0.660, // ACP Fig 1 side view and crown-registered front view: upper surface z 1.24 m at 0.55 and 1.44 m at 0.85 semispan
                 hstab_root_chord_m: 3.43,
                 hstab_tip_chord_m: 1.28,
                 hstab_root_twist_deg: -2.0,
                 hstab_tip_twist_deg: -2.0,
-                hstab_tip_le_m: (4.27, 6.1315, 0.710), // tailplane dihedral matched to the front view; was z 0.5
-                // Fin placed on the ACP Issue 013 Fig 1 sheet 1 side view
-                // (digitised, 84 px/m, overlay study): leading edge 30.1 m aft
-                // of the nose at the crown and swept 41 deg (the former 4.5 m
-                // tip offset gave 36 deg and a leading edge 2.6 m too far aft),
-                // tip chord 2.0 m, tip trailing edge 37.4 m (drawn 37.7 m)
-                // inside the 38.7 m tail cone, tip 6.193 m above the crown
-                // (11.578 m, locator C, over the 5.385 m fuselage top of the
-                // clearance table). The crown chord stays area-calibrated:
-                // 4.31 m closes the 28.2 m^2 of Table 6 (edges extended to the
-                // fuselage axis) on these edges. The straight edges drawn would
-                // enclose about 35 m^2 to the axis (crown chord 5.7 m), 25 %
-                // above that table value; the published area is kept and the
-                // discrepancy (drawing silhouette vs Table 6) is open.
-                // geo/tailfit 2026-10-11: fin straight-edge fit to the drawing at the root line (rms 0.007/0.005 m); was off 8.64, chords 4.31/2.0, tip (5.66, 0.0, 6.193)
-                vstab_offset_from_tail_m: 8.61,
+                hstab_tip_le_m: (4.27, 6.1315, 0.770), // Tailplane dihedral, front view
+                // Fin measured on the A220 ACP BD500-3AB48-13800-00 Issue 013, DM
+                // BD500-A-J06-10-00-00AAA-030A-A Figure 1 sheet 1 side view, page 7: straight
+                // lines through the LE and TE stroke centres (rms 0.002 m), horizontal scale from locator A
+                // (38.689 m, 10.09-10.10 pt/m), vertical from locator B (3.721 m, 11.03-11.17 pt/m: the sheet
+                // is drawn about 1.10 taller than long). Mean of two readings (extension lines at 600 dpi,
+                // outline strokes at 800 dpi), spread 0.05 m or less except the height (0.09 m, the two B
+                // readings). Root line: the constant-section crown. LE 30.05 m aft of the nose at the crown,
+                // swept 43.6 deg; TE swept 18.6 deg; drawn tip TE 37.73 m. Straight-edge trapezoid to the
+                // crown 22.9 m^2, against 20.77 m^2 total vertical stabilizer area in DM J06-10 Table 6
+                // (reference convention not printed; areas are checks only).
+                vstab_offset_from_tail_m: 8.65, // body end 38.70 m less the LE 30.05 m; was 7.69, 8.61 before
                 vstab_z_m: 1.9605,
-                vstab_root_chord_m: 5.64,
-                // geo/close 2026-10-12: fin top at the DRAWN height. The tail-fit kept the ACP 6.193 m (11.578 m locator C minus 5.385 m); the side sheet is stretched 1/0.9029 vertically
-                // (fuselage), so the drawn fin top is 5.89 m above the crown in the true frame (5.88 in the tail-fit report). Same straight LE/TE lines, cut lower: tip chord 1.78 -> 1.97 (TE slope), tip LE 5.97 -> 5.68; was 1.78 / (5.97, 0, 6.19)
-                vstab_tip_chord_m: 1.97,
-                // Step B (ACP side view LE fit slope 0.958 m/m above the crown, z-corrected; drawn tip TE 37.7 m, measure/A220-300, B): tip LE offset 5.38 -> 5.66 m (LE sweep 41 -> 42.4 deg
-                // over the published 6.193 m; tip TE 37.4 -> 37.7 m as drawn). A shear: chords and area unchanged. Root chord 4.31 m KEPT (drawn 5.66 m): ACP Table 6 VTP 28.2 m^2
-                // incl. rudder is the area convention and the drawn root is not reconcilable with it (exposed 23.7 m^2, to axis ~34 m^2), left as an open item.
-                vstab_tip_le_m: (5.68, 0.0, 5.89),
-                // Step B: dorsal fillet (ACP side view line fit, measure/A220-300, C: LE runs from 28.7 m at the crown to the fin LE (30.09 m) 0.48 m above it; one view, rough). Geometry only (vstab_dorsal_in_aero stays false).
-                // geo/tailfit 2026-10-11: dorsal re-fitted to the drawn LE; was x Some(28.7), height Some(0.48)
-                vstab_dorsal_x_start_m: Some(29.01),
-                vstab_dorsal_height_m: Some(0.8),
+                vstab_root_chord_m: 5.67, // drawn 5.66 / 5.68 m at the crown; was 5.09, 5.64 before
+                vstab_tip_chord_m: 1.99, // straight-edge chord at the drawn top; was 1.80, 1.97 before
+                vstab_tip_le_m: (5.69, 0.0, 5.97), // drawn top 5.92 / 6.02 m above the crown; was (5.08, 0, 5.89)
+                // Dorsal fillet, geometry only (vstab_dorsal_in_aero stays false).
+                vstab_dorsal_length_m: Some(1.61), // leaves the body line at x 28.44 m; was 1.66
+                vstab_dorsal_height_m: Some(0.99), // meets the straight LE 0.99 m above the crown; was 1.03
                 ..EmpennageConfig::default()
             },
             fuselage: FuselageConfig {
@@ -352,30 +404,19 @@ pub fn a220_300() -> AircraftPreset {
                 aft_plan_exponent: Some(1.52),
                 aft_crown_length_m: Some(11.33),
                 aft_crown_exponent: Some(2.17),
+                // Cabin section: floor depth measured on Airbus A220 ACP issue 013 fig. 6; hold polygon from the cargo compartment section A-A, ACP issue 013 DM 12AAB fig. 8 sheet 3 (PDF p130): 2.24 m between the walls, 1.05 m floor to ceiling, 0.84 m floor, lower corners on a 1.60 m radius, which drop 0.40 m from the wall foot to the floor edge (sqrt(1.60^2 - 0.42^2) - sqrt(1.60^2 - 1.12^2)); the chamfer is that drop. The forward-hold clearance section D-D (J14-20 fig. 3 sheet 3, PDF p199) read before dimensions the box envelope from the ceiling down the side wall (0.42, 0.46, 0.58, 0.71 m), not the floor depth; A-A times the printed 7.03 m forward length gives the 14.8 m3 compartment volume the ACP prints (J26 table 2, PDF p645). The ceiling takes the class floor-beam depth (the hold drawing carries no skin); cabin-datum-evidence.md.
+                cabin_section: Some(crate::CabinSectionConfig { cabin_widths: Some(crate::CabinWidthsConfig { armrest_m: 3.277, shoulder_m: 3.135 }), floor_below_crown_m: Some(2.3), hold: Some(crate::HoldSectionConfig { ceiling_below_crown_m: None, height_m: 1.05, floor_width_m: 0.84, side_width_m: 2.24, chamfer_height_m: 0.40 }) }),
                 ..FuselageConfig::default()
             },
             engine: EngineConfig {
-                // Final merge: engines.json carries a V2 nacelle set (nacelle_shape_v2) that agrees with the measured length, diameter and inlet; was Legacy.
+                // engines.json carries a V2 nacelle set (nacelle_shape_v2) that agrees with the measured length, diameter and inlet.
                 nacelle_model: crate::NacelleModel::V2,
                 // ACP Issue 013 locators P, Q and BB: engine centreline
                 // P - (P - BB/2 - Q)/2 = 5.44 m outboard (derived, +-0.15 m).
                 spanwise_positions_m: vec![5.44, -5.44],
-                // ACP nacelle clearance 22.9 in (0.582 m) minimum under the
-                // 1.08 m nacelle radius.
-                // Low point held at the ACP clearance with the drawn 1.225 m
-                // nacelle radius (nacelle lane: -1.410 -> -1.265), plus the wing lane's
-                // +0.054 m for the wing leading edge at the engine (integration).
-                // Step B (ACP front view circle centre -1.70 m, side view -1.71 m, measure/A220-300, B): centre 0.083 m lower (-1.617 -> -1.700 m), giving the nacelle clearance 0.645 -> ~0.56 m
-                // vs ACP G 0.582 m min and 0.56 m drawn; was -1.211 (ACP-pinned with the older wing LE). New value -1.211 - 0.07 = -1.281 (between drawn centre and ACP clearance).
-                z_m: -1.281,
-                // Step B: KEPT. Vector side and top silhouettes put the lip at 11.1 m (measure/A220-300, B) but ACP Table 5 K = 479.0 in = 12.17 m and the definition of K in Fig 1 sheet 2 is not
-                // readable from the extracted text; unresolved, published value kept (a move to 2.64 m would be needed if K is not the lip).
-                // Locator K table value: inlet 12.17 m aft of the nose (the
-                // drawn K is not to scale).
-                // geo/close 2026-10-12: KEPT. The ACP sheet 2 (top) overlay puts the drawn lip at K = 12.17 m (best rigid shift 0.00 m), so K is the lip as drawn there; sheet 1 (side) draws the
-                // nacelle front ~0.55 m further forward (the two sheets of the drawing disagree; side nacelle mismatch stays 0.85 m2 <= 1.0).
-                // geo/close 2026-10-12 owner review: side sheet wants the nacelle further forward; 0.15 m forward of the published offset is the top/side compromise (top 0.00 vs side -0.55 m optimum)
-                inlet_x_offset_m: 3.8371, // geometry round 2 (wing lane): was 3.668; the wing datum and sweep moved by +0.0191 m at the engine, this keeps the inlet station
+                z_m: -1.270, // Relative to the wing LE height at the engine. Axis z -1.62 m: ACP Fig 1 front and side views draw -1.71 m, printed clearance G 0.582 m gives -1.57 m
+                // Locator K, ACP Table 5: inlet lip 479.0 in = 12.17 m aft of the nose; plan view lip agrees (side view reads 12.35 m).
+                inlet_x_offset_m: 3.6810, // LE at the engine 15.851 m less the lip station
                 ..EngineConfig::default()
             },
             ..GeometryConfig::default()
@@ -392,7 +433,9 @@ pub fn a220_300() -> AircraftPreset {
             cargo_payload_kg: 15_000.0,
             // Airbus recovery publication: MZFW 55,792 kg less OEW 37,149 kg.
             max_structural_payload_kg: 18_643.0,
-            dive_speed_m_s: 175.0,
+            // Superseded at registration: the profile declares the TCDS VMO/MMO, so VD is the
+            // CS 25.335(b) value on VC = VMO (`crate::design_speeds`, `registry`).
+            dive_speed_m_s: 1.25 * 330.0 * 0.514_444,
             ..DesignRequirements::default()
         },
         // Compatibility-only outcome calibration for the frozen

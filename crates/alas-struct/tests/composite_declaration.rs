@@ -65,7 +65,7 @@ fn composite_material_assignment_carries_a_non_laminate_declaration() {
                 !decl.source.is_empty(),
                 "declaration for {preset_name} must have a non-empty source"
             );
-            // Per strict audit override: uncalibrated relative uncertainty must be
+            // Uncalibrated relative uncertainty must be
             // explicitly represented as unknown (None), never fabricated as a numeric value or 0.0.
             assert!(
                 decl.relative_uncertainty.is_none(),

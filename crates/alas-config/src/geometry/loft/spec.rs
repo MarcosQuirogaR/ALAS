@@ -1,7 +1,7 @@
 // SPDX-License-Identifier: AGPL-3.0-or-later
 // Copyright (C) 2026 Marcos Quiroga Rodriguez
 
-//! The serde types of loft data-file schema v1 (frozen 2026-10-11).
+//! The serde types of loft data-file schema v1.
 
 use serde::{Deserialize, Serialize};
 
@@ -208,6 +208,31 @@ pub struct SourceRef {
     pub note: String,
 }
 
+/// A small separate cone attached behind the main body (the stepped APU
+/// exhaust cone of a transport: the main hull ends in its own closure and the
+/// cone starts at the hull end with a smaller base). Frame of the loft file;
+/// the cone is a straight taper between two elliptical sections, never part of
+/// the hull curves, so the hull stays smooth. Its length is added to the
+/// reference length: the built body is `reference_length_m + length_m` long.
+#[derive(Debug, Clone, Copy, PartialEq, Serialize, Deserialize)]
+#[serde(deny_unknown_fields)]
+pub struct ApuConeSpec {
+    /// Axial length of the cone, m.
+    pub length_m: f64,
+    /// Plan width of the base (at the hull end), m.
+    pub base_width_m: f64,
+    /// Height of the base, m.
+    pub base_height_m: f64,
+    /// Centre height of the base, m (fuselage frame).
+    pub base_zc_m: f64,
+    /// Plan width at the tip, m.
+    pub tip_width_m: f64,
+    /// Height at the tip, m.
+    pub tip_height_m: f64,
+    /// Centre height at the tip, m.
+    pub tip_zc_m: f64,
+}
+
 /// One lofted body, as stored in `data/lofts/<id>.json`.
 #[derive(Debug, Clone, PartialEq, Serialize, Deserialize)]
 #[serde(deny_unknown_fields)]
@@ -246,4 +271,8 @@ pub struct LoftSpec {
     /// extension); absent means the plain warped superellipse.
     #[serde(default, skip_serializing_if = "Option::is_none")]
     pub residual: Option<ResidualSpec>,
+    /// Optional separate exhaust / APU cone behind the main body (schema 1,
+    /// additive minor extension); absent means the body ends at its closure.
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub apu_cone: Option<ApuConeSpec>,
 }

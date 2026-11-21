@@ -7,8 +7,8 @@
 //! `MissionProfileConfig::default()` is the long-range widebody worked
 //! example: 128.6 to 250 m/s *true* airspeeds. A turboprop cruising at
 //! M 0.44 cannot fly them (the mission deck refuses them with a typed climb
-//! energy deficit, which is what rejected 558 of 558 candidates of the
-//! 70-seat clean-sheet turboprop brief of 2026-10-15 as
+//! energy deficit, which is what rejected 558 of 558 candidates of a
+//! 70-seat clean-sheet turboprop brief as
 //! `dispatch_model_failed`). A preset that is a turboprop carries its own
 //! schedule; a brief with no preset gets this one, derived from the brief
 //! instead of from a registered aircraft:
@@ -64,46 +64,62 @@ fn stall_speed_m_s(mass_kg: f64, gravity_m_s2: f64, area_m2: f64, cl_max: f64) -
     (2.0 * mass_kg * gravity_m_s2 / (ISA_SEA_LEVEL_DENSITY_KG_M3 * area_m2 * cl_max)).sqrt()
 }
 
-/// The schedule for `config`, a clean-sheet brief whose engine is a
-/// turboprop; `None` when the brief cannot be sized or is not physical.
-pub(super) fn profile(config: &AlasConfig) -> Option<MissionProfileConfig> {
-    let wing = config.class_wing()?;
-    let r = &config.requirements;
-    let p = &config.performance;
+/// The mass, area and lift basis the class schedule is derived from.
+#[derive(Debug, Clone, Copy)]
+pub(crate) struct TurbopropScheduleBasis {
+    /// Takeoff mass the V2 is read at, kg.
+    pub takeoff_mass_kg: f64,
+    /// Landing mass the V_REF is read at, kg.
+    pub landing_mass_kg: f64,
+    /// Gravitational acceleration, m/s^2.
+    pub gravity_m_s2: f64,
+    /// Reference wing area, m^2.
+    pub wing_area_m2: f64,
+    /// Takeoff maximum lift coefficient.
+    pub cl_max_takeoff: f64,
+    /// Landing maximum lift coefficient.
+    pub cl_max_landing: f64,
+}
+
+/// Overwrite the takeoff, climb, descent and landing legs of `profile` with
+/// the turboprop class schedule of this module's documentation, flown as one
+/// assigned cruise level. The cruise speeds are left as they are. `None`,
+/// leaving `profile` untouched, when the basis is not physical.
+pub(crate) fn apply_class_schedule(
+    profile: &mut MissionProfileConfig,
+    basis: TurbopropScheduleBasis,
+) -> Option<()> {
     let valid = |x: f64| x.is_finite() && x > 0.0;
+    let b = basis;
     if ![
-        r.mtow_kg,
-        wing.area_m2,
-        p.cl_max_to,
-        p.cl_max_land,
-        r.gravity_m_s2,
+        b.takeoff_mass_kg,
+        b.landing_mass_kg,
+        b.gravity_m_s2,
+        b.wing_area_m2,
+        b.cl_max_takeoff,
+        b.cl_max_landing,
     ]
     .into_iter()
     .all(valid)
     {
         return None;
     }
-    let landing_mass_kg = r.mtow_kg * config.mass_model.mlw_fraction_mtow;
-    if !valid(landing_mass_kg) {
-        return None;
-    }
-    let v2 = V2_OVER_VSR * stall_speed_m_s(r.mtow_kg, r.gravity_m_s2, wing.area_m2, p.cl_max_to);
+    let v2 = V2_OVER_VSR
+        * stall_speed_m_s(
+            b.takeoff_mass_kg,
+            b.gravity_m_s2,
+            b.wing_area_m2,
+            b.cl_max_takeoff,
+        );
     let v_ref = VREF_OVER_VSR0
-        * stall_speed_m_s(landing_mass_kg, r.gravity_m_s2, wing.area_m2, p.cl_max_land);
+        * stall_speed_m_s(
+            b.landing_mass_kg,
+            b.gravity_m_s2,
+            b.wing_area_m2,
+            b.cl_max_landing,
+        );
     let climb_cas = CLIMB_OVER_V2 * v2;
-    let cruise_tas = r.cruise_mach
-        * alas_atmo::us1976_compute_values(r.cruise_altitude_m, 0.0).speed_of_sound_m_s;
-    if !valid(cruise_tas) {
-        return None;
-    }
-
-    let mut profile = MissionProfileConfig {
-        climb_descent_speed_reference: SpeedReference::CalibratedAirspeed,
-        ..MissionProfileConfig::default()
-    };
-    profile.cruise_1_air_speed_m_s = cruise_tas;
-    profile.cruise_2_air_speed_m_s = cruise_tas;
-    profile.cruise_3_air_speed_m_s = cruise_tas;
+    profile.climb_descent_speed_reference = SpeedReference::CalibratedAirspeed;
     // One assigned cruise level; see `atr72_600_schedule_fix`. 0.999, not 1.0,
     // because the mission model rejects a level fraction at or above 1.
     profile.initial_climb_altitude_fraction = 0.999;
@@ -132,9 +148,39 @@ pub(super) fn profile(config: &AlasConfig) -> Option<MissionProfileConfig> {
     profile.descent_4_rate_m_s = 800.0 * FT_MIN_M_S;
     profile.landing_air_speed_m_s = v_ref;
     profile.landing_descent_rate_m_s = 600.0 * FT_MIN_M_S;
+    Some(())
+}
+
+/// The schedule for `config`, a clean-sheet brief whose engine is a
+/// turboprop; `None` when the brief cannot be sized or is not physical.
+pub(super) fn profile(config: &AlasConfig) -> Option<MissionProfileConfig> {
+    let wing = config.class_wing()?;
+    let r = &config.requirements;
+    let p = &config.performance;
+    let cruise_tas = r.cruise_mach
+        * alas_atmo::us1976_compute_values(r.cruise_altitude_m, 0.0).speed_of_sound_m_s;
+    if !(cruise_tas.is_finite() && cruise_tas > 0.0) {
+        return None;
+    }
+    let mut profile = MissionProfileConfig::default();
+    apply_class_schedule(
+        &mut profile,
+        TurbopropScheduleBasis {
+            takeoff_mass_kg: r.mtow_kg,
+            landing_mass_kg: r.mtow_kg * config.mass_model.mlw_fraction_mtow,
+            gravity_m_s2: r.gravity_m_s2,
+            wing_area_m2: wing.area_m2,
+            cl_max_takeoff: p.cl_max_to,
+            cl_max_landing: p.cl_max_land,
+        },
+    )?;
+    profile.cruise_1_air_speed_m_s = cruise_tas;
+    profile.cruise_2_air_speed_m_s = cruise_tas;
+    profile.cruise_3_air_speed_m_s = cruise_tas;
     Some(profile)
 }
 
+#[allow(clippy::unwrap_used)]
 #[cfg(test)]
 mod tests {
     use super::*;
@@ -193,9 +239,28 @@ mod tests {
         document["mission"] = serde_json::json!({});
         let jet = AlasConfig::from_value(&document)
             .unwrap_or_else(|error| panic!("the jet brief loads: {error}"));
-        assert_eq!(
+        // The jet does not take this turboprop schedule; it takes the jet
+        // default rule (CAS/Mach climb to the brief's cruise Mach, cruise at
+        // that Mach at its level), the registered presets' rule, exactly.
+        let mut expected = MissionProfileConfig::default();
+        let tas_m_s = 0.78
+            * alas_atmo::us1976_try_compute_values(11277.6, 0.0)
+                .unwrap()
+                .speed_of_sound_m_s;
+        expected.cruise_1_air_speed_m_s = tas_m_s;
+        expected.cruise_2_air_speed_m_s = tas_m_s;
+        expected.cruise_3_air_speed_m_s = tas_m_s;
+        assert!(crate::presets::apply_default_rule(
+            &mut expected,
+            0.78,
+            jet.requirements.design_cruise_speed_eas_m_s(),
+            11277.6
+        ));
+        assert_eq!(jet.mission.profile, expected);
+        assert_eq!(jet.mission.profile.climb_mach, 0.78);
+        assert_ne!(
             jet.mission.profile.takeoff_air_speed_m_s,
-            MissionProfileConfig::default().takeoff_air_speed_m_s
+            pinned.mission.profile.takeoff_air_speed_m_s
         );
     }
 }

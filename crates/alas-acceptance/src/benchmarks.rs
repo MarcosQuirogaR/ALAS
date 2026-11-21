@@ -8,7 +8,18 @@
 //! screening, and end-to-end pipeline execution, comparing throughput against
 //! the Python reference baseline.
 
+use std::sync::atomic::{AtomicBool, Ordering};
 use std::time::Instant;
+
+/// Quick mode ([`set_quick`]): one timed iteration per workload and no
+/// warm-up run, for a budget check where the suite's total time matters.
+static QUICK: AtomicBool = AtomicBool::new(false);
+
+/// Run every workload once, without its warm-up, instead of the default
+/// iteration counts: the `--quick` budget check of `alas-bench`.
+pub fn set_quick(quick: bool) {
+    QUICK.store(quick, Ordering::Relaxed);
+}
 
 use alas_aero::operating_point::OperatingPoint;
 use alas_aero::vlm::run as run_vlm;
@@ -64,8 +75,12 @@ fn measure<F>(name: &str, iters: usize, legacy_ms: f64, mut op: F) -> BenchmarkR
 where
     F: FnMut() -> bool,
 {
-    // Warmup
-    op();
+    let quick = QUICK.load(Ordering::Relaxed);
+    let iters = if quick { 1 } else { iters };
+    if !quick {
+        // Warmup
+        op();
+    }
 
     let mut times_ms = Vec::with_capacity(iters);
     let mut failures = 0;
@@ -190,7 +205,7 @@ pub fn bench_vlm_solve(iters: usize) -> BenchmarkResult {
             };
         }
     };
-    let atmo = Atmosphere::isa(10000.0);
+    let atmo = Atmosphere::new(10000.0);
     let op_point = OperatingPoint::new(atmo, 230.0, 3.0, 0.0, 0.0, 0.0, 0.0);
 
     // The reference VLM solve takes ~250 ms.
@@ -212,7 +227,7 @@ pub fn bench_vlm_solve_fine(iters: usize) -> BenchmarkResult {
     let Ok(airplane) = builder.build(Some(&preset.design_vector), true) else {
         return unavailable(name, iters, 250.0);
     };
-    let atmo = Atmosphere::isa(10000.0);
+    let atmo = Atmosphere::new(10000.0);
     let op_point = OperatingPoint::new(atmo, 230.0, 3.0, 0.0, 0.0, 0.0, 0.0);
     measure(name, iters, 250.0, || {
         run_vlm(&airplane, &op_point, 2, 8).is_ok()
@@ -438,4 +453,74 @@ pub fn format_benchmark_report(report: &BenchmarkSuiteReport) -> String {
         report.total_elapsed_s
     ));
     out
+}
+
+/// Benchmarks whose mean exceeds its ceiling in `budget`, or that failed.
+///
+/// The budget is plain text, one `Workload name = ceiling_ms` per line,
+/// `#` starting a comment; the name is the report's workload column. A
+/// workload with a ceiling but no result is itself a violation, so that a
+/// renamed or dropped benchmark cannot silently leave the guard.
+pub fn check_benchmark_budget(report: &BenchmarkSuiteReport, budget: &str) -> Vec<String> {
+    let mut violations = Vec::new();
+    for line in budget.lines() {
+        let line = line.split('#').next().unwrap_or("").trim();
+        let Some((name, ceiling)) = line.split_once('=') else {
+            continue;
+        };
+        let (name, ceiling) = (name.trim(), ceiling.trim());
+        let Ok(ceiling_ms) = ceiling.parse::<f64>() else {
+            violations.push(format!("{name}: unreadable ceiling `{ceiling}`"));
+            continue;
+        };
+        match report.results.iter().find(|r| r.name == name) {
+            None => violations.push(format!("{name}: no such benchmark in the report")),
+            Some(r) if r.failures > 0 => {
+                violations.push(format!(
+                    "{name}: {} of {} runs failed",
+                    r.failures, r.iterations
+                ));
+            }
+            Some(r) if r.mean_ms.is_nan() || r.mean_ms > ceiling_ms => violations.push(format!(
+                "{name}: mean {:.1} ms exceeds the {ceiling_ms:.1} ms ceiling",
+                r.mean_ms
+            )),
+            Some(_) => {}
+        }
+    }
+    violations
+}
+
+#[cfg(test)]
+mod budget_tests {
+    use super::*;
+
+    fn report(mean_ms: f64, failures: usize) -> BenchmarkSuiteReport {
+        BenchmarkSuiteReport {
+            results: vec![BenchmarkResult {
+                name: "Native VLM Solve".to_owned(),
+                iterations: 2,
+                mean_ms,
+                min_ms: mean_ms,
+                max_ms: mean_ms,
+                legacy_python_ms: 1.0,
+                speedup_factor: 1.0,
+                failures,
+            }],
+            total_elapsed_s: 0.0,
+        }
+    }
+
+    #[test]
+    fn the_budget_flags_slow_failed_and_missing_workloads() {
+        let budget = "# ceilings\nNative VLM Solve = 10\n";
+        assert!(check_benchmark_budget(&report(9.0, 0), budget).is_empty());
+        assert_eq!(check_benchmark_budget(&report(11.0, 0), budget).len(), 1);
+        assert_eq!(check_benchmark_budget(&report(1.0, 1), budget).len(), 1);
+        assert_eq!(check_benchmark_budget(&report(1.0, 0), "Gone = 5").len(), 1);
+        assert_eq!(
+            check_benchmark_budget(&report(f64::NAN, 0), budget).len(),
+            1
+        );
+    }
 }

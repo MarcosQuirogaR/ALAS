@@ -157,6 +157,7 @@ fn row(name: &str) -> Result<Value, Box<dyn Error>> {
             "vertical_tail_area_m2": build.airframe.structure_inputs.vertical_tail_area_m2,
             "vertical_tail_taper_ratio": build.airframe.structure_inputs.vertical_tail_taper_ratio,
             "vertical_tail_count": build.airframe.structure_inputs.vertical_tail_count,
+            "fin_mounted_tailplane_factor": build.airframe.structure_inputs.fin_mounted_tailplane_factor,
             "fuselage_length_m": build.airframe.structure_inputs.fuselage_length_m,
             "fuselage_width_m": build.airframe.structure_inputs.fuselage_width_m,
             "fuselage_depth_m": build.airframe.structure_inputs.fuselage_depth_m,
@@ -185,6 +186,7 @@ fn row(name: &str) -> Result<Value, Box<dyn Error>> {
             "baseline_nozzle_mass_kg": prop.baseline_nozzle_mass_kg,
             "nozzle_scaling_exponent": prop.nozzle_scaling_exponent,
             "thrust_reversers_installed": prop.thrust_reversers_installed,
+            "thrust_reverser_engine_count": prop.thrust_reverser_engine_count,
             "maximum_mach": prop.maximum_mach,
             "nacelle_diameter_m": prop.nacelle_diameter_m,
             "maximum_fuel_capacity_kg": prop.maximum_fuel_capacity_kg,
@@ -195,6 +197,7 @@ fn row(name: &str) -> Result<Value, Box<dyn Error>> {
             "main_gear_length": build.airframe.sources.main_gear_length,
             "nose_gear_length": build.airframe.sources.nose_gear_length,
             "baseline_engine_mass": build.airframe.sources.baseline_engine_mass,
+            "gear_mass": build.airframe.sources.gear_mass,
         },
         "groups": {
             "structure": {

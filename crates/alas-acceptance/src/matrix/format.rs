@@ -3,6 +3,7 @@
 
 //! Terminal rendering for the acceptance matrix.
 
+use alas_config::presets::DesignRangeCriterion;
 use alas_config::{
     AircraftReferenceData, MissingDesignMissionDatum, PartialMissionEvidenceKind, PublishedRange,
 };
@@ -156,10 +157,15 @@ pub fn format_matrix_report(matrix: &AcceptanceMatrixReport) -> String {
         };
         out.push_str(&format!("- {}: {}\n", preset.name, detail));
     }
-    out.push_str("\nDesign mission evidence:\n");
+    out.push_str("\nDesign missions (charted design point flown at the takeoff-mass limit under the stated reserves; not the interactive route):\n");
     for preset in &matrix.presets {
+        let detail = preset
+            .design_mission
+            .as_ref()
+            .map(format_design_mission)
+            .unwrap_or_default();
         out.push_str(&format!(
-            "- {}: {}\n",
+            "- {}: {}{detail}\n",
             preset.name,
             format_design_mission_status(preset.design_mission_status)
         ));
@@ -213,17 +219,24 @@ pub fn format_matrix_report(matrix: &AcceptanceMatrixReport) -> String {
             "Physical Verdict: {physical_findings} preset finding(s) require investigation\n"
         ));
     }
+    let failed_missions = matrix
+        .presets
+        .iter()
+        .filter(|preset| preset.design_mission_status == PresetDesignMissionStatus::Failed)
+        .count();
     let acceptance_verdict = if matrix.all_passed {
-        "PASSED"
+        "PASSED".to_owned()
     } else if matrix.all_executed
         && matrix.all_physical_passed
         && !matrix.all_design_missions_verified
     {
-        "INCOMPLETE - DESIGN MISSIONS UNVERIFIED"
+        "INCOMPLETE - DESIGN MISSIONS UNVERIFIED".to_owned()
     } else if !matrix.all_design_missions_verified {
-        "NOT PASSED - DESIGN MISSIONS ALSO UNVERIFIED"
+        "NOT PASSED - DESIGN MISSIONS ALSO UNVERIFIED".to_owned()
+    } else if failed_missions > 0 {
+        format!("NOT PASSED - {failed_missions} DESIGN MISSION(S) FAILED")
     } else {
-        "NOT PASSED"
+        "NOT PASSED".to_owned()
     };
     out.push_str(&format!("Acceptance Verdict: {acceptance_verdict}\n"));
     out
@@ -270,6 +283,7 @@ pub fn format_matrix_json(matrix: &AcceptanceMatrixReport) -> serde_json::Result
                 "execution_passed": preset.execution_passed,
                 "physical_passed": preset.physical_passed,
                 "design_mission_status": format_design_mission_status(preset.design_mission_status),
+                "design_mission": preset.design_mission.as_ref().map(design_mission_json),
                 "mass": {
                     "mtow_kg": preset.mtow_kg,
                     "oew_kg": preset.oew_kg,
@@ -294,7 +308,7 @@ pub fn format_matrix_json(matrix: &AcceptanceMatrixReport) -> serde_json::Result
     serde_json::to_string_pretty(&serde_json::json!({
         "status": "preliminary_model_evidence_not_afm_wbm_limits",
         "generated_by": "cargo run --profile test -p alas-acceptance --bin preset_audit -- --output-dir <directory>",
-        "scope": "All routes are interactive diagnostics. No preset has a source-backed complete design mission, and AFM/WBM remains controlling where public planning data are absent.",
+        "scope": "Routes are interactive diagnostics. Each preset's design mission is its charted design point flown at the takeoff-mass limit under the stated reserves and graded against the range cell's band (alas-config data/design_range_cells.tsv and data/reference_grade_bands.tsv). AFM/WBM remains controlling where public planning data are absent.",
         "verdicts": {
             "all_executed": matrix.all_executed,
             "all_physical_passed": matrix.all_physical_passed,
@@ -303,6 +317,71 @@ pub fn format_matrix_json(matrix: &AcceptanceMatrixReport) -> serde_json::Result
         },
         "presets": presets,
     }))
+}
+
+/// The flown values and every missed requirement of one design mission.
+fn format_design_mission(grade: &DesignMissionGrade) -> String {
+    let mut parts = Vec::new();
+    if let Some(range_nmi) = grade.flown_range_nmi {
+        parts.push(format!(
+            "flown {range_nmi:.0} nmi at {:.0} kg payload, TOW {:.0} kg",
+            grade.payload_kg.unwrap_or(f64::NAN),
+            grade.takeoff_mass_kg.unwrap_or(f64::NAN),
+        ));
+        parts.push(format!(
+            "ramp fuel {:.0} of {:.0} kg tanks, reserves {:.0} kg",
+            grade.ramp_fuel_kg.unwrap_or(f64::NAN),
+            grade.tank_capacity_kg.unwrap_or(f64::NAN),
+            grade.reserve_fuel_kg.unwrap_or(f64::NAN),
+        ));
+    }
+    if let Some(criterion) = &grade.criterion {
+        parts.push(format!("criterion {}", criterion.describe()));
+    }
+    parts.extend(grade.reasons.iter().cloned());
+    if parts.is_empty() {
+        String::new()
+    } else {
+        format!(" - {}", parts.join("; "))
+    }
+}
+
+fn design_mission_json(grade: &DesignMissionGrade) -> serde_json::Value {
+    let criterion = grade.criterion.as_ref().map(|criterion| match criterion {
+        DesignRangeCriterion::WithinBand {
+            published_range_nmi,
+            band,
+            basis,
+        } => serde_json::json!({
+            "kind": "within_band",
+            "published_range_nmi": published_range_nmi,
+            "grade": band.grade.label(),
+            "relative_half_width": band.relative_half_width,
+            "basis": basis,
+        }),
+        DesignRangeCriterion::AtLeastRequirement {
+            required_range_nmi,
+            basis,
+        } => serde_json::json!({
+            "kind": "at_least_requirement",
+            "required_range_nmi": required_range_nmi,
+            "basis": basis,
+        }),
+    });
+    serde_json::json!({
+        "status": format_design_mission_status(grade.status),
+        "closure_converged": grade.closure_converged,
+        "fuel_feasible": grade.fuel_feasible,
+        "range_accepted": grade.range_accepted,
+        "flown_range_nmi": grade.flown_range_nmi,
+        "payload_kg": grade.payload_kg,
+        "takeoff_mass_kg": grade.takeoff_mass_kg,
+        "ramp_fuel_kg": grade.ramp_fuel_kg,
+        "tank_capacity_kg": grade.tank_capacity_kg,
+        "reserve_fuel_kg": grade.reserve_fuel_kg,
+        "criterion": criterion,
+        "reasons": grade.reasons,
+    })
 }
 
 fn format_fuel_capacity_evidence(evidence: alas_pipeline::FuelCapacityEvidence) -> &'static str {

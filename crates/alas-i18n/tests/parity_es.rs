@@ -21,7 +21,7 @@
 //! the wave-drag help moved to the Lock/Korn critical-Mach law. That second
 //! group mirrors `alas_config::tests::parity_config`'s
 //! `solver_agnostic_help_correction`, which documents the same
-//! 2026-09-11 VLM resolution-sensitivity study; see that test and
+//! VLM resolution-sensitivity study; see that test and
 //! `alas_config::analysis` for the underlying measurements. Their corrected
 //! Rust keys and values, together with the frozen reference keys and values,
 //! are kept in the named allowlist below. This keeps the exact tier while
@@ -30,7 +30,7 @@
 //! Two further shipped entries have no Python counterpart at all: the label
 //! and help text of the native `min_passenger_capacity` field
 //! (`alas_config::DesignRequirements::min_passenger_capacity`), a hard floor
-//! added after a physical audit found the translated optimizer replacing
+//! added after a physical review found the translated optimizer replacing
 //! real-preset passenger targets with no minimum. [`NATIVE_CATALOG_ENTRIES`]
 //! pins both the frozen fixture's absence and the shipped catalog's value for
 //! each, so the divergence cannot drift silently in either direction, and the
@@ -130,7 +130,7 @@ const SOURCE_CORRECTED_CATALOG: &[CatalogCorrection] = &[
     // described a generic multiplier/refinement ("Higher = more accurate,
     // slower") with no stated units; the corrected prose states the actual
     // absolute-panel-count semantics and the physical cost/benefit measured
-    // in the 2026-09-11 VLM resolution-sensitivity study (see
+    // in the VLM resolution-sensitivity study (see
     // `alas_config::analysis`'s module doc), so a user reading the help text
     // knows what the number means and why the default is what it is.
     CatalogCorrection {
@@ -140,8 +140,8 @@ const SOURCE_CORRECTED_CATALOG: &[CatalogCorrection] = &[
         frozen_value: "Refinamiento de paneles en envergadura por secci\u{00f3}n del ala para el m\u{00e9}todo de red de torbellinos. M\u{00e1}s alto = m\u{00e1}s preciso pero m\u{00e1}s lento.",
     },
     CatalogCorrection {
-        corrected_key: "Spanwise panels across each tail surface for the vortex-lattice solver, as an absolute count rather than a count per section. Both stabilizers are single-section surfaces, so this is the panel count they already had; it is stated absolutely so a cranked fin later gets the same density rather than twice it.",
-        corrected_value: "Paneles en envergadura a lo largo de cada superficie de cola para el solver de malla de torbellinos, como recuento absoluto en lugar de por tramo. Ambos estabilizadores son superficies de un solo tramo, as\u{00ed} que este es el recuento de paneles que ya ten\u{00ed}an; se expresa de forma absoluta para que una deriva quebrada en el futuro reciba la misma densidad y no el doble.",
+        corrected_key: "Spanwise panels across each tail surface for the vortex-lattice solver, as an absolute count rather than a count per section, so a cranked fin later gets the same density rather than twice it. The default of 24 is mesh-converged: from 6 to 48 panels Cn_beta falls 8-9 % and Cy_beta 5-6 %, halving the step at each doubling, and 24 panels come within 3 % of 96; Cm_alpha moves under 1 % and the neutral point 0.02 m.",
+        corrected_value: "Paneles en envergadura a lo largo de cada superficie de cola para el solver de malla de torbellinos, como recuento absoluto en lugar de por tramo, para que una deriva quebrada en el futuro reciba la misma densidad y no el doble. El valor por defecto de 24 est\u{00e1} convergido en malla: de 6 a 48 paneles, Cn_beta baja entre un 8 y un 9 por ciento y Cy_beta entre un 5 y un 6 por ciento, con un paso que se reduce a la mitad en cada duplicaci\u{00f3}n, y 24 paneles quedan a menos del 3 por ciento de 96; Cm_alpha var\u{00ed}a menos del 1 por ciento y el punto neutro 0,02 m.",
         frozen_key: "Spanwise panel refinement per tail surface for the vortex-lattice solver.",
         frozen_value: "Refinamiento de paneles en envergadura por superficie de cola para el m\u{00e9}todo de red de torbellinos.",
     },
@@ -201,7 +201,7 @@ struct NativeCatalogEntry {
 
 /// The label and help text of `alas_config::DesignRequirements`'s
 /// `min_passenger_capacity`: a native advanced-only load-case floor added
-/// after a physical audit found the translated optimizer silently replacing
+/// after a physical review found the translated optimizer silently replacing
 /// real-preset passenger targets with no minimum. There is no Python field to
 /// have translated, so both rows here are pinned two-sidedly: the fixture
 /// must not have the key, and the shipped catalog must hold exactly this

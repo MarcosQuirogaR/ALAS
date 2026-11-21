@@ -61,6 +61,10 @@ impl FlowUnsteadyAnalysisStatus {
     }
 }
 
+/// Detail carried by a quasi-steady (rigid-wake) FLOWUnsteady result so it
+/// never passes for the free vortex-particle wake.
+pub const REDUCED_FIDELITY_NOTE: &str = "reduced fidelity: quasi-steady rigid horseshoe wake (FLOWUnsteady steady lattice limit), not the free vortex-particle wake";
+
 /// Retained files, parsed data, and a physical comparison verdict.
 #[derive(Debug, Clone, PartialEq)]
 pub struct FlowUnsteadyAnalysisResult {
@@ -84,12 +88,27 @@ pub struct FlowUnsteadyAnalysisResult {
     pub error: Option<String>,
 }
 
+impl FlowUnsteadyAnalysisResult {
+    /// Whether the parsed polar came from the reduced-fidelity quasi-steady
+    /// wake rather than the free vortex-particle wake.
+    pub fn is_reduced_fidelity(&self) -> bool {
+        self.polar
+            .as_ref()
+            .is_some_and(|polar| polar.wake_model.is_reduced_fidelity())
+    }
+
+    /// The wake model the adapter declared, when a polar was parsed.
+    pub fn wake_model(&self) -> Option<&'static str> {
+        self.polar.as_ref().map(|polar| polar.wake_model.as_str())
+    }
+}
+
 /// Build the V2 SI request from the same optimized geometry and clean cruise
 /// condition that generated the ALAS final polar. Controls are included with a
 /// zero command and an explicit `applied_to_geometry=false` provenance because
 /// the current ALAS lifting mesh does not yet model deflectable surfaces.
 pub fn request_from_report(report: &AnalysisReport, config: &AlasConfig) -> FlowUnsteadyRequest {
-    let atmosphere = Atmosphere::isa(config.requirements.cruise_altitude_m);
+    let atmosphere = Atmosphere::new(config.requirements.cruise_altitude_m);
     let flight_condition = FlowUnsteadyFlightCondition {
         altitude_m: config.requirements.cruise_altitude_m,
         pressure_pa: atmosphere.pressure(),
@@ -190,20 +209,20 @@ fn controls_from_config(config: &AlasConfig) -> Vec<FlowUnsteadyControlSurface> 
             control.slat_span_end_frac,
         ),
         (
-            "flap",
-            "Main Wing",
-            "trailing",
-            control.flap_chord_fraction,
-            control.flap_span_start_frac,
-            control.flap_span_end_frac,
-        ),
-        (
             "aileron",
             "Main Wing",
             "trailing",
             control.aileron_chord_fraction,
             control.aileron_span_start_frac,
             control.aileron_span_end_frac,
+        ),
+        (
+            "inboard_aileron",
+            "Main Wing",
+            "trailing",
+            control.inboard_aileron_chord_fraction,
+            control.inboard_aileron_span_start_frac,
+            control.inboard_aileron_span_end_frac,
         ),
         (
             "spoiler",
@@ -231,6 +250,19 @@ fn controls_from_config(config: &AlasConfig) -> Vec<FlowUnsteadyControlSurface> 
         ),
     ]
     .into_iter()
+    // One flap entry per band: an inboard aileron between two flaps is not flap.
+    .chain(control.flap_bands().into_iter().map(|(start, end)| {
+        (
+            "flap",
+            "Main Wing",
+            "trailing",
+            control.flap_chord_fraction,
+            start,
+            end,
+        )
+    }))
+    // A zero chord states the aircraft does not have the surface.
+    .filter(|(_, _, _, chord_fraction, _, _)| *chord_fraction > 0.0)
     .map(
         |(role, surface_name, edge, chord_fraction, span_start_fraction, span_end_fraction)| {
             FlowUnsteadyControlSurface {
@@ -246,6 +278,21 @@ fn controls_from_config(config: &AlasConfig) -> Vec<FlowUnsteadyControlSurface> 
         },
     )
     .collect()
+}
+
+/// The FLOWUnsteady timeout for `report`'s schedule, from `base_seconds` the
+/// budget of a schedule of the configured `sweep_n_points`: the solver runs one
+/// unsteady vortex-lattice solve per angle, and the compressible polar carries
+/// up to `1 / beta_w` times the configured point count (A1), so the budget
+/// grows with the number of angles actually sent and never shrinks below the
+/// base.
+pub fn scaled_timeout_seconds(
+    report: &AnalysisReport,
+    config: &AlasConfig,
+    base_seconds: f64,
+) -> f64 {
+    let configured = config.analysis.sweep_n_points.max(1) as f64;
+    base_seconds * (report.polar.alpha_deg.len() as f64 / configured).max(1.0)
 }
 
 /// Export, run, parse, and admit only identically-defined coefficients.
@@ -352,6 +399,8 @@ pub fn run_flowunsteady_analysis(
     };
     if !result.comparable {
         result.error = Some("FLOWUnsteady result does not declare the shared whole-aircraft reference, frames, and schedule; no overlay is admitted".to_owned());
+    } else if polar.wake_model.is_reduced_fidelity() {
+        result.error = Some(REDUCED_FIDELITY_NOTE.to_owned());
     }
     result.polar = Some(polar);
     result
@@ -419,6 +468,31 @@ mod tests {
             "12% morphed_ 88% sc20410"
         );
         assert_eq!(flow_airfoil_name("", 2, 7), "section_2_7");
+    }
+
+    #[test]
+    fn the_timeout_scales_with_the_schedule_actually_sent() {
+        let config = AlasConfig::default();
+        let report = FullAnalysis::new(config.clone())
+            .run(&DesignVector::default(), false)
+            .expect("default product report should build");
+        let points = report.polar.alpha_deg.len() as f64;
+        let configured = config.analysis.sweep_n_points as f64;
+        let timeout = scaled_timeout_seconds(&report, &config, 900.0);
+        assert_eq!(timeout, 900.0 * (points / configured).max(1.0));
+        assert!(timeout >= 900.0);
+        // A denser compressible schedule gets proportionally more time.
+        let mut denser = report.clone();
+        let extra = denser.polar.alpha_deg.clone();
+        denser.polar.alpha_deg.extend(extra);
+        assert_eq!(
+            scaled_timeout_seconds(&denser, &config, 900.0),
+            900.0 * (2.0 * points / configured).max(1.0)
+        );
+        // A shorter schedule never shrinks the base budget.
+        let mut shorter = report;
+        shorter.polar.alpha_deg.truncate(2);
+        assert_eq!(scaled_timeout_seconds(&shorter, &config, 900.0), 900.0);
     }
 
     #[test]

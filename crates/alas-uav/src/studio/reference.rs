@@ -4,9 +4,9 @@
 //! The reference aircraft: Xtra2UPV "XTRA28 Lince" (ACC 2026 report 02), built
 //! from a spec with the studio functions.
 //!
-//! It is the closest PUBLISHED aircraft to the owner's class (V-tail on a
-//! boom, twin AT2814 tractors on a low wing, taildragger). The owner's own CAD
-//! assembly is not available, so nothing here is claimed to be that aircraft.
+//! It is the closest PUBLISHED aircraft to the target class (V-tail on a
+//! boom, twin AT2814 tractors on a low wing, taildragger). The target aircraft's
+//! own CAD assembly is not available, so nothing here is claimed to be that aircraft.
 //!
 //! Provenance of the numbers (page references are the report's PDF pages,
 //! competitions.md section 2.2):

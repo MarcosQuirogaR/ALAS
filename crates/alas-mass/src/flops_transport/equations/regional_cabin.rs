@@ -58,7 +58,7 @@ const K_MTOW_TWO_THIRDS: f64 = 0.768;
 const K_FLIGHT_CONTROL: f64 = 0.88;
 /// Seat and unitemized mass per passenger seat, kg, as quoted in the
 /// secondary source ("an average value for each seat weight is 15 kg").
-const SEAT_ALLOWANCE_KG: f64 = 15.0;
+pub(in crate::flops_transport) const SEAT_ALLOWANCE_KG: f64 = 15.0;
 
 /// Torenbeek systems-and-furnishings group `W_sys`, kg, for a maximum takeoff
 /// mass in kilograms.

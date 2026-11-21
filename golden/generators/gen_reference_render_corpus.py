@@ -400,13 +400,12 @@ def main():
                 figure.savefig(image_path, dpi=150)
                 contracts[key] = _figure_contract(figure, figure_id, theme, image_path)
                 plt.close(figure)
-            except Exception as error:  # evidence must preserve the exact blocker
-                contracts[key] = _unavailable_contract(
-                    figure_id,
-                    theme,
-                    f"Reference factory raised {type(error).__name__}: {error}",
-                )
+            except BaseException:
+                # Only a factory that returns None means "no figure here". Any
+                # exception is a defect in the reference or its environment and
+                # must stop the generator rather than become fixture data.
                 plt.close("all")
+                raise
 
     named = {}
     for bullet in _result_bullet_names():

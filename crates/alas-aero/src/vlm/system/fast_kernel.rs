@@ -136,8 +136,9 @@ pub(super) fn horseshoe(
 pub(super) struct Source {
     pub(super) left: [f64; 3],
     pub(super) right: [f64; 3],
-    pub(super) wing_index: usize,
+    pub(super) core_component: super::CoreComponent,
     pub(super) leg_core_radius: f64,
+    pub(super) other_component_core_radius: f64,
 }
 
 fn sources_of(panels: &[Panel]) -> Vec<Source> {
@@ -146,8 +147,9 @@ fn sources_of(panels: &[Panel]) -> Vec<Source> {
         .map(|panel| Source {
             left: panel.left_vortex_vertex,
             right: panel.right_vortex_vertex,
-            wing_index: panel.wing_index,
-            leg_core_radius: super::inter_surface_core(usize::MAX, panel),
+            core_component: panel.core_component,
+            leg_core_radius: panel.leg_core_radius,
+            other_component_core_radius: panel.other_component_core_radius,
         })
         .collect()
 }
@@ -174,6 +176,9 @@ pub(super) fn fill_changed(
     mut kernel: Option<&mut [[f64; 3]]>,
 ) {
     let n = panels.len();
+    if n == 0 {
+        return;
+    }
     let sources = sources_of(panels);
     // `gamma / (4 pi)` for the two strengths used: 1 and 4 pi (exactly 1).
     let four_pi = 4.0 * std::f64::consts::PI;
@@ -187,8 +192,19 @@ pub(super) fn fill_changed(
             Columns::gather(&sources, (0..n).collect()),
             Columns::gather(&sources, columns),
         );
-        let mut scratch = RowScratch::default();
-        for (i, (&row_changed, field)) in changed.iter().zip(panels).enumerate() {
+        use rayon::prelude::*;
+        // Each row is evaluated alone, with its own scratch, by the same
+        // arithmetic in the same order, so the entries are bit-identical
+        // whichever thread fills a row. The rows run on the rayon pool when it
+        // has more than one worker. With one worker they run on the caller's
+        // thread: a caller outside the pool (the analysis, its fuel-artifact
+        // thread) would otherwise wait for that worker while another caller
+        // holds it, and lose the core it runs on.
+        let fill_row = |scratch: &mut RowScratch,
+                        aic_row: &mut [f64],
+                        kernel_row: Option<&mut [[f64; 3]]>,
+                        row_changed: bool,
+                        field: &Panel| {
             let run = if row_changed { &every } else { &moved };
             let at = |scratch: &RowScratch, k: usize| {
                 [
@@ -199,36 +215,80 @@ pub(super) fn fill_changed(
             };
             evaluate_row(
                 field.collocation_point,
-                field.wing_index,
+                field.core_component,
                 run,
                 (1.0, unit_constant),
-                &mut scratch,
+                scratch,
             );
             for (k, &j) in run.index.iter().enumerate() {
-                aic[i * n + j] = dot3(at(&scratch, k), field.normal_direction);
+                aic_row[j] = dot3(at(scratch, k), field.normal_direction);
             }
-            if let Some(kernel) = kernel.as_deref_mut() {
+            if let Some(kernel_row) = kernel_row {
                 evaluate_row(
                     field.vortex_center,
-                    field.wing_index,
+                    field.core_component,
                     run,
                     (four_pi, 1.0),
-                    &mut scratch,
+                    scratch,
                 );
                 for (k, &j) in run.index.iter().enumerate() {
-                    kernel[i * n + j] = at(&scratch, k);
+                    kernel_row[j] = at(scratch, k);
                 }
             }
+        };
+        if rayon::current_num_threads() == 1 {
+            let mut scratch = RowScratch::default();
+            let rows = changed.iter().zip(panels);
+            match kernel {
+                Some(kernel) => {
+                    for ((aic_row, kernel_row), (&row_changed, field)) in
+                        aic.chunks_mut(n).zip(kernel.chunks_mut(n)).zip(rows)
+                    {
+                        fill_row(&mut scratch, aic_row, Some(kernel_row), row_changed, field);
+                    }
+                }
+                None => {
+                    for (aic_row, (&row_changed, field)) in aic.chunks_mut(n).zip(rows) {
+                        fill_row(&mut scratch, aic_row, None, row_changed, field);
+                    }
+                }
+            }
+            return;
+        }
+        let rows = changed.par_iter().zip(panels.par_iter());
+        match kernel {
+            Some(kernel) => aic
+                .par_chunks_mut(n)
+                .zip(kernel.par_chunks_mut(n))
+                .zip(rows)
+                .with_min_len(8)
+                .for_each_init(
+                    RowScratch::default,
+                    |scratch, ((aic_row, kernel_row), (&row_changed, field))| {
+                        fill_row(scratch, aic_row, Some(kernel_row), row_changed, field);
+                    },
+                ),
+            None => aic
+                .par_chunks_mut(n)
+                .zip(rows)
+                .with_min_len(8)
+                .for_each_init(
+                    RowScratch::default,
+                    |scratch, (aic_row, (&row_changed, field))| {
+                        fill_row(scratch, aic_row, None, row_changed, field);
+                    },
+                ),
         }
         return;
     }
     let mut entry = |i: usize, j: usize| {
         let (field, source) = (&panels[i], &sources[j]);
-        let core = if source.wing_index == field.wing_index {
-            0.0
-        } else {
-            source.leg_core_radius
-        };
+        let core = super::core_seen(
+            field.core_component,
+            source.core_component,
+            source.leg_core_radius,
+            source.other_component_core_radius,
+        );
         let induced = horseshoe(
             fast,
             field.collocation_point,

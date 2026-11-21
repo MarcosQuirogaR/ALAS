@@ -14,9 +14,11 @@
 //!   are tested against the worked A320 example of the audit.
 //! - The **reference-scaled model** ([`ClmaxReference::scale`]) anchors the
 //!   three coefficients (clean, take-off, landing) of a registered aircraft
-//!   at its declared values and moves them with the two geometry ratios the
-//!   handbook forms share: `cos(Lambda_c/4)` for the clean wing and
-//!   `(S_flapped/S) cos(Lambda_hinge)` for the high-lift increments. Every
+//!   at its declared values and moves them with the geometry ratios of the
+//!   handbook forms: `cos(Lambda_c/4)` for the clean wing,
+//!   `(c_f/c) (b_lef/b_e)^2 cos^2(Lambda_c/4)` (Roskam VI eq. 8.30) for the
+//!   declared leading-edge part of the increments and
+//!   `(S_flapped/S) cos(Lambda_hinge)` for the trailing-edge rest. Every
 //!   registered preset therefore keeps its calibrated value at its own
 //!   geometry (the ratios are exactly 1), and a sweep, taper, span or flap
 //!   change moves the coefficients in the handbook direction and magnitude.
@@ -81,7 +83,7 @@ pub fn roskam_slat_increment(chord_ratio: f64, span_ratio: f64, sweep_c4_deg: f6
 }
 
 /// The three maximum lift coefficients of a configuration set.
-#[derive(Debug, Clone, Copy, PartialEq)]
+#[derive(serde::Serialize, serde::Deserialize, Debug, Clone, Copy, PartialEq)]
 pub struct ClmaxSet {
     /// Clean wing, flaps and slats retracted.
     pub clean: f64,
@@ -100,6 +102,10 @@ pub struct WingLiftGeometry {
     pub flapped_area_ratio: f64,
     /// Sweep of the flap hinge line, degrees.
     pub hinge_sweep_deg: f64,
+    /// Leading-edge device chord over the local chord, `c_f/c` (zero without one).
+    pub slat_chord_ratio: f64,
+    /// Leading-edge device span over the exposed semispan, `b_lef/b_e`.
+    pub slat_span_ratio: f64,
 }
 
 impl WingLiftGeometry {
@@ -110,6 +116,8 @@ impl WingLiftGeometry {
             && self.hinge_sweep_deg.abs() < 70.0
             && self.flapped_area_ratio.is_finite()
             && self.flapped_area_ratio > 0.0
+            && (0.0..1.0).contains(&self.slat_chord_ratio)
+            && (0.0..=1.0).contains(&self.slat_span_ratio)
     }
 }
 
@@ -121,6 +129,9 @@ pub struct ClmaxReference {
     pub set: ClmaxSet,
     /// The geometry they were declared for.
     pub geometry: WingLiftGeometry,
+    /// The leading-edge part of both declared increments (slats out, flaps up,
+    /// less clean); zero for a wing without leading-edge devices.
+    pub leading_edge: f64,
 }
 
 impl ClmaxReference {
@@ -128,12 +139,15 @@ impl ClmaxReference {
     ///
     /// ```text
     /// clean   = clean_ref * cos(L_c4) / cos(L_c4,ref)
-    /// d_x     = (x_ref - clean_ref) * [(Sf/S) / (Sf/S)_ref] * [cos(L_h) / cos(L_h,ref)]
-    /// x       = clean + d_x                         (x = take-off, landing)
+    /// le      = le_ref * Eq8.30(geometry) / Eq8.30(reference)
+    /// d_x     = (x_ref - clean_ref - le_ref) * [(Sf/S) / (Sf/S)_ref] * [cos(L_h) / cos(L_h,ref)]
+    /// x       = clean + le + d_x                    (x = take-off, landing)
     /// ```
     ///
-    /// `None` when either geometry is invalid or when the reference
-    /// increments are not positive (nothing to scale), and when `geometry`
+    /// `None` when either geometry is invalid, when the reference
+    /// increments are not positive (nothing to scale) or smaller than the
+    /// leading-edge part, when a leading-edge part sits on a reference without
+    /// a leading-edge device, and when `geometry`
     /// equals the reference exactly: the declared values stand untouched,
     /// bit for bit.
     pub fn scale(&self, geometry: &WingLiftGeometry) -> Option<ClmaxSet> {
@@ -142,9 +156,26 @@ impl ClmaxReference {
         }
         let d_takeoff = self.set.takeoff - self.set.clean;
         let d_landing = self.set.landing - self.set.clean;
-        if !(self.set.clean > 0.0 && d_takeoff > 0.0 && d_landing > 0.0) {
+        let le = self.leading_edge;
+        if !(self.set.clean > 0.0
+            && d_takeoff > 0.0
+            && d_landing > 0.0
+            && (0.0..=d_takeoff.min(d_landing)).contains(&le))
+        {
             return None;
         }
+        let slat = |g: &WingLiftGeometry| {
+            roskam_slat_increment(g.slat_chord_ratio, g.slat_span_ratio, g.sweep_c4_deg)
+        };
+        let le_scaled = if le > 0.0 {
+            let reference = slat(&self.geometry);
+            if reference <= 0.0 {
+                return None;
+            }
+            le * slat(geometry) / reference
+        } else {
+            0.0
+        };
         let sweep = |g: &WingLiftGeometry| g.sweep_c4_deg.to_radians().cos();
         let hinge = |g: &WingLiftGeometry| g.hinge_sweep_deg.to_radians().cos();
         let clean = self.set.clean * sweep(geometry) / sweep(&self.geometry);
@@ -153,8 +184,8 @@ impl ClmaxReference {
             / hinge(&self.geometry);
         let scaled = ClmaxSet {
             clean,
-            takeoff: clean + d_takeoff * device,
-            landing: clean + d_landing * device,
+            takeoff: clean + le_scaled + (d_takeoff - le) * device,
+            landing: clean + le_scaled + (d_landing - le) * device,
         };
         [scaled.clean, scaled.takeoff, scaled.landing]
             .iter()
@@ -210,8 +241,58 @@ mod tests {
                 sweep_c4_deg: 25.0,
                 flapped_area_ratio: 0.60,
                 hinge_sweep_deg: 20.0,
+                slat_chord_ratio: 0.15,
+                slat_span_ratio: 0.80,
             },
+            leading_edge: 0.0,
         }
+    }
+
+    #[test]
+    fn the_leading_edge_part_scales_with_slat_span_and_cos_squared_sweep() {
+        // The A320 of Obert Fig. 26.13: 0.62 of the 1.10 landing increment is the slat.
+        let reference = ClmaxReference {
+            leading_edge: 0.62,
+            ..a320_reference()
+        };
+        let moved = WingLiftGeometry {
+            sweep_c4_deg: 30.0,
+            slat_span_ratio: 0.72,
+            ..reference.geometry
+        };
+        let cos = |deg: f64| deg.to_radians().cos();
+        let clean = 1.50 * cos(30.0) / cos(25.0);
+        let le = 0.62 * (0.72_f64 / 0.80).powi(2) * (cos(30.0) / cos(25.0)).powi(2);
+        // The flap part keeps its ratio of 1 (same flap area and hinge sweep).
+        let reference_to = ClmaxReference {
+            set: ClmaxSet {
+                takeoff: 2.30,
+                ..reference.set
+            },
+            ..reference
+        };
+        let scaled = reference_to.scale(&moved).unwrap();
+        assert!((scaled.clean - clean).abs() < 1e-12);
+        assert!((scaled.takeoff - (clean + le + (0.80 - 0.62))).abs() < 1e-12);
+        assert!((scaled.landing - (clean + le + (1.10 - 0.62))).abs() < 1e-12);
+        // The leading-edge part moves with the slat span alone when nothing else does.
+        let shorter = WingLiftGeometry {
+            slat_span_ratio: 0.40,
+            ..reference.geometry
+        };
+        let short = reference_to.scale(&shorter).unwrap();
+        assert!((short.landing - (1.50 + 0.62 * 0.25 + 0.48)).abs() < 1e-12);
+        // A leading-edge part larger than an increment, or on a reference wing
+        // without a device, is refused.
+        assert_eq!(reference.scale(&moved), None);
+        let no_slat = ClmaxReference {
+            geometry: WingLiftGeometry {
+                slat_chord_ratio: 0.0,
+                ..reference_to.geometry
+            },
+            ..reference_to
+        };
+        assert_eq!(no_slat.scale(&moved), None);
     }
 
     #[test]

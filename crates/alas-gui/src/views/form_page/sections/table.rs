@@ -39,8 +39,13 @@ pub(in crate::views::form_page) fn page_sections(
     ];
     const MASS_MODEL_ADVANCED: &[PageSection] = &[
         PageSection {
-            title: "FLOPS transport inputs and technology",
-            names: &["flops_transport", "flops_structure"],
+            title: "FLOPS transport inputs",
+            names: &["flops_transport"],
+            default_open: true,
+        },
+        PageSection {
+            title: "FLOPS technology factors",
+            names: &["flops_structure"],
             default_open: true,
         },
         PageSection {
@@ -106,6 +111,8 @@ pub(in crate::views::form_page) fn page_sections(
                 "mlg_body_gear_mtow_kg",
                 "wheels_per_mlg_strut",
                 "tire_class",
+                "mlg_tire",
+                "nlg_tire",
                 "strut_material",
             ],
             default_open: true,
@@ -141,6 +148,9 @@ pub(in crate::views::form_page) fn page_sections(
                 "aileron_chord_fraction",
                 "aileron_span_start_frac",
                 "aileron_span_end_frac",
+                "inboard_aileron_chord_fraction",
+                "inboard_aileron_span_start_frac",
+                "inboard_aileron_span_end_frac",
                 "spoiler_chord_fraction",
                 "spoiler_span_start_frac",
                 "spoiler_span_end_frac",
@@ -278,6 +288,7 @@ pub(in crate::views::form_page) fn page_sections(
                 "cl_max_to",
                 "cl_max_land",
                 "cl_max_clean",
+                "cl_max_le_increment",
                 "cl_min_clean",
                 "geometry_scaled_clmax",
             ],
@@ -299,8 +310,11 @@ pub(in crate::views::form_page) fn page_sections(
                 "oei_condition_to_sls_thrust_ratio",
                 "oei_asymmetric_trim_cd",
                 "oei_windmilling_cd",
+                "takeoff_flap_deflection_deg",
+                "landing_flap_deflection_deg",
                 "go_around_spool_thrust_fraction",
                 "wet_landing_runway",
+                "takeoff_packs_on",
                 "main_gear_truck_wheels",
                 "engine_match_tolerance",
             ],
@@ -363,7 +377,7 @@ pub(in crate::views::form_page) fn page_sections(
     const MISSION_ADVANCED: &[PageSection] = &[
         PageSection {
             title: "Mission run",
-            names: &["enabled", "timeout_s"],
+            names: &["enabled"],
             default_open: true,
         },
         PageSection {

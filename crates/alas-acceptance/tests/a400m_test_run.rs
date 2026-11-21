@@ -461,10 +461,11 @@ fn a400m_field_performance_and_oei() {
             let polar = alas_pipeline::field_performance::report_field_polar(
                 &config, &report, 0.2, airport,
             );
-            let Ok((cd0, k)) = polar else {
+            let Ok(polar) = polar else {
                 println!("{icao}: polar error {polar:?}");
                 continue;
             };
+            let (cd0, k) = (polar.cd0, polar.k);
             match alas_pipeline::field_performance::calculate(
                 &config, airport, s_ref, MTOW_KG, MLW_KG, 0.0, cd0, k,
             ) {

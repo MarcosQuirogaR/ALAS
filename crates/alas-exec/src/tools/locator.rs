@@ -52,6 +52,37 @@ impl ToolLocator {
         self.user_data_root.join("tool-preferences.json")
     }
 
+    /// The user-level file the custom-airport registry is kept in.
+    ///
+    /// The registry itself is in-memory, and a saved workspace carries a copy,
+    /// but an airport entered once is expected to survive a restart on its
+    /// own, in the desktop application and headless alike. It sits beside the
+    /// tool preferences, so one user-data location holds both.
+    pub fn custom_airports_path(&self) -> PathBuf {
+        self.user_data_root.join("custom-airports.json")
+    }
+
+    /// The `library` folder of the user data root: one sub-folder per kind of
+    /// user-saved object (airports, engines, cabins).
+    pub fn library_root(&self) -> PathBuf {
+        self.user_data_root.join("library")
+    }
+
+    /// Custom airports, one `<ICAO>.json` file per airport.
+    pub fn my_airports_dir(&self) -> PathBuf {
+        self.library_root().join("my-airports")
+    }
+
+    /// User-saved engines.
+    pub fn my_engines_dir(&self) -> PathBuf {
+        self.library_root().join("my-engines")
+    }
+
+    /// User-saved cabin layouts.
+    pub fn my_cabins_dir(&self) -> PathBuf {
+        self.library_root().join("my-cabins")
+    }
+
     /// Resolve a relative writable/data path against the same roots used by
     /// the packaged application.  The pipeline cannot depend on `alas-app`
     /// without creating a crate cycle, so this small policy lives with the
@@ -161,97 +192,6 @@ impl ToolLocator {
                 ))
                 .ready_path(),
         }
-    }
-
-    /// Inspect the configured FLOWUnsteady/Julia adapter launcher.
-    ///
-    /// The configured preference overrides discovery, mirroring how
-    /// `avl_exe`/`openvsp_dir` already override their own adjacent-tool
-    /// discovery. `ALAS_FLOWUNSTEADY_EXE` remains a valid override for
-    /// headless/CI use when no preference is configured.
-    pub fn discover_flowunsteady(&self, configured: &Path) -> ExecutableDiscovery {
-        if !configured.as_os_str().is_empty() {
-            return if configured.is_file() {
-                ExecutableDiscovery::Ready(configured.to_path_buf())
-            } else {
-                ExecutableDiscovery::Incomplete {
-                    directory: configured.to_path_buf(),
-                    missing: vec!["FLOWUnsteady/Julia executable".to_owned()],
-                }
-            };
-        }
-        env::var_os("ALAS_FLOWUNSTEADY_EXE")
-            .map(PathBuf::from)
-            .filter(|path| path.is_file())
-            .map_or(ExecutableDiscovery::Absent, ExecutableDiscovery::Ready)
-    }
-
-    /// Inspect the configured and adjacent MSC Nastran installation.
-    pub fn discover_nastran(&self, configured: &Path) -> ExecutableDiscovery {
-        let adjacent = self.discover_executable(
-            configured,
-            &["nastran.exe", "nastran"],
-            &["NASTRAN", "Nastran", "nastran"],
-        );
-        if matches!(adjacent, ExecutableDiscovery::Ready(_)) {
-            return adjacent;
-        }
-        self.discover_msc_executable(
-            "Nastran/bin",
-            &["nastran.exe", "nastranw.exe"],
-            configured.as_os_str().is_empty(),
-        )
-        .unwrap_or(adjacent)
-    }
-
-    /// Inspect the configured and adjacent MSC Patran installation.
-    pub fn discover_patran(&self, configured: &Path) -> ExecutableDiscovery {
-        let adjacent = self.discover_executable(
-            configured,
-            &["patran.exe", "patran"],
-            &["Patran", "PATRAN", "patran"],
-        );
-        if matches!(adjacent, ExecutableDiscovery::Ready(_)) {
-            return adjacent;
-        }
-        self.discover_msc_executable("Patran/bin", &["patran.exe"], false)
-            .unwrap_or(adjacent)
-    }
-
-    /// Inspect a configured or adjacent headless OpenVSP installation.
-    ///
-    /// The official Windows distribution calls the batch runner
-    /// `vspscript.exe`. The interactive `vsp.exe` also accepts `-script`, but
-    /// is deliberately not selected automatically because it loads the GUI
-    /// and graphics stack for a pipeline operation that does not need either.
-    pub fn discover_openvsp(&self, configured: &Path) -> ExecutableDiscovery {
-        self.discover_executable(
-            configured,
-            &["vspscript.exe", "vspscript"],
-            &["OpenVSP", "openvsp"],
-        )
-    }
-
-    /// Inspect a configured or adjacent native VSPAERO installation.
-    pub fn discover_vspaero(&self, configured: &Path) -> ExecutableDiscovery {
-        self.discover_executable(
-            configured,
-            &["vspaero.exe", "vspaero"],
-            &["OpenVSP", "openvsp"],
-        )
-    }
-
-    /// Inspect a configured or adjacent native Athena Vortex Lattice install.
-    pub fn discover_avl(&self, configured: &Path) -> ExecutableDiscovery {
-        // The official Windows executable is commonly versioned (`avl352.exe`)
-        // and the ALAS external-tools bundle uses that name.  Keep the generic
-        // names for user installations, but recognize the bundled binary
-        // without requiring a manual path entry.
-        self.discover_executable(
-            configured,
-            &["avl352.exe", "avl.exe", "avl352", "avl"],
-            &["AVL", "avl"],
-        )
     }
 
     /// Resolve an MSES directory, preferring an explicit configured path and
@@ -371,7 +311,7 @@ impl ToolLocator {
             .find(|path| path.is_dir())
     }
 
-    fn discover_msc_executable(
+    pub(super) fn discover_msc_executable(
         &self,
         relative_directory: &str,
         names: &[&str],
@@ -461,19 +401,29 @@ impl ToolLocator {
     /// development checkout keeps its external tools beside the repository's
     /// `Cargo.toml`. Walking only to that marker recovers the checkout layout
     /// without searching arbitrary directories on the host. Packaged installs
-    /// have no marker, so the walk remains limited to their parent chain and
-    /// the per-user data root.
-    fn adjacent_tool_roots(&self) -> Vec<PathBuf> {
-        let mut roots = Vec::new();
+    /// have no marker, so discovery stops at the application root and its
+    /// direct parent (as `candidate_roots` does) and the per-user data root;
+    /// it never climbs towards the drive root.
+    pub(super) fn adjacent_tool_roots(&self) -> Vec<PathBuf> {
+        let mut chain = Vec::new();
+        let mut marker_found = false;
         let mut current = Some(self.app_root.as_path());
         while let Some(root) = current {
-            if !roots.iter().any(|candidate| candidate == root) {
-                roots.push(root.to_path_buf());
-            }
+            chain.push(root);
             if root.join("Cargo.toml").is_file() {
+                marker_found = true;
                 break;
             }
             current = root.parent();
+        }
+        if !marker_found {
+            chain.truncate(2);
+        }
+        let mut roots: Vec<PathBuf> = Vec::new();
+        for root in chain {
+            if !roots.iter().any(|candidate| candidate == root) {
+                roots.push(root.to_path_buf());
+            }
         }
         if !roots.contains(&self.user_data_root) {
             roots.push(self.user_data_root.clone());

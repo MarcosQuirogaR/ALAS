@@ -251,3 +251,9 @@ fn chart_chrome_supports_titles_and_categories() {
         SceneElement::Text { text, .. } if text == "MZFW"
     )));
 }
+
+#[test]
+fn symmetric_log_axes_are_ticked_on_decades_of_both_signs() {
+    let ticks = major_ticks(-3.3, 3.3, Scale::SymLog { linthresh: 0.033 }, 6);
+    assert_eq!(ticks, vec![-1.0, -0.1, -0.01, 0.0, 0.01, 0.1, 1.0]);
+}

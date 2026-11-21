@@ -53,7 +53,7 @@
     "Bags/cargo ULD": "ULD de equipaje/carga",
     "Balanced field length factor": "Factor de longitud de campo equilibrada",
     "Belly cargo": "Carga en bodega",
-    "Below this Mach number, transonic wave drag is assumed zero (not yet computed).": "Por debajo de este n\u00famero de Mach se supone resistencia de onda trans\u00f3nica nula (a\u00fan no se calcula).",
+    "Below this Mach number, transonic wave drag is assumed zero.": "Por debajo de este n\u00famero de Mach se supone resistencia de onda trans\u00f3nica nula (a\u00fan no se calcula).",
     "Bending moment M [MN.m]": "Momento flector M [MN\u00b7m]",
     "Bending stiffness EI [GN.m^2]": "Rigidez a flexi\u00f3n EI [GN\u00b7m\u00b2]",
     "Break-chord taper-realism penalty weight": "Peso de penalizaci\u00f3n por realismo del estrechamiento en el quiebro",

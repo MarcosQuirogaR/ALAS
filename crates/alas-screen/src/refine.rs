@@ -127,6 +127,9 @@ pub(crate) fn refine_candidate_3d_with_mass_model(
             return;
         }
     };
+    if matches!(geometry, ScreeningGeometry::Product) {
+        alas_aero::analysis::apply_tail_efficiency(&mut plane, &cfg2);
+    }
     if matches!(geometry, ScreeningGeometry::ReferenceCompatibility) {
         // The frozen screening fixture normalizes with the
         // unfolded wing scales. Keep that choice local to the compatibility
@@ -190,7 +193,7 @@ pub(crate) fn refine_candidate_3d_with_mass_model(
             &plane,
             dv.sweep_deg,
             Some(effective_geometry),
-            Some(cfg2.drag_model.clone()),
+            Some(cfg2.resolved_drag_model()),
             Some(cfg2.analysis.clone()),
         )
     } else {
@@ -198,7 +201,7 @@ pub(crate) fn refine_candidate_3d_with_mass_model(
             &plane,
             AeroAnalysis::quarter_chord_sweep_deg(&plane, dv.sweep_deg),
             Some(effective_geometry),
-            Some(cfg2.drag_model.clone()),
+            Some(cfg2.resolved_drag_model()),
             Some(cfg2.analysis.clone()),
         )
     };
@@ -228,7 +231,31 @@ pub(crate) fn refine_candidate_3d_with_mass_model(
         cl_alpha: trim.cl_alpha,
     };
 
-    let perf = match aero.trimmed_performance(&tp, mach, altitude) {
+    // The product trim runs on the Goethert-stretched lattice: screen the
+    // trimmed state there too, at the compressible attitude (A1G), so the
+    // screening rank is on the basis of the report and the mission.
+    let flight = trim.attitude();
+    let performance =
+        if flight.compressible && !matches!(geometry, ScreeningGeometry::ReferenceCompatibility) {
+            let beta = alas_stab::neutral_point::beta_for_mach(mach);
+            let stretched = alas_stab::neutral_point::goethert_stretch(&plane, beta);
+            let point = TrimPoint {
+                trim_alpha_deg: flight.alpha_deg,
+                trim_ih_deg: flight.incidence_deg,
+                cl_alpha: flight.cl_alpha,
+            };
+            aero.trimmed_stretched_performance(
+                &stretched,
+                &point,
+                mach,
+                altitude,
+                beta,
+                flight.cm_body_per_deg,
+            )
+        } else {
+            aero.trimmed_performance(&tp, mach, altitude)
+        };
+    let perf = match performance {
         Ok(p) => p,
         Err(e) => {
             candidate.refine_error = Some(e.to_string());

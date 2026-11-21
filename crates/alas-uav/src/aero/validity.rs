@@ -4,7 +4,7 @@
 //! Validity guard for the NeuralFoil-based section models.
 //!
 //! NeuralFoil normalises `ln Re` and the angle of attack and extrapolates
-//! silently outside its training data, so the guard is ours (UAV-PLAN 3.1).
+//! silently outside its training data, so the guard is ours.
 //! Each (Re, alpha, Mach, confidence) query is classified as
 //! [`Severity::Ok`], [`Severity::Warn`] (answer returned, flagged) or
 //! [`Severity::Refused`] (outside any plausible domain).

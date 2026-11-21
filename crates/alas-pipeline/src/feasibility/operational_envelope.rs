@@ -197,6 +197,44 @@ fn fuel_phase(fuel_kg: f64) -> CheckedPhase {
     }
 }
 
+/// The zero-fuel operational envelope: the zero-fuel centres of gravity from
+/// which adding fuel along the burn order stays inside the physical limits at
+/// every sampled mass, as (forward, aft) % MAC.
+///
+/// The limits depend on the mass and the phase, not on the centre of gravity,
+/// and the loaded station is linear in the zero-fuel one, so each sampled fuel
+/// load bounds the zero-fuel station directly and the band is the intersection
+/// of those bounds. `None` when a limit is not finite or the band is empty.
+fn zero_fuel_admissible_band(
+    mac_frame: alas_geom::aircraft::mac_frame::MacFrame,
+    model_cg: &ModelCgEnvelopeAssessment,
+    zero_fuel_mass_kg: f64,
+    vector: &[FuelVectorPoint],
+) -> Option<(f64, f64)> {
+    if !(zero_fuel_mass_kg.is_finite() && zero_fuel_mass_kg > 0.0) {
+        return None;
+    }
+    let station_m = |pct_mac: f64| mac_frame.x_lemac_m + pct_mac / 100.0 * mac_frame.chord_m;
+    let zero_fuel = limits_at_mass(model_cg, zero_fuel_mass_kg, CheckedPhase::ZeroFuel);
+    if !(zero_fuel.fwd_pct_mac.is_finite() && zero_fuel.aft_pct_mac.is_finite()) {
+        return None;
+    }
+    let mut forward_m = station_m(zero_fuel.fwd_pct_mac);
+    let mut aft_m = station_m(zero_fuel.aft_pct_mac);
+    for point in vector.iter().filter(|point| point.fuel_kg > 0.0) {
+        let mass_kg = zero_fuel_mass_kg + point.fuel_kg;
+        let limits = limits_at_mass(model_cg, mass_kg, fuel_phase(point.fuel_kg));
+        if !(limits.fwd_pct_mac.is_finite() && limits.aft_pct_mac.is_finite()) {
+            return None;
+        }
+        let fuel_moment = point.fuel_kg * point.x_m;
+        let bound = |pct_mac: f64| (station_m(pct_mac) * mass_kg - fuel_moment) / zero_fuel_mass_kg;
+        forward_m = forward_m.max(bound(limits.fwd_pct_mac));
+        aft_m = aft_m.min(bound(limits.aft_pct_mac));
+    }
+    (forward_m <= aft_m).then(|| (mac_frame.pct_mac(forward_m), mac_frame.pct_mac(aft_m)))
+}
+
 /// Build the operational envelope from a completed report and its already-
 /// formed model CG assessment. `None` when the payload layout or the fuel
 /// tank arrangement cannot be resolved on this geometry: reported by the
@@ -222,7 +260,7 @@ pub fn assess_operational_envelope(
     // `ModelCgLoadingState::OperatingEmpty` off the same `model_cg`
     // assessment passed in by the caller, so there is exactly one DOW mass
     // and CG in the pipeline, not a second one computed independently by
-    // the payload lane. An earlier draft of this item quoted a different
+    // the payload work. An earlier draft of this item quoted a different
     // DOW %MAC (33.81, versus this state's 31.20) from a provisional
     // calculation made before the sequences were wired to this same
     // `model_cg` state; that number was never a second, competing
@@ -357,43 +395,8 @@ pub fn assess_operational_envelope(
             )
         });
 
-    // The zero-fuel operational envelope : the set of ZFW CGs from
-    // which adding fuel along the same burn order stays inside the physical
-    // limits at every intermediate mass. Grid search over a bounded number
-    // of candidate ZFW stations (cheap, like the potato sampling):
-    // the physical limits at ZFW mass already bracket the search domain.
-    const ZFW_CANDIDATES: usize = 21;
-    let zfw_limits = limits_at_mass(model_cg, zfw_state.mass_kg, CheckedPhase::ZeroFuel);
-    let (zfw_aft, zfw_fwd) = (zfw_limits.aft_pct_mac, zfw_limits.fwd_pct_mac);
-    let zfw_operational_limits_pct_mac = if zfw_aft.is_finite() && zfw_fwd.is_finite() {
-        let mut admissible_fwd = f64::INFINITY;
-        let mut admissible_aft = f64::NEG_INFINITY;
-        for step in 0..ZFW_CANDIDATES {
-            let fraction = step as f64 / (ZFW_CANDIDATES - 1).max(1) as f64;
-            let candidate_pct_mac = zfw_fwd + fraction * (zfw_aft - zfw_fwd);
-            let candidate_x_m = mac_frame.x_lemac_m + candidate_pct_mac / 100.0 * mac_frame.chord_m;
-            let admissible = vector.iter().all(|point| {
-                let mass_kg = zfw_state.mass_kg + point.fuel_kg;
-                let x_m = if point.fuel_kg > 0.0 {
-                    (zfw_state.mass_kg * candidate_x_m + point.fuel_kg * point.x_m)
-                        / mass_kg.max(1.0)
-                } else {
-                    candidate_x_m
-                };
-                let checked =
-                    check_point(mac_frame, model_cg, mass_kg, x_m, fuel_phase(point.fuel_kg));
-                checked.inside_limits
-            });
-            if admissible {
-                admissible_fwd = admissible_fwd.min(candidate_pct_mac);
-                admissible_aft = admissible_aft.max(candidate_pct_mac);
-            }
-        }
-        (admissible_fwd.is_finite() && admissible_aft.is_finite())
-            .then_some((admissible_fwd, admissible_aft))
-    } else {
-        None
-    };
+    let zfw_operational_limits_pct_mac =
+        zero_fuel_admissible_band(mac_frame, model_cg, zfw_state.mass_kg, &vector);
 
     Some(OperationalEnvelopeAssessment {
         passenger_sequences,
@@ -499,6 +502,49 @@ mod tests {
             .zfw_operational_limits_pct_mac
             .expect("a bracketable ZFW operational band");
         assert!(fwd.is_finite() && aft.is_finite() && fwd <= aft);
+    }
+
+    /// The band's edges are exact: a zero-fuel centre of gravity just inside
+    /// either edge stays inside the limits at every sampled fuel load, and one
+    /// just outside leaves them at some load.
+    #[test]
+    fn the_zero_fuel_band_edges_are_exact() {
+        let (_, _, model_cg) = a320_report_and_model_cg();
+        let frame = alas_geom::aircraft::mac_frame::MacFrame {
+            chord_m: 4.2,
+            x_lemac_m: 16.0,
+        };
+        let zfw_kg = model_cg
+            .loading_states
+            .iter()
+            .map(|state| state.mass_kg)
+            .fold(f64::INFINITY, f64::min);
+        let point = |fuel_kg: f64, x_m: f64| FuelVectorPoint {
+            fuel_kg,
+            x_m,
+            z_m: 0.0,
+        };
+        let vector = [point(0.0, 0.0), point(2_000.0, 16.2), point(8_000.0, 18.1)];
+        let (fwd, aft) = zero_fuel_admissible_band(frame, &model_cg, zfw_kg, &vector)
+            .expect("the band is not empty");
+        let admissible = |pct_mac: f64| {
+            let x_m = frame.x_lemac_m + pct_mac / 100.0 * frame.chord_m;
+            vector.iter().all(|point| {
+                let mass_kg = zfw_kg + point.fuel_kg;
+                let loaded_m = (zfw_kg * x_m + point.fuel_kg * point.x_m) / mass_kg;
+                check_point(
+                    frame,
+                    &model_cg,
+                    mass_kg,
+                    loaded_m,
+                    fuel_phase(point.fuel_kg),
+                )
+                .inside_limits
+            })
+        };
+        const STEP: f64 = 1.0e-6;
+        assert!(admissible(fwd + STEP) && admissible(aft - STEP));
+        assert!(!admissible(fwd - STEP) && !admissible(aft + STEP));
     }
 
     /// Partial-loading points see the ground mechanisms only, fuel-loaded

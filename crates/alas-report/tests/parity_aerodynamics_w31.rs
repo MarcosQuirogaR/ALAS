@@ -12,6 +12,7 @@ use alas_aero::avl::{AvlModel, AvlPolar, AvlPolarPoint, AvlReference};
 use alas_aero::mses::{MsesPressureResult, MsesStatus};
 use alas_aero::vspaero::{VspaeroModel, VspaeroPolar, VspaeroPolarPoint, VspaeroReference};
 use alas_config::design_variables::DesignVector;
+use alas_config::AlasConfig;
 use alas_geom::asb::airfoil::Airfoil;
 use alas_geom::asb::airplane::Airplane;
 use alas_geom::asb::wing::{Wing, WingXSec};
@@ -41,6 +42,7 @@ fn report() -> AnalysisReport {
         polar: PolarSweep {
             alpha_deg: vec![-4.0, 0.0, 4.0, 8.0],
             geometric_alpha_deg: vec![-4.0, 0.0, 4.0, 8.0],
+            compressible_mach: None,
             cl: vec![-0.2, 0.2, 0.6, 0.9],
             cd: vec![0.04, 0.025, 0.03, 0.05],
             cd_induced: vec![0.01, 0.012, 0.02, 0.035],
@@ -476,9 +478,7 @@ fn classical_prandtl_curve_uses_geometry_when_the_report_grid_never_reaches_zero
     assert!(!svg.contains("does not bracket CL=0"));
 }
 
-#[test]
-fn model_comparison_overlays_only_compatible_vspaero_lift_and_moment() {
-    let report = report();
+fn vspaero_result(report: &AnalysisReport) -> VspaeroAnalysisResult {
     let points = report
         .polar
         .alpha_deg
@@ -500,7 +500,7 @@ fn model_comparison_overlays_only_compatible_vspaero_lift_and_moment() {
         })
         .collect();
     let path = PathBuf::from("case");
-    let vspaero = VspaeroAnalysisResult {
+    VspaeroAnalysisResult {
         status: VspaeroAnalysisStatus::CompletedComparable,
         runtime_executable: Some(PathBuf::from("vspaero.exe")),
         case_path: path.clone(),
@@ -525,7 +525,13 @@ fn model_comparison_overlays_only_compatible_vspaero_lift_and_moment() {
         ]),
         error: None,
         outside_validity_alpha_deg: Vec::new(),
-    };
+    }
+}
+
+#[test]
+fn model_comparison_overlays_only_compatible_vspaero_lift_and_moment() {
+    let report = report();
+    let vspaero = vspaero_result(&report);
     let svg = render_svg(&aerodynamics::figure_model_comparison(
         &report,
         None,
@@ -542,7 +548,11 @@ fn model_comparison_overlays_only_compatible_vspaero_lift_and_moment() {
 #[test]
 fn optional_figures_are_data_driven_and_honest_without_external_data() {
     let report = report();
-    let svg = render_svg(&aerodynamics::figure_span_loading(&report, Some("light")));
+    let svg = render_svg(&aerodynamics::figure_span_loading(
+        &report,
+        &AlasConfig::default(),
+        Some("light"),
+    ));
     text_contract(&svg, &["VLM span loading unavailable"]);
     let svg = render_svg(&aerodynamics::figure_vlm_flow(&report, Some("dark")));
     text_contract(&svg, &["VLM flow unavailable"]);
@@ -629,4 +639,114 @@ fn mses_field_fills_native_mplot_grid_cells_when_row_topology_is_retained() {
     assert!(boundary.is_some_and(|points| { points.len() >= 5 && points.first() == points.last() }));
     let svg = render_svg(&scene);
     text_contract(&svg, &["outside the native MSES grid (not solved)"]);
+}
+
+fn texts(scene: &alas_report::scene::Scene) -> Vec<(String, [f64; 2])> {
+    scene
+        .elements
+        .iter()
+        .filter_map(|element| match element {
+            alas_report::scene::SceneElement::Text { text, pos, .. } => Some((text.clone(), *pos)),
+            _ => None,
+        })
+        .collect()
+}
+
+/// Numeric tick labels in a pixel window.
+fn ticks_in(scene: &alas_report::scene::Scene, x: (f64, f64), y: (f64, f64)) -> Vec<f64> {
+    texts(scene)
+        .into_iter()
+        .filter(|(_, pos)| (x.0..=x.1).contains(&pos[0]) && (y.0..=y.1).contains(&pos[1]))
+        .filter_map(|(text, _)| text.parse::<f64>().ok())
+        .collect()
+}
+
+const ALPHA_NOTE: &str =
+    "Angle axis: compressibility-corrected angle at the lift of the incompressible lattice sweep";
+const CROSS_CHECK_NOTE: &str = "Cross-check rows: geometric angle of the incompressible solves";
+
+/// Every figure that draws the polar sweep uses the reporting
+/// (Prandtl-Glauert) angle axis and says so. The fixture's reporting axis
+/// spans -2.5..5 deg (ticks -2, 0, 2, 4) and its geometric one -4..8 deg
+/// (ticks 0, 5), so the ticks tell the two apart.
+#[test]
+fn the_polar_figures_share_one_angle_axis_and_state_its_basis() {
+    let mut report = report();
+    report.polar.alpha_deg = vec![-2.5, 0.0, 2.5, 5.0];
+    let panel = aerodynamics::figure_aero_panel(&report, Some("light"));
+    // Lift-curve panel: x 70..410, tick labels just below y = 320.
+    let ticks = ticks_in(&panel, (70.0, 410.0), (320.0, 335.0));
+    assert!(
+        ticks.contains(&-2.0) && ticks.iter().all(|tick| *tick < 6.0),
+        "{ticks:?}"
+    );
+    assert!(texts(&panel).iter().any(|(text, _)| text == ALPHA_NOTE));
+    // The note (centred at x 450, y 692, in the 700 px scene) sits below the
+    // bottom-row axis titles (y 669-681): no other text within 10 px of it at
+    // any x, so the clearance holds for a note of any width, Spanish included.
+    let crowded = texts(&panel)
+        .into_iter()
+        .any(|(text, pos)| text != ALPHA_NOTE && (pos[1] - 692.0).abs() < 10.0);
+    assert!(!crowded, "a text sits on the angle-axis note");
+
+    // Model comparison with a comparable VSPAERO polar: the first row's lift
+    // axes (x 60..) use the same reporting angles, and no cross-check note.
+    let vspaero = vspaero_result(&report);
+    let comparison =
+        aerodynamics::figure_model_comparison(&report, None, Some(&vspaero), None, Some("light"));
+    assert!(texts(&comparison)
+        .iter()
+        .any(|(text, _)| text == ALPHA_NOTE));
+    assert!(!texts(&comparison)
+        .iter()
+        .any(|(text, _)| text == CROSS_CHECK_NOTE));
+    // Angle tick labels of the lift-curve axes (x 480..850, below the frame at y 325).
+    let first_row = ticks_in(&comparison, (480.0, 850.0), (326.0, 340.0));
+    assert!(
+        first_row.contains(&-2.0) && first_row.iter().all(|tick| *tick < 6.0),
+        "{first_row:?}"
+    );
+
+    // Without any external solver: the same axis.
+    let bare = aerodynamics::figure_model_comparison(&report, None, None, None, Some("light"));
+    assert!(texts(&bare).iter().any(|(text, _)| text == ALPHA_NOTE));
+}
+
+/// With an AVL cross-check the extra rows are solved and drawn at the
+/// geometric angle: their x axes say "geometric alpha [deg]" and the figure
+/// carries a second note, so the two bases are never confused.
+#[test]
+fn the_avl_cross_check_rows_state_the_geometric_basis() {
+    let mut report = report();
+    report.polar.alpha_deg = vec![-2.5, 0.0, 2.5, 5.0];
+    let avl = avl_result(
+        &report,
+        AvlAnalysisStatus::CompletedComparable,
+        AvlComparisonStatus::Compatible(vec![
+            AvlComparableQuantity::LiftCoefficient,
+            AvlComparableQuantity::PitchingMomentCoefficient,
+        ]),
+    );
+    let scene =
+        aerodynamics::figure_model_comparison(&report, None, None, Some(&avl), Some("light"));
+    let all = texts(&scene);
+    assert!(all.iter().any(|(text, _)| text == ALPHA_NOTE));
+    assert!(all.iter().any(|(text, _)| text == CROSS_CHECK_NOTE));
+    assert!(
+        all.iter()
+            .filter(|(text, _)| text == "geometric alpha [deg]")
+            .count()
+            >= 2
+    );
+    // The notes sit below the legend, clear of every other text.
+    let note_y = all
+        .iter()
+        .filter(|(text, _)| text == ALPHA_NOTE || text == CROSS_CHECK_NOTE)
+        .map(|(_, pos)| pos[1])
+        .fold(f64::INFINITY, f64::min);
+    let clash = all.iter().any(|(text, pos)| {
+        text != ALPHA_NOTE && text != CROSS_CHECK_NOTE && (pos[1] - note_y).abs() < 10.0
+            || text != ALPHA_NOTE && text != CROSS_CHECK_NOTE && pos[1] > note_y
+    });
+    assert!(!clash, "a text overlaps the note lines");
 }

@@ -12,7 +12,7 @@
 //! - `takeoff_landing_speeds_isa_sea_level`, `oei_second_segment` and
 //!   `field_lengths_isa_sea_level` read one
 //!   [`alas_pipeline::field_reference::IsaSeaLevelFieldReference`], built on
-//!   `report_config::config_for_report` (computed `VMC`, scaled `CLmax`,
+//!   `report_config::config_for_report_at` at ISA sea level (computed `VMC`, scaled `CLmax`,
 //!   improved-climb `V2`);
 //! - `payload_range` reads the report chart's own data
 //!   (`alas_report::families::performance::payload_range_data`) and prices
@@ -106,7 +106,7 @@ pub(super) fn validation_json(
 }
 
 /// The cruise-thrust and top-of-climb checks with the scatter of the engine's
-/// altitude thrust (owner decision 2026-10-13): required, available, scatter
+/// altitude thrust: required, available, scatter
 /// and verdict (`pass`, `warning` inside the band, `hard` beyond it), for
 /// every jet, passing or not. A warning is never dropped.
 fn thrust_uncertainty_json(
@@ -144,7 +144,7 @@ fn thrust_uncertainty_json(
             "engine has a cruise or climb thrust datum: any shortfall is hard"
         },
         "scatter_fraction": checks.scatter,
-        // The key keeps its historical name; since 2026-10-14 the check is the
+        // The key keeps its historical name; the check is the
         // worst of the cruise levels the mission plan flies (`plan` below), and
         // the design level at the mid-cruise mass only when no plan is carried.
         "level_cruise_mid_mass_static_tw": one(&checks.level, "T/W"),
@@ -320,6 +320,7 @@ fn reference_missions_json(config: &AlasConfig, report: &AnalysisReport) -> Valu
                 "takeoff_fuel_kg": fuel.takeoff_fuel_kg,
                 "takeoff_mass_kg": fuel.takeoff_mass_kg,
                 "zero_fuel_mass_kg": fuel.zero_fuel_mass_kg,
+                "offloaded_payload_kg": fuel.offloaded_payload_kg,
                 "trip_time_s": fuel.trip_time_s,
                 "dispatch_status": fuel.status,
                 "converged": fuel.converged,
@@ -402,7 +403,11 @@ fn cruise_json(config: &AlasConfig, report: &AnalysisReport) -> Value {
     let model = report_mission_model(config, report);
     let mmo = model
         .as_ref()
-        .map(|model| model.profile.max_operating_mach)
+        .map(|model| {
+            model
+                .profile
+                .mmo_at_altitude(requirements.cruise_altitude_m)
+        })
         .map_err(String::clone);
     let max_operating_mach = match &mmo {
         Ok(value) if value.is_finite() && *value > 0.0 => json!({

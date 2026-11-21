@@ -14,6 +14,7 @@ pub struct WalkthroughRestore {
     pub(crate) nav_pinned: bool,
     pub(crate) nav_hover_open: bool,
     pub(crate) preview_open: bool,
+    pub(crate) run_log_open: bool,
 }
 
 /// Supported user interface languages.
@@ -94,10 +95,12 @@ pub struct RunOptions {
 }
 
 impl Default for RunOptions {
+    /// A loaded aircraft is analysed as it is drawn: a search redesigns it, so
+    /// it is asked for on the Aircraft page, and a clean sheet asks for it itself.
     fn default() -> Self {
         Self {
-            optimize: true,
-            compare_baseline: true,
+            optimize: false,
+            compare_baseline: false,
             write_outputs: true,
             parallel: true,
         }

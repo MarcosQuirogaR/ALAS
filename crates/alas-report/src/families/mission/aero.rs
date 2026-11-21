@@ -131,7 +131,10 @@ pub fn figure_mission_aero_forces(mission: &MissionResult, theme: Option<&str>) 
         x_range,
         &throttle,
         Stroke::new(Color::from_hex("tab:blue"), 1.3),
-        "Throttle",
+        // The command is a share of the rating the leg flies at, not of one fixed rating: the
+        // take-off rating on take-off-rated legs (`leg_takeoff_rated`, alas_mission
+        // segments/common.rs), the deck's rating otherwise (`analyses.thrust(.., 1.0)`).
+        "Throttle (share of leg rating)",
         9.0,
     );
 

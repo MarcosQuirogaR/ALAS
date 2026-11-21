@@ -1,7 +1,7 @@
 // SPDX-License-Identifier: AGPL-3.0-or-later
 // Copyright (C) 2026 Marcos Quiroga Rodriguez
 
-//! Neutral point from the production vortex lattice (UAV-PLAN M4, item 1).
+//! Neutral point from the production vortex lattice.
 //!
 //! The airframe planform (main wing plus a horizontal tail or V pair) is
 //! mapped onto `alas_geom` wings at the panel boundaries (chord is linear

@@ -11,10 +11,12 @@
 pub mod drag;
 pub mod fields;
 mod handle_cache;
+mod hump_defaults;
 pub mod persist;
 pub mod policy;
 pub mod quick;
 pub mod scene;
+pub mod search;
 pub mod session;
 pub mod undo;
 
@@ -22,12 +24,20 @@ pub use session::{
     ExitChoice, SandboxDesign, SandboxLayout, SandboxSession, StartingDesign, WorkspaceMode,
 };
 pub mod advanced;
+pub mod built_sections;
+pub mod camera_row;
 pub mod case;
 pub mod editors;
 pub mod estimates;
-pub mod fuselage_editor;
+mod feasibility_cards;
+pub mod framing;
+mod list_editors;
+#[cfg(test)]
+mod live_input_tests;
+pub mod navigation;
 pub mod overlays;
 pub mod panel;
+pub mod section_views;
 pub mod viewport;
 pub mod windows;
 pub mod workspace;

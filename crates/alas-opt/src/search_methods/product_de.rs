@@ -15,7 +15,9 @@ use std::time::Duration;
 
 use alas_config::{SolverSettings, StageBudget};
 
-pub(crate) use super::lshade_de::{run_with_admission as run, Outcome, Settings, Termination};
+pub(crate) use super::lshade_de::{
+    run_guided, run_with_admission as run, Outcome, Settings, Termination,
+};
 use super::{ScoredPoint, Tier};
 
 /// The `method` string every product optimization result reports.
@@ -206,13 +208,19 @@ pub(crate) fn refinement_settings(
 }
 
 /// Lane quantum of the native population schedule: the size of one
-/// evaluator wave on the reference 32-thread workstation. It is a fixed
-/// constant, never the configured worker count, so the population schedule,
-/// and with it the search trajectory, is the same at any worker count and a
-/// run replays on any machine. On 32 lanes every generation is then a whole
-/// number of full waves, where a 35-member generation ran 32 lanes and then
-/// 3 (about half the lane time idle).
-pub(crate) const NATIVE_LANE_QUANTUM: usize = 32;
+/// evaluator wave on the reference 16-thread desktop, whose sixteenth
+/// thread runs the registered aircraft's reporting analysis beside the
+/// search (`alas_pipeline`, VLM branch). It is a fixed constant, never the
+/// configured worker count, so the population schedule, and with it the
+/// search trajectory, is the same at any worker count and a run replays on
+/// any machine. On 15 lanes every generation is then a whole number of full
+/// waves, and on 16 lanes it loses one lane in sixteen, where a 32-member
+/// generation on 15 lanes ran two full waves and a third of two (measured:
+/// exploration lane utilization 0.55 to 0.61 on 15 workers).
+/// The floor population is one quantum: at the several hundred candidates a
+/// staged run affords, a 32-member floor left eight to twenty-five
+/// generations (fourteen finished convergence runs).
+pub(crate) const NATIVE_LANE_QUANTUM: usize = 15;
 
 /// Keep whole native waves occupied without making the population schedule
 /// depend on the machine or the configured worker count: the population is
@@ -260,6 +268,20 @@ pub(crate) fn unevaluated(values: &[f64]) -> ScoredPoint {
 mod tests {
     use super::*;
 
+    /// A replay stops the kernel where the recorded kernel stopped: the
+    /// recorded total less the restoration share, which replays after it.
+    #[test]
+    fn a_replay_stops_the_kernel_before_the_recorded_restoration_share() {
+        let mut solver = SolverSettings::interactive();
+        solver.stop_on_evaluations_only = true;
+        solver.refinement.max_evaluations = 83;
+        solver.refinement.replay_evaluations = Some(71);
+        solver.refinement.replay_restoration_evaluations = Some(4);
+        assert_eq!(refinement_settings(&solver, 1, 7, 83).stop_after, 67);
+        // Without the restoration share the kernel replays the whole total.
+        solver.refinement.replay_restoration_evaluations = None;
+        assert_eq!(refinement_settings(&solver, 1, 7, 83).stop_after, 71);
+    }
     #[test]
     fn native_population_is_worker_independent_and_saturates_to_the_budget() {
         for budget in [1, 31, 32, 120, 240, 5_000] {
@@ -273,8 +295,8 @@ mod tests {
             );
             configure_native_population(&mut reference);
             assert!(reference.population <= reference.max_evaluations);
-            assert!(reference.population >= 32.min(reference.max_evaluations));
-            // Whole 32-lane waves unless the ceiling itself is smaller.
+            assert!(reference.population >= NATIVE_LANE_QUANTUM.min(reference.max_evaluations));
+            // Whole lane waves unless the ceiling itself is smaller.
             assert!(
                 reference.population % NATIVE_LANE_QUANTUM == 0
                     || reference.population == reference.max_evaluations,

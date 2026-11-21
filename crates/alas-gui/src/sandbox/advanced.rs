@@ -1,18 +1,20 @@
 // SPDX-License-Identifier: AGPL-3.0-or-later
 // Copyright (C) 2026 Marcos Quiroga Rodriguez
 
-//! The detached Advanced Settings window.
+//! The Sandbox's detached Advanced Settings window (the guided pages host the
+//! same settings as Advanced sections; this window is how the full-screen
+//! Sandbox, which has no pages, reaches them).
 //!
-//! One window, organized by discipline tabs, shared by the guided workspace
-//! and the sandbox. Every tab renders the same schema-driven form page the
-//! navigation tree used, editing the one authoritative configuration, so an
+//! One window, organized by discipline tabs. Every tab renders the same
+//! schema-driven form page the guided pages host, editing the one
+//! authoritative configuration, so an
 //! edit here invalidates sandbox estimates exactly like a Parameter Panel
 //! edit. A registered preset's geometry stays read-only here as everywhere
 //! else in the guided workspace.
 
-use egui::{vec2, Context, ScrollArea, ViewportBuilder, ViewportCommand};
+use egui::{vec2, Context, ScrollArea, ViewportBuilder};
 
-use crate::native_viewport::{show_native_viewport, viewport_id};
+use crate::native_viewport::{raise, show_native_viewport};
 use crate::nav::{self, PageKind};
 use crate::state::AppState;
 use crate::views::{form_page, tr};
@@ -242,18 +244,16 @@ pub fn show_advanced_settings_contents(state: &mut AppState, ui: &mut egui::Ui) 
             // disables only its editors, so a protected page keeps its
             // heading, description and field labels readable.
             form_page::show_form_page_locked(state, ui, page, locked);
+            crate::search::flush_scroll(ui);
         });
 }
 
 /// The top-bar action that opens the window.
 pub fn show_menu_action(state: &mut AppState, ui: &mut egui::Ui) {
     if ui.button(tr("Advanced Settings")).clicked() {
-        if state.sandbox.layout.advanced_settings_open {
-            // The action is also a raise/focus command when the native window
-            // already exists behind the main ALAS window.
-            ui.ctx()
-                .send_viewport_cmd_to(viewport_id("advanced_settings"), ViewportCommand::Focus);
-        }
+        // The action is also a raise command: the native window may be
+        // minimised or behind the main ALAS window.
+        raise(ui.ctx(), "advanced_settings");
         state.sandbox.layout.advanced_settings_open = true;
     }
 }

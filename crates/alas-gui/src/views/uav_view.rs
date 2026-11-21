@@ -28,16 +28,36 @@ use airframe::airframe_inputs;
 use competition_results::competition_result;
 use presentation::card;
 use sections::mission_inputs;
-use workflow::{action_bar, execution_status, preliminary_banner, section_intro, workflow_header};
+use workflow::{action_bar, execution_status, section_intro, workflow_header};
+
+/// Whether the Fixed-Wing UAV workflow is still work in progress. While it is,
+/// the navigation entry is greyed out with a badge and the page shows only a
+/// placeholder card; the workflow code below stays compiled and tested, and
+/// switching this flag to `false` brings it back.
+pub const UAV_WORK_IN_PROGRESS: bool = true;
+
+/// The only content of the page while the workflow is work in progress.
+fn work_in_progress_card(ui: &mut Ui) {
+    crate::theme::card_frame(ui).show(ui, |ui| {
+        ui.set_min_width(ui.available_width());
+        ui.label(tr(
+            "Fixed-wing UAV design is in development and will be available in a later release.",
+        ));
+    });
+}
 
 /// Render the complete fixed-wing UAV workflow.
 pub fn show_uav_view(state: &mut AppState, ui: &mut Ui) {
+    if UAV_WORK_IN_PROGRESS {
+        ui.heading(crate::views::tr_label("Fixed-Wing UAV"));
+        ui.add_space(6.0);
+        work_in_progress_card(ui);
+        return;
+    }
     ScrollArea::vertical()
         .id_salt("uav_workflow_scroll")
         .auto_shrink([false, false])
         .show(ui, |ui| {
-            preliminary_banner(ui);
-            ui.add_space(8.0);
             workflow_header(&mut state.uav, ui);
             ui.add_space(8.0);
 

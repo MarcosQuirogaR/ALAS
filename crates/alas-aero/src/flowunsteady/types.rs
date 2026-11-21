@@ -33,8 +33,37 @@ pub struct FlowUnsteadyPolar {
     pub lift_is_wind_axis: bool,
     /// True only when Cm is about the stated origin in body axes.
     pub pitch_moment_is_body_axis: bool,
+    /// Wake model the adapter actually ran.
+    pub wake_model: FlowUnsteadyWakeModel,
     /// Adapter samples in requested order.
     pub points: Vec<FlowUnsteadyPoint>,
+}
+
+/// Wake model declared by the adapter result (`model=`).
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub enum FlowUnsteadyWakeModel {
+    /// Free vortex-particle wake time-marched to a settled average: the
+    /// full-fidelity FLOWUnsteady result.
+    FreeVortexParticle,
+    /// Rigid semi-infinite horseshoe wake (FLOWUnsteady's quasi-steady
+    /// lattice): the steady limit, reduced fidelity. It must never be
+    /// presented as the free-wake result.
+    QuasiSteadyLattice,
+}
+
+impl FlowUnsteadyWakeModel {
+    /// Stable result-contract spelling.
+    pub fn as_str(self) -> &'static str {
+        match self {
+            Self::FreeVortexParticle => "vortex_particle_wake",
+            Self::QuasiSteadyLattice => "quasi_steady_vortex_lattice",
+        }
+    }
+
+    /// Whether this is the reduced-fidelity quasi-steady wake.
+    pub fn is_reduced_fidelity(self) -> bool {
+        self == Self::QuasiSteadyLattice
+    }
 }
 
 /// One physical airfoil section attached to an exported lifting surface.

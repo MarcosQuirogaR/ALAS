@@ -57,6 +57,10 @@ pub struct MainGearPlacementInput<'a> {
     pub nose_gear_x_m: f64,
     /// Preferred main-gear station; the nearest feasible station is returned.
     pub requested_main_gear_x_m: f64,
+    /// How far aft of the placed (reaction) station the rotation pivot stands,
+    /// m, non-negative: `rotation_pivot_x_m - x_mlg_m` of the group, constant
+    /// while the group translates. Tip-back and tail scrape pivot there.
+    pub rotation_pivot_offset_m: f64,
     /// Inclusive installation interval, m, supplied from attachment geometry.
     /// A fuselage-length interval alone does not establish an attachment bay.
     pub installation_bounds_m: (f64, f64),
@@ -104,7 +108,8 @@ type Interval = (f64, f64);
 ///
 /// Static nose reactions use `x_cg = (C + G*x_main)/M`, including the gear's
 /// own first moment. Tip-back must clear both the configured minimum and the
-/// scrape angle recomputed at the proposed station. A supplied
+/// scrape angle recomputed at the proposed station, both taken about the
+/// rotation pivot `rotation_pivot_offset_m` aft of it. A supplied
 /// [`ForwardCgBoundary`] is met with the same moving CG. The contour comparison
 /// can yield disjoint feasible intervals; none is discarded before choosing
 /// the nearest station. Equal-distance choices take the forward station.
@@ -128,10 +133,12 @@ pub fn solve_main_gear_station(
         let fixed_moment_m = state.moment_without_main_gear_kg_m / state.mass_kg;
         let fixed_fraction = (state.mass_kg - state.main_gear_mass_kg) / state.mass_kg;
         let tip_offset_m = state.cg_height_m * input.minimum_tip_back_deg.to_radians().tan();
+        let pivot_m = input.rotation_pivot_offset_m;
+        // Tip-back about the pivot x + d: (x + d) - x_cg >= h tan(minimum).
         clip_linear(
             &mut intervals,
             fixed_fraction,
-            fixed_moment_m + tip_offset_m,
+            fixed_moment_m + tip_offset_m - pivot_m,
         )?;
         clip_linear(
             &mut intervals,
@@ -151,7 +158,14 @@ pub fn solve_main_gear_station(
                 boundary.intercept_m - fixed_moment_m,
             )?;
         }
-        let scrape = scrape_intervals(input, state, fixed_moment_m, fixed_fraction)?;
+        // The scrape balance in the pivot station y = x + d, where
+        // x_cg = C' + (1 - f) y with C' = C - (1 - f) d; shifted back to x.
+        let pivot_moment_m = fixed_moment_m - (1.0 - fixed_fraction) * pivot_m;
+        let scrape = scrape_intervals(input, state, pivot_moment_m, fixed_fraction)?;
+        let scrape: Vec<Interval> = scrape
+            .into_iter()
+            .map(|(lower, upper)| (lower - pivot_m, upper - pivot_m))
+            .collect();
         intervals = intersections(&intervals, &scrape);
         if intervals.is_empty() {
             return Ok(None);
@@ -176,6 +190,7 @@ fn validate(input: &MainGearPlacementInput<'_>) -> Result<(), PlacementInputErro
     if ![
         input.nose_gear_x_m,
         input.requested_main_gear_x_m,
+        input.rotation_pivot_offset_m,
         lower,
         upper,
         input.minimum_tip_back_deg,
@@ -183,6 +198,7 @@ fn validate(input: &MainGearPlacementInput<'_>) -> Result<(), PlacementInputErro
     ]
     .iter()
     .all(|value| value.is_finite())
+        || input.rotation_pivot_offset_m < 0.0
         || lower > upper
         || !(0.0..90.0).contains(&input.minimum_tip_back_deg)
         || input.lower_contour.is_empty()
@@ -311,7 +327,8 @@ fn intersections(left: &[Interval], right: &[Interval]) -> Vec<Interval> {
 
 fn feasible(input: &MainGearPlacementInput<'_>, station_m: f64) -> bool {
     let wheelbase_m = station_m - input.nose_gear_x_m;
-    let Some(scrape_deg) = tail_scrape_angle_deg(input.lower_contour, station_m, input.ground_z_m)
+    let pivot_m = station_m + input.rotation_pivot_offset_m;
+    let Some(scrape_deg) = tail_scrape_angle_deg(input.lower_contour, pivot_m, input.ground_z_m)
     else {
         return false;
     };
@@ -320,7 +337,7 @@ fn feasible(input: &MainGearPlacementInput<'_>, station_m: f64) -> bool {
             let cg_m = (state.moment_without_main_gear_kg_m + state.main_gear_mass_kg * station_m)
                 / state.mass_kg;
             let nose_fraction = (station_m - cg_m) / wheelbase_m;
-            let tip_deg = tip_back_angle_deg(station_m, cg_m, state.cg_height_m);
+            let tip_deg = tip_back_angle_deg(pivot_m, cg_m, state.cg_height_m);
             nose_fraction >= state.minimum_nose_fraction
                 && nose_fraction <= state.maximum_nose_fraction
                 && tip_deg >= input.minimum_tip_back_deg.max(scrape_deg)
@@ -409,6 +426,7 @@ mod tests {
         MainGearPlacementInput {
             nose_gear_x_m: 1.0,
             requested_main_gear_x_m: 8.0,
+            rotation_pivot_offset_m: 0.0,
             installation_bounds_m: (6.0, 12.0),
             minimum_tip_back_deg: 15.0,
             ground_z_m: -1.0,
@@ -528,6 +546,39 @@ mod tests {
         let result = solve_main_gear_station(&moved).unwrap().unwrap();
         assert!((result - original - 100.0).abs() < 32.0 * f64::EPSILON * result);
         assert!(feasible(&moved, result));
+    }
+
+    #[test]
+    fn tip_back_and_scrape_pivot_on_the_aft_most_station_aft_of_the_reaction_station() {
+        // x_cg = 7.2 + 0.1 x, h = 2 m, 30 deg minimum tip-back, nose share
+        // 10-20 % (x in [8.875, 10]). About the reaction station the tip-back
+        // needs 0.9 x >= 7.2 + 2 tan 30; about a pivot 0.3 m aft of it the
+        // same angle needs 0.9 x >= 7.2 + 2 tan 30 - 0.3.
+        let states = [state()];
+        let mut problem = input(&states, &CONTOUR);
+        problem.minimum_tip_back_deg = 30.0;
+        let tip_m = 2.0 * 30.0_f64.to_radians().tan();
+        let at_reaction = solve_main_gear_station(&problem).unwrap().unwrap();
+        assert!(
+            (at_reaction - (7.2 + tip_m) / 0.9).abs() < 1.0e-9,
+            "{at_reaction}"
+        );
+        problem.rotation_pivot_offset_m = 0.3;
+        let at_pivot = solve_main_gear_station(&problem).unwrap().unwrap();
+        assert!(
+            (at_pivot - (7.2 + tip_m - 0.3) / 0.9).abs() < 1.0e-9,
+            "{at_pivot}"
+        );
+        assert!(feasible(&problem, at_pivot) && !feasible(&problem, at_pivot - 1.0e-6));
+        let cg_m = 7.2 + 0.1 * at_pivot;
+        let tip_deg = tip_back_angle_deg(at_pivot + 0.3, cg_m, 2.0);
+        assert!((tip_deg - 30.0).abs() < 1.0e-6, "{tip_deg}");
+        // A pivot ahead of the reaction station is not a main-gear layout.
+        problem.rotation_pivot_offset_m = -0.1;
+        assert_eq!(
+            solve_main_gear_station(&problem),
+            Err(PlacementInputError::Geometry)
+        );
     }
 
     #[test]

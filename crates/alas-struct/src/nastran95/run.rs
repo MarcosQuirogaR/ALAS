@@ -22,7 +22,7 @@
 //! `DOSNAM` buffers are only 72 bytes, while a useful desktop output directory
 //! commonly exceeds that once `run.log` or `scr` is appended.
 //! `OCMEM` may select any allocation up to the executable's fixed open-core
-//! array. Current local builds write that limit beside `nastran.exe`, letting
+//! array. Current local builds write that limit beside the solver executable, letting
 //! the runner use the compiled capacity by default and reject invalid requests
 //! before the Fortran program exits successfully without results.
 //! The supervised live runner defaults `DBMEM=1` to keep the database in the
@@ -30,7 +30,8 @@
 //! explicit opt-out for constrained hosts.
 //! The deck is fed with its carriage returns stripped, since a bare `CR` lands
 //! in column 81 and the scanner rejects the card; and the runtime directory
-//! carrying `libgfortran` has to be on `PATH`.
+//! carrying `libgfortran` (when the build links it dynamically) has to be on the loader
+//! search path (`PATH` on Windows, `LD_LIBRARY_PATH` on Linux).
 //!
 //! The parser is shared with the modern solver on purpose: NASTRAN-95 and MSC
 //! print the same `D I S P L A C E M E N T   V E C T O R` and
@@ -42,6 +43,8 @@
 mod print_file;
 mod process;
 mod runtime;
+#[cfg(all(test, unix))]
+mod stub_tests;
 #[cfg(test)]
 mod tests;
 mod workspace;
@@ -72,6 +75,8 @@ use crate::nastran::text::{self};
 /// is added by the loader, leaving 37 bytes for the directory itself.
 const MAX_RIGID_FORMAT_DIR_BYTES: usize = 37;
 const MAX_DOSNAM_PATH_BYTES: usize = 72;
+/// Longest a single solve may run (below the one-day sweep of stale private folders).
+const MAX_SOLVE: Duration = Duration::from_secs(12 * 3600);
 /// Older locally built executables do not advertise their fixed `COMMON
 /// /ZZZZZZ/` allocation. Retain their historic cap rather than claiming a
 /// larger allocation the binary cannot honor.
@@ -93,20 +98,22 @@ const WINDOWS_GNU_RUNTIME_DLLS: [&str; 4] = [
 /// Where the built solver and its runtime are, resolved from the environment.
 ///
 /// `ALAS_NASTRAN95_DIR` is the checked-out solver tree (the executable is
-/// `build/bin/nastran.exe` beneath it and the run-time files are its `rf/`)
+/// `build/bin/nastran.exe`, or `build/bin/nastran` off Windows, beneath it and
+/// the run-time files are its `rf/`)
 /// and `ALAS_NASTRAN95_RUNTIME` is the directory holding `libgfortran`, which
-/// has to be on `PATH` for the executable to load. `ALAS_NASTRAN95_RF_STAGE`
+/// has to be on the loader search path for the executable to load. `ALAS_NASTRAN95_RF_STAGE`
 /// may name a dedicated short absolute directory for copied rigid-format files
 /// when the requested run directory is too long for `RFOPEN`. Both solver
 /// variables unset means no solver, which a caller treats as "skip", not
 /// "fail".
 #[derive(Debug, Clone)]
 pub struct Nastran95Solver {
-    /// The `nastran.exe` to run.
+    /// The solver executable to run ([`Self::EXECUTABLE_RELATIVE`] under the root).
     pub exe: PathBuf,
     /// The `rf/` directory `NASINFO` is staged from.
     pub rf_source: PathBuf,
-    /// The directory to prepend to `PATH`, or `None` if the runtime is already
+    /// The directory to prepend to the loader search path (`PATH` on Windows,
+    /// `LD_LIBRARY_PATH` elsewhere), or `None` if the runtime is already
     /// reachable.
     pub runtime: Option<PathBuf>,
     /// How the runtime directory was selected.
@@ -117,6 +124,9 @@ pub struct Nastran95Solver {
     pub open_core_words: Option<String>,
     /// Largest run-time OCMEM allocation compiled into this executable.
     pub max_open_core_words: u64,
+    /// Run every solve in its own private, short, unpredictable directory (made when
+    /// the solve starts, removed after it) instead of a fixed shared stage.
+    pub private_work: bool,
 }
 
 /// Provenance for the runtime directory used by a NASTRAN-95 solver.
@@ -136,6 +146,20 @@ pub enum Nastran95RuntimeSource {
 }
 
 impl Nastran95Solver {
+    /// File name of the built solver: the Windows build is `nastran.exe`, the
+    /// Linux build (`tools/nastran95/build-linux.sh`) is `nastran`.
+    pub const EXECUTABLE_NAME: &'static str = if cfg!(windows) {
+        "nastran.exe"
+    } else {
+        "nastran"
+    };
+    /// The solver path relative to the installation root.
+    pub const EXECUTABLE_RELATIVE: &'static str = if cfg!(windows) {
+        "build/bin/nastran.exe"
+    } else {
+        "build/bin/nastran"
+    };
+
     /// Construct the local solver from an explicit installation and optional
     /// runtime/staging paths, if the required executable and rigid formats exist.
     pub fn from_paths(
@@ -147,7 +171,7 @@ impl Nastran95Solver {
         if dir.as_os_str().is_empty() {
             return None;
         }
-        let exe = dir.join("build").join("bin").join("nastran.exe");
+        let exe = dir.join("build").join("bin").join(Self::EXECUTABLE_NAME);
         let rf_source = dir.join("rf");
         if !exe.exists() || !rf_source.join("NASINFO").exists() {
             return None;
@@ -165,6 +189,7 @@ impl Nastran95Solver {
                 .filter(|value| !value.is_empty())
                 .map(str::to_owned),
             max_open_core_words,
+            private_work: false,
         })
     }
 
@@ -191,6 +216,20 @@ impl Nastran95Solver {
         Self::from_paths(&solver_dir, None, None, None)
     }
 
+    /// Discover a NASTRAN-95 that the tool installer built from source under
+    /// `<user data>/external tools/NASTRAN-95`. Its rigid-format files
+    /// are staged in a short directory, which the legacy solver needs.
+    pub fn from_installed_tool() -> Option<Self> {
+        let locator = alas_exec::ToolLocator::for_current_process();
+        let dir = locator
+            .user_data_root()
+            .join("external tools")
+            .join("NASTRAN-95");
+        let mut solver = Self::from_paths(&dir, None, None, None)?;
+        solver.private_work = true;
+        Some(solver)
+    }
+
     /// Explain when a stale configured runtime was replaced by the runtime
     /// shipped beside the selected solver. The integration layer can include
     /// this in its status card or run log without rewriting preferences.
@@ -213,6 +252,15 @@ impl Nastran95Solver {
     /// is configured, keeping the long user-facing artifact directory free to
     /// retain the BDF and F06 after the solver exits.
     pub(crate) fn workspace_for(&self, artifact_dir: &Path) -> Result<PathBuf, String> {
+        if self.private_work {
+            let Some(solution) = artifact_dir.file_name() else {
+                return Err(format!(
+                    "cannot derive NASTRAN-95 solution name from {}",
+                    artifact_dir.display()
+                ));
+            };
+            return Ok(super::private_dir::create_private_dir("n95-")?.join(solution));
+        }
         let Some(stage) = self.rf_stage.as_deref() else {
             return Ok(artifact_dir.to_path_buf());
         };
@@ -232,6 +280,36 @@ impl Nastran95Solver {
             .join("nas-run")
             .join(std::process::id().to_string())
             .join(solution))
+    }
+}
+
+/// Releases a solve's private work directory when dropped, panics included.
+pub(crate) struct WorkspaceGuard<'a> {
+    solver: &'a Nastran95Solver,
+    transient: PathBuf,
+}
+
+impl<'a> WorkspaceGuard<'a> {
+    pub(crate) fn new(solver: &'a Nastran95Solver, transient: PathBuf) -> Self {
+        Self { solver, transient }
+    }
+}
+
+impl Drop for WorkspaceGuard<'_> {
+    fn drop(&mut self) {
+        self.solver.release_workspace(&self.transient);
+    }
+}
+
+impl Nastran95Solver {
+    /// Remove the private directory [`Self::workspace_for`] made for a finished
+    /// solve (a no-op for a configured, shared stage).
+    pub(crate) fn release_workspace(&self, transient: &Path) {
+        if self.private_work {
+            if let Some(root) = transient.parent() {
+                let _ = std::fs::remove_dir_all(root);
+            }
+        }
     }
 }
 
@@ -257,10 +335,12 @@ pub fn run_nastran95(
     work_dir: &Path,
     timeout_seconds: f64,
 ) -> RunOutcome {
-    let timeout = match timeout_from_seconds("nastran.exe", timeout_seconds) {
+    let timeout = match timeout_from_seconds(Nastran95Solver::EXECUTABLE_NAME, timeout_seconds) {
         Ok(timeout) => timeout,
         Err(error) => return RunOutcome::Failed(error.to_string()),
     };
+    // No solve may outlive the stale-folder sweep of its private work tree (a day).
+    let timeout = timeout.min(MAX_SOLVE);
     let open_core = match open_core_words(
         solver.open_core_words.as_deref(),
         solver.max_open_core_words,
@@ -276,15 +356,22 @@ pub fn run_nastran95(
     if let Err(error) = validate_runtime_dependencies(&solver.exe, solver.runtime.as_deref()) {
         return RunOutcome::Failed(error);
     }
-    if let Err(error) = validate_dosnam_paths(&work_dir) {
-        return RunOutcome::Failed(error);
+    // A private work tree is addressed relative to the solver's working directory, so
+    // the fixed-size path buffers never see the (arbitrarily deep, per-user) tree.
+    let relative = solver.private_work;
+    if !relative {
+        if let Err(error) = validate_dosnam_paths(&work_dir) {
+            return RunOutcome::Failed(error);
+        }
     }
     let rf = match rigid_format_stage_dir(&work_dir, solver.rf_stage.as_deref()) {
         Ok(path) => path,
         Err(error) => return RunOutcome::Failed(error),
     };
-    if let Err(error) = validate_rigid_format_stage(&rf) {
-        return RunOutcome::Failed(error);
+    if !relative {
+        if let Err(error) = validate_rigid_format_stage(&rf) {
+            return RunOutcome::Failed(error);
+        }
     }
     if let Err(error) = stage(solver, &work_dir, &rf) {
         return RunOutcome::Failed(format!("could not stage the run: {error}"));
@@ -296,19 +383,39 @@ pub fn run_nastran95(
     // maximum. Set ALAS_NASTRAN95_DBMEM=0 to opt out for constrained hosts.
     let dbmem = std::env::var("ALAS_NASTRAN95_DBMEM").unwrap_or_else(|_| "1".to_owned());
 
+    let rf_name = if relative {
+        match rf.strip_prefix(&work_dir) {
+            Ok(inside) => short(inside),
+            Err(_) => {
+                return RunOutcome::Failed(format!(
+                    "a private NASTRAN-95 work tree needs its rigid-format folder inside the work folder, got {}",
+                    rf.display()
+                ))
+            }
+        }
+    } else {
+        short(&rf)
+    };
+    let named = |relative_name: &str, absolute: &Path| {
+        if relative {
+            relative_name.to_owned()
+        } else {
+            short(absolute)
+        }
+    };
     let mut command = Command::new(&solver.exe);
     command
         .current_dir(&work_dir)
         .env("DBMEM", &dbmem)
         .env("OCMEM", &open_core)
-        .env("RFDIR", short(&rf))
-        .env("DIRCTY", short(&scratch))
-        .env("LOGNM", short(&work_dir.join("run.log")))
-        .env("OPTPNM", short(&work_dir.join("run.optp")))
-        .env("NPTPNM", short(&work_dir.join("run.nptp")))
+        .env("RFDIR", rf_name)
+        .env("DIRCTY", named("scr", &scratch))
+        .env("LOGNM", named("run.log", &work_dir.join("run.log")))
+        .env("OPTPNM", named("run.optp", &work_dir.join("run.optp")))
+        .env("NPTPNM", named("run.nptp", &work_dir.join("run.nptp")))
         .env("PLTNM", "none")
-        .env("DICTNM", short(&work_dir.join("run.dic")))
-        .env("PUNCHNM", short(&work_dir.join("run.pch")));
+        .env("DICTNM", named("run.dic", &work_dir.join("run.dic")))
+        .env("PUNCHNM", named("run.pch", &work_dir.join("run.pch")));
     for unit in 11..=21 {
         command.env(format!("FTN{unit}"), "none");
     }
@@ -316,9 +423,10 @@ pub fn run_nastran95(
         command.env(format!("SOF{unit}"), "none");
     }
     if let Some(runtime) = &solver.runtime {
-        let path = std::env::var("PATH").unwrap_or_default();
         let runtime = absolute_path(runtime).unwrap_or_else(|_| runtime.clone());
-        command.env("PATH", format!("{};{path}", runtime.display()));
+        let (variable, value) =
+            runtime_search_env(&runtime, std::env::var_os(RUNTIME_SEARCH_VARIABLE));
+        command.env(variable, value);
     }
 
     // A bare carriage return lands in column 81 and fails the scanner.

@@ -18,7 +18,7 @@
 //!
 //! [`runs`] ports `alas/sidecar/runs.py`: run lifecycle tracking and bounded in-memory registry.
 //!
-//! [`pipeline`] ports `alas/pipeline.py`: master multi-stage design coordinator.
+//! [`pipeline`] ports `alas/pipeline.py`: master multi-stage design orchestrator.
 //!
 //! [`openvsp`] materializes the native geometry and a lifting-surface-only
 //! VSPAERO mesh. [`vspaero`] runs and parses that independent solver, then
@@ -32,8 +32,8 @@ pub mod cpacs;
 #[path = "cpacs/adapters.rs"]
 pub mod cpacs_adapters;
 pub mod cruise_mass;
+pub mod design_point;
 pub mod dual_solver;
-pub mod earth_texture;
 pub mod export;
 pub mod feasibility;
 pub mod field_performance;
@@ -100,24 +100,36 @@ pub use export::{
     export_json_with_feasibility_and_cpacs, format_summary, CpacsReference, DesignDatabase,
 };
 pub use feasibility::{
-    assess_physical_feasibility, assess_physical_feasibility_with_load_case, design_mass_config,
-    design_vn_diagram, design_vn_mass_kg, format_feasibility, thrust_checks, CarriedFuelBasis,
-    CgEnvelopeAssessment, CruiseEquilibriumAssessment, DeliveryBlocker, DeliveryClassification,
-    DeliveryVerdict, DesignProvenance, DispatchAssessment, DispatchOutcome, FeasibilityReport,
-    FindingCode, FindingSeverity, FuelCapacityAssessment, FuelCapacityEvidence,
-    FuelLoadingAssessment, LedgerItemSummary, MassBalanceAssessment, MassStateSummary,
-    MissionFuelAssessment, MissionFuelStatus, PhysicalFinding, PlannedLevels, PlanningCgStatus,
-    RunCompletion, TankSummary, ThrustChecks,
+    assess_physical_feasibility, assess_physical_feasibility_on_route,
+    assess_physical_feasibility_with_load_case, design_mass_config, design_vn_diagram,
+    design_vn_mass_kg, format_feasibility, thrust_checks, CarriedFuelBasis, CgEnvelopeAssessment,
+    CruiseEquilibriumAssessment, DeliveryBlocker, DeliveryClassification, DeliveryVerdict,
+    DesignProvenance, DispatchAssessment, DispatchOutcome, FeasibilityReport, FindingCode,
+    FindingSeverity, FuelCapacityAssessment, FuelCapacityEvidence, FuelLoadingAssessment,
+    LedgerItemSummary, MassBalanceAssessment, MassStateSummary, MissionCgPoint, MissionEventRecord,
+    MissionFuelAssessment, MissionFuelStatus, MissionHistory, MissionStageResult, PhysicalFinding,
+    PlannedLevels, PlanningCgStatus, PropulsionStationEvidence, RunCompletion, StageFieldCheck,
+    TankSummary, ThrustChecks,
 };
 pub use flowunsteady::{
     run_flowunsteady_analysis, FlowUnsteadyAnalysisResult, FlowUnsteadyAnalysisStatus,
 };
 pub use full_analysis::{
-    AnalysisReport, DesignPoint, FullAnalysis, PolarFit, PolarFitStatus, TrimmedDesignPoint,
+    cruise_point_off_polar_note, route_cruise_point, AnalysisReport, CruisePointBasis,
+    CruisePointMission, DesignPoint, FullAnalysis, LoadPlanPolicy, PolarFit, PolarFitStatus,
+    RouteCruisePoint, TrimmedDesignPoint,
 };
 pub use gear_stations::{resolved_gear_stations, wing_mounted_gear_domain};
 pub use mission_stage::dispatch::{
-    DesignMissionCase, LoadCaseSelection, PolicyClosureCase, SelectedLoadCase,
+    DeclaredLevelCheck, DesignMissionCase, LoadCaseSelection, PolicyClosureCase, SelectedLoadCase,
+};
+pub use mission_stage::plan::{
+    Applied, CarriedItem, PlanClosure, PlanLoadCase, ResolvedEvent, TrimDragReport, TrimDragStatus,
+};
+pub use mission_stage::sequence::{flown_phases, Phase, PhaseKind, PlannedMission, Scope};
+pub use mission_stage::{
+    fly_standard_mission, planned_standard_mission, planned_standard_schedule, NativeFlight,
+    NativeSupplement, ReachCause, ReachNote, SizingOutcome,
 };
 pub use openvsp::{
     export_openvsp_script, materialize_openvsp_project, OpenVspExportResult, OpenVspExportStatus,
@@ -126,8 +138,8 @@ pub use payload_layout_export::{
     export_payload_layout_artifact, PayloadLayoutArtifact, PAYLOAD_LAYOUT_SCHEMA_VERSION,
 };
 pub use pipeline::{
-    DesignPipeline, PipelineExecutionStatus, PipelineOptions, PipelineResult, RoutePlanningStatus,
-    RunObservers,
+    live_dispatch_account, DesignPipeline, PipelineExecutionStatus, PipelineOptions,
+    PipelineResult, RoutePlanningStatus, RunObservers, LIVE_DISPATCH_NOT_ENABLED,
 };
 pub use plot::render_scene_svg;
 pub use runs::{RunEvent, RunEventKind, RunEventSeverity, RunRegistry, RunState};

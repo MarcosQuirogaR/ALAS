@@ -27,9 +27,9 @@
 
 use alas_report::families::geometry::SceneFraming;
 use alas_viz::SceneView;
-use egui::{pos2, vec2, Color32, Context, Id, Pos2, Rect, Response, RichText, Stroke, Ui};
+use egui::{pos2, vec2, Color32, Context, Id, Pos2, Rect, Response, Stroke, Ui};
 
-use crate::state::{AppState, PreviewCamera};
+use crate::state::AppState;
 use crate::theme::SELECTABLE_CONTROL_RADIUS;
 use crate::views::tr;
 
@@ -38,6 +38,10 @@ use super::overlays::show_action_block;
 use super::panel::show_parameter_access;
 use super::scene::{SANDBOX_CAMERA_ID, SANDBOX_VIEW_KEY};
 
+/// Orbit gain of the sandbox viewport, degrees per logical point of pointer
+/// motion (about one turn for a 1000 point drag). egui reports drag motion in
+/// logical points, so the gain already follows the display scaling.
+pub const ORBIT_DEGREES_PER_POINT: f64 = 0.38;
 const HANDLE_RADIUS: f32 = 6.0;
 const PICK_RADIUS: f32 = 11.0;
 /// Reveal just the closest handle before the pointer reaches its drag target.
@@ -46,6 +50,8 @@ const REVEAL_RADIUS: f32 = 28.0;
 pub const REST_OPACITY: f32 = 0.6;
 /// Inset of the floating controls from the viewport edge, in points.
 pub const OVERLAY_INSET: f32 = 8.0;
+/// How long the ring marking a newly set pivot stays on screen, s.
+const PIVOT_MARKER_S: f64 = 2.5;
 /// Height reserved for the camera row at the top of the viewport, in points.
 pub const CAMERA_ROW_HEIGHT: f32 = 28.0;
 /// Height of one line of the rejected-edit message, in points.
@@ -157,6 +163,13 @@ pub(super) fn floating_control(
             .rounding(egui::Rounding::same(SELECTABLE_CONTROL_RADIUS)),
     );
     ui.set_opacity(previous);
+    // A pointer click leaves egui's keyboard focus on the button, which draws
+    // the focus outline and lit fill for good: the clicked category would
+    // then look selected beside the real selection. Keyboard activation keeps
+    // the focus cue.
+    if response.clicked() && ui.ctx().input(|input| input.pointer.any_click()) {
+        response.surrender_focus();
+    }
     debug_assert_eq!(response.id, id, "floating control id is predictable");
     register_overlay_rect(ui.ctx(), tag, response.rect);
     response
@@ -257,6 +270,14 @@ impl CanvasFit {
         Self { scale, offset }
     }
 
+    /// The scene canvas point under a screen point.
+    fn to_canvas(&self, point: egui::Pos2) -> [f64; 2] {
+        [
+            f64::from((point.x - self.offset.x) / self.scale),
+            f64::from((point.y - self.offset.y) / self.scale),
+        ]
+    }
+
     fn to_screen(&self, framing: &SceneFraming, point: [f64; 3]) -> egui::Pos2 {
         let [x, y] = framing.project(point);
         pos2(
@@ -271,6 +292,9 @@ pub fn show_viewport(state: &mut AppState, ui: &mut Ui) {
     // The control rectangles of the last frame decide who owns this
     // gesture; the controls of this frame register themselves again below.
     let overlays = overlay_rects(ui.ctx());
+    if let Some(inset) = super::framing::measured_fit_inset(ui.ctx()) {
+        state.set_sandbox_fit_inset(inset);
+    }
     reset_overlay_rects(ui.ctx());
     let size = vec2(
         ui.available_width().max(240.0),
@@ -278,7 +302,9 @@ pub fn show_viewport(state: &mut AppState, ui: &mut Ui) {
     );
     // The canvas is the viewport: a resize redraws the kept framing.
     state.set_sandbox_viewport_size((size.x, size.y));
-    let Some((scene, framing)) = state.sandbox.scene.clone() else {
+    // Taken out for the draw and put back right after it: cloning the scene
+    // (tens of thousands of elements) every frame cost as much as drawing it.
+    let Some((scene, framing)) = state.sandbox.scene.take() else {
         ui.centered_and_justified(|ui| ui.label(tr("The aircraft could not be built.")));
         return;
     };
@@ -292,6 +318,7 @@ pub fn show_viewport(state: &mut AppState, ui: &mut Ui) {
             .cache_key(SANDBOX_VIEW_KEY)
             .cache_revision(revision),
     );
+    state.sandbox.scene = Some((scene, framing));
     let rect = response.rect;
     ui.ctx()
         .data_mut(|d| d.insert_temp(viewport_rect_id(), rect));
@@ -313,44 +340,112 @@ pub fn show_viewport(state: &mut AppState, ui: &mut Ui) {
         .filter(|(_, distance)| *distance <= PICK_RADIUS)
         .map(|(handle, _)| (*handle).clone());
 
+    // The handle a drag grabs is the one under where the press went down, not
+    // under where the pointer is when the drag threshold is crossed: a drag
+    // that starts on bare geometry orbits and edits nothing.
+    let press_handle = press_origin.and_then(|origin| {
+        handles
+            .iter()
+            .map(|h| (h, fit.to_screen(&framing, h.point).distance(origin)))
+            .filter(|(_, d)| *d <= PICK_RADIUS)
+            .min_by(|a, b| a.1.total_cmp(&b.1))
+            .map(|(h, _)| h.clone())
+    });
     // A handle under the pointer takes the drag; the camera is the
     // fallback interaction. A gesture that began on a floating control
     // belongs to that control.
     let mut camera_changed = false;
     if state.sandbox.drag.is_some() {
         if response.dragged() {
-            state.update_handle_drag(response.drag_motion());
+            state.update_handle_drag(response.drag_delta());
         }
         if response.drag_stopped() || !ui.input(|i| i.pointer.primary_down()) {
             state.end_handle_drag();
         }
     } else if gesture_on_control {
         // Owned by the control under the press origin.
-    } else if response.drag_started() && hovered_handle.is_some() {
-        if let Some(handle) = &hovered_handle {
+    } else if response.drag_started() && press_handle.is_some() {
+        if let Some(handle) = &press_handle {
             state.begin_handle_drag(handle, &framing, fit.scale);
         }
-    } else if response.dragged_by(egui::PointerButton::Primary)
-        || response.dragged_by(egui::PointerButton::Middle)
-    {
-        let delta = response.drag_motion();
-        state
-            .preview_camera_mut(SANDBOX_CAMERA_ID)
-            .apply_orbit_motion(delta);
-        camera_changed = delta.is_finite();
+    } else {
+        // CATIA V5 navigation (see `nav_input`); the left button alone
+        // never moves the camera.
+        match crate::nav_input::read(&response) {
+            crate::nav_input::NavAction::Pan(motion) => {
+                // Pan: the pivot follows the pointer on screen.
+                let delta = motion / fit.scale;
+                if delta.is_finite() {
+                    state.sandbox.pan.0 += f64::from(delta.x);
+                    state.sandbox.pan.1 += f64::from(delta.y);
+                    state.sandbox.view_touched = true;
+                    camera_changed = true;
+                }
+            }
+            crate::nav_input::NavAction::Rotate(delta) => {
+                // Orbit about the pivot (the aircraft's centre unless one was set).
+                state
+                    .preview_camera_mut(SANDBOX_CAMERA_ID)
+                    .apply_orbit_motion_at(delta, ORBIT_DEGREES_PER_POINT);
+                camera_changed |= delta.is_finite();
+            }
+            crate::nav_input::NavAction::None => {}
+        }
+    }
+    // Set the pivot on the surface point under a double or middle click; the picture does not move, later orbits turn about that point.
+    if let Some(p) = pointer {
+        let set_pivot = crate::nav_input::pivot_requested(&response);
+        if set_pivot {
+            let canvas_point = fit.to_canvas(p);
+            if state.set_sandbox_pivot_at(&framing, canvas_point) {
+                state.sandbox.pivot_marker_at = Some(ui.input(|i| i.time));
+                state.sandbox.view_touched = true;
+                camera_changed = true;
+            }
+        }
     }
     if response.hovered() && pointer.is_some() {
         let scroll_y = ui.input(|input| input.smooth_scroll_delta.y);
         if scroll_y.abs() > f32::EPSILON {
             let factor = f64::from((1.0 + scroll_y * 0.0015).clamp(0.5, 1.5));
-            state
-                .preview_camera_mut(SANDBOX_CAMERA_ID)
-                .apply_zoom_factor(factor);
+            let cursor = pointer.map_or((0.0, 0.0), |p| {
+                let c = fit.to_canvas(p);
+                (c[0] - framing.canvas.0 * 0.5, c[1] - framing.canvas.1 * 0.5)
+            });
+            let mut pan = state.sandbox.pan;
+            super::navigation::zoom_towards_cursor(
+                state.preview_camera_mut(SANDBOX_CAMERA_ID),
+                &mut pan,
+                factor,
+                cursor,
+            );
+            state.sandbox.pan = pan;
+            state.sandbox.view_touched = true;
             camera_changed = true;
         }
     }
 
     let painter = ui.painter_at(rect);
+    // A brief marker where the pivot was just set: an expanding ring and a
+    // cross in the accent over an outline, at full strength until it fades
+    // over the last third of `PIVOT_MARKER_S`.
+    if let (Some(at), Some(pivot)) = (state.sandbox.pivot_marker_at, state.sandbox.pivot) {
+        let age = ui.input(|i| i.time) - at;
+        if (0.0..PIVOT_MARKER_S).contains(&age) {
+            use crate::theme::mark::{paint, Part};
+            let centre = fit.to_screen(&framing, pivot);
+            let progress = (age / PIVOT_MARKER_S) as f32;
+            let (radius, accent) = (7.0 + 15.0 * progress, ui.visuals().hyperlink_color);
+            let (across, down) = (vec2(radius + 4.0, 0.0), vec2(0.0, radius + 4.0));
+            let parts = [
+                Part::Ring(centre, radius, 2.5),
+                Part::Line([centre - across, centre + across], 1.5),
+                Part::Line([centre - down, centre + down], 1.5),
+            ];
+            paint(&painter, accent, 3.0 * (1.0 - progress), &parts);
+            ui.ctx().request_repaint();
+        }
+    }
     let accent = ui.visuals().hyperlink_color;
     for handle in handles.iter() {
         let active = state
@@ -396,7 +491,9 @@ pub fn show_viewport(state: &mut AppState, ui: &mut Ui) {
     }
     // Only a handle explains itself; the empty design space has no tooltip.
     if let Some(handle) = &hovered_handle {
-        response.clone().on_hover_text(hover_text(handle));
+        response
+            .clone()
+            .on_hover_text_at_pointer(hover_text(handle));
     }
     if let Some(drag) = &state.sandbox.drag {
         painter.text(
@@ -409,11 +506,13 @@ pub fn show_viewport(state: &mut AppState, ui: &mut Ui) {
     }
 
     let block = show_action_block(state, ui, rect);
-    let camera_row = show_viewport_controls(state, ui, rect, &mut camera_changed);
+    let camera_row =
+        super::camera_row::show_viewport_controls(state, ui, rect, &mut camera_changed);
     // A rejected-edit message sits above the action block, left-aligned;
     // the category stack keeps clear of it. Run status is not painted here:
     // the run log window and the estimates strip carry it.
-    let mut message_bottom = block.top() - 6.0;
+    let summary_top = super::panel::show_summary_text(state, ui, rect, block.top() - 6.0);
+    let mut message_bottom = summary_top - 4.0;
     let messages: Vec<(String, Color32)> = state
         .sandbox
         .rejected_edit
@@ -442,6 +541,13 @@ pub fn show_viewport(state: &mut AppState, ui: &mut Ui) {
         state.reproject_sandbox_scene();
         ui.ctx().request_repaint();
     }
+    // An orbit that ended with the aircraft partly out of the free part of
+    // the viewport refits it (a view the user panned or zoomed is kept).
+    if response.drag_stopped() && !state.sandbox.view_touched && state.drawn_outside_free_viewport()
+    {
+        state.refit_sandbox_framing();
+        ui.ctx().request_repaint();
+    }
 }
 
 /// Compare handles by the model target they edit, rather than by their
@@ -459,70 +565,6 @@ fn same_handle_identity(left: &Handle, right: &Handle) -> bool {
 
 fn hover_text(handle: &Handle) -> String {
     format!("{} ({})", tr(handle.label), tr("drag to edit"))
-}
-
-/// The camera row centred at the top of the viewport: Overview, the name of
-/// the isolated component when one is focused, the presets and Fit.
-/// Presets and orbit only turn the camera; Fit refits the framing to the
-/// shown components and resets the zoom. Returns the row rectangle.
-fn show_viewport_controls(
-    state: &mut AppState,
-    ui: &mut Ui,
-    viewport: Rect,
-    camera_changed: &mut bool,
-) -> Rect {
-    let top = viewport.top() + OVERLAY_INSET;
-    let row = centered_row(ui, "camera", viewport, top, CAMERA_ROW_HEIGHT, |ui| {
-        // Overview is the no-component state of the same selection the
-        // category stack renders, so it shows as selected exactly when no
-        // component is focused.
-        let overview = state.sandbox.focus().is_none();
-        if floating_control(
-            ui,
-            "camera",
-            true,
-            overview,
-            egui::Button::new(tr("Overview")).small(),
-        )
-        .on_hover_text(tr(
-            "Show the whole aircraft again without changing any data.",
-        ))
-        .clicked()
-            && !overview
-        {
-            state.set_sandbox_focus(None);
-        }
-        if let Some(focus) = state.sandbox.focus() {
-            ui.label(RichText::new(tr(focus.title())).weak().small());
-        }
-        for (label, camera) in [
-            ("Iso", PreviewCamera::isometric()),
-            ("Top", PreviewCamera::top()),
-            ("Front", PreviewCamera::front()),
-            ("Side", PreviewCamera::side()),
-        ] {
-            if floating_button(ui, "camera", egui::Button::new(tr(label)).small()).clicked() {
-                let zoom = state.preview_camera_mut(SANDBOX_CAMERA_ID).zoom;
-                *state.preview_camera_mut(SANDBOX_CAMERA_ID) = PreviewCamera { zoom, ..camera };
-                state.view_state_mut(SANDBOX_VIEW_KEY).reset();
-                *camera_changed = true;
-            }
-        }
-        if floating_button(ui, "camera", egui::Button::new(tr("Fit")).small())
-            .on_hover_text(tr(
-                "Refit the current view without changing its orientation.",
-            ))
-            .clicked()
-        {
-            state.preview_camera_mut(SANDBOX_CAMERA_ID).fit();
-            state.view_state_mut(SANDBOX_VIEW_KEY).reset();
-            state.refit_sandbox_framing();
-        }
-    });
-    Rect::from_min_max(
-        pos2(viewport.left(), top),
-        pos2(viewport.right(), row.bottom().max(top + CAMERA_ROW_HEIGHT)),
-    )
 }
 
 #[cfg(test)]
@@ -560,5 +602,29 @@ mod tests {
         assert!(same_handle_identity(&original, &reprojected));
         assert!(!same_handle_identity(&original, &other_section));
         assert!(!same_handle_identity(&original, &other_component));
+    }
+}
+
+#[cfg(test)]
+mod gain_tests {
+    use super::ORBIT_DEGREES_PER_POINT;
+    use crate::state::PreviewCamera;
+
+    /// The orbit gain is pinned: 100 logical points of drag turn the model
+    /// 38 degrees about the vertical, and a full 1000 point sweep one turn.
+    #[test]
+    fn the_orbit_gain_is_about_a_third_of_a_degree_per_point() {
+        assert!((0.35..=0.40).contains(&ORBIT_DEGREES_PER_POINT));
+        let mut camera = PreviewCamera::front();
+        camera.apply_orbit_motion_at(egui::vec2(100.0, 0.0), ORBIT_DEGREES_PER_POINT);
+        let turned = (camera.yaw_deg - PreviewCamera::front().yaw_deg).rem_euclid(360.0);
+        assert!((turned - 38.0).abs() < 1e-9, "{turned}");
+        let mut camera = PreviewCamera::front();
+        camera.apply_orbit_motion_at(egui::vec2(1000.0, 0.0), ORBIT_DEGREES_PER_POINT);
+        let turned = (camera.yaw_deg - PreviewCamera::front().yaw_deg).rem_euclid(360.0);
+        assert!(
+            (turned - 20.0).abs() < 1e-9,
+            "380 degrees wraps to 20: {turned}"
+        );
     }
 }

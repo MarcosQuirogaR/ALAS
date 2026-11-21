@@ -194,6 +194,34 @@ pub fn update_acceleration(conditions: &mut Conditions, differentiate: &[Vec<f64
     }
 }
 
+/// The acceleration of a climb at the maximum-climb rating: the rate of change of the airspeed,
+/// along the velocity.
+///
+/// The climb at the rating is a total-energy climb (BADA 3.8 User Manual, Sec. 3.2): the force
+/// balance carries the change of the airspeed along the path, and the curvature of the path (the
+/// change of the flight-path angle between points) is neglected, as the energy share the rate is
+/// settled by assumes. Kept, the curvature term ties each point's thrust to its neighbours'
+/// rates through the collocation derivative, and the point-by-point settling drifted away from
+/// the rating at the ends of a leg that blends its speed (C919 step climb).
+pub fn update_tangential_acceleration(conditions: &mut Conditions, differentiate: &[Vec<f64>]) {
+    let speeds: Vec<f64> = conditions
+        .velocity_vector_m_s
+        .iter()
+        .map(|v| v.iter().map(|value| value * value).sum::<f64>().sqrt())
+        .collect();
+    for (row, acceleration) in conditions.acceleration_vector_m_s2.iter_mut().enumerate() {
+        let along: f64 = differentiate[row]
+            .iter()
+            .zip(&speeds)
+            .map(|(&weight, speed)| weight * speed)
+            .sum();
+        let velocity = conditions.velocity_vector_m_s[row];
+        for (axis, value) in acceleration.iter_mut().enumerate() {
+            *value = along * velocity[axis] / speeds[row];
+        }
+    }
+}
+
 /// Build the body and wind transforms, and read the flow angles out of them.
 ///
 /// The angle of attack is *not* an input here: it falls out of the body pitch
@@ -244,7 +272,12 @@ pub fn update_orientations(conditions: &mut Conditions) {
 }
 
 /// Sum lift, drag, thrust and weight in the inertial frame.
-pub fn update_forces(conditions: &mut Conditions) {
+///
+/// `load_factor` is the sustained load factor of the leg (1 in steady flight):
+/// in turning flight the lift balances `n W`, which the weight term stands in
+/// for, so the vertical residual is zero at `L = n W`. Exactly 1 leaves every
+/// force as it was.
+pub fn update_forces(conditions: &mut Conditions, load_factor: f64) {
     for point in 0..conditions.len() {
         let wind_to_inertial = conditions.transform_wind_to_inertial[point];
         let body_to_inertial = conditions.transform_body_to_inertial[point];
@@ -258,7 +291,10 @@ pub fn update_forces(conditions: &mut Conditions) {
             &conditions.wind_drag_force_vector_n[point],
         );
         let thrust = matrix_vector(&body_to_inertial, &conditions.thrust_force_vector_n[point]);
-        let weight = conditions.gravity_force_vector_n[point];
+        let mut weight = conditions.gravity_force_vector_n[point];
+        if load_factor != 1.0 {
+            weight = weight.map(|component| component * load_factor);
+        }
 
         for axis in 0..3 {
             conditions.total_force_vector_n[point][axis] =

@@ -6,7 +6,7 @@
 //! the nacelle dimensions, and the spanwise stations of the detailed wing
 //! method.
 
-use alas_config::{GeometryConfig, WingConfig};
+use alas_config::{EngineConfig, GeometryConfig, WingConfig};
 use alas_geom::aircraft::airplane::Airplane;
 use alas_geom::aircraft::fuselage::Fuselage;
 use alas_geom::aircraft::spacing::linspace;
@@ -26,7 +26,8 @@ pub(super) struct BuiltFuselage<'a> {
     pub wing: &'a Wing,
     /// Maximum fuselage width `WF`, m.
     pub width_m: f64,
-    /// Maximum fuselage depth `DF`, m.
+    /// Fuselage depth `DF`, m: the depth of the maximum-width body
+    /// (`product::max_fuselage_width_depth`).
     pub depth_m: f64,
     /// Fuselage length `XL`, first to last section, m.
     pub length_m: f64,
@@ -64,14 +65,97 @@ fn section_thickness(wing: &Wing, sample: &[f64]) -> Vec<f64> {
         .collect()
 }
 
+/// The spanwise stations of the wing pods of one semi-wing, fractions of the
+/// semispan. The engine list holds both sides, and rear-fuselage engines stand
+/// off the centreline on no wing.
+pub(super) fn semi_wing_pod_stations(engine: &EngineConfig, semispan_m: f64) -> Vec<f64> {
+    if engine.rear_fuselage_mount().is_some() {
+        return Vec::new();
+    }
+    engine
+        .spanwise_positions_m
+        .iter()
+        .filter(|y| **y > 0.0)
+        .map(|y| y / semispan_m)
+        .filter(|eta| *eta <= 1.0)
+        .collect()
+}
+
+/// The fin mass factor of the built tail.
+pub(super) fn fin_factor(
+    horizontal: &Wing,
+    vertical: &Wing,
+    fuselage: &Fuselage,
+    fin_count: usize,
+) -> f64 {
+    let (height_m, fin_span_m) = tailplane_on_fin_heights_m(horizontal, vertical, fuselage);
+    super::structure::fin_mounted_tailplane_factor(
+        horizontal.reference_area(),
+        height_m,
+        vertical.reference_planform().unfolded_area() / fin_count as f64,
+        fin_span_m,
+    )
+}
+
+/// The height of the tailplane root above the fin root, and the fin span, m.
+///
+/// The fin root is where the fin leaves the body: the higher of its planform
+/// root and the fuselage top at that station, since a planform carried into the
+/// body is not fin span. A tailplane at or below that height is carried by the
+/// fuselage and gives a height of zero or less.
+fn tailplane_on_fin_heights_m(
+    horizontal: &Wing,
+    vertical: &Wing,
+    fuselage: &Fuselage,
+) -> (f64, f64) {
+    let fin = vertical.reference_planform();
+    let (Some(fin_root), Some(fin_tip), Some(tailplane_root)) = (
+        fin.xsecs.first(),
+        fin.xsecs.last(),
+        horizontal.reference_planform().xsecs.first().cloned(),
+    ) else {
+        return (0.0, 0.0);
+    };
+    let body_top = fuselage_top_at(fuselage, fin_root.xyz_le[0]);
+    let root_z = fin_root.xyz_le[2].max(body_top);
+    (
+        tailplane_root.xyz_le[2] - root_z,
+        fin_tip.xyz_le[2] - root_z,
+    )
+}
+
+/// Top of the fuselage at station `x`, m, interpolated between sections and
+/// held at the end sections beyond them.
+fn fuselage_top_at(fuselage: &Fuselage, x: f64) -> f64 {
+    let top = |section: &alas_geom::aircraft::fuselage::FuselageXSec| {
+        section.xyz_c[2] + section.height / 2.0
+    };
+    let mut height = f64::NEG_INFINITY;
+    for pair in fuselage.xsecs.windows(2) {
+        let (a, b) = (&pair[0], &pair[1]);
+        if x >= a.xyz_c[0] && x <= b.xyz_c[0] && b.xyz_c[0] > a.xyz_c[0] {
+            let t = (x - a.xyz_c[0]) / (b.xyz_c[0] - a.xyz_c[0]);
+            height = top(a) + t * (top(b) - top(a));
+            break;
+        }
+    }
+    if height.is_finite() {
+        return height;
+    }
+    fuselage.xsecs.last().map_or(0.0, top)
+}
+
 /// Area-weighted average thickness-to-chord ratio over the lofted sections.
+/// Each panel's area is its chord times its span in the plane of the sections
+/// (y and z together), so a fin, whose sections stack in z, is weighted like a wing.
 pub(super) fn average_thickness(wing: &Wing) -> f64 {
     let sample = linspace(0.0, 1.0, 101);
     let thickness = section_thickness(wing, &sample);
     let mut weighted = 0.0;
     let mut total = 0.0;
     for (pair, tc) in wing.xsecs.windows(2).zip(thickness.windows(2)) {
-        let span = (pair[1].xyz_le[1] - pair[0].xyz_le[1]).abs();
+        let span =
+            (pair[1].xyz_le[1] - pair[0].xyz_le[1]).hypot(pair[1].xyz_le[2] - pair[0].xyz_le[2]);
         let area = span * (pair[0].chord + pair[1].chord) / 2.0;
         weighted += area * (tc[0] + tc[1]) / 2.0;
         total += area;
@@ -89,16 +173,17 @@ pub(super) fn average_thickness(wing: &Wing) -> f64 {
 /// ([`alas_config::WingShape`]); equation 66's dihedral term is a ground-roll
 /// clearance under the outboard engine, measured on the wing as it stands.
 pub(super) fn ground_dihedral_deg(wing: &Wing, wing_config: &WingConfig) -> f64 {
-    let (Some(root), Some(tip)) = (wing.xsecs.first(), wing.xsecs.last()) else {
+    let Some(tip) = wing.xsecs.last() else {
         return 0.0;
     };
-    let dy = (tip.xyz_le[1] - root.xyz_le[1]).abs();
+    let (root_le_m, _) = wing.design_root();
+    let dy = (tip.xyz_le[1] - root_le_m[1]).abs();
     if dy <= 0.0 {
         return 0.0;
     }
     // The builder has already rejected an invalid rise, so none is left.
     let tip_rise_m = wing_config.flight_tip_rise_m(dy).unwrap_or(0.0);
-    ((tip.xyz_le[2] - tip_rise_m - root.xyz_le[2]) / dy)
+    ((tip.xyz_le[2] - tip_rise_m - root_le_m[2]) / dy)
         .atan()
         .to_degrees()
 }
@@ -222,4 +307,37 @@ pub(super) fn detailed_stations(wing: &Wing) -> Vec<WingStation> {
         }
     }
     stations
+}
+
+// Test fixture failures are failed assertions.
+#[allow(clippy::unwrap_used, clippy::expect_used)]
+#[cfg(test)]
+mod tests {
+    use super::*;
+    use alas_geom::builder::AircraftBuilder;
+
+    #[test]
+    fn a_fin_has_the_thickness_of_its_sections_like_a_tailplane() {
+        let entry = alas_config::presets::get("A320-200").expect("preset");
+        let plane = AircraftBuilder::new(Some(entry.geometry.clone()))
+            .build(Some(&entry.design_vector), true)
+            .expect("builds");
+        for name in ["Vertical Stabilizer", "Horizontal Stabilizer", "Main Wing"] {
+            let surface = plane
+                .wings
+                .iter()
+                .find(|wing| wing.name == name)
+                .expect("surface");
+            let sample = linspace(0.0, 1.0, 101);
+            let sections = section_thickness(surface, &sample);
+            let (low, high) = sections
+                .iter()
+                .fold((f64::INFINITY, 0.0_f64), |(l, h), &t| (l.min(t), h.max(t)));
+            let average = average_thickness(surface);
+            assert!(
+                average.is_finite() && average >= low - 1e-12 && average <= high + 1e-12,
+                "{name} {average}"
+            );
+        }
+    }
 }

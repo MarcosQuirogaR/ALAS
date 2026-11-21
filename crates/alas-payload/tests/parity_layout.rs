@@ -117,6 +117,9 @@ fn compare_meta(
         ItemMeta::None => {
             discrete.exact(&at("meta.keys"), &meta_keys(expected), &Vec::new());
         }
+        ItemMeta::Declared(_) => {
+            unreachable!("the frozen Python layouts declare no payload items")
+        }
         ItemMeta::Seat(seat) => {
             discrete
                 .exact(
@@ -219,7 +222,7 @@ fn compare_meta(
     }
 }
 
-/// Positions, masses and fractions geometry phase 1 moved: `(item, frozen Python value, current value)`.
+/// Positions, masses and fractions the fitted geometry moves: `(item, frozen Python value, current value)`.
 ///
 /// Every `%MAC` figure follows the wing frame the fitted A320 (aerodynamic centre -0.148 m,
 /// `parity_geometry::MOVED_FRAMES`), B787-9 and A380 wings moved: a station keeps its metre value
@@ -334,7 +337,7 @@ const MOVED_VALUES: [(&str, f64, f64); 24] = [
     ),
 ];
 
-/// Compare a value against the frozen record, or, when geometry phase 1 moved it, against both
+/// Compare a value against the frozen record, or, when the fitted geometry moves it, against both
 /// the record (unchanged fixture) and the current value.
 trait MovedScalar {
     fn moved_scalar(&mut self, name: &str, actual: f64, expected: f64) -> &mut Self;
@@ -352,7 +355,7 @@ impl MovedScalar for Comparison {
     }
 }
 
-/// Pallet labels the geometry phase 1 lofts moved: `(item, frozen Python label, current label)`.
+/// Pallet labels the lofted geometry moves: `(item, frozen Python label, current label)`.
 ///
 /// The `cargo_narrowbody` interior is laid out on the current A320 geometry, whose lofted lower
 /// lobe splits the same 5794 kg of freight over the two P6P pallets differently

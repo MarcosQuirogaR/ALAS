@@ -56,6 +56,9 @@ use std::f64::consts::PI;
 mod tail_volume;
 pub use tail_volume::{tail_volume_coefficients, tail_volume_coefficients_reference_compatibility};
 
+mod bracket;
+pub use bracket::{bracketed_trim, SEARCH_RANGE_DEG as TRIM_SEARCH_RANGE_DEG};
+
 mod compressible;
 pub use compressible::CompressibleTrim;
 
@@ -68,5 +71,6 @@ pub use with_system::{
 
 mod longitudinal;
 pub use longitudinal::*;
+mod normal_rotation;
 mod probes;
 pub(crate) use probes::*;

@@ -39,7 +39,11 @@ fn explicit_fuselage_length_bound(bounds: Option<&[(f64, f64)]>) -> bool {
 
 impl DesignOptimizer {
     /// Construct a new design optimizer with `config`.
-    pub fn new(config: AlasConfig) -> Self {
+    pub fn new(mut config: AlasConfig) -> Self {
+        // A clean sheet runs its own default plan (`SolverSettings::for_clean_sheet`).
+        if config.optimizer.design_space.mode == alas_config::DesignMode::CleanSheet {
+            config.optimizer.solver = config.optimizer.solver.clone().for_clean_sheet();
+        }
         Self { config }
     }
 
@@ -220,8 +224,10 @@ impl DesignOptimizer {
     ///
     /// # Errors
     ///
-    /// Returns [`OptimizationError::NoFeasibleDesign`] when every evaluated
-    /// candidate fails the active objective/analysis policy. Invalid bounds
+    /// Infeasibility is not an error: when no evaluated candidate passes the
+    /// active objective/analysis policy, the least-violating candidate is
+    /// returned with `best_valid == false` and termination
+    /// `"no_feasible_design"`. Invalid bounds
     /// and unknown solver tokens are reported before any objective evaluation
     /// begins.
     pub fn run(
@@ -285,14 +291,37 @@ impl DesignOptimizer {
         let effective_bounds = self.effective_bounds(bounds, initial_design)?;
         let nominal = self.nominal_design(initial_design)?;
         let preserve_explicit_fuselage_length = explicit_fuselage_length_bound(bounds);
+        // The staged search refines on the refinement model; the reporting
+        // analysis, on the configuration as given, verifies what it delivers.
+        let refined = crate::ScreeningFidelity::refinement();
         let mut objective = DesignObjective::new_with_nominal_and_fuselage_policy(
-            self.config.clone(),
+            refined.configure(&self.config),
             nominal,
             preserve_explicit_fuselage_length,
         );
+        objective.sizing_controls = refined.controls();
+        // A search model's engine stops in the wider band; replays do not.
+        objective.sizing_controls.engine_aim_band = Some(crate::mdo::ENGINE_SEARCH_AIM_BAND);
         // Every candidate is sized under a cap measured on the nominal, so a
         // straggler cannot stall a generation (`search::work_cap`).
-        let cap = crate::search::work_cap::nominal_work_cap(&objective, &nominal);
+        let reference = crate::search::work_cap::nominal_reference(&objective, &nominal);
+        let cap = reference.cap;
+        // A clean-sheet engine is sized once, on the nominal, and the
+        // exploration model holds it. The refinement model, which ranks the
+        // finalists, sizes the engine of every candidate as the reporting
+        // replay does: a held engine overstated the A320 clean sheet's static
+        // margin by about 4 points of MAC (lighter rubber engines move the CG
+        // aft), so the held ranking sat on the floor and its best candidates
+        // failed once sized. The exploration's margin calibration measures
+        // that offset against this model (`product_search::calibration`).
+        let held_engine = reference.sized_engine.as_ref();
+        let hold = |mut config: AlasConfig| {
+            if let Some(sized) = held_engine {
+                config.apply_sized_engine(sized);
+                config.optimizer.design_space.engine_sized_by_requirements = false;
+            }
+            config
+        };
         objective.sizing_controls.budget = cap;
 
         // The band mode searches the takeoff mass too: the caller's vector starts
@@ -320,7 +349,7 @@ impl DesignOptimizer {
             ))
         })?;
         let fidelity = crate::ScreeningFidelity::shipped();
-        if fidelity == crate::ScreeningFidelity::full() {
+        if fidelity == refined {
             let result = self.run_product_search(
                 &effective_bounds,
                 search_initial,
@@ -332,11 +361,12 @@ impl DesignOptimizer {
             return Ok(with_work_cap(result, cap));
         }
         let mut screening_model = DesignObjective::new_with_nominal_and_fuselage_policy(
-            fidelity.configure(&self.config),
+            hold(fidelity.configure(&self.config)),
             nominal,
             preserve_explicit_fuselage_length,
         );
         screening_model.sizing_controls = fidelity.controls();
+        screening_model.sizing_controls.predicts_engine_scale = held_engine.is_some();
         if screening_model.sizing_controls.budget.is_none() {
             screening_model.sizing_controls.budget = cap;
         }
@@ -362,8 +392,7 @@ impl DesignOptimizer {
     ///
     /// # Errors
     ///
-    /// Returns [`OptimizationError::NoFeasibleDesign`] when every evaluated
-    /// candidate fails the delegated evaluator's active validity policy.
+    /// Infeasibility is not an error: see [`Self::run`].
     pub fn run_with_evaluator<E: ObjectiveEvaluator + ?Sized>(
         &mut self,
         bounds: Option<&[(f64, f64)]>,
@@ -429,9 +458,10 @@ impl DesignOptimizer {
         if result.was_cancelled() {
             return Ok(result);
         }
-        let result = ensure_feasible(result)?;
-
-        restore_winning_payload_load_case(&mut self.config, &result.best_design);
+        let result = flag_if_infeasible(result);
+        if result.best_valid {
+            restore_winning_payload_load_case(&mut self.config, &result.best_design);
+        }
         Ok(result)
     }
 }
@@ -449,8 +479,12 @@ fn complete_search(
     if result.was_cancelled() {
         return Ok(result);
     }
-    let result = ensure_feasible(result)?;
-    restore_winning_payload_load_case(config, &result.best_design);
+    let result = flag_if_infeasible(result);
+    // A flagged infeasible winner is reviewed, not adopted: its payload case
+    // is not restored into the caller's configuration.
+    if result.best_valid {
+        restore_winning_payload_load_case(config, &result.best_design);
+    }
     Ok(result)
 }
 
@@ -546,8 +580,10 @@ mod evidence_tests {
             if termination == "cancelled" {
                 assert_eq!(observed.expect("cancellation has priority"), result);
             } else {
-                let strict = ensure_feasible(result).expect_err("strict rejection");
-                assert_eq!(observed.expect_err("observed rejection"), strict);
+                let flagged = observed.expect("an infeasible search is flagged, not an error");
+                assert_eq!(flagged, flag_if_infeasible(result));
+                assert_eq!(flagged.termination, "no_feasible_design");
+                assert!(!flagged.best_valid);
             }
         }
     }

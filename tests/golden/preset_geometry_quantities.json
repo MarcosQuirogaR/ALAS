@@ -1,0 +1,1543 @@
+{
+  "pins": {
+    "A220-300/fuselage_largest_height_m": {
+      "abs_tol": 1e-6,
+      "note": "Built geometry, m; tolerance 1e-6 relative (1 micrometre floor) covers host differences in the last bits of the fitted curves, far below any intended dimension change.",
+      "rel_tol": 1e-6,
+      "value": 3.722788551608664
+    },
+    "A220-300/fuselage_largest_width_m": {
+      "abs_tol": 1e-6,
+      "note": "Built geometry, m; tolerance 1e-6 relative (1 micrometre floor) covers host differences in the last bits of the fitted curves, far below any intended dimension change.",
+      "rel_tol": 1e-6,
+      "value": 3.500000000000003
+    },
+    "A220-300/fuselage_nose_x_m": {
+      "abs_tol": 1e-6,
+      "note": "Built geometry, m; tolerance 1e-6 relative (1 micrometre floor) covers host differences in the last bits of the fitted curves, far below any intended dimension change.",
+      "rel_tol": 1e-6,
+      "value": 0.0
+    },
+    "A220-300/fuselage_station_count": {
+      "abs_tol": 0.0,
+      "note": "Number of stations of the built primary fuselage polyline.",
+      "rel_tol": 0.0,
+      "value": 59.0
+    },
+    "A220-300/fuselage_tail_x_m": {
+      "abs_tol": 1e-6,
+      "note": "Built geometry, m; tolerance 1e-6 relative (1 micrometre floor) covers host differences in the last bits of the fitted curves, far below any intended dimension change.",
+      "rel_tol": 1e-6,
+      "value": 38.7
+    },
+    "A220-300/horizontal_tail_area_m2": {
+      "abs_tol": 1e-6,
+      "note": "Built geometry, m^2; tolerance 1e-6 relative (1 micrometre floor) covers host differences in the last bits of the fitted curves, far below any intended dimension change.",
+      "rel_tol": 1e-6,
+      "value": 29.077152200358693
+    },
+    "A220-300/horizontal_tail_mean_aerodynamic_chord_m": {
+      "abs_tol": 1e-6,
+      "note": "Built geometry, m; tolerance 1e-6 relative (1 micrometre floor) covers host differences in the last bits of the fitted curves, far below any intended dimension change.",
+      "rel_tol": 1e-6,
+      "value": 2.518725751266406
+    },
+    "A220-300/horizontal_tail_quarter_chord_centre_x_m": {
+      "abs_tol": 1e-6,
+      "note": "Built geometry, m; tolerance 1e-6 relative (1 micrometre floor) covers host differences in the last bits of the fitted curves, far below any intended dimension change.",
+      "rel_tol": 1e-6,
+      "value": 34.82811541958037
+    },
+    "A220-300/horizontal_tail_span_m": {
+      "abs_tol": 1e-6,
+      "note": "Built geometry, m; tolerance 1e-6 relative (1 micrometre floor) covers host differences in the last bits of the fitted curves, far below any intended dimension change.",
+      "rel_tol": 1e-6,
+      "value": 12.359541216698432
+    },
+    "A220-300/vertical_tail_area_m2": {
+      "abs_tol": 1e-6,
+      "note": "Built geometry, m^2; tolerance 1e-6 relative (1 micrometre floor) covers host differences in the last bits of the fitted curves, far below any intended dimension change.",
+      "rel_tol": 1e-6,
+      "value": 21.701491372781476
+    },
+    "A220-300/vertical_tail_mean_aerodynamic_chord_m": {
+      "abs_tol": 1e-6,
+      "note": "Built geometry, m; tolerance 1e-6 relative (1 micrometre floor) covers host differences in the last bits of the fitted curves, far below any intended dimension change.",
+      "rel_tol": 1e-6,
+      "value": 3.80448899346634
+    },
+    "A220-300/vertical_tail_quarter_chord_centre_x_m": {
+      "abs_tol": 1e-6,
+      "note": "Built geometry, m; tolerance 1e-6 relative (1 micrometre floor) covers host differences in the last bits of the fitted curves, far below any intended dimension change.",
+      "rel_tol": 1e-6,
+      "value": 33.94471478638073
+    },
+    "A220-300/vertical_tail_span_m": {
+      "abs_tol": 1e-6,
+      "note": "Built geometry, m; tolerance 1e-6 relative (1 micrometre floor) covers host differences in the last bits of the fitted curves, far below any intended dimension change.",
+      "rel_tol": 1e-6,
+      "value": 6.169356446796364
+    },
+    "A220-300/wing_area_m2": {
+      "abs_tol": 1e-6,
+      "note": "Built geometry, m^2; tolerance 1e-6 relative (1 micrometre floor) covers host differences in the last bits of the fitted curves, far below any intended dimension change.",
+      "rel_tol": 1e-6,
+      "value": 122.83706675745492
+    },
+    "A220-300/wing_mean_aerodynamic_chord_m": {
+      "abs_tol": 1e-6,
+      "note": "Built geometry, m; tolerance 1e-6 relative (1 micrometre floor) covers host differences in the last bits of the fitted curves, far below any intended dimension change.",
+      "rel_tol": 1e-6,
+      "value": 4.217490374238403
+    },
+    "A220-300/wing_quarter_chord_centre_x_m": {
+      "abs_tol": 1e-6,
+      "note": "Built geometry, m; tolerance 1e-6 relative (1 micrometre floor) covers host differences in the last bits of the fitted curves, far below any intended dimension change.",
+      "rel_tol": 1e-6,
+      "value": 17.515064089261806
+    },
+    "A220-300/wing_span_m": {
+      "abs_tol": 1e-6,
+      "note": "Built geometry, m; tolerance 1e-6 relative (1 micrometre floor) covers host differences in the last bits of the fitted curves, far below any intended dimension change.",
+      "rel_tol": 1e-6,
+      "value": 36.50040317748025
+    },
+    "A320-200/fuselage_largest_height_m": {
+      "abs_tol": 1e-6,
+      "note": "Built geometry, m; tolerance 1e-6 relative (1 micrometre floor) covers host differences in the last bits of the fitted curves, far below any intended dimension change.",
+      "rel_tol": 1e-6,
+      "value": 4.1400000000000015
+    },
+    "A320-200/fuselage_largest_width_m": {
+      "abs_tol": 1e-6,
+      "note": "Built geometry, m; tolerance 1e-6 relative (1 micrometre floor) covers host differences in the last bits of the fitted curves, far below any intended dimension change.",
+      "rel_tol": 1e-6,
+      "value": 3.95
+    },
+    "A320-200/fuselage_nose_x_m": {
+      "abs_tol": 1e-6,
+      "note": "Built geometry, m; tolerance 1e-6 relative (1 micrometre floor) covers host differences in the last bits of the fitted curves, far below any intended dimension change.",
+      "rel_tol": 1e-6,
+      "value": 0.0
+    },
+    "A320-200/fuselage_station_count": {
+      "abs_tol": 0.0,
+      "note": "Number of stations of the built primary fuselage polyline.",
+      "rel_tol": 0.0,
+      "value": 68.0
+    },
+    "A320-200/fuselage_tail_x_m": {
+      "abs_tol": 1e-6,
+      "note": "Built geometry, m; tolerance 1e-6 relative (1 micrometre floor) covers host differences in the last bits of the fitted curves, far below any intended dimension change.",
+      "rel_tol": 1e-6,
+      "value": 37.57
+    },
+    "A320-200/horizontal_tail_area_m2": {
+      "abs_tol": 1e-6,
+      "note": "Built geometry, m^2; tolerance 1e-6 relative (1 micrometre floor) covers host differences in the last bits of the fitted curves, far below any intended dimension change.",
+      "rel_tol": 1e-6,
+      "value": 31.41322150587772
+    },
+    "A320-200/horizontal_tail_mean_aerodynamic_chord_m": {
+      "abs_tol": 1e-6,
+      "note": "Built geometry, m; tolerance 1e-6 relative (1 micrometre floor) covers host differences in the last bits of the fitted curves, far below any intended dimension change.",
+      "rel_tol": 1e-6,
+      "value": 2.7425391728467647
+    },
+    "A320-200/horizontal_tail_quarter_chord_centre_x_m": {
+      "abs_tol": 1e-6,
+      "note": "Built geometry, m; tolerance 1e-6 relative (1 micrometre floor) covers host differences in the last bits of the fitted curves, far below any intended dimension change.",
+      "rel_tol": 1e-6,
+      "value": 34.01951356964588
+    },
+    "A320-200/horizontal_tail_span_m": {
+      "abs_tol": 1e-6,
+      "note": "Built geometry, m; tolerance 1e-6 relative (1 micrometre floor) covers host differences in the last bits of the fitted curves, far below any intended dimension change.",
+      "rel_tol": 1e-6,
+      "value": 12.536869190644172
+    },
+    "A320-200/vertical_tail_area_m2": {
+      "abs_tol": 1e-6,
+      "note": "Built geometry, m^2; tolerance 1e-6 relative (1 micrometre floor) covers host differences in the last bits of the fitted curves, far below any intended dimension change.",
+      "rel_tol": 1e-6,
+      "value": 22.655410415888838
+    },
+    "A320-200/vertical_tail_mean_aerodynamic_chord_m": {
+      "abs_tol": 1e-6,
+      "note": "Built geometry, m; tolerance 1e-6 relative (1 micrometre floor) covers host differences in the last bits of the fitted curves, far below any intended dimension change.",
+      "rel_tol": 1e-6,
+      "value": 4.056863703170336
+    },
+    "A320-200/vertical_tail_quarter_chord_centre_x_m": {
+      "abs_tol": 1e-6,
+      "note": "Built geometry, m; tolerance 1e-6 relative (1 micrometre floor) covers host differences in the last bits of the fitted curves, far below any intended dimension change.",
+      "rel_tol": 1e-6,
+      "value": 32.89148209722567
+    },
+    "A320-200/vertical_tail_span_m": {
+      "abs_tol": 1e-6,
+      "note": "Built geometry, m; tolerance 1e-6 relative (1 micrometre floor) covers host differences in the last bits of the fitted curves, far below any intended dimension change.",
+      "rel_tol": 1e-6,
+      "value": 6.108152320975449
+    },
+    "A320-200/wing_area_m2": {
+      "abs_tol": 1e-6,
+      "note": "Built geometry, m^2; tolerance 1e-6 relative (1 micrometre floor) covers host differences in the last bits of the fitted curves, far below any intended dimension change.",
+      "rel_tol": 1e-6,
+      "value": 126.09388567163835
+    },
+    "A320-200/wing_mean_aerodynamic_chord_m": {
+      "abs_tol": 1e-6,
+      "note": "Built geometry, m; tolerance 1e-6 relative (1 micrometre floor) covers host differences in the last bits of the fitted curves, far below any intended dimension change.",
+      "rel_tol": 1e-6,
+      "value": 4.300531841563078
+    },
+    "A320-200/wing_quarter_chord_centre_x_m": {
+      "abs_tol": 1e-6,
+      "note": "Built geometry, m; tolerance 1e-6 relative (1 micrometre floor) covers host differences in the last bits of the fitted curves, far below any intended dimension change.",
+      "rel_tol": 1e-6,
+      "value": 16.390089563106038
+    },
+    "A320-200/wing_span_m": {
+      "abs_tol": 1e-6,
+      "note": "Built geometry, m; tolerance 1e-6 relative (1 micrometre floor) covers host differences in the last bits of the fitted curves, far below any intended dimension change.",
+      "rel_tol": 1e-6,
+      "value": 34.393250151581
+    },
+    "A340-300/fuselage_largest_height_m": {
+      "abs_tol": 1e-6,
+      "note": "Built geometry, m; tolerance 1e-6 relative (1 micrometre floor) covers host differences in the last bits of the fitted curves, far below any intended dimension change.",
+      "rel_tol": 1e-6,
+      "value": 5.640000000000018
+    },
+    "A340-300/fuselage_largest_width_m": {
+      "abs_tol": 1e-6,
+      "note": "Built geometry, m; tolerance 1e-6 relative (1 micrometre floor) covers host differences in the last bits of the fitted curves, far below any intended dimension change.",
+      "rel_tol": 1e-6,
+      "value": 5.640000000000018
+    },
+    "A340-300/fuselage_nose_x_m": {
+      "abs_tol": 1e-6,
+      "note": "Built geometry, m; tolerance 1e-6 relative (1 micrometre floor) covers host differences in the last bits of the fitted curves, far below any intended dimension change.",
+      "rel_tol": 1e-6,
+      "value": 0.0
+    },
+    "A340-300/fuselage_station_count": {
+      "abs_tol": 0.0,
+      "note": "Number of stations of the built primary fuselage polyline.",
+      "rel_tol": 0.0,
+      "value": 90.0
+    },
+    "A340-300/fuselage_tail_x_m": {
+      "abs_tol": 1e-6,
+      "note": "Built geometry, m; tolerance 1e-6 relative (1 micrometre floor) covers host differences in the last bits of the fitted curves, far below any intended dimension change.",
+      "rel_tol": 1e-6,
+      "value": 62.84
+    },
+    "A340-300/horizontal_tail_area_m2": {
+      "abs_tol": 1e-6,
+      "note": "Built geometry, m^2; tolerance 1e-6 relative (1 micrometre floor) covers host differences in the last bits of the fitted curves, far below any intended dimension change.",
+      "rel_tol": 1e-6,
+      "value": 71.16651354845267
+    },
+    "A340-300/horizontal_tail_mean_aerodynamic_chord_m": {
+      "abs_tol": 1e-6,
+      "note": "Built geometry, m; tolerance 1e-6 relative (1 micrometre floor) covers host differences in the last bits of the fitted curves, far below any intended dimension change.",
+      "rel_tol": 1e-6,
+      "value": 3.9401512369164355
+    },
+    "A340-300/horizontal_tail_quarter_chord_centre_x_m": {
+      "abs_tol": 1e-6,
+      "note": "Built geometry, m; tolerance 1e-6 relative (1 micrometre floor) covers host differences in the last bits of the fitted curves, far below any intended dimension change.",
+      "rel_tol": 1e-6,
+      "value": 58.950373301684756
+    },
+    "A340-300/horizontal_tail_span_m": {
+      "abs_tol": 1e-6,
+      "note": "Built geometry, m; tolerance 1e-6 relative (1 micrometre floor) covers host differences in the last bits of the fitted curves, far below any intended dimension change.",
+      "rel_tol": 1e-6,
+      "value": 19.520196299884034
+    },
+    "A340-300/vertical_tail_area_m2": {
+      "abs_tol": 1e-6,
+      "note": "Built geometry, m^2; tolerance 1e-6 relative (1 micrometre floor) covers host differences in the last bits of the fitted curves, far below any intended dimension change.",
+      "rel_tol": 1e-6,
+      "value": 45.61859492603984
+    },
+    "A340-300/vertical_tail_mean_aerodynamic_chord_m": {
+      "abs_tol": 1e-6,
+      "note": "Built geometry, m; tolerance 1e-6 relative (1 micrometre floor) covers host differences in the last bits of the fitted curves, far below any intended dimension change.",
+      "rel_tol": 1e-6,
+      "value": 5.802749898661073
+    },
+    "A340-300/vertical_tail_quarter_chord_centre_x_m": {
+      "abs_tol": 1e-6,
+      "note": "Built geometry, m; tolerance 1e-6 relative (1 micrometre floor) covers host differences in the last bits of the fitted curves, far below any intended dimension change.",
+      "rel_tol": 1e-6,
+      "value": 57.346057782631725
+    },
+    "A340-300/vertical_tail_span_m": {
+      "abs_tol": 1e-6,
+      "note": "Built geometry, m; tolerance 1e-6 relative (1 micrometre floor) covers host differences in the last bits of the fitted curves, far below any intended dimension change.",
+      "rel_tol": 1e-6,
+      "value": 8.361623495579277
+    },
+    "A340-300/wing_area_m2": {
+      "abs_tol": 1e-6,
+      "note": "Built geometry, m^2; tolerance 1e-6 relative (1 micrometre floor) covers host differences in the last bits of the fitted curves, far below any intended dimension change.",
+      "rel_tol": 1e-6,
+      "value": 371.0833029912634
+    },
+    "A340-300/wing_mean_aerodynamic_chord_m": {
+      "abs_tol": 1e-6,
+      "note": "Built geometry, m; tolerance 1e-6 relative (1 micrometre floor) covers host differences in the last bits of the fitted curves, far below any intended dimension change.",
+      "rel_tol": 1e-6,
+      "value": 7.497404173940645
+    },
+    "A340-300/wing_quarter_chord_centre_x_m": {
+      "abs_tol": 1e-6,
+      "note": "Built geometry, m; tolerance 1e-6 relative (1 micrometre floor) covers host differences in the last bits of the fitted curves, far below any intended dimension change.",
+      "rel_tol": 1e-6,
+      "value": 29.848307130781944
+    },
+    "A340-300/wing_span_m": {
+      "abs_tol": 1e-6,
+      "note": "Built geometry, m; tolerance 1e-6 relative (1 micrometre floor) covers host differences in the last bits of the fitted curves, far below any intended dimension change.",
+      "rel_tol": 1e-6,
+      "value": 58.14755344771621
+    },
+    "A350-900/fuselage_largest_height_m": {
+      "abs_tol": 1e-6,
+      "note": "Built geometry, m; tolerance 1e-6 relative (1 micrometre floor) covers host differences in the last bits of the fitted curves, far below any intended dimension change.",
+      "rel_tol": 1e-6,
+      "value": 6.1641031303675895
+    },
+    "A350-900/fuselage_largest_width_m": {
+      "abs_tol": 1e-6,
+      "note": "Built geometry, m; tolerance 1e-6 relative (1 micrometre floor) covers host differences in the last bits of the fitted curves, far below any intended dimension change.",
+      "rel_tol": 1e-6,
+      "value": 5.959999952096891
+    },
+    "A350-900/fuselage_nose_x_m": {
+      "abs_tol": 1e-6,
+      "note": "Built geometry, m; tolerance 1e-6 relative (1 micrometre floor) covers host differences in the last bits of the fitted curves, far below any intended dimension change.",
+      "rel_tol": 1e-6,
+      "value": 0.0
+    },
+    "A350-900/fuselage_station_count": {
+      "abs_tol": 0.0,
+      "note": "Number of stations of the built primary fuselage polyline.",
+      "rel_tol": 0.0,
+      "value": 88.0
+    },
+    "A350-900/fuselage_tail_x_m": {
+      "abs_tol": 1e-6,
+      "note": "Built geometry, m; tolerance 1e-6 relative (1 micrometre floor) covers host differences in the last bits of the fitted curves, far below any intended dimension change.",
+      "rel_tol": 1e-6,
+      "value": 65.26
+    },
+    "A350-900/horizontal_tail_area_m2": {
+      "abs_tol": 1e-6,
+      "note": "Built geometry, m^2; tolerance 1e-6 relative (1 micrometre floor) covers host differences in the last bits of the fitted curves, far below any intended dimension change.",
+      "rel_tol": 1e-6,
+      "value": 83.14762379028849
+    },
+    "A350-900/horizontal_tail_mean_aerodynamic_chord_m": {
+      "abs_tol": 1e-6,
+      "note": "Built geometry, m; tolerance 1e-6 relative (1 micrometre floor) covers host differences in the last bits of the fitted curves, far below any intended dimension change.",
+      "rel_tol": 1e-6,
+      "value": 4.723216412625109
+    },
+    "A350-900/horizontal_tail_quarter_chord_centre_x_m": {
+      "abs_tol": 1e-6,
+      "note": "Built geometry, m; tolerance 1e-6 relative (1 micrometre floor) covers host differences in the last bits of the fitted curves, far below any intended dimension change.",
+      "rel_tol": 1e-6,
+      "value": 61.43986943488352
+    },
+    "A350-900/horizontal_tail_span_m": {
+      "abs_tol": 1e-6,
+      "note": "Built geometry, m; tolerance 1e-6 relative (1 micrometre floor) covers host differences in the last bits of the fitted curves, far below any intended dimension change.",
+      "rel_tol": 1e-6,
+      "value": 18.898578747066345
+    },
+    "A350-900/vertical_tail_area_m2": {
+      "abs_tol": 1e-6,
+      "note": "Built geometry, m^2; tolerance 1e-6 relative (1 micrometre floor) covers host differences in the last bits of the fitted curves, far below any intended dimension change.",
+      "rel_tol": 1e-6,
+      "value": 51.47490106567722
+    },
+    "A350-900/vertical_tail_mean_aerodynamic_chord_m": {
+      "abs_tol": 1e-6,
+      "note": "Built geometry, m; tolerance 1e-6 relative (1 micrometre floor) covers host differences in the last bits of the fitted curves, far below any intended dimension change.",
+      "rel_tol": 1e-6,
+      "value": 5.7835071923143495
+    },
+    "A350-900/vertical_tail_quarter_chord_centre_x_m": {
+      "abs_tol": 1e-6,
+      "note": "Built geometry, m; tolerance 1e-6 relative (1 micrometre floor) covers host differences in the last bits of the fitted curves, far below any intended dimension change.",
+      "rel_tol": 1e-6,
+      "value": 59.83244273036813
+    },
+    "A350-900/vertical_tail_span_m": {
+      "abs_tol": 1e-6,
+      "note": "Built geometry, m; tolerance 1e-6 relative (1 micrometre floor) covers host differences in the last bits of the fitted curves, far below any intended dimension change.",
+      "rel_tol": 1e-6,
+      "value": 9.488444922020477
+    },
+    "A350-900/wing_area_m2": {
+      "abs_tol": 1e-6,
+      "note": "Built geometry, m^2; tolerance 1e-6 relative (1 micrometre floor) covers host differences in the last bits of the fitted curves, far below any intended dimension change.",
+      "rel_tol": 1e-6,
+      "value": 462.0362372514393
+    },
+    "A350-900/wing_mean_aerodynamic_chord_m": {
+      "abs_tol": 1e-6,
+      "note": "Built geometry, m; tolerance 1e-6 relative (1 micrometre floor) covers host differences in the last bits of the fitted curves, far below any intended dimension change.",
+      "rel_tol": 1e-6,
+      "value": 9.375500963163715
+    },
+    "A350-900/wing_quarter_chord_centre_x_m": {
+      "abs_tol": 1e-6,
+      "note": "Built geometry, m; tolerance 1e-6 relative (1 micrometre floor) covers host differences in the last bits of the fitted curves, far below any intended dimension change.",
+      "rel_tol": 1e-6,
+      "value": 30.632302383755867
+    },
+    "A350-900/wing_span_m": {
+      "abs_tol": 1e-6,
+      "note": "Built geometry, m; tolerance 1e-6 relative (1 micrometre floor) covers host differences in the last bits of the fitted curves, far below any intended dimension change.",
+      "rel_tol": 1e-6,
+      "value": 63.42747435636834
+    },
+    "A380-800/fuselage_largest_height_m": {
+      "abs_tol": 1e-6,
+      "note": "Built geometry, m; tolerance 1e-6 relative (1 micrometre floor) covers host differences in the last bits of the fitted curves, far below any intended dimension change.",
+      "rel_tol": 1e-6,
+      "value": 8.410000000000013
+    },
+    "A380-800/fuselage_largest_width_m": {
+      "abs_tol": 1e-6,
+      "note": "Built geometry, m; tolerance 1e-6 relative (1 micrometre floor) covers host differences in the last bits of the fitted curves, far below any intended dimension change.",
+      "rel_tol": 1e-6,
+      "value": 7.14000000000001
+    },
+    "A380-800/fuselage_nose_x_m": {
+      "abs_tol": 1e-6,
+      "note": "Built geometry, m; tolerance 1e-6 relative (1 micrometre floor) covers host differences in the last bits of the fitted curves, far below any intended dimension change.",
+      "rel_tol": 1e-6,
+      "value": 0.0
+    },
+    "A380-800/fuselage_station_count": {
+      "abs_tol": 0.0,
+      "note": "Number of stations of the built primary fuselage polyline.",
+      "rel_tol": 0.0,
+      "value": 128.0
+    },
+    "A380-800/fuselage_tail_x_m": {
+      "abs_tol": 1e-6,
+      "note": "Built geometry, m; tolerance 1e-6 relative (1 micrometre floor) covers host differences in the last bits of the fitted curves, far below any intended dimension change.",
+      "rel_tol": 1e-6,
+      "value": 70.4
+    },
+    "A380-800/horizontal_tail_area_m2": {
+      "abs_tol": 1e-6,
+      "note": "Built geometry, m^2; tolerance 1e-6 relative (1 micrometre floor) covers host differences in the last bits of the fitted curves, far below any intended dimension change.",
+      "rel_tol": 1e-6,
+      "value": 203.9131499119476
+    },
+    "A380-800/horizontal_tail_mean_aerodynamic_chord_m": {
+      "abs_tol": 1e-6,
+      "note": "Built geometry, m; tolerance 1e-6 relative (1 micrometre floor) covers host differences in the last bits of the fitted curves, far below any intended dimension change.",
+      "rel_tol": 1e-6,
+      "value": 7.232962373373706
+    },
+    "A380-800/horizontal_tail_quarter_chord_centre_x_m": {
+      "abs_tol": 1e-6,
+      "note": "Built geometry, m; tolerance 1e-6 relative (1 micrometre floor) covers host differences in the last bits of the fitted curves, far below any intended dimension change.",
+      "rel_tol": 1e-6,
+      "value": 63.98640156216241
+    },
+    "A380-800/horizontal_tail_span_m": {
+      "abs_tol": 1e-6,
+      "note": "Built geometry, m; tolerance 1e-6 relative (1 micrometre floor) covers host differences in the last bits of the fitted curves, far below any intended dimension change.",
+      "rel_tol": 1e-6,
+      "value": 30.56100716345246
+    },
+    "A380-800/vertical_tail_area_m2": {
+      "abs_tol": 1e-6,
+      "note": "Built geometry, m^2; tolerance 1e-6 relative (1 micrometre floor) covers host differences in the last bits of the fitted curves, far below any intended dimension change.",
+      "rel_tol": 1e-6,
+      "value": 122.57679542196442
+    },
+    "A380-800/vertical_tail_mean_aerodynamic_chord_m": {
+      "abs_tol": 1e-6,
+      "note": "Built geometry, m; tolerance 1e-6 relative (1 micrometre floor) covers host differences in the last bits of the fitted curves, far below any intended dimension change.",
+      "rel_tol": 1e-6,
+      "value": 8.973311610024396
+    },
+    "A380-800/vertical_tail_quarter_chord_centre_x_m": {
+      "abs_tol": 1e-6,
+      "note": "Built geometry, m; tolerance 1e-6 relative (1 micrometre floor) covers host differences in the last bits of the fitted curves, far below any intended dimension change.",
+      "rel_tol": 1e-6,
+      "value": 62.11570322716531
+    },
+    "A380-800/vertical_tail_span_m": {
+      "abs_tol": 1e-6,
+      "note": "Built geometry, m; tolerance 1e-6 relative (1 micrometre floor) covers host differences in the last bits of the fitted curves, far below any intended dimension change.",
+      "rel_tol": 1e-6,
+      "value": 14.64092263833194
+    },
+    "A380-800/wing_area_m2": {
+      "abs_tol": 1e-6,
+      "note": "Built geometry, m^2; tolerance 1e-6 relative (1 micrometre floor) covers host differences in the last bits of the fitted curves, far below any intended dimension change.",
+      "rel_tol": 1e-6,
+      "value": 859.3167453229671
+    },
+    "A380-800/wing_mean_aerodynamic_chord_m": {
+      "abs_tol": 1e-6,
+      "note": "Built geometry, m; tolerance 1e-6 relative (1 micrometre floor) covers host differences in the last bits of the fitted curves, far below any intended dimension change.",
+      "rel_tol": 1e-6,
+      "value": 12.544378567068557
+    },
+    "A380-800/wing_quarter_chord_centre_x_m": {
+      "abs_tol": 1e-6,
+      "note": "Built geometry, m; tolerance 1e-6 relative (1 micrometre floor) covers host differences in the last bits of the fitted curves, far below any intended dimension change.",
+      "rel_tol": 1e-6,
+      "value": 31.567926508923225
+    },
+    "A380-800/wing_span_m": {
+      "abs_tol": 1e-6,
+      "note": "Built geometry, m; tolerance 1e-6 relative (1 micrometre floor) covers host differences in the last bits of the fitted curves, far below any intended dimension change.",
+      "rel_tol": 1e-6,
+      "value": 80.21232035694557
+    },
+    "A400M/fuselage_largest_height_m": {
+      "abs_tol": 1e-6,
+      "note": "Built geometry, m; tolerance 1e-6 relative (1 micrometre floor) covers host differences in the last bits of the fitted curves, far below any intended dimension change.",
+      "rel_tol": 1e-6,
+      "value": 5.121139187827458
+    },
+    "A400M/fuselage_largest_width_m": {
+      "abs_tol": 1e-6,
+      "note": "Built geometry, m; tolerance 1e-6 relative (1 micrometre floor) covers host differences in the last bits of the fitted curves, far below any intended dimension change.",
+      "rel_tol": 1e-6,
+      "value": 5.600733065738716
+    },
+    "A400M/fuselage_nose_x_m": {
+      "abs_tol": 1e-6,
+      "note": "Built geometry, m; tolerance 1e-6 relative (1 micrometre floor) covers host differences in the last bits of the fitted curves, far below any intended dimension change.",
+      "rel_tol": 1e-6,
+      "value": 0.0
+    },
+    "A400M/fuselage_station_count": {
+      "abs_tol": 0.0,
+      "note": "Number of stations of the built primary fuselage polyline.",
+      "rel_tol": 0.0,
+      "value": 68.0
+    },
+    "A400M/fuselage_tail_x_m": {
+      "abs_tol": 1e-6,
+      "note": "Built geometry, m; tolerance 1e-6 relative (1 micrometre floor) covers host differences in the last bits of the fitted curves, far below any intended dimension change.",
+      "rel_tol": 1e-6,
+      "value": 39.09
+    },
+    "A400M/horizontal_tail_area_m2": {
+      "abs_tol": 1e-6,
+      "note": "Built geometry, m^2; tolerance 1e-6 relative (1 micrometre floor) covers host differences in the last bits of the fitted curves, far below any intended dimension change.",
+      "rel_tol": 1e-6,
+      "value": 65.9799
+    },
+    "A400M/horizontal_tail_mean_aerodynamic_chord_m": {
+      "abs_tol": 1e-6,
+      "note": "Built geometry, m; tolerance 1e-6 relative (1 micrometre floor) covers host differences in the last bits of the fitted curves, far below any intended dimension change.",
+      "rel_tol": 1e-6,
+      "value": 3.7979512269645745
+    },
+    "A400M/horizontal_tail_quarter_chord_centre_x_m": {
+      "abs_tol": 1e-6,
+      "note": "Built geometry, m; tolerance 1e-6 relative (1 micrometre floor) covers host differences in the last bits of the fitted curves, far below any intended dimension change.",
+      "rel_tol": 1e-6,
+      "value": 40.23630921035042
+    },
+    "A400M/horizontal_tail_span_m": {
+      "abs_tol": 1e-6,
+      "note": "Built geometry, m; tolerance 1e-6 relative (1 micrometre floor) covers host differences in the last bits of the fitted curves, far below any intended dimension change.",
+      "rel_tol": 1e-6,
+      "value": 18.9
+    },
+    "A400M/vertical_tail_area_m2": {
+      "abs_tol": 1e-6,
+      "note": "Built geometry, m^2; tolerance 1e-6 relative (1 micrometre floor) covers host differences in the last bits of the fitted curves, far below any intended dimension change.",
+      "rel_tol": 1e-6,
+      "value": 50.31166232923441
+    },
+    "A400M/vertical_tail_mean_aerodynamic_chord_m": {
+      "abs_tol": 1e-6,
+      "note": "Built geometry, m; tolerance 1e-6 relative (1 micrometre floor) covers host differences in the last bits of the fitted curves, far below any intended dimension change.",
+      "rel_tol": 1e-6,
+      "value": 6.622471304422624
+    },
+    "A400M/vertical_tail_quarter_chord_centre_x_m": {
+      "abs_tol": 1e-6,
+      "note": "Built geometry, m; tolerance 1e-6 relative (1 micrometre floor) covers host differences in the last bits of the fitted curves, far below any intended dimension change.",
+      "rel_tol": 1e-6,
+      "value": 36.088356098708985
+    },
+    "A400M/vertical_tail_span_m": {
+      "abs_tol": 1e-6,
+      "note": "Built geometry, m; tolerance 1e-6 relative (1 micrometre floor) covers host differences in the last bits of the fitted curves, far below any intended dimension change.",
+      "rel_tol": 1e-6,
+      "value": 7.833970169374122
+    },
+    "A400M/wing_area_m2": {
+      "abs_tol": 1e-6,
+      "note": "Built geometry, m^2; tolerance 1e-6 relative (1 micrometre floor) covers host differences in the last bits of the fitted curves, far below any intended dimension change.",
+      "rel_tol": 1e-6,
+      "value": 220.75379923606917
+    },
+    "A400M/wing_mean_aerodynamic_chord_m": {
+      "abs_tol": 1e-6,
+      "note": "Built geometry, m; tolerance 1e-6 relative (1 micrometre floor) covers host differences in the last bits of the fitted curves, far below any intended dimension change.",
+      "rel_tol": 1e-6,
+      "value": 5.652478454166549
+    },
+    "A400M/wing_quarter_chord_centre_x_m": {
+      "abs_tol": 1e-6,
+      "note": "Built geometry, m; tolerance 1e-6 relative (1 micrometre floor) covers host differences in the last bits of the fitted curves, far below any intended dimension change.",
+      "rel_tol": 1e-6,
+      "value": 17.06949201331088
+    },
+    "A400M/wing_span_m": {
+      "abs_tol": 1e-6,
+      "note": "Built geometry, m; tolerance 1e-6 relative (1 micrometre floor) covers host differences in the last bits of the fitted curves, far below any intended dimension change.",
+      "rel_tol": 1e-6,
+      "value": 42.46048128736682
+    },
+    "ATR72-600/fuselage_largest_height_m": {
+      "abs_tol": 1e-6,
+      "note": "Built geometry, m; tolerance 1e-6 relative (1 micrometre floor) covers host differences in the last bits of the fitted curves, far below any intended dimension change.",
+      "rel_tol": 1e-6,
+      "value": 2.7124211137519194
+    },
+    "ATR72-600/fuselage_largest_width_m": {
+      "abs_tol": 1e-6,
+      "note": "Built geometry, m; tolerance 1e-6 relative (1 micrometre floor) covers host differences in the last bits of the fitted curves, far below any intended dimension change.",
+      "rel_tol": 1e-6,
+      "value": 2.8658568247761975
+    },
+    "ATR72-600/fuselage_nose_x_m": {
+      "abs_tol": 1e-6,
+      "note": "Built geometry, m; tolerance 1e-6 relative (1 micrometre floor) covers host differences in the last bits of the fitted curves, far below any intended dimension change.",
+      "rel_tol": 1e-6,
+      "value": 0.0
+    },
+    "ATR72-600/fuselage_station_count": {
+      "abs_tol": 0.0,
+      "note": "Number of stations of the built primary fuselage polyline.",
+      "rel_tol": 0.0,
+      "value": 57.0
+    },
+    "ATR72-600/fuselage_tail_x_m": {
+      "abs_tol": 1e-6,
+      "note": "Built geometry, m; tolerance 1e-6 relative (1 micrometre floor) covers host differences in the last bits of the fitted curves, far below any intended dimension change.",
+      "rel_tol": 1e-6,
+      "value": 27.166
+    },
+    "ATR72-600/horizontal_tail_area_m2": {
+      "abs_tol": 1e-6,
+      "note": "Built geometry, m^2; tolerance 1e-6 relative (1 micrometre floor) covers host differences in the last bits of the fitted curves, far below any intended dimension change.",
+      "rel_tol": 1e-6,
+      "value": 11.497869047762222
+    },
+    "ATR72-600/horizontal_tail_mean_aerodynamic_chord_m": {
+      "abs_tol": 1e-6,
+      "note": "Built geometry, m; tolerance 1e-6 relative (1 micrometre floor) covers host differences in the last bits of the fitted curves, far below any intended dimension change.",
+      "rel_tol": 1e-6,
+      "value": 1.6328939459613936
+    },
+    "ATR72-600/horizontal_tail_quarter_chord_centre_x_m": {
+      "abs_tol": 1e-6,
+      "note": "Built geometry, m; tolerance 1e-6 relative (1 micrometre floor) covers host differences in the last bits of the fitted curves, far below any intended dimension change.",
+      "rel_tol": 1e-6,
+      "value": 25.48160297544297
+    },
+    "ATR72-600/horizontal_tail_span_m": {
+      "abs_tol": 1e-6,
+      "note": "Built geometry, m; tolerance 1e-6 relative (1 micrometre floor) covers host differences in the last bits of the fitted curves, far below any intended dimension change.",
+      "rel_tol": 1e-6,
+      "value": 7.3200328418405185
+    },
+    "ATR72-600/vertical_tail_area_m2": {
+      "abs_tol": 1e-6,
+      "note": "Built geometry, m^2; tolerance 1e-6 relative (1 micrometre floor) covers host differences in the last bits of the fitted curves, far below any intended dimension change.",
+      "rel_tol": 1e-6,
+      "value": 14.707859038968412
+    },
+    "ATR72-600/vertical_tail_mean_aerodynamic_chord_m": {
+      "abs_tol": 1e-6,
+      "note": "Built geometry, m; tolerance 1e-6 relative (1 micrometre floor) covers host differences in the last bits of the fitted curves, far below any intended dimension change.",
+      "rel_tol": 1e-6,
+      "value": 3.625682216133755
+    },
+    "ATR72-600/vertical_tail_quarter_chord_centre_x_m": {
+      "abs_tol": 1e-6,
+      "note": "Built geometry, m; tolerance 1e-6 relative (1 micrometre floor) covers host differences in the last bits of the fitted curves, far below any intended dimension change.",
+      "rel_tol": 1e-6,
+      "value": 23.66353168458642
+    },
+    "ATR72-600/vertical_tail_span_m": {
+      "abs_tol": 1e-6,
+      "note": "Built geometry, m; tolerance 1e-6 relative (1 micrometre floor) covers host differences in the last bits of the fitted curves, far below any intended dimension change.",
+      "rel_tol": 1e-6,
+      "value": 4.429445709343812
+    },
+    "ATR72-600/wing_area_m2": {
+      "abs_tol": 1e-6,
+      "note": "Built geometry, m^2; tolerance 1e-6 relative (1 micrometre floor) covers host differences in the last bits of the fitted curves, far below any intended dimension change.",
+      "rel_tol": 1e-6,
+      "value": 60.72508440783555
+    },
+    "ATR72-600/wing_mean_aerodynamic_chord_m": {
+      "abs_tol": 1e-6,
+      "note": "Built geometry, m; tolerance 1e-6 relative (1 micrometre floor) covers host differences in the last bits of the fitted curves, far below any intended dimension change.",
+      "rel_tol": 1e-6,
+      "value": 2.300748522596916
+    },
+    "ATR72-600/wing_quarter_chord_centre_x_m": {
+      "abs_tol": 1e-6,
+      "note": "Built geometry, m; tolerance 1e-6 relative (1 micrometre floor) covers host differences in the last bits of the fitted curves, far below any intended dimension change.",
+      "rel_tol": 1e-6,
+      "value": 11.839273003537095
+    },
+    "ATR72-600/wing_span_m": {
+      "abs_tol": 1e-6,
+      "note": "Built geometry, m; tolerance 1e-6 relative (1 micrometre floor) covers host differences in the last bits of the fitted curves, far below any intended dimension change.",
+      "rel_tol": 1e-6,
+      "value": 27.064814059864503
+    },
+    "AVE/fuselage_largest_height_m": {
+      "abs_tol": 1e-6,
+      "note": "Built geometry, m; tolerance 1e-6 relative (1 micrometre floor) covers host differences in the last bits of the fitted curves, far below any intended dimension change.",
+      "rel_tol": 1e-6,
+      "value": 6.20000043980182
+    },
+    "AVE/fuselage_largest_width_m": {
+      "abs_tol": 1e-6,
+      "note": "Built geometry, m; tolerance 1e-6 relative (1 micrometre floor) covers host differences in the last bits of the fitted curves, far below any intended dimension change.",
+      "rel_tol": 1e-6,
+      "value": 6.200000000000002
+    },
+    "AVE/fuselage_nose_x_m": {
+      "abs_tol": 1e-6,
+      "note": "Built geometry, m; tolerance 1e-6 relative (1 micrometre floor) covers host differences in the last bits of the fitted curves, far below any intended dimension change.",
+      "rel_tol": 1e-6,
+      "value": 0.0
+    },
+    "AVE/fuselage_station_count": {
+      "abs_tol": 0.0,
+      "note": "Number of stations of the built primary fuselage polyline.",
+      "rel_tol": 0.0,
+      "value": 107.0
+    },
+    "AVE/fuselage_tail_x_m": {
+      "abs_tol": 1e-6,
+      "note": "Built geometry, m; tolerance 1e-6 relative (1 micrometre floor) covers host differences in the last bits of the fitted curves, far below any intended dimension change.",
+      "rel_tol": 1e-6,
+      "value": 76.72
+    },
+    "AVE/horizontal_tail_area_m2": {
+      "abs_tol": 1e-6,
+      "note": "Built geometry, m^2; tolerance 1e-6 relative (1 micrometre floor) covers host differences in the last bits of the fitted curves, far below any intended dimension change.",
+      "rel_tol": 1e-6,
+      "value": 105.67615557595184
+    },
+    "AVE/horizontal_tail_mean_aerodynamic_chord_m": {
+      "abs_tol": 1e-6,
+      "note": "Built geometry, m; tolerance 1e-6 relative (1 micrometre floor) covers host differences in the last bits of the fitted curves, far below any intended dimension change.",
+      "rel_tol": 1e-6,
+      "value": 4.865956790123457
+    },
+    "AVE/horizontal_tail_quarter_chord_centre_x_m": {
+      "abs_tol": 1e-6,
+      "note": "Built geometry, m; tolerance 1e-6 relative (1 micrometre floor) covers host differences in the last bits of the fitted curves, far below any intended dimension change.",
+      "rel_tol": 1e-6,
+      "value": 70.12641203703704
+    },
+    "AVE/horizontal_tail_span_m": {
+      "abs_tol": 1e-6,
+      "note": "Built geometry, m; tolerance 1e-6 relative (1 micrometre floor) covers host differences in the last bits of the fitted curves, far below any intended dimension change.",
+      "rel_tol": 1e-6,
+      "value": 24.462073049988856
+    },
+    "AVE/vertical_tail_area_m2": {
+      "abs_tol": 1e-6,
+      "note": "Built geometry, m^2; tolerance 1e-6 relative (1 micrometre floor) covers host differences in the last bits of the fitted curves, far below any intended dimension change.",
+      "rel_tol": 1e-6,
+      "value": 63.96206428845645
+    },
+    "AVE/vertical_tail_mean_aerodynamic_chord_m": {
+      "abs_tol": 1e-6,
+      "note": "Built geometry, m; tolerance 1e-6 relative (1 micrometre floor) covers host differences in the last bits of the fitted curves, far below any intended dimension change.",
+      "rel_tol": 1e-6,
+      "value": 6.5003191024104945
+    },
+    "AVE/vertical_tail_quarter_chord_centre_x_m": {
+      "abs_tol": 1e-6,
+      "note": "Built geometry, m; tolerance 1e-6 relative (1 micrometre floor) covers host differences in the last bits of the fitted curves, far below any intended dimension change.",
+      "rel_tol": 1e-6,
+      "value": 68.73008979860926
+    },
+    "AVE/vertical_tail_span_m": {
+      "abs_tol": 1e-6,
+      "note": "Built geometry, m; tolerance 1e-6 relative (1 micrometre floor) covers host differences in the last bits of the fitted curves, far below any intended dimension change.",
+      "rel_tol": 1e-6,
+      "value": 10.835852688674967
+    },
+    "AVE/wing_area_m2": {
+      "abs_tol": 1e-6,
+      "note": "Built geometry, m^2; tolerance 1e-6 relative (1 micrometre floor) covers host differences in the last bits of the fitted curves, far below any intended dimension change.",
+      "rel_tol": 1e-6,
+      "value": 529.6602693736445
+    },
+    "AVE/wing_mean_aerodynamic_chord_m": {
+      "abs_tol": 1e-6,
+      "note": "Built geometry, m; tolerance 1e-6 relative (1 micrometre floor) covers host differences in the last bits of the fitted curves, far below any intended dimension change.",
+      "rel_tol": 1e-6,
+      "value": 9.490368675656624
+    },
+    "AVE/wing_quarter_chord_centre_x_m": {
+      "abs_tol": 1e-6,
+      "note": "Built geometry, m; tolerance 1e-6 relative (1 micrometre floor) covers host differences in the last bits of the fitted curves, far below any intended dimension change.",
+      "rel_tol": 1e-6,
+      "value": 36.38633523988096
+    },
+    "AVE/wing_span_m": {
+      "abs_tol": 1e-6,
+      "note": "Built geometry, m; tolerance 1e-6 relative (1 micrometre floor) covers host differences in the last bits of the fitted curves, far below any intended dimension change.",
+      "rel_tol": 1e-6,
+      "value": 72.32305799072734
+    },
+    "B747-400/fuselage_largest_height_m": {
+      "abs_tol": 1e-6,
+      "note": "Built geometry, m; tolerance 1e-6 relative (1 micrometre floor) covers host differences in the last bits of the fitted curves, far below any intended dimension change.",
+      "rel_tol": 1e-6,
+      "value": 8.077461675559569
+    },
+    "B747-400/fuselage_largest_width_m": {
+      "abs_tol": 1e-6,
+      "note": "Built geometry, m; tolerance 1e-6 relative (1 micrometre floor) covers host differences in the last bits of the fitted curves, far below any intended dimension change.",
+      "rel_tol": 1e-6,
+      "value": 6.500000013123708
+    },
+    "B747-400/fuselage_nose_x_m": {
+      "abs_tol": 1e-6,
+      "note": "Built geometry, m; tolerance 1e-6 relative (1 micrometre floor) covers host differences in the last bits of the fitted curves, far below any intended dimension change.",
+      "rel_tol": 1e-6,
+      "value": 0.0
+    },
+    "B747-400/fuselage_station_count": {
+      "abs_tol": 0.0,
+      "note": "Number of stations of the built primary fuselage polyline.",
+      "rel_tol": 0.0,
+      "value": 109.0
+    },
+    "B747-400/fuselage_tail_x_m": {
+      "abs_tol": 1e-6,
+      "note": "Built geometry, m; tolerance 1e-6 relative (1 micrometre floor) covers host differences in the last bits of the fitted curves, far below any intended dimension change.",
+      "rel_tol": 1e-6,
+      "value": 68.63
+    },
+    "B747-400/horizontal_tail_area_m2": {
+      "abs_tol": 1e-6,
+      "note": "Built geometry, m^2; tolerance 1e-6 relative (1 micrometre floor) covers host differences in the last bits of the fitted curves, far below any intended dimension change.",
+      "rel_tol": 1e-6,
+      "value": 140.8552704127093
+    },
+    "B747-400/horizontal_tail_mean_aerodynamic_chord_m": {
+      "abs_tol": 1e-6,
+      "note": "Built geometry, m; tolerance 1e-6 relative (1 micrometre floor) covers host differences in the last bits of the fitted curves, far below any intended dimension change.",
+      "rel_tol": 1e-6,
+      "value": 7.04063768115942
+    },
+    "B747-400/horizontal_tail_quarter_chord_centre_x_m": {
+      "abs_tol": 1e-6,
+      "note": "Built geometry, m; tolerance 1e-6 relative (1 micrometre floor) covers host differences in the last bits of the fitted curves, far below any intended dimension change.",
+      "rel_tol": 1e-6,
+      "value": 62.89404347826087
+    },
+    "B747-400/horizontal_tail_span_m": {
+      "abs_tol": 1e-6,
+      "note": "Built geometry, m; tolerance 1e-6 relative (1 micrometre floor) covers host differences in the last bits of the fitted curves, far below any intended dimension change.",
+      "rel_tol": 1e-6,
+      "value": 22.26960797038881
+    },
+    "B747-400/vertical_tail_area_m2": {
+      "abs_tol": 1e-6,
+      "note": "Built geometry, m^2; tolerance 1e-6 relative (1 micrometre floor) covers host differences in the last bits of the fitted curves, far below any intended dimension change.",
+      "rel_tol": 1e-6,
+      "value": 81.81114841048353
+    },
+    "B747-400/vertical_tail_mean_aerodynamic_chord_m": {
+      "abs_tol": 1e-6,
+      "note": "Built geometry, m; tolerance 1e-6 relative (1 micrometre floor) covers host differences in the last bits of the fitted curves, far below any intended dimension change.",
+      "rel_tol": 1e-6,
+      "value": 8.638384798281296
+    },
+    "B747-400/vertical_tail_quarter_chord_centre_x_m": {
+      "abs_tol": 1e-6,
+      "note": "Built geometry, m; tolerance 1e-6 relative (1 micrometre floor) covers host differences in the last bits of the fitted curves, far below any intended dimension change.",
+      "rel_tol": 1e-6,
+      "value": 61.74977057044384
+    },
+    "B747-400/vertical_tail_span_m": {
+      "abs_tol": 1e-6,
+      "note": "Built geometry, m; tolerance 1e-6 relative (1 micrometre floor) covers host differences in the last bits of the fitted curves, far below any intended dimension change.",
+      "rel_tol": 1e-6,
+      "value": 10.182255976885163
+    },
+    "B747-400/wing_area_m2": {
+      "abs_tol": 1e-6,
+      "note": "Built geometry, m^2; tolerance 1e-6 relative (1 micrometre floor) covers host differences in the last bits of the fitted curves, far below any intended dimension change.",
+      "rel_tol": 1e-6,
+      "value": 570.1681468059874
+    },
+    "B747-400/wing_mean_aerodynamic_chord_m": {
+      "abs_tol": 1e-6,
+      "note": "Built geometry, m; tolerance 1e-6 relative (1 micrometre floor) covers host differences in the last bits of the fitted curves, far below any intended dimension change.",
+      "rel_tol": 1e-6,
+      "value": 10.655870373426914
+    },
+    "B747-400/wing_quarter_chord_centre_x_m": {
+      "abs_tol": 1e-6,
+      "note": "Built geometry, m; tolerance 1e-6 relative (1 micrometre floor) covers host differences in the last bits of the fitted curves, far below any intended dimension change.",
+      "rel_tol": 1e-6,
+      "value": 31.526616606938223
+    },
+    "B747-400/wing_span_m": {
+      "abs_tol": 1e-6,
+      "note": "Built geometry, m; tolerance 1e-6 relative (1 micrometre floor) covers host differences in the last bits of the fitted curves, far below any intended dimension change.",
+      "rel_tol": 1e-6,
+      "value": 62.82411196497219
+    },
+    "B787-9/fuselage_largest_height_m": {
+      "abs_tol": 1e-6,
+      "note": "Built geometry, m; tolerance 1e-6 relative (1 micrometre floor) covers host differences in the last bits of the fitted curves, far below any intended dimension change.",
+      "rel_tol": 1e-6,
+      "value": 5.942609369661424
+    },
+    "B787-9/fuselage_largest_width_m": {
+      "abs_tol": 1e-6,
+      "note": "Built geometry, m; tolerance 1e-6 relative (1 micrometre floor) covers host differences in the last bits of the fitted curves, far below any intended dimension change.",
+      "rel_tol": 1e-6,
+      "value": 5.770000000000007
+    },
+    "B787-9/fuselage_nose_x_m": {
+      "abs_tol": 1e-6,
+      "note": "Built geometry, m; tolerance 1e-6 relative (1 micrometre floor) covers host differences in the last bits of the fitted curves, far below any intended dimension change.",
+      "rel_tol": 1e-6,
+      "value": 0.0
+    },
+    "B787-9/fuselage_station_count": {
+      "abs_tol": 0.0,
+      "note": "Number of stations of the built primary fuselage polyline.",
+      "rel_tol": 0.0,
+      "value": 71.0
+    },
+    "B787-9/fuselage_tail_x_m": {
+      "abs_tol": 1e-6,
+      "note": "Built geometry, m; tolerance 1e-6 relative (1 micrometre floor) covers host differences in the last bits of the fitted curves, far below any intended dimension change.",
+      "rel_tol": 1e-6,
+      "value": 62.0
+    },
+    "B787-9/horizontal_tail_area_m2": {
+      "abs_tol": 1e-6,
+      "note": "Built geometry, m^2; tolerance 1e-6 relative (1 micrometre floor) covers host differences in the last bits of the fitted curves, far below any intended dimension change.",
+      "rel_tol": 1e-6,
+      "value": 78.09957177437889
+    },
+    "B787-9/horizontal_tail_mean_aerodynamic_chord_m": {
+      "abs_tol": 1e-6,
+      "note": "Built geometry, m; tolerance 1e-6 relative (1 micrometre floor) covers host differences in the last bits of the fitted curves, far below any intended dimension change.",
+      "rel_tol": 1e-6,
+      "value": 4.4089990227405975
+    },
+    "B787-9/horizontal_tail_quarter_chord_centre_x_m": {
+      "abs_tol": 1e-6,
+      "note": "Built geometry, m; tolerance 1e-6 relative (1 micrometre floor) covers host differences in the last bits of the fitted curves, far below any intended dimension change.",
+      "rel_tol": 1e-6,
+      "value": 57.114206773257344
+    },
+    "B787-9/horizontal_tail_span_m": {
+      "abs_tol": 1e-6,
+      "note": "Built geometry, m; tolerance 1e-6 relative (1 micrometre floor) covers host differences in the last bits of the fitted curves, far below any intended dimension change.",
+      "rel_tol": 1e-6,
+      "value": 20.007532785131545
+    },
+    "B787-9/vertical_tail_area_m2": {
+      "abs_tol": 1e-6,
+      "note": "Built geometry, m^2; tolerance 1e-6 relative (1 micrometre floor) covers host differences in the last bits of the fitted curves, far below any intended dimension change.",
+      "rel_tol": 1e-6,
+      "value": 50.13977227071498
+    },
+    "B787-9/vertical_tail_mean_aerodynamic_chord_m": {
+      "abs_tol": 1e-6,
+      "note": "Built geometry, m; tolerance 1e-6 relative (1 micrometre floor) covers host differences in the last bits of the fitted curves, far below any intended dimension change.",
+      "rel_tol": 1e-6,
+      "value": 5.809305181744937
+    },
+    "B787-9/vertical_tail_quarter_chord_centre_x_m": {
+      "abs_tol": 1e-6,
+      "note": "Built geometry, m; tolerance 1e-6 relative (1 micrometre floor) covers host differences in the last bits of the fitted curves, far below any intended dimension change.",
+      "rel_tol": 1e-6,
+      "value": 55.44476673863995
+    },
+    "B787-9/vertical_tail_span_m": {
+      "abs_tol": 1e-6,
+      "note": "Built geometry, m; tolerance 1e-6 relative (1 micrometre floor) covers host differences in the last bits of the fitted curves, far below any intended dimension change.",
+      "rel_tol": 1e-6,
+      "value": 9.571274392942785
+    },
+    "B787-9/wing_area_m2": {
+      "abs_tol": 1e-6,
+      "note": "Built geometry, m^2; tolerance 1e-6 relative (1 micrometre floor) covers host differences in the last bits of the fitted curves, far below any intended dimension change.",
+      "rel_tol": 1e-6,
+      "value": 378.2159008650917
+    },
+    "B787-9/wing_mean_aerodynamic_chord_m": {
+      "abs_tol": 1e-6,
+      "note": "Built geometry, m; tolerance 1e-6 relative (1 micrometre floor) covers host differences in the last bits of the fitted curves, far below any intended dimension change.",
+      "rel_tol": 1e-6,
+      "value": 8.171541825190724
+    },
+    "B787-9/wing_quarter_chord_centre_x_m": {
+      "abs_tol": 1e-6,
+      "note": "Built geometry, m; tolerance 1e-6 relative (1 micrometre floor) covers host differences in the last bits of the fitted curves, far below any intended dimension change.",
+      "rel_tol": 1e-6,
+      "value": 29.01877629083578
+    },
+    "B787-9/wing_span_m": {
+      "abs_tol": 1e-6,
+      "note": "Built geometry, m; tolerance 1e-6 relative (1 micrometre floor) covers host differences in the last bits of the fitted curves, far below any intended dimension change.",
+      "rel_tol": 1e-6,
+      "value": 60.61602493684531
+    },
+    "C295/fuselage_largest_height_m": {
+      "abs_tol": 1e-6,
+      "note": "Built geometry, m; tolerance 1e-6 relative (1 micrometre floor) covers host differences in the last bits of the fitted curves, far below any intended dimension change.",
+      "rel_tol": 1e-6,
+      "value": 2.8373869074057794
+    },
+    "C295/fuselage_largest_width_m": {
+      "abs_tol": 1e-6,
+      "note": "Built geometry, m; tolerance 1e-6 relative (1 micrometre floor) covers host differences in the last bits of the fitted curves, far below any intended dimension change.",
+      "rel_tol": 1e-6,
+      "value": 2.8252298799892133
+    },
+    "C295/fuselage_nose_x_m": {
+      "abs_tol": 1e-6,
+      "note": "Built geometry, m; tolerance 1e-6 relative (1 micrometre floor) covers host differences in the last bits of the fitted curves, far below any intended dimension change.",
+      "rel_tol": 1e-6,
+      "value": 0.0
+    },
+    "C295/fuselage_station_count": {
+      "abs_tol": 0.0,
+      "note": "Number of stations of the built primary fuselage polyline.",
+      "rel_tol": 0.0,
+      "value": 80.0
+    },
+    "C295/fuselage_tail_x_m": {
+      "abs_tol": 1e-6,
+      "note": "Built geometry, m; tolerance 1e-6 relative (1 micrometre floor) covers host differences in the last bits of the fitted curves, far below any intended dimension change.",
+      "rel_tol": 1e-6,
+      "value": 24.5
+    },
+    "C295/horizontal_tail_area_m2": {
+      "abs_tol": 1e-6,
+      "note": "Built geometry, m^2; tolerance 1e-6 relative (1 micrometre floor) covers host differences in the last bits of the fitted curves, far below any intended dimension change.",
+      "rel_tol": 1e-6,
+      "value": 20.7495
+    },
+    "C295/horizontal_tail_mean_aerodynamic_chord_m": {
+      "abs_tol": 1e-6,
+      "note": "Built geometry, m; tolerance 1e-6 relative (1 micrometre floor) covers host differences in the last bits of the fitted curves, far below any intended dimension change.",
+      "rel_tol": 1e-6,
+      "value": 2.0182928905917414
+    },
+    "C295/horizontal_tail_quarter_chord_centre_x_m": {
+      "abs_tol": 1e-6,
+      "note": "Built geometry, m; tolerance 1e-6 relative (1 micrometre floor) covers host differences in the last bits of the fitted curves, far below any intended dimension change.",
+      "rel_tol": 1e-6,
+      "value": 22.335130906768836
+    },
+    "C295/horizontal_tail_span_m": {
+      "abs_tol": 1e-6,
+      "note": "Built geometry, m; tolerance 1e-6 relative (1 micrometre floor) covers host differences in the last bits of the fitted curves, far below any intended dimension change.",
+      "rel_tol": 1e-6,
+      "value": 10.6
+    },
+    "C295/vertical_tail_area_m2": {
+      "abs_tol": 1e-6,
+      "note": "Built geometry, m^2; tolerance 1e-6 relative (1 micrometre floor) covers host differences in the last bits of the fitted curves, far below any intended dimension change.",
+      "rel_tol": 1e-6,
+      "value": 11.141551097438361
+    },
+    "C295/vertical_tail_mean_aerodynamic_chord_m": {
+      "abs_tol": 1e-6,
+      "note": "Built geometry, m; tolerance 1e-6 relative (1 micrometre floor) covers host differences in the last bits of the fitted curves, far below any intended dimension change.",
+      "rel_tol": 1e-6,
+      "value": 2.44616815391066
+    },
+    "C295/vertical_tail_quarter_chord_centre_x_m": {
+      "abs_tol": 1e-6,
+      "note": "Built geometry, m; tolerance 1e-6 relative (1 micrometre floor) covers host differences in the last bits of the fitted curves, far below any intended dimension change.",
+      "rel_tol": 1e-6,
+      "value": 22.351572404082653
+    },
+    "C295/vertical_tail_span_m": {
+      "abs_tol": 1e-6,
+      "note": "Built geometry, m; tolerance 1e-6 relative (1 micrometre floor) covers host differences in the last bits of the fitted curves, far below any intended dimension change.",
+      "rel_tol": 1e-6,
+      "value": 4.731957776981233
+    },
+    "C295/wing_area_m2": {
+      "abs_tol": 1e-6,
+      "note": "Built geometry, m^2; tolerance 1e-6 relative (1 micrometre floor) covers host differences in the last bits of the fitted curves, far below any intended dimension change.",
+      "rel_tol": 1e-6,
+      "value": 60.02328134665356
+    },
+    "C295/wing_mean_aerodynamic_chord_m": {
+      "abs_tol": 1e-6,
+      "note": "Built geometry, m; tolerance 1e-6 relative (1 micrometre floor) covers host differences in the last bits of the fitted curves, far below any intended dimension change.",
+      "rel_tol": 1e-6,
+      "value": 2.5610971608146422
+    },
+    "C295/wing_quarter_chord_centre_x_m": {
+      "abs_tol": 1e-6,
+      "note": "Built geometry, m; tolerance 1e-6 relative (1 micrometre floor) covers host differences in the last bits of the fitted curves, far below any intended dimension change.",
+      "rel_tol": 1e-6,
+      "value": 10.758326916208059
+    },
+    "C295/wing_span_m": {
+      "abs_tol": 1e-6,
+      "note": "Built geometry, m; tolerance 1e-6 relative (1 micrometre floor) covers host differences in the last bits of the fitted curves, far below any intended dimension change.",
+      "rel_tol": 1e-6,
+      "value": 25.819226844711604
+    },
+    "C919/fuselage_largest_height_m": {
+      "abs_tol": 1e-6,
+      "note": "Built geometry, m; tolerance 1e-6 relative (1 micrometre floor) covers host differences in the last bits of the fitted curves, far below any intended dimension change.",
+      "rel_tol": 1e-6,
+      "value": 4.166000000000008
+    },
+    "C919/fuselage_largest_width_m": {
+      "abs_tol": 1e-6,
+      "note": "Built geometry, m; tolerance 1e-6 relative (1 micrometre floor) covers host differences in the last bits of the fitted curves, far below any intended dimension change.",
+      "rel_tol": 1e-6,
+      "value": 3.960000000000001
+    },
+    "C919/fuselage_nose_x_m": {
+      "abs_tol": 1e-6,
+      "note": "Built geometry, m; tolerance 1e-6 relative (1 micrometre floor) covers host differences in the last bits of the fitted curves, far below any intended dimension change.",
+      "rel_tol": 1e-6,
+      "value": 0.0
+    },
+    "C919/fuselage_station_count": {
+      "abs_tol": 0.0,
+      "note": "Number of stations of the built primary fuselage polyline.",
+      "rel_tol": 0.0,
+      "value": 73.0
+    },
+    "C919/fuselage_tail_x_m": {
+      "abs_tol": 1e-6,
+      "note": "Built geometry, m; tolerance 1e-6 relative (1 micrometre floor) covers host differences in the last bits of the fitted curves, far below any intended dimension change.",
+      "rel_tol": 1e-6,
+      "value": 38.9
+    },
+    "C919/horizontal_tail_area_m2": {
+      "abs_tol": 1e-6,
+      "note": "Built geometry, m^2; tolerance 1e-6 relative (1 micrometre floor) covers host differences in the last bits of the fitted curves, far below any intended dimension change.",
+      "rel_tol": 1e-6,
+      "value": 31.368092354436026
+    },
+    "C919/horizontal_tail_mean_aerodynamic_chord_m": {
+      "abs_tol": 1e-6,
+      "note": "Built geometry, m; tolerance 1e-6 relative (1 micrometre floor) covers host differences in the last bits of the fitted curves, far below any intended dimension change.",
+      "rel_tol": 1e-6,
+      "value": 2.6953615876219317
+    },
+    "C919/horizontal_tail_quarter_chord_centre_x_m": {
+      "abs_tol": 1e-6,
+      "note": "Built geometry, m; tolerance 1e-6 relative (1 micrometre floor) covers host differences in the last bits of the fitted curves, far below any intended dimension change.",
+      "rel_tol": 1e-6,
+      "value": 35.087695761856715
+    },
+    "C919/horizontal_tail_span_m": {
+      "abs_tol": 1e-6,
+      "note": "Built geometry, m; tolerance 1e-6 relative (1 micrometre floor) covers host differences in the last bits of the fitted curves, far below any intended dimension change.",
+      "rel_tol": 1e-6,
+      "value": 12.661187630448447
+    },
+    "C919/vertical_tail_area_m2": {
+      "abs_tol": 1e-6,
+      "note": "Built geometry, m^2; tolerance 1e-6 relative (1 micrometre floor) covers host differences in the last bits of the fitted curves, far below any intended dimension change.",
+      "rel_tol": 1e-6,
+      "value": 25.018278032893704
+    },
+    "C919/vertical_tail_mean_aerodynamic_chord_m": {
+      "abs_tol": 1e-6,
+      "note": "Built geometry, m; tolerance 1e-6 relative (1 micrometre floor) covers host differences in the last bits of the fitted curves, far below any intended dimension change.",
+      "rel_tol": 1e-6,
+      "value": 4.21640384818691
+    },
+    "C919/vertical_tail_quarter_chord_centre_x_m": {
+      "abs_tol": 1e-6,
+      "note": "Built geometry, m; tolerance 1e-6 relative (1 micrometre floor) covers host differences in the last bits of the fitted curves, far below any intended dimension change.",
+      "rel_tol": 1e-6,
+      "value": 34.180346172609944
+    },
+    "C919/vertical_tail_span_m": {
+      "abs_tol": 1e-6,
+      "note": "Built geometry, m; tolerance 1e-6 relative (1 micrometre floor) covers host differences in the last bits of the fitted curves, far below any intended dimension change.",
+      "rel_tol": 1e-6,
+      "value": 6.446979857882751
+    },
+    "C919/wing_area_m2": {
+      "abs_tol": 1e-6,
+      "note": "Built geometry, m^2; tolerance 1e-6 relative (1 micrometre floor) covers host differences in the last bits of the fitted curves, far below any intended dimension change.",
+      "rel_tol": 1e-6,
+      "value": 127.76539108493826
+    },
+    "C919/wing_mean_aerodynamic_chord_m": {
+      "abs_tol": 1e-6,
+      "note": "Built geometry, m; tolerance 1e-6 relative (1 micrometre floor) covers host differences in the last bits of the fitted curves, far below any intended dimension change.",
+      "rel_tol": 1e-6,
+      "value": 4.419812962640012
+    },
+    "C919/wing_quarter_chord_centre_x_m": {
+      "abs_tol": 1e-6,
+      "note": "Built geometry, m; tolerance 1e-6 relative (1 micrometre floor) covers host differences in the last bits of the fitted curves, far below any intended dimension change.",
+      "rel_tol": 1e-6,
+      "value": 17.11370198711213
+    },
+    "C919/wing_span_m": {
+      "abs_tol": 1e-6,
+      "note": "Built geometry, m; tolerance 1e-6 relative (1 micrometre floor) covers host differences in the last bits of the fitted curves, far below any intended dimension change.",
+      "rel_tol": 1e-6,
+      "value": 33.76806295376924
+    },
+    "DC-10/fuselage_largest_height_m": {
+      "abs_tol": 1e-6,
+      "note": "Built geometry, m; tolerance 1e-6 relative (1 micrometre floor) covers host differences in the last bits of the fitted curves, far below any intended dimension change.",
+      "rel_tol": 1e-6,
+      "value": 6.020000000000003
+    },
+    "DC-10/fuselage_largest_width_m": {
+      "abs_tol": 1e-6,
+      "note": "Built geometry, m; tolerance 1e-6 relative (1 micrometre floor) covers host differences in the last bits of the fitted curves, far below any intended dimension change.",
+      "rel_tol": 1e-6,
+      "value": 6.0200000000000085
+    },
+    "DC-10/fuselage_nose_x_m": {
+      "abs_tol": 1e-6,
+      "note": "Built geometry, m; tolerance 1e-6 relative (1 micrometre floor) covers host differences in the last bits of the fitted curves, far below any intended dimension change.",
+      "rel_tol": 1e-6,
+      "value": 0.0
+    },
+    "DC-10/fuselage_station_count": {
+      "abs_tol": 0.0,
+      "note": "Number of stations of the built primary fuselage polyline.",
+      "rel_tol": 0.0,
+      "value": 83.0
+    },
+    "DC-10/fuselage_tail_x_m": {
+      "abs_tol": 1e-6,
+      "note": "Built geometry, m; tolerance 1e-6 relative (1 micrometre floor) covers host differences in the last bits of the fitted curves, far below any intended dimension change.",
+      "rel_tol": 1e-6,
+      "value": 51.97
+    },
+    "DC-10/horizontal_tail_area_m2": {
+      "abs_tol": 1e-6,
+      "note": "Built geometry, m^2; tolerance 1e-6 relative (1 micrometre floor) covers host differences in the last bits of the fitted curves, far below any intended dimension change.",
+      "rel_tol": 1e-6,
+      "value": 125.86073422783453
+    },
+    "DC-10/horizontal_tail_mean_aerodynamic_chord_m": {
+      "abs_tol": 1e-6,
+      "note": "Built geometry, m; tolerance 1e-6 relative (1 micrometre floor) covers host differences in the last bits of the fitted curves, far below any intended dimension change.",
+      "rel_tol": 1e-6,
+      "value": 6.187220100054745
+    },
+    "DC-10/horizontal_tail_quarter_chord_centre_x_m": {
+      "abs_tol": 1e-6,
+      "note": "Built geometry, m; tolerance 1e-6 relative (1 micrometre floor) covers host differences in the last bits of the fitted curves, far below any intended dimension change.",
+      "rel_tol": 1e-6,
+      "value": 47.956997849939704
+    },
+    "DC-10/horizontal_tail_span_m": {
+      "abs_tol": 1e-6,
+      "note": "Built geometry, m; tolerance 1e-6 relative (1 micrometre floor) covers host differences in the last bits of the fitted curves, far below any intended dimension change.",
+      "rel_tol": 1e-6,
+      "value": 22.003732217073118
+    },
+    "DC-10/vertical_tail_area_m2": {
+      "abs_tol": 1e-6,
+      "note": "Built geometry, m^2; tolerance 1e-6 relative (1 micrometre floor) covers host differences in the last bits of the fitted curves, far below any intended dimension change.",
+      "rel_tol": 1e-6,
+      "value": 32.9159365119415
+    },
+    "DC-10/vertical_tail_mean_aerodynamic_chord_m": {
+      "abs_tol": 1e-6,
+      "note": "Built geometry, m; tolerance 1e-6 relative (1 micrometre floor) covers host differences in the last bits of the fitted curves, far below any intended dimension change.",
+      "rel_tol": 1e-6,
+      "value": 5.134374403743666
+    },
+    "DC-10/vertical_tail_quarter_chord_centre_x_m": {
+      "abs_tol": 1e-6,
+      "note": "Built geometry, m; tolerance 1e-6 relative (1 micrometre floor) covers host differences in the last bits of the fitted curves, far below any intended dimension change.",
+      "rel_tol": 1e-6,
+      "value": 48.14521475589241
+    },
+    "DC-10/vertical_tail_span_m": {
+      "abs_tol": 1e-6,
+      "note": "Built geometry, m; tolerance 1e-6 relative (1 micrometre floor) covers host differences in the last bits of the fitted curves, far below any intended dimension change.",
+      "rel_tol": 1e-6,
+      "value": 6.797810560493589
+    },
+    "DC-10/wing_area_m2": {
+      "abs_tol": 1e-6,
+      "note": "Built geometry, m^2; tolerance 1e-6 relative (1 micrometre floor) covers host differences in the last bits of the fitted curves, far below any intended dimension change.",
+      "rel_tol": 1e-6,
+      "value": 370.089012658766
+    },
+    "DC-10/wing_mean_aerodynamic_chord_m": {
+      "abs_tol": 1e-6,
+      "note": "Built geometry, m; tolerance 1e-6 relative (1 micrometre floor) covers host differences in the last bits of the fitted curves, far below any intended dimension change.",
+      "rel_tol": 1e-6,
+      "value": 8.667154703021042
+    },
+    "DC-10/wing_quarter_chord_centre_x_m": {
+      "abs_tol": 1e-6,
+      "note": "Built geometry, m; tolerance 1e-6 relative (1 micrometre floor) covers host differences in the last bits of the fitted curves, far below any intended dimension change.",
+      "rel_tol": 1e-6,
+      "value": 29.04378009924411
+    },
+    "DC-10/wing_span_m": {
+      "abs_tol": 1e-6,
+      "note": "Built geometry, m; tolerance 1e-6 relative (1 micrometre floor) covers host differences in the last bits of the fitted curves, far below any intended dimension change.",
+      "rel_tol": 1e-6,
+      "value": 50.54501734684833
+    },
+    "E195-E2/fuselage_largest_height_m": {
+      "abs_tol": 1e-6,
+      "note": "Built geometry, m; tolerance 1e-6 relative (1 micrometre floor) covers host differences in the last bits of the fitted curves, far below any intended dimension change.",
+      "rel_tol": 1e-6,
+      "value": 3.3500000000000036
+    },
+    "E195-E2/fuselage_largest_width_m": {
+      "abs_tol": 1e-6,
+      "note": "Built geometry, m; tolerance 1e-6 relative (1 micrometre floor) covers host differences in the last bits of the fitted curves, far below any intended dimension change.",
+      "rel_tol": 1e-6,
+      "value": 3.0200000000000005
+    },
+    "E195-E2/fuselage_nose_x_m": {
+      "abs_tol": 1e-6,
+      "note": "Built geometry, m; tolerance 1e-6 relative (1 micrometre floor) covers host differences in the last bits of the fitted curves, far below any intended dimension change.",
+      "rel_tol": 1e-6,
+      "value": 0.0
+    },
+    "E195-E2/fuselage_station_count": {
+      "abs_tol": 0.0,
+      "note": "Number of stations of the built primary fuselage polyline.",
+      "rel_tol": 0.0,
+      "value": 69.0
+    },
+    "E195-E2/fuselage_tail_x_m": {
+      "abs_tol": 1e-6,
+      "note": "Built geometry, m; tolerance 1e-6 relative (1 micrometre floor) covers host differences in the last bits of the fitted curves, far below any intended dimension change.",
+      "rel_tol": 1e-6,
+      "value": 41.6
+    },
+    "E195-E2/horizontal_tail_area_m2": {
+      "abs_tol": 1e-6,
+      "note": "Built geometry, m^2; tolerance 1e-6 relative (1 micrometre floor) covers host differences in the last bits of the fitted curves, far below any intended dimension change.",
+      "rel_tol": 1e-6,
+      "value": 23.32461741227691
+    },
+    "E195-E2/horizontal_tail_mean_aerodynamic_chord_m": {
+      "abs_tol": 1e-6,
+      "note": "Built geometry, m; tolerance 1e-6 relative (1 micrometre floor) covers host differences in the last bits of the fitted curves, far below any intended dimension change.",
+      "rel_tol": 1e-6,
+      "value": 2.475302560836448
+    },
+    "E195-E2/horizontal_tail_quarter_chord_centre_x_m": {
+      "abs_tol": 1e-6,
+      "note": "Built geometry, m; tolerance 1e-6 relative (1 micrometre floor) covers host differences in the last bits of the fitted curves, far below any intended dimension change.",
+      "rel_tol": 1e-6,
+      "value": 38.36178587632114
+    },
+    "E195-E2/horizontal_tail_span_m": {
+      "abs_tol": 1e-6,
+      "note": "Built geometry, m; tolerance 1e-6 relative (1 micrometre floor) covers host differences in the last bits of the fitted curves, far below any intended dimension change.",
+      "rel_tol": 1e-6,
+      "value": 10.064129713895662
+    },
+    "E195-E2/vertical_tail_area_m2": {
+      "abs_tol": 1e-6,
+      "note": "Built geometry, m^2; tolerance 1e-6 relative (1 micrometre floor) covers host differences in the last bits of the fitted curves, far below any intended dimension change.",
+      "rel_tol": 1e-6,
+      "value": 17.05216412321891
+    },
+    "E195-E2/vertical_tail_mean_aerodynamic_chord_m": {
+      "abs_tol": 1e-6,
+      "note": "Built geometry, m; tolerance 1e-6 relative (1 micrometre floor) covers host differences in the last bits of the fitted curves, far below any intended dimension change.",
+      "rel_tol": 1e-6,
+      "value": 3.430337806948808
+    },
+    "E195-E2/vertical_tail_quarter_chord_centre_x_m": {
+      "abs_tol": 1e-6,
+      "note": "Built geometry, m; tolerance 1e-6 relative (1 micrometre floor) covers host differences in the last bits of the fitted curves, far below any intended dimension change.",
+      "rel_tol": 1e-6,
+      "value": 37.61037870549236
+    },
+    "E195-E2/vertical_tail_span_m": {
+      "abs_tol": 1e-6,
+      "note": "Built geometry, m; tolerance 1e-6 relative (1 micrometre floor) covers host differences in the last bits of the fitted curves, far below any intended dimension change.",
+      "rel_tol": 1e-6,
+      "value": 5.4597845515982035
+    },
+    "E195-E2/wing_area_m2": {
+      "abs_tol": 1e-6,
+      "note": "Built geometry, m^2; tolerance 1e-6 relative (1 micrometre floor) covers host differences in the last bits of the fitted curves, far below any intended dimension change.",
+      "rel_tol": 1e-6,
+      "value": 113.48290168135313
+    },
+    "E195-E2/wing_mean_aerodynamic_chord_m": {
+      "abs_tol": 1e-6,
+      "note": "Built geometry, m; tolerance 1e-6 relative (1 micrometre floor) covers host differences in the last bits of the fitted curves, far below any intended dimension change.",
+      "rel_tol": 1e-6,
+      "value": 3.988072128389016
+    },
+    "E195-E2/wing_quarter_chord_centre_x_m": {
+      "abs_tol": 1e-6,
+      "note": "Built geometry, m; tolerance 1e-6 relative (1 micrometre floor) covers host differences in the last bits of the fitted curves, far below any intended dimension change.",
+      "rel_tol": 1e-6,
+      "value": 18.911965213715703
+    },
+    "E195-E2/wing_span_m": {
+      "abs_tol": 1e-6,
+      "note": "Built geometry, m; tolerance 1e-6 relative (1 micrometre floor) covers host differences in the last bits of the fitted curves, far below any intended dimension change.",
+      "rel_tol": 1e-6,
+      "value": 35.244772872821834
+    },
+    "LJ60/fuselage_largest_height_m": {
+      "abs_tol": 1e-6,
+      "note": "Built geometry, m; tolerance 1e-6 relative (1 micrometre floor) covers host differences in the last bits of the fitted curves, far below any intended dimension change.",
+      "rel_tol": 1e-6,
+      "value": 1.9109976259356651
+    },
+    "LJ60/fuselage_largest_width_m": {
+      "abs_tol": 1e-6,
+      "note": "Built geometry, m; tolerance 1e-6 relative (1 micrometre floor) covers host differences in the last bits of the fitted curves, far below any intended dimension change.",
+      "rel_tol": 1e-6,
+      "value": 1.9888648470656376
+    },
+    "LJ60/fuselage_nose_x_m": {
+      "abs_tol": 1e-6,
+      "note": "Built geometry, m; tolerance 1e-6 relative (1 micrometre floor) covers host differences in the last bits of the fitted curves, far below any intended dimension change.",
+      "rel_tol": 1e-6,
+      "value": 0.0
+    },
+    "LJ60/fuselage_station_count": {
+      "abs_tol": 0.0,
+      "note": "Number of stations of the built primary fuselage polyline.",
+      "rel_tol": 0.0,
+      "value": 52.0
+    },
+    "LJ60/fuselage_tail_x_m": {
+      "abs_tol": 1e-6,
+      "note": "Built geometry, m; tolerance 1e-6 relative (1 micrometre floor) covers host differences in the last bits of the fitted curves, far below any intended dimension change.",
+      "rel_tol": 1e-6,
+      "value": 17.12
+    },
+    "LJ60/horizontal_tail_area_m2": {
+      "abs_tol": 1e-6,
+      "note": "Built geometry, m^2; tolerance 1e-6 relative (1 micrometre floor) covers host differences in the last bits of the fitted curves, far below any intended dimension change.",
+      "rel_tol": 1e-6,
+      "value": 5.4660971275263766
+    },
+    "LJ60/horizontal_tail_mean_aerodynamic_chord_m": {
+      "abs_tol": 1e-6,
+      "note": "Built geometry, m; tolerance 1e-6 relative (1 micrometre floor) covers host differences in the last bits of the fitted curves, far below any intended dimension change.",
+      "rel_tol": 1e-6,
+      "value": 1.2659289617486336
+    },
+    "LJ60/horizontal_tail_quarter_chord_centre_x_m": {
+      "abs_tol": 1e-6,
+      "note": "Built geometry, m; tolerance 1e-6 relative (1 micrometre floor) covers host differences in the last bits of the fitted curves, far below any intended dimension change.",
+      "rel_tol": 1e-6,
+      "value": 16.649228142076502
+    },
+    "LJ60/horizontal_tail_span_m": {
+      "abs_tol": 1e-6,
+      "note": "Built geometry, m; tolerance 1e-6 relative (1 micrometre floor) covers host differences in the last bits of the fitted curves, far below any intended dimension change.",
+      "rel_tol": 1e-6,
+      "value": 4.480407481578996
+    },
+    "LJ60/vertical_tail_area_m2": {
+      "abs_tol": 1e-6,
+      "note": "Built geometry, m^2; tolerance 1e-6 relative (1 micrometre floor) covers host differences in the last bits of the fitted curves, far below any intended dimension change.",
+      "rel_tol": 1e-6,
+      "value": 4.777566750979842
+    },
+    "LJ60/vertical_tail_mean_aerodynamic_chord_m": {
+      "abs_tol": 1e-6,
+      "note": "Built geometry, m; tolerance 1e-6 relative (1 micrometre floor) covers host differences in the last bits of the fitted curves, far below any intended dimension change.",
+      "rel_tol": 1e-6,
+      "value": 2.3597472270370687
+    },
+    "LJ60/vertical_tail_quarter_chord_centre_x_m": {
+      "abs_tol": 1e-6,
+      "note": "Built geometry, m; tolerance 1e-6 relative (1 micrometre floor) covers host differences in the last bits of the fitted curves, far below any intended dimension change.",
+      "rel_tol": 1e-6,
+      "value": 15.493171956130057
+    },
+    "LJ60/vertical_tail_span_m": {
+      "abs_tol": 1e-6,
+      "note": "Built geometry, m; tolerance 1e-6 relative (1 micrometre floor) covers host differences in the last bits of the fitted curves, far below any intended dimension change.",
+      "rel_tol": 1e-6,
+      "value": 2.09774492768438
+    },
+    "LJ60/wing_area_m2": {
+      "abs_tol": 1e-6,
+      "note": "Built geometry, m^2; tolerance 1e-6 relative (1 micrometre floor) covers host differences in the last bits of the fitted curves, far below any intended dimension change.",
+      "rel_tol": 1e-6,
+      "value": 25.70620472704866
+    },
+    "LJ60/wing_mean_aerodynamic_chord_m": {
+      "abs_tol": 1e-6,
+      "note": "Built geometry, m; tolerance 1e-6 relative (1 micrometre floor) covers host differences in the last bits of the fitted curves, far below any intended dimension change.",
+      "rel_tol": 1e-6,
+      "value": 2.1979637709945274
+    },
+    "LJ60/wing_quarter_chord_centre_x_m": {
+      "abs_tol": 1e-6,
+      "note": "Built geometry, m; tolerance 1e-6 relative (1 micrometre floor) covers host differences in the last bits of the fitted curves, far below any intended dimension change.",
+      "rel_tol": 1e-6,
+      "value": 9.481049381292587
+    },
+    "LJ60/wing_span_m": {
+      "abs_tol": 1e-6,
+      "note": "Built geometry, m; tolerance 1e-6 relative (1 micrometre floor) covers host differences in the last bits of the fitted curves, far below any intended dimension change.",
+      "rel_tol": 1e-6,
+      "value": 12.55821913308815
+    }
+  },
+  "producer": {
+    "cargo": [
+      "test",
+      "-p",
+      "alas-geom",
+      "--test",
+      "preset_geometry_quantities"
+    ]
+  }
+}

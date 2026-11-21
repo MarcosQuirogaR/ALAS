@@ -4,27 +4,109 @@
 // Ported from alas/reporting/visualization.py (`figure_payload_range`) and
 // alas/physics/performance.py (`payload_range_diagram`).
 
-//! The conceptual A-B-C-D payload-range curve from the analyzed aircraft.
+//! The conceptual A-B-C-D payload-range curve from the analyzed aircraft,
+//! flown between B and C as well as at the corners
+//! ([`alas_pipeline::quick_analysis::corners::mtow_line`]): the takeoff-mass
+//! line is curved, and its chord reads long.
 //!
 //! The report crate owns this orchestration because the numerical payload-range
 //! calculation consumes both a full-analysis report and configuration. Keeping
 //! the inputs here prevents a renderer from quietly reverting to a plausible
 //! transport-sized set of points when the aircraft or its fuel model changes.
 
-use alas_config::{presets, AlasConfig};
-use alas_mass::breakdown::OEW_KEYS;
-use alas_pipeline::feasibility::{assess_fuel_capacity, FuelCapacityEvidence};
+use alas_config::AlasConfig;
+use alas_pipeline::feasibility::FuelCapacityEvidence;
 use alas_pipeline::full_analysis::AnalysisReport;
-use alas_pipeline::quick_analysis::corners::{corner_ranges, CornerMasses, RangeBasis};
-use alas_pipeline::quick_analysis::payload_capacity_estimate;
+use alas_pipeline::quick_analysis::corners::mtow_line::{mtow_line_points, MtowLinePoint};
+use alas_pipeline::quick_analysis::corners::{
+    chart_corner_masses, corner_ranges, CornerMasses, RangeBasis,
+};
 
 use super::support::format_thousands;
 use crate::chart_kit::draw_title;
+use crate::plot_data::{CustomSeries, SeriesKind};
 use crate::scene::{Axes2D, Color, Fill, Scene, SceneElement, Stroke, TextAlign, TextBaseline};
 use crate::theme::get_palette;
 
 const M_TO_NM: f64 = 1852.0;
 const BLUE: &str = "tab:blue";
+/// Name of the exported series of points flown on the takeoff-mass line, B to C.
+const MTOW_LINE_SERIES: &str = "flown takeoff-mass line B-C";
+
+/// Offset and alignment of a corner's two-line label: the first of four anchors
+/// (above-right, above-left, below-right, below-left) whose text box crosses the
+/// curve least and stays inside the axes. A corner on a descending leg, as C and D
+/// are on a long-range type, therefore flips to the side the curve is not on.
+fn label_anchor(
+    curve_px: &[[f64; 2]],
+    at: [f64; 2],
+    text: &str,
+    axes: (f64, f64, f64, f64),
+    placed: &mut Vec<(f64, f64, f64, f64)>,
+) -> (f64, f64, TextAlign, TextBaseline) {
+    let chars = text.lines().map(|l| l.chars().count()).max().unwrap_or(1) as f64;
+    let (w, h) = (chars * 5.4, 2.0 * 14.0);
+    let anchors = [
+        (8.0, -10.0, TextAlign::Left, TextBaseline::Bottom),
+        (-8.0, -10.0, TextAlign::Right, TextBaseline::Bottom),
+        (8.0, 10.0, TextAlign::Left, TextBaseline::Top),
+        (-8.0, 10.0, TextAlign::Right, TextBaseline::Top),
+    ];
+    let mut best = (usize::MAX, anchors[0]);
+    for anchor in anchors {
+        let (dx, dy, align, baseline) = anchor;
+        let x0 = if align == TextAlign::Left {
+            at[0] + dx
+        } else {
+            at[0] + dx - w
+        };
+        let y0 = if baseline == TextBaseline::Bottom {
+            at[1] + dy - h
+        } else {
+            at[1] + dy
+        };
+        let (x1, y1) = (x0 + w, y0 + h);
+        let outside =
+            x0 < axes.0 || x1 > axes.0 + axes.2 || y0 < axes.1 || y1 > axes.1 + axes.3 - 2.0;
+        let mut hits = if outside { 1_000 } else { 0 };
+        for &(px0, py0, px1, py1) in placed.iter() {
+            if x0 < px1 && x1 > px0 && y0 < py1 && y1 > py0 {
+                hits += 500;
+            }
+        }
+        for pair in curve_px.windows(2) {
+            let length =
+                ((pair[1][0] - pair[0][0]).powi(2) + (pair[1][1] - pair[0][1]).powi(2)).sqrt();
+            let steps = (length / 3.0).ceil().max(1.0) as usize;
+            for k in 0..=steps {
+                let t = k as f64 / steps as f64;
+                let px = pair[0][0] + t * (pair[1][0] - pair[0][0]);
+                let py = pair[0][1] + t * (pair[1][1] - pair[0][1]);
+                // The marker itself sits at `at`; ignore the curve right at the label's own corner.
+                let own = (px - at[0]).abs() < 6.0 && (py - at[1]).abs() < 6.0;
+                if !own && px >= x0 - 3.0 && px <= x1 + 3.0 && py >= y0 - 3.0 && py <= y1 + 3.0 {
+                    hits += 1;
+                }
+            }
+        }
+        if hits < best.0 {
+            best = (hits, anchor);
+        }
+    }
+    let (dx, _, align, baseline) = best.1;
+    let bx0 = if align == TextAlign::Left {
+        at[0] + dx
+    } else {
+        at[0] + dx - w
+    };
+    let by0 = if baseline == TextBaseline::Bottom {
+        at[1] + best.1 .1 - h
+    } else {
+        at[1] + best.1 .1
+    };
+    placed.push((bx0, by0, bx0 + w, by0 + h));
+    best.1
+}
 
 /// One labelled corner of the conceptual payload-range curve.
 #[derive(Debug, Clone, Copy)]
@@ -68,6 +150,26 @@ pub struct PayloadRangeData {
     pub range_basis: RangeBasis,
     /// Range method and its provenance, including the fuel scheme.
     pub method_note: String,
+    /// Points flown on the takeoff-mass line strictly between B and C, in
+    /// falling payload, priced as the corners are; empty when B and C
+    /// coincide.
+    pub mtow_line: Vec<MtowLinePoint>,
+}
+
+impl PayloadRangeData {
+    /// The flown curve as (range nm, payload kg): A, B, the takeoff-mass line
+    /// points, C and D.
+    pub fn curve(&self) -> Vec<(f64, f64)> {
+        let corner = |index: usize| (self.points[index].range_nm, self.points[index].payload_kg);
+        let mut curve = vec![corner(0), corner(1)];
+        curve.extend(
+            self.mtow_line
+                .iter()
+                .map(|point| (point.range_m / M_TO_NM, point.payload_kg)),
+        );
+        curve.extend([corner(2), corner(3)]);
+        curve
+    }
 }
 
 /// Generate the payload-range curve from the report's masses, fuel model
@@ -91,12 +193,9 @@ pub fn figure_payload_range(
         return status_scene("Conceptual Payload-Range Diagram", message, theme);
     };
 
-    let ranges: Vec<f64> = data.points.iter().map(|point| point.range_nm).collect();
-    let payloads_t: Vec<f64> = data
-        .points
-        .iter()
-        .map(|point| point.payload_kg / 1000.0)
-        .collect();
+    let flown = data.curve();
+    let ranges: Vec<f64> = flown.iter().map(|point| point.0).collect();
+    let payloads_t: Vec<f64> = flown.iter().map(|point| point.1 / 1000.0).collect();
     let max_range = ranges.iter().copied().fold(0.0, f64::max).max(1.0);
     let max_payload = payloads_t.iter().copied().fold(0.0, f64::max).max(1.0);
 
@@ -106,7 +205,7 @@ pub fn figure_payload_range(
     scene.suppress_derived_title();
     let axes = Axes2D::new(
         (85.0, 45.0, 530.0, 350.0),
-        (-0.03 * max_range, max_range * 1.15),
+        (-0.03 * max_range, max_range * 1.35),
         (0.0, max_payload * 1.25),
     );
     axes.draw_frame(&mut scene, pal);
@@ -132,7 +231,9 @@ pub fn figure_payload_range(
         stroke: None,
     });
     axes.add_line_series(&mut scene, &curve, Stroke::new(Color::from_hex(BLUE), 2.5));
+    let curve_px: Vec<[f64; 2]> = curve.iter().map(|&(r, p)| axes.map_point(r, p)).collect();
 
+    let mut placed: Vec<(f64, f64, f64, f64)> = Vec::new();
     let mut i = 0;
     while i < data.points.len() {
         let point = data.points[i];
@@ -153,26 +254,26 @@ pub fn figure_payload_range(
             fill: Some(Fill::new(Color::from_hex(BLUE))),
             stroke: Some(Stroke::new(Color::from_hex(pal.bg), 1.0)),
         });
-        let near_right_edge = point.range_nm > 0.85 * max_range;
+        let text = format!(
+            "{}\n{} nm | {:.1} t",
+            labels,
+            format_thousands(point.range_nm),
+            point.payload_kg / 1000.0
+        );
+        let (dx, dy, align, baseline) = label_anchor(
+            &curve_px,
+            mapped,
+            &text,
+            (axes.left, axes.top, axes.width, axes.height),
+            &mut placed,
+        );
         scene.add(SceneElement::Text {
-            text: format!(
-                "{}\n{} nm | {:.1} t",
-                labels,
-                format_thousands(point.range_nm),
-                point.payload_kg / 1000.0
-            ),
-            pos: [
-                mapped[0] + if near_right_edge { -8.0 } else { 8.0 },
-                mapped[1] - 10.0,
-            ],
+            text,
+            pos: [mapped[0] + dx, mapped[1] + dy],
             font_size: 8.5,
             color: Color::from_hex(pal.title),
-            align: if near_right_edge {
-                TextAlign::Right
-            } else {
-                TextAlign::Left
-            },
-            baseline: TextBaseline::Bottom,
+            align,
+            baseline,
             angle_deg: 0.0,
             bold: true,
         });
@@ -210,7 +311,7 @@ pub fn figure_payload_range(
             },
             format_thousands(data.mtow_kg)
         ),
-        pos: [axes.left + axes.width * 0.5, axes.top + axes.height + 56.0],
+        pos: [axes.left + axes.width * 0.5, axes.top + axes.height + 66.0],
         font_size: 7.5,
         color: Color::from_hex(pal.tick),
         align: TextAlign::Center,
@@ -220,7 +321,7 @@ pub fn figure_payload_range(
     });
     scene.add(SceneElement::Text {
         text: format!("Range basis: {}", data.range_basis.label()),
-        pos: [axes.left + axes.width * 0.5, axes.top + axes.height + 70.0],
+        pos: [axes.left + axes.width * 0.5, axes.top + axes.height + 82.0],
         font_size: 7.5,
         color: Color::from_hex(pal.tick),
         align: TextAlign::Center,
@@ -228,7 +329,34 @@ pub fn figure_payload_range(
         angle_deg: 0.0,
         bold: false,
     });
+    record_mtow_line(&mut scene, &data);
     scene
+}
+
+/// Record the flown takeoff-mass line, B to C, as its own exported series:
+/// a payload between B and C is read between flown points, not on the chord.
+fn record_mtow_line(scene: &mut Scene, data: &PayloadRangeData) {
+    let (b, c) = (data.points[1], data.points[2]);
+    let mut rows = vec![(b.range_nm, b.payload_kg, "B".to_owned())];
+    rows.extend(data.mtow_line.iter().map(|point| {
+        let kind = if point.stated { "stated ZFW" } else { "ZFW" };
+        (
+            point.range_m / M_TO_NM,
+            point.payload_kg,
+            format!("{kind} {:.0} kg", point.zero_fuel_mass_kg),
+        )
+    }));
+    rows.push((c.range_nm, c.payload_kg, "C".to_owned()));
+    scene.data_trace.note_custom(CustomSeries {
+        key: "mtow_line",
+        x_label: "Range (nm)",
+        y_label: "Payload (t)",
+        name: MTOW_LINE_SERIES,
+        kind: SeriesKind::Points,
+        x: rows.iter().map(|row| row.0).collect(),
+        y: rows.iter().map(|row| row.1 / 1000.0).collect(),
+        labels: rows.into_iter().map(|row| row.2).collect(),
+    });
 }
 
 /// Compute the conceptual payload-range corners for `report` under `config`.
@@ -240,66 +368,17 @@ pub fn payload_range_data(
     report: &AnalysisReport,
     config: &AlasConfig,
 ) -> Option<PayloadRangeData> {
-    report.airplane.wings.first()?;
-    let masses = &report.component_masses;
-    let oew_kg: f64 = OEW_KEYS
-        .iter()
-        .map(|key| masses.get(*key).copied().unwrap_or(0.0))
-        .sum();
-    let analyzed_payload_kg = masses.get("Payload").copied().unwrap_or(0.0);
-    // Capability corners trade payload against fuel under the aircraft's
-    // limit. Under Hard MTOW that limit is the declared MTOW, which one
-    // volume-limited load case does not lower; a mission-closed aircraft's
-    // limit is its sized takeoff mass.
-    let mtow_kg = if config
-        .optimizer
-        .objective
-        .mtow_sizing
-        .sizes_at_declared_mass()
-    {
-        report.aircraft_mtow_limit_kg(config.requirements.mtow_kg)
-    } else {
-        report.analysis_takeoff_mass_kg(config.requirements.mtow_kg)
-    };
-
-    // A payload-range chart is an aircraft-capability curve, not a second
-    // drawing of the currently selected cabin load. The old implementation
-    // used the latter as point A, so a 130-seat A220 or 525-seat A380 could
-    // never show the structural payload the preset was meant to represent.
-    // Bound the configured/effective payload by MZFW - the *modeled* OEW;
-    // this keeps the chart on the same mass convention as the feasibility
-    // check and prevents an MZFW violation from being hidden in a figure.
-    let configured_payload_limit = config.requirements.max_structural_payload_kg;
-    let effective_payload_limit = report
-        .geometry_summary
-        .get("effective_structural_payload_limit_kg")
-        .copied();
-    let published_mzfw_payload_limit = presets::get(&config.preset)
-        .ok()
-        .and_then(|preset| preset.reference.mzfw_kg)
-        .map(|mzfw_kg| mzfw_kg - oew_kg);
-    // Achievable payload: the declared cap, the effective or MZFW-derived limit
-    // and the MTOW - OEW budget, resolved by the same estimator the sandbox
-    // Quick Analysis uses so both surfaces publish one capacity basis.
-    let mzfw_limit_kg = [effective_payload_limit, published_mzfw_payload_limit]
-        .into_iter()
-        .flatten()
-        .filter(|value| value.is_finite() && *value > 0.0)
-        .reduce(f64::min);
-    let capacity = payload_capacity_estimate(
-        configured_payload_limit,
-        mzfw_limit_kg,
-        analyzed_payload_kg,
+    // The chart masses come from the routine the design database's
+    // `characteristics.design_point_range` uses too, so both price one basis.
+    let chart = chart_corner_masses(report, config)?;
+    let CornerMasses {
         mtow_kg,
         oew_kg,
-    );
-    let (max_payload_kg, payload_basis) = (capacity.capacity_kg, capacity.basis);
-
-    let fuel_capacity = assess_fuel_capacity(config, &report.design, report);
-    let tank_capacity_kg = fuel_capacity
-        .capacity_kg
-        .filter(|value| value.is_finite())?;
-    let fuel_capacity_limit = match fuel_capacity.evidence {
+        max_payload_kg: _,
+        tank_capacity_kg,
+    } = chart.masses;
+    let payload_basis = chart.payload_basis;
+    let fuel_capacity_limit = match chart.tank_evidence {
         FuelCapacityEvidence::PublishedPreset => "published usable capacity",
         FuelCapacityEvidence::GeometryEstimate => "geometry-estimated capacity",
         FuelCapacityEvidence::Unavailable => "unavailable",
@@ -313,17 +392,10 @@ pub fn payload_range_data(
 
     // The ranges come from the same routine the sandbox Quick Analysis uses,
     // so both surfaces publish one set of corners for one report.
-    let ranges = corner_ranges(
-        config,
-        report,
-        &CornerMasses {
-            mtow_kg,
-            oew_kg,
-            max_payload_kg,
-            tank_capacity_kg,
-        },
-    )
-    .ok()?;
+    let ranges = corner_ranges(config, report, &chart.masses).ok()?;
+    // The B-C line flown by the same rule; a point the model cannot price
+    // leaves the chart unavailable, as a corner does.
+    let mtow_line = mtow_line_points(config, report, &chart.masses, None, None).ok()?;
     let labels = ["A", "B", "C", "D"];
     let points = std::array::from_fn(|index| PayloadRangePoint {
         label: labels[index],
@@ -342,6 +414,7 @@ pub fn payload_range_data(
         reserve_fuel_kg: ranges.reserve_fuel_kg,
         range_basis: ranges.basis,
         method_note: ranges.note,
+        mtow_line,
     })
 }
 

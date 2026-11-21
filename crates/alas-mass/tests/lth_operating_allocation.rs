@@ -76,7 +76,14 @@ fn lth_crew_is_allocated_to_cockpit_without_changing_operating_total() {
     bundled.operating_items.flight_crew_and_baggage_kg = 0.0;
     let bundled_placement = build(&bundled).state(LoadState::OperatingEmpty);
     assert!((allocated.mass_kg - bundled_placement.mass_kg).abs() < 1e-8);
-    let cockpit_x = 0.05 * design.fuselage_length_m;
+    // The crew sits on the flight deck read from the built nose loft
+    // (Raymer 6th ed. ch. 9.2); the FLOPS 0.05 L rule is only its fallback.
+    let cockpit_x = stations
+        .flight_crew
+        .as_ref()
+        .expect("the built loft places the flight deck")
+        .position_m[0];
+    assert!(cockpit_x < stations.operating_items.position_m[0]);
     let expected_moment_change = pilot_mass * (cockpit_x - stations.operating_items.position_m[0]);
     let actual_moment_change = allocated.mass_kg * allocated.cg_m[0]
         - bundled_placement.mass_kg * bundled_placement.cg_m[0];

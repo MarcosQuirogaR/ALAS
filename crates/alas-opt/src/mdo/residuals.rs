@@ -19,6 +19,7 @@ use super::residuals_performance::performance_residuals;
 use super::sizing::SizingOutcome;
 use super::types::ConstraintFamily::{Balance, Mass};
 use super::types::ConstraintResidual;
+use interference::interference_residuals;
 
 mod balance_ledger;
 mod band_range;
@@ -28,15 +29,22 @@ mod declared_fuel;
 #[cfg(test)]
 mod declared_fuel_tests;
 pub(super) mod gear_placement;
+mod interference;
+mod load_plan;
 mod mtow_modes;
 mod public_planning;
 mod relative_balance;
 #[cfg(test)]
 mod relative_tests;
+mod takeoff_override;
+#[cfg(test)]
+mod ths_validation_tests;
+mod vn_envelope;
 
 #[cfg(test)]
+use declared_fuel::nominal_tank_capacity_kg;
+#[cfg(test)]
 use declared_fuel::NOMINAL_TANK_CAPACITY_KG;
-use declared_fuel::{nominal_tank_capacity_kg, published_fuel};
 pub use relative_balance::reporting_relative_balance;
 
 /// Every requirement family's residuals for one sized candidate.
@@ -60,6 +68,11 @@ pub(crate) fn build(
         &outcome.plane,
         outcome.masses.wing,
     ));
+    // The report's V-n envelope checks, on the same configuration.
+    residuals.extend(vn_envelope::residuals(
+        &structural_config,
+        outcome.plane.s_ref,
+    ));
     residuals.extend(mass_residuals(outcome, config));
     residuals.extend(balance_residuals(outcome, config, ResidualRole::Constraint));
     residuals.extend(public_planning::residuals(outcome, config));
@@ -68,6 +81,8 @@ pub(crate) fn build(
         config,
         ResidualRole::Constraint,
     ));
+    residuals.extend(super::engine::sizing::residuals(outcome, config));
+    residuals.extend(takeoff_override::notice(config));
     residuals.extend(geometry_residuals(
         outcome,
         config,
@@ -77,7 +92,22 @@ pub(crate) fn build(
         target_cargo_payload_kg,
     ));
     residuals.extend(layout_residuals(outcome, config, ResidualRole::Constraint));
+    residuals.extend(super::residuals_hold_clearance::hold_clearance_residuals(
+        &outcome.plane,
+        config,
+        ResidualRole::Constraint,
+    ));
+    residuals.extend(interference_residuals(
+        outcome,
+        config,
+        ResidualRole::Constraint,
+    ));
     residuals.extend(super::residuals_buffet::buffet_residuals(
+        outcome,
+        config,
+        ResidualRole::Constraint,
+    ));
+    residuals.extend(super::residuals_lateral::lateral_residuals(
         outcome,
         config,
         ResidualRole::Constraint,
@@ -161,66 +191,7 @@ fn mass_residuals(outcome: &SizingOutcome, config: &AlasConfig) -> Vec<Constrain
         ));
     }
 
-    // A reference adaptation must keep the tanks the registered aircraft's
-    // mission needs. The route check above does not test it: a short route
-    // leaves most of the volume empty. Where the plan closes on a design
-    // mission (design range at design payload), the usable capacity must
-    // hold that mission's reserve-inclusive takeoff fuel
-    // (`SizedCandidate::design_mission_fuel_kg`); the taxi-out fuel on top of
-    // it is the route check's, which then flies the same mission. Otherwise
-    // the fallback is the product tank inventory of the preset design vector
-    // held against the candidate's own: both come from one resolver
-    // (`alas_mass::tanks::resolve_product_layout`) at one fuel density, and
-    // the candidate's is the capacity its dispatch is bounded by.
-    let capacity_kg = sized.usable_capacity_kg;
-    if let (Some(nominal_kg), true) = (
-        nominal_tank_capacity_kg(&outcome.registered_config(config)),
-        capacity_kg.is_finite(),
-    ) {
-        let required_kg =
-            if outcome.plan.design_mission.is_some() && sized.design_mission_fuel_kg.is_finite() {
-                sized.design_mission_fuel_kg
-            } else {
-                nominal_kg
-            };
-        residuals.push(ConstraintResidual::scaled(
-            "fuel_capacity_declared",
-            Mass,
-            capacity_kg,
-            required_kg,
-            "kg",
-            required_kg - capacity_kg,
-            role,
-        ));
-        // Published figures, for context only; never ranked.
-        if let Some(published) = published_fuel(config) {
-            if let Some(kg) = published.0 {
-                residuals.push(ConstraintResidual::scaled(
-                    "fuel_capacity_published",
-                    Mass,
-                    capacity_kg,
-                    kg,
-                    "kg",
-                    kg - capacity_kg,
-                    ResidualRole::Diagnostic,
-                ));
-            }
-            if let Some(litres) = published.1 {
-                let modelled_l = capacity_kg
-                    / alas_mass::tanks::inventory_density_kg_m3(config).max(1e-9)
-                    * 1_000.0;
-                residuals.push(ConstraintResidual::scaled(
-                    "fuel_volume_published",
-                    Mass,
-                    modelled_l,
-                    litres,
-                    "L",
-                    litres - modelled_l,
-                    ResidualRole::Diagnostic,
-                ));
-            }
-        }
-    }
+    residuals.extend(declared_fuel::tank_residuals(outcome, config, role));
 
     // The takeoff-mass limits follow the plan (`alas_config::MtowPlan`):
     // `mtow_ceiling` for the two original ceiling-bound modes, the hard band
@@ -235,6 +206,7 @@ fn mass_residuals(outcome: &SizingOutcome, config: &AlasConfig) -> Vec<Constrain
         outcome.mtow_ceiling,
         role,
     ));
+    residuals.extend(mtow_modes::chart_payload_cap_residuals(outcome, config));
     // MTOW band only: keep the registered aircraft's corner B range.
     residuals.extend(band_range::residuals(outcome, config, role));
 
@@ -405,6 +377,7 @@ fn balance_residuals(
             .with_detail(error)];
         }
     };
+    let held = config.holds_to_registered_aircraft();
     // Hard, preset-anchored companions of the two diagnostic residuals below.
     // They compare design loadings, as the reporting guard does.
     let mut residuals =
@@ -445,8 +418,18 @@ fn balance_residuals(
                 } else {
                     worst.actual - worst.limit
                 };
-                // Unvalidated CG-range and tail-scrape measurements are diagnostics.
-                let residual_policy = if constraint.is_diagnostic() {
+                // A configured requirement (CG range, an assumed or state-unspecified
+                // rotation attitude) is a diagnostic, not a hard limit. A run held to
+                // the registered aircraft keeps the absolute tail-scrape and usable-CG
+                // rows diagnostic whatever their basis: the search cannot move the gear
+                // or the upsweep, and the hard relative guards above hold it to the
+                // registered aircraft instead: the registered aircraft is certified in that state.
+                let held_absolute_row = held
+                    && matches!(
+                        constraint,
+                        ModelCgConstraint::TailScrape | ModelCgConstraint::MinimumUsableCgRange
+                    );
+                let residual_policy = if worst.is_diagnostic() || held_absolute_row {
                     ResidualRole::Diagnostic
                 } else {
                     role

@@ -1,7 +1,7 @@
 // SPDX-License-Identifier: AGPL-3.0-or-later
 // Copyright (C) 2026 Marcos Quiroga Rodriguez
 
-//! Static dispatch inventories used to audit GUI/report registry coverage.
+//! Static dispatch inventories used to check GUI/report registry coverage.
 //!
 //! Keeping these lists beside the dispatch module makes adding a descriptor a
 //! compile-visible review step while avoiding a second dynamic registry.

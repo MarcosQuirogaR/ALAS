@@ -76,6 +76,18 @@ pub fn compute_v_speeds(
     )
 }
 
+/// The landing mass the schedule is evaluated at, kg: the supplied value when
+/// it is finite and positive, otherwise `NaN`, so that the stall, approach
+/// and touchdown speeds and the landing distance of an unusable mass are
+/// `NaN` rather than a zero that meets every field limit.
+fn usable_landing_mass_kg(landing_mass_kg: f64) -> f64 {
+    if landing_mass_kg.is_finite() && landing_mass_kg > 0.0 {
+        landing_mass_kg
+    } else {
+        f64::NAN
+    }
+}
+
 /// Compute the configurable legacy speed schedule with separate take-off and landing
 /// masses. Take-off speeds remain tied to MTOW, while stall/approach/
 /// touchdown speeds use the arrival mass.
@@ -93,7 +105,7 @@ pub fn compute_v_speeds_at_masses(
     let sigma = density_ratio(airport.elevation_m, airport.isa_deviation_c);
     let rho = sigma * RHO_SL;
     let ws_pa = mtow_kg * G / wing_area_m2;
-    let landing_ws_pa = landing_mass_kg.max(0.0) * G / wing_area_m2;
+    let landing_ws_pa = usable_landing_mass_kg(landing_mass_kg) * G / wing_area_m2;
 
     let v_stall_to = (2.0 * ws_pa / (rho * cl_max_to)).sqrt();
     let v_stall_land = (2.0 * landing_ws_pa / (rho * cl_max_land)).sqrt();
@@ -250,7 +262,7 @@ pub fn compute_field_performance_at_masses(
 ) -> FieldPerformance {
     let sigma = density_ratio(airport.elevation_m, airport.isa_deviation_c);
     let ws_pa = mtow_kg * G / wing_area_m2;
-    let landing_mass_kg = landing_mass_kg.max(0.0);
+    let landing_mass_kg = usable_landing_mass_kg(landing_mass_kg);
     let landing_ws_pa = landing_mass_kg * G / wing_area_m2;
     let ws_psf = ws_pa * PA_TO_PSF;
 
@@ -291,6 +303,30 @@ mod tests {
 
     fn sea_level() -> Airport {
         Airport::custom("Fixture", 0.0, 3500.0, 3500.0, 0.0, 0.0, 0.0)
+    }
+
+    #[test]
+    fn an_unusable_landing_mass_gives_no_landing_result() {
+        let config = PerformanceConfig::default();
+        for mass_kg in [f64::NAN, -1.0, 0.0, f64::INFINITY] {
+            let field = compute_field_performance_at_masses(
+                79_000.0,
+                mass_kg,
+                122.0,
+                &sea_level(),
+                2.2,
+                3.0,
+                0.3,
+                0.3,
+                1.0,
+                &config,
+            );
+            assert!(field.ldr_m.is_nan(), "{mass_kg}: {}", field.ldr_m);
+            assert!(field.landing_mass_kg.is_nan());
+            assert!(field.v_speeds.v_stall_land_ms.is_nan());
+            assert!(field.v_speeds.v_app_ms.is_nan());
+            assert!(field.v_speeds.v_stall_to_ms.is_finite());
+        }
     }
 
     #[test]

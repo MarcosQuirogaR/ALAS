@@ -173,7 +173,8 @@ mod tests {
             let shared = size_design_wing_box(&config, &design, &plane)?;
 
             let alone = reconcile_with_wing_mass(&config, &design, &plane, None, masses.wing)?;
-            let with_box = reconcile_with_design_box(&config, &plane, None, masses.wing, shared)?;
+            let with_box =
+                reconcile_with_design_box(&config, &design, &plane, None, masses.wing, shared)?;
             assert_eq!(alone.feedback, with_box.feedback);
             assert_eq!(alone.reference, with_box.reference);
             assert_eq!(alone.primary_declaration, with_box.primary_declaration);

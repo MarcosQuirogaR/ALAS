@@ -147,6 +147,7 @@ mod tests {
             furnishings: station(30.0, 0.0),
             operating_items: station(30.0, 0.0),
             payload_fallback: station(31.0, 0.0),
+            flight_crew: None,
         }
     }
 

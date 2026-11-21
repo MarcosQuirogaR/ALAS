@@ -32,15 +32,17 @@ pub(crate) fn card<R>(ui: &mut Ui, title: &str, help: &str, add: impl FnOnce(&mu
 
 /// Card heading plus the hover-only explanation marker.
 pub(crate) fn card_title(ui: &mut Ui, title: &str, help: &str) {
-    ui.horizontal_wrapped(|ui| {
-        let heading = ui.label(RichText::new(tr(title)).strong().size(15.0));
-        if !help.is_empty() {
-            heading.on_hover_text(tr(help));
-            // Plain ASCII: the bundled font has no CIRCLED LATIN SMALL LETTER I,
-            // so U+24D8 painted a tofu box next to every card title.
-            ui.label(RichText::new("(i)").weak().small())
-                .on_hover_text(tr(help));
-        }
+    crate::theme::header_row(ui, |ui| {
+        ui.horizontal_wrapped(|ui| {
+            let heading = ui.label(crate::theme::card_title(ui, tr(title)));
+            if !help.is_empty() {
+                heading.on_hover_text(tr(help));
+                // Plain ASCII: the bundled font has no CIRCLED LATIN SMALL LETTER I,
+                // so U+24D8 painted a tofu box next to every card title.
+                ui.label(RichText::new("(i)").weak().small())
+                    .on_hover_text(tr(help));
+            }
+        })
     });
 }
 
@@ -55,6 +57,7 @@ pub(crate) fn details<R>(
     egui::CollapsingHeader::new(RichText::new(tr(summary)).small())
         .id_salt(id)
         .default_open(false)
+        .open(crate::perf_tour::force_open())
         .show(ui, |ui| {
             ui.set_min_width(ui.available_width());
             add(ui)
@@ -127,10 +130,10 @@ fn pair_column(
         .num_columns(2)
         .striped(true)
         .max_col_width((width * 0.62).max(80.0))
-        .spacing([10.0, 3.0])
+        .spacing(crate::theme::space::GRID_SPACING)
         .show(ui, |ui| {
             for (label, value) in rows {
-                ui.label(RichText::new(tr(label)).weak());
+                ui.label(crate::notation::styled(ui, RichText::new(tr(label)).weak()));
                 show_value(ui, value);
                 ui.end_row();
             }

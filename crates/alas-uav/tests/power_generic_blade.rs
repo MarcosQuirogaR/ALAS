@@ -7,8 +7,8 @@
 //! Generic-blade fallback with a NeuralFoil cambered section, its low-Re
 //! warning, and the BEMT-to-map tabulation used by the mission adapter.
 //!
-//! Verification only: M2 lane A measured the static coefficients of the same
-//! section; the numbers below are that lane's results re-derived, plus the
+//! Verification only: An earlier study measured the static coefficients of the same
+//! section; the numbers below are that study's results re-derived, plus the
 //! old analytic placeholder for the before/after comparison.  Typical measured
 //! APC thin-electric figures (about 0.10 / 0.04, from memory of UIUC plots,
 //! NOT verified on a page) are context, not a reference.
@@ -37,7 +37,7 @@ fn nf_cambered_generic_blade_raises_static_ct_over_the_analytic_placeholder() {
     assert!(nf.generic && analytic.generic);
     let (ct_a, cp_a, _) = static_coefficients(&analytic, 6000.0, d);
     let (ct_n, cp_n, re75) = static_coefficients(&nf, 6000.0, d);
-    // Before: 0.073 / 0.024 (lane B).  After: about 0.09 / 0.035 (lane A).
+    // Before: 0.073 / 0.024.  After: about 0.09 / 0.035.
     assert!((0.065..0.08).contains(&ct_a), "analytic CT {ct_a}");
     assert!((0.08..0.11).contains(&ct_n), "NF CT {ct_n}");
     assert!((0.028..0.045).contains(&cp_n), "NF CP {cp_n}");

@@ -134,7 +134,7 @@ fn interpolate(lower: f64, upper: f64, fraction: f64) -> f64 {
     lower + fraction * (upper - lower)
 }
 
-const A220_300_VERTICES: [CgEnvelopeVertex; 10] = [
+pub(super) const A220_300_VERTICES: [CgEnvelopeVertex; 10] = [
     vertex(36_287.0, 12.0, Some(31.0), 14.0, 29.0),
     vertex(54_658.0, 12.0, Some(37.1), 13.3, 35.8),
     vertex(56_699.0, 13.0, Some(37.1), 13.2, 35.8),

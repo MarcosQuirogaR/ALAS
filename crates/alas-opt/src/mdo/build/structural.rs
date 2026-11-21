@@ -17,10 +17,12 @@ pub(crate) type StructuralMassAnalysis = (
     StructuralInventory,
 );
 
-fn structural_failure() -> CandidateFailure {
-    CandidateFailure {
-        reason: "structural_sizing",
-    }
+/// The stable `structural_sizing` label, with the typed cause (the failed
+/// check, station and offending value) as its detail.
+fn structural_failure(
+    error: alas_mass::wing_reconciliation::WingReconciliationError,
+) -> CandidateFailure {
+    CandidateFailure::with_detail("structural_sizing", error.to_string())
 }
 
 /// Name the typed cause of a failed product mass buildup.
@@ -44,23 +46,18 @@ fn structural_failure() -> CandidateFailure {
 /// invariant a rejected design is counted under.
 fn product_mass_failure(error: &ComponentMassError) -> CandidateFailure {
     match error {
-        ComponentMassError::FlopsUnverified { reasons, .. } => reasons.first().map_or(
-            CandidateFailure {
-                reason: "flops_unverified",
-            },
-            |reason| CandidateFailure {
-                reason: reason.as_str(),
-            },
-        ),
-        ComponentMassError::Geometry(_) => CandidateFailure {
-            reason: "mass_coordinate_geometry",
-        },
-        ComponentMassError::FlopsIncompleteAirframe => CandidateFailure {
-            reason: "flops_incomplete_airframe",
-        },
-        ComponentMassError::IncoherentMassArchitecture { .. } => CandidateFailure {
-            reason: "incoherent_mass_architecture",
-        },
+        ComponentMassError::FlopsUnverified { reasons, .. } => reasons
+            .first()
+            .map_or(CandidateFailure::new("flops_unverified"), |reason| {
+                CandidateFailure::new(reason.as_str())
+            }),
+        ComponentMassError::Geometry(_) => CandidateFailure::new("mass_coordinate_geometry"),
+        ComponentMassError::FlopsIncompleteAirframe => {
+            CandidateFailure::new("flops_incomplete_airframe")
+        }
+        ComponentMassError::IncoherentMassArchitecture { .. } => {
+            CandidateFailure::new("incoherent_mass_architecture")
+        }
     }
 }
 
@@ -88,13 +85,9 @@ fn mass_coordinate_failure(config: &AlasConfig, plane: &Airplane) -> CandidateFa
         &config.landing_gear,
     ) {
         Err(alas_mass::stations::StationError::MainGearStationNotMeasured { .. }) => {
-            CandidateFailure {
-                reason: "main_gear_station_not_measured",
-            }
+            CandidateFailure::new("main_gear_station_not_measured")
         }
-        _ => CandidateFailure {
-            reason: "mass_coordinates",
-        },
+        _ => CandidateFailure::new("mass_coordinates"),
     }
 }
 
@@ -131,9 +124,14 @@ pub(crate) fn mass_analysis_with_structural_feedback(
     // comparison constructor and must never enter this evaluator through a
     // silent branch.
     if !config.mass_model.mass_architecture.is_production() {
-        return Err(CandidateFailure {
-            reason: "legacy_mass_architecture",
-        });
+        return Err(CandidateFailure::with_detail(
+            "legacy_mass_architecture",
+            format!(
+                "mass_model.mass_architecture = {} has no mission-sized closure; set it to {} to fly the mission",
+                config.mass_model.mass_architecture.as_str(),
+                alas_config::MassArchitecture::PureFlopsTransportV1.as_str()
+            ),
+        ));
     }
     let analysis_mass_model = config.analysis_mass_model(config.requirements.mtow_kg);
     let (masses, coords, _) = run_mass_analysis_with_model_checked_product_with_gear(
@@ -158,19 +156,20 @@ pub(crate) fn mass_analysis_with_structural_feedback(
         Some(shared) => shared,
         None => {
             let sized = alas_mass::wing_reconciliation::size_design_wing_box(config, dv, plane)
-                .map_err(|_| structural_failure())?;
+                .map_err(structural_failure)?;
             *design_box = Some(sized);
             sized
         }
     };
     let reconciliation = alas_mass::wing_reconciliation::reconcile_with_design_box(
         config,
+        dv,
         plane,
         reference,
         masses.wing,
         shared_box,
     )
-    .map_err(|_| structural_failure())?;
+    .map_err(structural_failure)?;
     let feedback = reconciliation.feedback;
     let reference = reconciliation.reference;
     let inventory = reconciliation.inventory;
@@ -418,20 +417,24 @@ mod structural_tests {
         // report stage, not the acceptance gate.
         let (mut config, dv, plane) = clean_sheet_candidate();
         config.structures.spanwise_stations = 1;
+        use alas_mass::wing_reconciliation::{StructuralSizingCause, WingReconciliationError};
+        let expected = WingReconciliationError::StructuralSizing(
+            StructuralSizingCause::TooFewSpanwiseStations { count: 1 },
+        );
         let enabled_failure = sized_primary_wing(&config, &dv, &plane, &config.requirements)
             .expect_err("one spanwise station cannot be strength-sized");
-        assert_eq!(
-            enabled_failure,
-            alas_mass::wing_reconciliation::WingReconciliationError::StructuralSizing
-        );
+        assert_eq!(enabled_failure, expected);
+        // The candidate label stays stable; the cause rides in the detail.
+        let candidate = structural_failure(enabled_failure);
+        assert_eq!(candidate.reason, "structural_sizing");
+        assert!(candidate
+            .detail
+            .is_some_and(|detail| detail.contains("structures.spanwise_stations = 1")));
 
         config.structures.enabled = false;
         let disabled_failure = sized_primary_wing(&config, &dv, &plane, &config.requirements)
             .expect_err("disabling the downstream solve does not waive the strength gate");
-        assert_eq!(
-            disabled_failure,
-            alas_mass::wing_reconciliation::WingReconciliationError::StructuralSizing
-        );
+        assert_eq!(disabled_failure, expected);
     }
 
     #[test]

@@ -46,9 +46,12 @@ GMSH = REPO / "external tools" / "gmsh-4.15.2-Windows64" / "gmsh.exe"
 
 GAMMA = 1.4
 R_AIR = 287.05287
-CP_AIR = 1005.0
+# Cp and the molecular weight follow from R and gamma, so the solver's own
+# speed of sound equals the one used to set the free-stream velocity.
+CP_AIR = GAMMA * R_AIR / (GAMMA - 1.0)
 PR_AIR = 0.71
-MOL_WEIGHT = 28.9
+UNIVERSAL_GAS_CONSTANT = 8314.462618  # J/(kmol K)
+MOL_WEIGHT = UNIVERSAL_GAS_CONSTANT / R_AIR
 
 # Values transcribed from informe_tecnico_P1.md lines 36 to 61.  The report
 # gives rho and nu to four significant figures; using their product for mu
@@ -862,16 +865,31 @@ def run_case(
 ) -> dict:
     case = output_root / case_name(requested_mach, alpha_deg)
     if force_rebuild and case.exists():
-        # Only remove this script's own case directory.  No shared production
-        # case is touched by this driver.
+        # Only remove this script's own case directory: it must be a direct
+        # child of the output root and neither a symlink nor a junction, which
+        # `exists()` would follow to some other folder.
         import shutil
 
+        is_junction = getattr(os.path, "isjunction", lambda _path: False)
+        if (
+            case.is_symlink()
+            or is_junction(case)
+            or case.resolve().parent != output_root.resolve()
+            or not case.is_dir()
+        ):
+            raise RuntimeError(f"refusing to remove {case}: not a plain case folder inside {output_root}")
         shutil.rmtree(case)
     metadata = write_case(case, requested_mach, alpha_deg, end_time, write_interval)
     if prepare_only:
         result = {"case": case.name, "status": "prepared", "study": metadata}
         (case / "result.json").write_text(json.dumps(result, indent=2) + "\n", encoding="utf-8")
         return result
+    for tool in (OPENFOAM_BIN, GMSH):
+        if not tool.exists():
+            raise FileNotFoundError(
+                f"{tool} not found; set ALAS_OPENFOAM_ROOT to an OpenFOAM install with a "
+                "win64MingwDPInt32Opt platform folder and place gmsh under 'external tools'"
+            )
     gmsh_code, gmsh_out, _ = run_command(
         case,
         "gmsh",

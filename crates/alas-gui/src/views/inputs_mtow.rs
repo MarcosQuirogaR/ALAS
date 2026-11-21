@@ -1,7 +1,7 @@
 // SPDX-License-Identifier: AGPL-3.0-or-later
 // Copyright (C) 2026 Marcos Quiroga Rodriguez
 
-//! The "Maximum take-off mass" card of the Setup > Inputs page.
+//! The "Maximum take-off mass" card of the Aircraft page.
 //!
 //! The card owns `requirements.mtow_kg` and the four objective fields that
 //! select and parameterize how the take-off mass is settled:
@@ -24,7 +24,7 @@ use std::sync::Arc;
 
 use crate::state::AppState;
 use crate::views::form::dynamic_form;
-use crate::views::{tr, tr_fields};
+use crate::views::{tr_fields, tr_label};
 
 const NMI_M: f64 = 1852.0;
 
@@ -111,6 +111,11 @@ pub(crate) fn set_objective(state: &mut AppState, key: &str, value: Value, label
     let shown = value
         .as_str()
         .map_or_else(|| value.to_string(), str::to_owned);
+    // The status line names the mode as the selector does, not its wire name.
+    let shown = MtowSizing::ALL
+        .into_iter()
+        .find(|mode| key == "mtow_sizing" && Some(mode.as_str()) == value.as_str())
+        .map_or(shown, |mode| tr_label(mode_label(mode, true)));
     // Older documents may omit this group; serde defaults fill any fields
     // that an edit leaves out.
     let Some(objective) = state
@@ -123,7 +128,7 @@ pub(crate) fn set_objective(state: &mut AppState, key: &str, value: Value, label
     };
     objective.insert(key.to_owned(), value);
     state.on_config_modified();
-    state.note_parameter_modified(tr(label), shown);
+    state.note_parameter_modified(tr_label(label), shown);
 }
 
 fn requirements_field(state: &AppState, name: &str) -> Option<Field> {
@@ -140,6 +145,7 @@ fn show_declared_mtow(state: &mut AppState, ui: &mut Ui, help: &'static str) {
         return;
     };
     field.help = help;
+    field.long_help = "";
     let errors = state
         .validation_findings
         .iter()
@@ -150,7 +156,11 @@ fn show_declared_mtow(state: &mut AppState, ui: &mut Ui, help: &'static str) {
     let fields = [field];
     let edits = state
         .group_mut("requirements")
-        .map(|values| dynamic_form(ui, &fields, values, &errors, lang, false))
+        .map(|values| {
+            crate::views::form::with_baseline_group("requirements", || {
+                dynamic_form(ui, &fields, values, &errors, lang, false)
+            })
+        })
         .unwrap_or_default();
     if !edits.is_empty() {
         state.on_config_modified();
@@ -166,17 +176,18 @@ fn show_mode_selector(state: &mut AppState, ui: &mut Ui) {
     let current = stored_mode(state);
     let stored = mode_is_stored(state);
     let mut chosen = None;
-    ui.label(tr("MTOW mode"));
+    crate::views::form::label_row(ui, tr_label("MTOW mode"), |_| {});
     ComboBox::from_id_salt("inputs_mtow_mode")
+        .icon(crate::combo_icon::down_arrow)
         .width(ui.available_width())
         // One line when closed; the full label leads the hover text.
         .truncate()
-        .selected_text(tr(mode_label(current, stored)))
+        .selected_text(tr_label(mode_label(current, stored)))
         .show_ui(ui, |ui| {
             for (mode, label) in CHOICES {
                 if ui
-                    .selectable_label(current == mode, tr(label))
-                    .on_hover_text(tr(mode_help(mode)))
+                    .selectable_label(current == mode, tr_label(label))
+                    .on_hover_text(tr_label(mode_help(mode)))
                     .clicked()
                 {
                     chosen = Some(mode);
@@ -184,14 +195,14 @@ fn show_mode_selector(state: &mut AppState, ui: &mut Ui) {
             }
             if let Some(label) = legacy_label(current, stored) {
                 ui.separator();
-                ui.add_enabled(false, egui::SelectableLabel::new(true, tr(label)));
+                ui.add_enabled(false, egui::SelectableLabel::new(true, tr_label(label)));
             }
         })
         .response
         .on_hover_text(format!(
             "{}\n\n{}",
-            tr(mode_label(current, stored)),
-            tr(mode_help(current))
+            tr_label(mode_label(current, stored)),
+            tr_label(mode_help(current))
         ));
     if let Some(mode) = chosen.filter(|mode| *mode != current) {
         set_objective(
@@ -203,27 +214,23 @@ fn show_mode_selector(state: &mut AppState, ui: &mut Ui) {
     }
 }
 
-/// A numeric objective field edited with a drag value.
-fn drag_row(
+fn drag_cell(
     ui: &mut Ui,
     label: &str,
     hover: &str,
     value: &mut f64,
     speed: f64,
     unit: &str,
+    range: Option<std::ops::RangeInclusive<f64>>,
 ) -> bool {
-    let mut changed = false;
-    ui.horizontal_wrapped(|ui| {
-        ui.label(tr(label)).on_hover_text(tr(hover));
-        changed = ui
-            .add(
-                DragValue::new(value)
-                    .speed(speed)
-                    .suffix(format!(" {unit}")),
-            )
-            .changed();
-    });
-    changed && value.is_finite()
+    let range = range.unwrap_or(f64::MIN..=f64::MAX);
+    let drag = DragValue::new(value).speed(speed).range(range);
+    crate::views::form::drag_cell(
+        ui,
+        &tr_label(label),
+        &tr_label(hover),
+        drag.suffix(format!(" {unit}")),
+    ) && value.is_finite()
 }
 
 fn mode_help(mode: MtowSizing) -> &'static str {
@@ -238,9 +245,12 @@ fn mode_help(mode: MtowSizing) -> &'static str {
 /// Resolve the still-air design range with the model's preset precedence.
 pub(crate) fn effective_design_range_nmi(state: &AppState) -> Option<f64> {
     let config = state.typed_config_arc()?;
-    config
-        .mtow_plan()
-        .design_mission
+    let mission = config.mtow_plan().design_mission;
+    // A payload-defined mission has no range before the closure solves it.
+    if mission.is_some_and(|mission| mission.range.is_model_defined()) {
+        return None;
+    }
+    mission
         .and_then(|mission| mission.range.declared_nmi())
         .or_else(|| {
             let explicit = config.optimizer.objective.design_range_nmi;
@@ -270,12 +280,20 @@ pub(crate) fn effective_design_range_nmi(state: &AppState) -> Option<f64> {
 fn show_design_range(state: &mut AppState, ui: &mut Ui) {
     let effective = effective_design_range_nmi(state);
     let mut range = effective.unwrap_or(0.0);
-    let help = if effective.is_some() {
+    let model_defined = state.typed_config_arc().is_some_and(|config| {
+        config
+            .mtow_plan()
+            .design_mission
+            .is_some_and(|mission| mission.range.is_model_defined())
+    });
+    let help = if model_defined {
+        "The aircraft's design mission is defined by its payload: the model solves the range at the declared takeoff mass with the fuel reserves of the fuel policy. Enter a range to override it."
+    } else if effective.is_some() {
         "Still-air distance of the design mission. Zero uses the declared design range of the aircraft, or the route distance when none is declared."
     } else {
         "Automatic design range is unavailable until both airport coordinates are known. Enter a design range, or select the route airports."
     };
-    if drag_row(ui, "Design range", help, &mut range, 10.0, "nmi") {
+    if drag_cell(ui, "Design range", help, &mut range, 10.0, "nmi", None) {
         set_objective(
             state,
             "design_range_nmi",
@@ -285,7 +303,7 @@ fn show_design_range(state: &mut AppState, ui: &mut Ui) {
     }
 }
 
-fn show_band_controls(state: &mut AppState, ui: &mut Ui) {
+fn show_band_target(state: &mut AppState, ui: &mut Ui) {
     let declared = state
         .typed_config_arc()
         .map_or(0.0, |config| config.requirements.mtow_kg);
@@ -295,13 +313,14 @@ fn show_band_controls(state: &mut AppState, ui: &mut Ui) {
     } else {
         declared
     };
-    if drag_row(
+    if drag_cell(
         ui,
         "MTOW target",
         "Centre of the band. Defaults to the declared MTOW while it is zero.",
         &mut target,
         100.0,
         "kg",
+        None,
     ) {
         set_objective(
             state,
@@ -310,22 +329,21 @@ fn show_band_controls(state: &mut AppState, ui: &mut Ui) {
             "MTOW target",
         );
     }
+}
+
+fn show_band_variation(state: &mut AppState, ui: &mut Ui) {
     let fraction = objective_number(state, "mtow_band_fraction")
         .unwrap_or(alas_config::DEFAULT_MTOW_BAND_FRACTION);
     let mut percent = fraction * 100.0;
-    let mut changed = false;
-    ui.horizontal_wrapped(|ui| {
-        ui.label(tr("Allowed variation (+/-)"))
-            .on_hover_text(tr("Half-width of the band as a percentage of the target."));
-        changed = ui
-            .add(
-                DragValue::new(&mut percent)
-                    .speed(0.1)
-                    .range(0.1..=49.0)
-                    .suffix(" %"),
-            )
-            .changed();
-    });
+    let changed = drag_cell(
+        ui,
+        "Allowed variation (+/-)",
+        "Half-width of the band as a percentage of the target.",
+        &mut percent,
+        0.1,
+        "%",
+        Some(0.1..=49.0),
+    );
     if changed && percent.is_finite() {
         set_objective(
             state,
@@ -334,8 +352,6 @@ fn show_band_controls(state: &mut AppState, ui: &mut Ui) {
             "MTOW band fraction",
         );
     }
-    show_design_range(state, ui);
-    show_band_check(state, ui);
 }
 
 /// The report the quick check runs against: the optimized design when a run
@@ -391,7 +407,7 @@ fn show_band_check(state: &AppState, ui: &mut Ui) {
         }
     };
     let Some(check) = check else {
-        ui.label(RichText::new(tr("Run a baseline analysis to check the band.")).weak());
+        ui.label(RichText::new(tr_label("Run a baseline analysis to check the band.")).weak());
         return;
     };
     let fields = |check: &DesignMissionBand| {
@@ -403,65 +419,86 @@ fn show_band_check(state: &AppState, ui: &mut Ui) {
     let warn = ui.visuals().warn_fg_color;
     match check.status {
         BandStatus::BandTooHeavy => {
-            ui.label(RichText::new(tr("Band too heavy")).color(warn)).on_hover_text(tr_fields(
+            ui.label(RichText::new(tr_label("Band too heavy")).color(warn)).on_hover_text(tr_fields(
                 "Warning: the design mission is already reachable at the lower band edge ({lo} nmi), so every mass in the band is heavier than the mission needs. Lower the target or lengthen the design range.",
                 &fields(&check),
             ));
         }
         BandStatus::BandTooLight => {
-            ui.label(RichText::new(tr("Band too light")).color(warn)).on_hover_text(tr_fields(
+            ui.label(RichText::new(tr_label("Band too light")).color(warn)).on_hover_text(tr_fields(
                 "Warning: the design mission is out of reach even at the upper band edge ({hi} nmi). Raise the target or the allowed variation, or shorten the design range.",
                 &fields(&check),
             ));
         }
         BandStatus::Inside => {
-            ui.label(RichText::new(tr("Design mission fits the band.")).weak());
+            ui.label(RichText::new(tr_label("Design mission fits the band.")).weak());
         }
         BandStatus::Unavailable => {
-            ui.label(RichText::new(tr("The band check is unavailable for this report.")).weak());
+            ui.label(
+                RichText::new(tr_label("The band check is unavailable for this report.")).weak(),
+            );
         }
     }
 }
 
-/// Render the card body.
+/// One cell of the card's grid.
+#[derive(Clone, Copy, PartialEq)]
+enum Cell {
+    Mode,
+    Declared(&'static str),
+    Target,
+    Variation,
+    Range,
+}
+
+/// Render the card body: the controls on the form's column grid, so the
+/// mode, the declared mass and the band parameters share rows by width.
 pub(crate) fn show_mtow_controls(state: &mut AppState, ui: &mut Ui) {
     if !optimize_active(state) {
-        ui.label(RichText::new(tr("Available when Optimize design space is on.")).weak());
+        ui.label(RichText::new(tr_label("Available when Optimize design space is on.")).weak());
         show_declared_mtow(state, ui, HARD_HELP);
         return;
     }
-    show_mode_selector(state, ui);
-    match stored_mode(state) {
-        MtowSizing::FixedRequirement => show_declared_mtow(state, ui, HARD_HELP),
-        MtowSizing::MtowBand => {
-            show_declared_mtow(
-                state,
-                ui,
-                "Declared MTOW. The band target defaults to it while the target is zero.",
-            );
-            show_band_controls(state, ui);
-        }
-        MtowSizing::PayloadAdjusted => {
-            show_declared_mtow(
-                state,
-                ui,
-                "Declared MTOW. Only the first estimate of the closure starts from it.",
-            );
-            show_design_range(state, ui);
-        }
-        MtowSizing::SizedByMission | MtowSizing::Unconstrained => {
-            show_declared_mtow(
-                state,
-                ui,
-                "Declared MTOW. In the loaded mode it seeds the closure, and it also caps it unless the mode is unconstrained.",
-            );
-        }
+    let mode = stored_mode(state);
+    let cells: Vec<Cell> = match mode {
+        MtowSizing::FixedRequirement => vec![Cell::Mode, Cell::Declared(HARD_HELP)],
+        MtowSizing::MtowBand => vec![
+            Cell::Mode,
+            Cell::Declared("Declared MTOW. The band target defaults to it while the target is zero."),
+            Cell::Target,
+            Cell::Variation,
+            Cell::Range,
+        ],
+        MtowSizing::PayloadAdjusted => vec![
+            Cell::Mode,
+            Cell::Declared("Declared MTOW. Only the first estimate of the closure starts from it."),
+            Cell::Range,
+        ],
+        MtowSizing::SizedByMission | MtowSizing::Unconstrained => vec![
+            Cell::Mode,
+            Cell::Declared("Declared MTOW. In the loaded mode it seeds the closure, and it also caps it unless the mode is unconstrained."),
+        ],
+    };
+    let mut grid = crate::views::form::CellGrid::new(ui, "mtow_grid");
+    for cell in cells {
+        grid.cell(ui, |ui, _| match cell {
+            Cell::Mode => show_mode_selector(state, ui),
+            Cell::Declared(help) => show_declared_mtow(state, ui, help),
+            Cell::Target => show_band_target(state, ui),
+            Cell::Variation => show_band_variation(state, ui),
+            Cell::Range => show_design_range(state, ui),
+        });
+    }
+    grid.finish(ui);
+    if mode == MtowSizing::MtowBand {
+        show_band_check(state, ui);
     }
 }
 
 /// The Maximum take-off mass card.
 pub(crate) fn show_mtow_card(state: &mut AppState, ui: &mut Ui) {
-    let _ = super::inputs_view::card(ui, "Maximum take-off mass", |ui| {
+    let open_for = ["requirements.mtow_kg"];
+    let _ = super::focus_card::card_for(ui, "Maximum take-off mass", &open_for, |ui| {
         show_mtow_controls(state, ui);
     });
     ui.add_space(8.0);

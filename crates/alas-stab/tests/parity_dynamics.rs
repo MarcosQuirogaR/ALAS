@@ -21,6 +21,12 @@
 //! (`get_modes`'s own closed-form-ness is what `alas-stab::modes` checks at
 //! `closed`, on fixed derivative sets.)
 //!
+//! The dutch roll is compared through its natural frequency and its stability
+//! flag only: `alas-stab::modes` takes it as the root pair of the
+//! sideslip/yaw-rate quadratic, which the reference's real and imaginary parts
+//! are not (module doc there). The reference's imaginary part is the undamped
+//! frequency, which equals the modulus of the complex root reported here.
+//!
 //! # The aircraft
 //!
 //! This runs on the frozen-reference aircraft and checks its reference
@@ -32,12 +38,13 @@
 use std::collections::HashMap;
 
 use alas_aero::operating_point::OperatingPoint;
-use alas_atmo::Atmosphere;
+use alas_atmo::{Atmosphere, GAS_CONSTANT_AIR, STANDARD_GRAVITY};
 use alas_config::geometry::GeometryConfig;
 use alas_geom::asb::airplane::Airplane;
 use alas_geom::builder::AircraftBuilder;
 use alas_stab::dynamics::{self, DynamicMode};
 use alas_stab::modes::MassProperties;
+use alas_testkit::reference_ambient::reference_ambient;
 use alas_testkit::{Comparison, Tier};
 use serde::Deserialize;
 
@@ -198,14 +205,58 @@ fn compare_mode(
     discrete.finish();
 }
 
+/// The reference's gravity in the phugoid term, m/s^2: the two-decimal
+/// default of its `get_modes`.
+const REFERENCE_GRAVITY: f64 = 9.81;
+
+/// The reference's phugoid, restated at the product's gravity.
+///
+/// The phugoid is the root pair of `s^2 - 2 sigma s + (sigma^2 + omega^2)`
+/// with `sigma = x_u / 2` and `omega^2 = -sigma^2 - g z_u / u0`; the product
+/// reads the standard gravity 9.80665 m/s^2 where the reference's `get_modes`
+/// reads 9.81. Gravity enters only through `omega^2 + sigma^2 = -g z_u / u0`,
+/// the squared natural frequency, and `sigma` does not depend on it, so the
+/// reference mode at the product's gravity follows exactly from the recorded
+/// real part and the recorded natural frequency, with no other input:
+/// `wn' = wn sqrt(g / 9.81)`, `omega' = sqrt(wn'^2 - sigma^2)`,
+/// `zeta' = -sigma / wn'` and `T' = 2 pi / wn'`. The factor is 0.99983.
+fn phugoid_at_product_gravity(mode: &ModeFixture) -> ModeFixture {
+    assert!(
+        mode.eigenvalue_imag > 0.0,
+        "an aperiodic phugoid has no natural frequency to restate"
+    );
+    let sigma = mode.eigenvalue_real;
+    let wn_squared =
+        (sigma.powi(2) + mode.eigenvalue_imag.powi(2)) * (STANDARD_GRAVITY / REFERENCE_GRAVITY);
+    let wn = wn_squared.sqrt();
+    ModeFixture {
+        eigenvalue_real: sigma,
+        eigenvalue_imag: (wn_squared - sigma.powi(2)).sqrt(),
+        damping_ratio: -sigma / wn,
+        period_s: 2.0 * std::f64::consts::PI / wn,
+        stable: mode.stable,
+    }
+}
+
 #[test]
 fn compute_dynamic_modes_matches_python() {
     let fixture: Fixture = alas_testkit::load("stab", "dynamics");
     let plane = build();
     let case = &fixture.compute_dynamic_modes;
 
+    // The fixture was generated with the reference's fitted atmosphere, which
+    // differs from the U.S. Standard Atmosphere, 1976 the product evaluates
+    // by 1.5 % in temperature at 11 km. The mode solve reads the ambient
+    // state only through the density (the velocity is an input and the
+    // derivatives are coefficients), so the model is driven with the
+    // reference's recorded density at the altitude
+    // (`golden/atmo/differentiable.json`), through the pressure of the level
+    // and a temperature deviation.
+    let level = Atmosphere::new(case.inputs.altitude_m);
+    let reference = reference_ambient(case.inputs.altitude_m);
+    let temperature = level.pressure() / (GAS_CONSTANT_AIR * reference.density_kg_m3);
     let op_point = OperatingPoint::new(
-        Atmosphere::new(case.inputs.altitude_m),
+        level.with_temperature_deviation(temperature - level.temperature()),
         case.inputs.velocity,
         case.inputs.alpha,
         0.0,
@@ -232,7 +283,7 @@ fn compute_dynamic_modes_matches_python() {
         &mut comparison,
         "phugoid",
         &result.phugoid,
-        &case.modes["phugoid"],
+        &phugoid_at_product_gravity(&case.modes["phugoid"]),
     );
     compare_mode(
         &mut comparison,
@@ -246,12 +297,16 @@ fn compute_dynamic_modes_matches_python() {
         &result.roll_subsidence,
         &case.modes["roll_subsidence"],
     );
-    compare_mode(
-        &mut comparison,
-        "dutch_roll",
-        &result.dutch_roll,
-        &case.modes["dutch_roll"],
+    comparison.scalar(
+        "dutch_roll.natural_frequency",
+        result
+            .dutch_roll
+            .eigenvalue_real
+            .hypot(result.dutch_roll.eigenvalue_imag),
+        case.modes["dutch_roll"].eigenvalue_imag,
     );
+    assert!(result.dutch_roll.eigenvalue_imag > 0.0);
+    assert_eq!(result.dutch_roll.stable, case.modes["dutch_roll"].stable);
     compare_mode(
         &mut comparison,
         "spiral",

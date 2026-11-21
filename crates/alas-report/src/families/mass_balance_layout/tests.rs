@@ -5,7 +5,7 @@ use super::common::assign_label_rows;
 use super::fuel_volume::wing_fuel_volume_m3;
 use super::fuel_volume::{figure_fuel_volume_check, figure_fuel_volume_check_for_loading};
 use super::landing_gear::figure_landing_gear_planform;
-use super::mass_breakdown::{figure_mass_breakdown, AC_CHORD_FRACTION, FUEL_NEG_COLOR};
+use super::mass_breakdown::{figure_mass_breakdown, FUEL_NEG_COLOR};
 use crate::scene::{Color, SceneElement};
 use alas_aero::analysis::PolarSweep;
 use alas_config::design_variables::DesignVector;
@@ -81,6 +81,7 @@ fn test_report(masses: BTreeMap<String, f64>) -> AnalysisReport {
         polar: PolarSweep {
             alpha_deg: Vec::new(),
             geometric_alpha_deg: Vec::new(),
+            compressible_mach: None,
             cl: Vec::new(),
             cd: Vec::new(),
             cd_induced: Vec::new(),
@@ -220,9 +221,7 @@ fn landing_gear_planform_draws_one_polygon_per_wheel_plus_wing_and_fuselage() {
 
     // Recompute the gear layout independently to cross-check the wheel count.
     let mac = report.airplane.c_ref;
-    let wing = &report.airplane.wings[0];
-    let x_wing_ac = wing.aerodynamic_center(AC_CHORD_FRACTION)[0];
-    let x_mac_le = x_wing_ac - 0.25 * mac;
+    let x_mac_le = report.airplane.mac_frame().expect("a wing").x_lemac_m;
     let fus = &report.airplane.fuselages[0];
     let x_nlg = fus.xsecs[0].xyz_c[0]
         + (fus.xsecs[2].xyz_c[0] - fus.xsecs[0].xyz_c[0]) * config.mass_model.nlg_x_fraction;
@@ -307,8 +306,8 @@ fn landing_gear_planform_exposes_both_coordinate_axis_labels_and_ticks() {
             _ => None,
         })
         .collect::<Vec<_>>();
-    assert!(labels.contains(&"Y [m]"));
-    assert!(labels.contains(&"X [m] (fuselage station)"));
+    assert!(labels.contains(&"Span Y [m]"));
+    assert!(labels.contains(&"Longitudinal X [m]"));
     assert!(
         labels
             .iter()
@@ -349,7 +348,7 @@ fn fuel_volume_check_is_green_when_capacity_covers_the_required_fuel() {
 }
 
 #[test]
-fn fuel_volume_check_exposes_named_rows_without_redundant_numeric_y_ticks() {
+fn fuel_volume_check_exposes_named_rows_and_a_ticked_mass_axis() {
     let mut masses = full_masses();
     masses.insert(FUEL.to_owned(), 1.0);
     let scene = figure_fuel_volume_check(&test_report(masses), &AlasConfig::default(), None);
@@ -370,7 +369,7 @@ fn fuel_volume_check_exposes_named_rows_without_redundant_numeric_y_ticks() {
             .iter()
             .filter(|label| label.parse::<f64>().is_ok())
             .count(),
-        0
+        5, // the five labelled ticks of the mass axis; bar values read "x.x t"
     );
 }
 
@@ -477,4 +476,53 @@ fn a_planform_with_a_measured_main_gear_station_is_unchanged() {
         element,
         SceneElement::Text { text, .. } if text.contains("No main-gear station measured")
     )));
+}
+
+#[test]
+fn the_tire_status_separates_a_real_overload_from_a_missing_design_margin() {
+    use super::landing_gear::tire_status;
+    use alas_perf::landing_gear::tires::TireLoadRatios;
+    let ratios = |nose_static, nose_dynamic, main_static| TireLoadRatios {
+        nose_static,
+        nose_dynamic,
+        main_static,
+    };
+    // All inside the ratings and the design factor met.
+    assert_eq!(tire_status(&ratios(0.5, 0.5, 0.8), false), "OK");
+    // Main tires at 97 % of rating (DC-10): inside the rating, short of 1.07.
+    assert_eq!(
+        tire_status(&ratios(0.6, 0.57, 0.978), true),
+        "BELOW DESIGN FACTOR"
+    );
+    // Nose braking governing at 1.03 of the dynamic rating while the static
+    // load is light: the design-load margin is 0.97, but this is a real
+    // overload and must not read as a missing margin.
+    assert_eq!(tire_status(&ratios(0.70, 1.033, 0.5), true), "OVERLOADED");
+    assert_eq!(tire_status(&ratios(1.2, 0.5, 0.5), true), "OVERLOADED");
+    assert_eq!(tire_status(&ratios(0.5, 0.5, 1.01), true), "OVERLOADED");
+}
+
+#[test]
+fn landing_gear_planform_longitudinal_ticks_read_positive_station_values() {
+    // The nose-up planform plots the negated station; its right-aligned
+    // (vertical-axis) tick labels must still read the station itself.
+    let scene =
+        figure_landing_gear_planform(&test_report(full_masses()), &AlasConfig::default(), None);
+    let labels: Vec<&String> = scene
+        .elements
+        .iter()
+        .filter_map(|element| match element {
+            SceneElement::Text {
+                text,
+                align: crate::scene::TextAlign::Right,
+                ..
+            } if text.parse::<f64>().is_ok() => Some(text),
+            _ => None,
+        })
+        .collect();
+    assert!(!labels.is_empty());
+    assert!(
+        labels.iter().all(|label| !label.starts_with('-')),
+        "{labels:?}"
+    );
 }

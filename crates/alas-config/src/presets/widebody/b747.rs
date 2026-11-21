@@ -9,6 +9,7 @@ use crate::{
     GeometryConfig, LandingGearConfig, WingConfig,
 };
 
+use crate::presets::landing_reference::B747_400_REFERENCE_AREA_M2;
 // Source key used in the comments below:
 //   ACAP = Boeing 747-400/-400ER Airplane Characteristics for Airport Planning,
 //   D6-58326-1 Rev F, December 2024 (PDF page = document page + 17 in sections
@@ -23,8 +24,10 @@ use crate::{
 /// 100 ft 5 in (30.61 m), 133 ft 8 in (40.74 m) and 180 ft 11 in (55.14 m)
 /// aft of the nose on the 225 ft 2 in (68.63 m) body. The 42 x 76 in clear
 /// opening printed there is at least the Type A minimum of CS 25.807(a)
-/// (42 x 72 in). The upper-deck emergency exits (section 2.7.5) are not part
-/// of this main-deck arrangement; the upper deck keeps the generic exit rule.
+/// (42 x 72 in). The upper deck has one pair of Type A exits: EASA TCDS
+/// IM.A.196 Issue 19, section 3 (747-400) III.20, "660 passengers with 5 pair
+/// of Type A exits on main deck plus one pair of Type A exits on the upper
+/// deck" (main deck limited to 550, upper deck to 110).
 const B747_400_EXIT_LAYOUT: crate::CertifiedExitLayout = crate::CertifiedExitLayout {
     label: "A-A-A-A-A",
     pairs: &[
@@ -49,8 +52,12 @@ const B747_400_EXIT_LAYOUT: crate::CertifiedExitLayout = crate::CertifiedExitLay
             station_m: Some(55.14),
         },
     ],
+    upper_deck_pairs: &[crate::CertifiedExitPair {
+        exit_type: "A",
+        station_m: None,
+    }],
     station_body_length_m: Some(68.63),
-    source: "Boeing 747-400 ACAP D6-58326-1 Rev F, December 2024, section 2.7.1 p. 2-35 (747-400 main deck doors 1-5 at 31-2/9.50, 61-8/18.80, 100-5/30.61, 133-8/40.74, 180-11/55.14 ft-in/m; 42 x 76 in openings)",
+    source: "Boeing 747-400 ACAP D6-58326-1 Rev F, December 2024, section 2.7.1 p. 2-35 (747-400 main deck doors 1-5 at 31-2/9.50, 61-8/18.80, 100-5/30.61, 133-8/40.74, 180-11/55.14 ft-in/m; 42 x 76 in openings); EASA TCDS IM.A.196 Issue 19 section 3 III.20 (one upper-deck Type A pair)",
 };
 
 /// The ACAP three-class cabin: 24 first, 32 business and 302 economy on the
@@ -95,6 +102,7 @@ pub fn b747_400() -> AircraftPreset {
     AircraftPreset {
         name: "B747-400",
         display_name: "Boeing 747-400 (CF6-80C2B1F)",
+        class: crate::presets::AircraftClass::Transport,
         description: "Boeing 747-400 passenger at the 875,000 lb takeoff weight with four CF6-80C2B1F engines.",
         identity: AircraftVariantIdentity {
             model: "747-400 passenger",
@@ -126,10 +134,7 @@ pub fn b747_400() -> AircraftPreset {
             usable_fuel_volume_l: Some(216_014.0),
             usable_fuel_mass_kg: Some(173_459.0),
             fuel_density_kg_l: Some(173_459.0 / 216_014.0),
-            // Boeing reference area 5,650 ft2 (525 m2). NOT in the ACAP and not
-            // re-verified here (recalled, estimate): it matches a straight-taper
-            // trapezoid that leaves out the inboard trailing-edge extension.
-            reference_wing_area_m2: Some(525.0),
+            reference_wing_area_m2: Some(B747_400_REFERENCE_AREA_M2),
             // 24 first + 32 business + 302 economy on the main deck and 42
             // business on the upper deck (ACAP section 2.1.1 typical seating).
             planning_seats: Some(400),
@@ -137,10 +142,55 @@ pub fn b747_400() -> AircraftPreset {
             planning_cabin: Some(B747_400_PLANNING_CABIN),
             certified_exit_layout: Some(B747_400_EXIT_LAYOUT),
             design_point: Some(crate::PayloadRangeDesignPoint {
+                long_range_cruise: None,
+                cruise: None,
                 range_nmi: 5_700.0,
                 payload_kg: Some(67_318.0),
                 source: "Boeing 747-400 ACAP D6-58326-1 Rev F section 3.2.1 p.3-2 (payload/range 0.85 Mach, CF6-80C2B1F, standard day): maximum-structural-payload corner, 542,500 lb zero-fuel weight (OEW 394,088 lb + 148,412 lb payload = 67,318 kg) meets the 875,000 lb brake-release line at a range read as 5,700 nmi (+-100 nmi); reserves FAR international, 10 % trip allowance, 200 nmi alternate, 30 min hold at 1,500 ft",
+                reserve: Some(crate::presets::DesignPointReserve {
+                    scheme: Some(crate::FuelScheme::FaaFlagSupplemental),
+                    contingency_trip_fraction: None,
+                    contingency_minimum_hold_min: None,
+                    alternate_distance_nmi: Some(200.0),
+                    final_reserve_hold_min: Some(30.0),
+                    flag_flight_time_fraction: Some(0.10),
+                    holding_altitude_ft: Some(1_500.0),
+                    source: "Boeing 747-400 ACAP D6-58326-1 Rev F section 3.2.1 p 3-2 notes: FAR international reserves, 10% trip air time, 200-nmi alternative, 1/2 hour hold at 1,500 ft",
+                }),
             }),
+            // Design mission, one provenance row per datum. Reserve and cruise Mach
+            // are printed in the chart notes of the same figure; the climb and descent
+            // schedules are not printed there.
+            mission_provenance: crate::DesignMissionProvenanceSet {
+                range: Some(crate::MissionDatumProvenance {
+                    tier: crate::MissionEvidenceTier::Manufacturer,
+                    stated_conditions: Some("standard day, 0.85 Mach cruise, CF6-80C2B1F engines, 875,000 lb brake-release line, FAR international reserves; range read from the chart at the maximum-structural-payload corner"),
+                    relative_uncertainty: Some(100.0 / 5_700.0),
+                    variant_match: crate::MissionEvidenceApplicability::ExactPreset,
+                    source: "Boeing 747-400 ACAP D6-58326-1 Rev F, December 2024, section 3.2.1 p.3-2 (payload/range, Model 747-400 and 400 Combi, 0.85 Mach cruise, CF6-80C2B1F); corner read as 5,700 nmi, +-100 nmi",
+                }),
+                payload: Some(crate::MissionDatumProvenance {
+                    tier: crate::MissionEvidenceTier::Manufacturer,
+                    stated_conditions: Some("542,500 lb maximum zero-fuel weight less the 394,088 lb operating empty weight of the three-class 400-passenger arrangement (ACAP section 2.1.1 note 3): 148,412 lb"),
+                    relative_uncertainty: None,
+                    variant_match: crate::MissionEvidenceApplicability::ExactPreset,
+                    source: "Boeing 747-400 ACAP D6-58326-1 Rev F, section 2.1.1 (fifth weight column) and section 3.2.1 p.3-2",
+                }),
+                profile: Some(crate::MissionDatumProvenance {
+                    tier: crate::MissionEvidenceTier::Manufacturer,
+                    stated_conditions: Some("0.85 Mach cruise, standard day; the ACAP prints no climb or descent schedule, so the model's configured schedules apply to those phases"),
+                    relative_uncertainty: None,
+                    variant_match: crate::MissionEvidenceApplicability::ExactPreset,
+                    source: "Boeing 747-400 ACAP D6-58326-1 Rev F, section 3.2.1 p.3-2 (title and notes)",
+                }),
+                reserve_fuel: Some(crate::MissionDatumProvenance {
+                    tier: crate::MissionEvidenceTier::Manufacturer,
+                    stated_conditions: Some("FAR international reserves: 10 % of trip air time, 200 nmi alternate, 30 min hold at 1,500 ft; the reserve mass follows from the modelled trip"),
+                    relative_uncertainty: None,
+                    variant_match: crate::MissionEvidenceApplicability::ExactPreset,
+                    source: "Boeing 747-400 ACAP D6-58326-1 Rev F, section 3.2.1 p.3-2 notes",
+                }),
+            },
             cg_evidence: CgEnvelopeEvidence::AfmRequired,
             // ACAP section 7.4.1 (p.7-9) ground envelope and section 7.3.
             aft_cg_nose_load: Some(crate::presets::gear_load::B747_400),
@@ -158,13 +208,12 @@ pub fn b747_400() -> AircraftPreset {
             // four-wheel body bogies (49x17 nose, H49x19.0-22 main tires).
             mlg_strut_bogie_wheels: Some(vec![4, 4, 4, 4]),
             wheels_per_mlg_strut: 0,
+            mlg_tire: "H49x19.0-22/32PR".to_owned(),
+            nlg_tire: "49x17/32PR".to_owned(), // ACAP 7.2.1 prints both
             // 36 ft 1 in (11.00 m) wing-gear track over the 6.50 m body.
             track_diameter_factor: 11.00 / 6.50,
-            // Section 7.2.1: nose gear to the wing bogie centres 78 ft 11.5 in
-            // (24.07 m); the body bogies are 10 ft 1 in (3.07 m) behind them
-            // (27.14 m). Section 2.2.1 prints the 84 ft 0 in (25.60 m) wheelbase
-            // to the mean of the two groups (24.07 + 3.07 / 2 = 25.61 m).
-            reference_wheelbase_m: Some(24.07),
+            // Section 2.2.1 prints the 84 ft 0 in (25.60 m) wheelbase to the mean of the two main groups (wing bogies 24.07 m, body bogies 27.14 m, section 7.2.1); the station fractions below keep the groups, this scalar is the printed datum.
+            reference_wheelbase_m: Some(25.60),
             reference_body_wheelbase_m: Some(27.14),
             reference_track_m: Some(11.00),
             reference_station_frame: Some("nose_tip_drawing_reference".to_owned()),
@@ -187,40 +236,28 @@ pub fn b747_400() -> AircraftPreset {
             // understates the geometric tail-down angle, so 11 deg is the floor
             // and no 15 deg Raymer/Roskam floor is imposed.
             min_tip_back_deg: 11.0,
-            takeoff_stabilizer_nose_up_deg: Some(crate::landing_gear::TRANSPORT_THS_TAKEOFF_NOSE_UP_DEG),
+            // Tail-strike pitch attitude 12.5 deg: AERO 2007 Q1 Fig. 1 (takeoff, flaps 10/20, lift-off attitude 10.1/10.0 deg).
+            // The table prints no gear state: state unspecified, compared with the gear-extended model attitude (a warning).
+            required_rotation_angle_deg: 12.5,
+            required_rotation_basis: crate::landing_gear::RotationAngleBasis::PublishedStateUnspecified,
+            trimmable_stabilizer: true,
             ..LandingGearConfig::default()
         },
         design_vector: DesignVector {
             // ACAP section 2.2.1: 211 ft 5 in (64.44 m) jig span; 213 ft 0 in
             // (64.92 m) at maximum gross weight with full fuel.
             span_m: 64.44,
-            // Reference trapezoid of the 525 m2 reference area over 64.44 m with
-            // the drawn 4.27 m tip chord (section 2.2.1 plan: tip leading edge
-            // 152 ft 7 in = 46.51 m and trailing edge 166 ft 7 in = 50.78 m aft
-            // of the nose): root 2 S / b - c_tip = 12.02 m. The drawn planform
-            // is wider inboard (Yehudi trailing-edge extension, about 16.1 m
-            // at the centreline by drawing read); that extension lies outside
-            // the reference wing and is not modelled.
-            //
-            // Step B w2 (DECISIONS: model the Yehudi trailing-edge extension, keep the published reference area as the
-            // convention): the root chord is the drawn 16.1 m at the centreline (drawing read of round 2, C); with the
-            // kink chord unchanged the straight inboard trailing edge then gives 14.3 m at the side of body, the drawn
-            // 14.6 m within the reading error. The built gross planform area is therefore about 575 m2, NOT the
-            // published 525 m2 (`reference_wing_area_m2` stays the published reference; the model has no separate
-            // reference-area override). Was root chord 12.02 m.
+            // Centreline chord of the drawn planform (section 2.2.1 plan read, with the Yehudi trailing-edge extension);
+            // a datum since the wing inside the body runs on the built edge lines to y = 0 and the box holds the side-of-body chord. Built gross area about 565 m2, NOT the
+            // published 525 m2 (the reference wing states the published area; the sections do not).
             root_chord_m: 16.10,
-            break_chord_m: 8.845,
-            // Step B w2: chord of the same straight edges at the wing-tip station y = 31.29 m (the 64.44 m span now
-            // includes the winglets, see the device below); was 4.27 m at y = 32.22 m.
-            tip_chord_m: 4.494,
-            // Straight leading edge through the side-of-body root station
-            // (21.05 m aft of the nose at y = 3.25 m, drawing read) and the
-            // drawn tip leading edge (46.51 m at y = 32.22 m) reads 41.3 deg; 40.9 deg is
-            // used because the 45 deg sweep guardrail must hold for the +-10 % local
-            // sweep study, and the root datum below moves 0.2 m aft so the tip
-            // leading edge stays within 0.2 m of the drawing. The
-            // quarter-chord sweep of this model wing is 39 deg against the
-            // 37.5 deg quoted for the type (recalled, not retrieved).
+            // Section 2.2.1 plan trace at y = 13.2 m: LE 30.10 m, TE 39.14 m aft of the nose. Was 8.845.
+            break_chord_m: 9.045,
+            // Section 2.2.1 plan: the outer trailing edge is one straight line (0.58 m/m) ending at chord 3.85 m at y = 31.29 m (the 64.44 m span includes the winglets).
+            tip_chord_m: 3.85,
+            // Leading-edge angle of the panel outboard of the kink: the drawn tip (section 2.2.1 plan, 45.8 m at
+            // y = 31.29 m) reads 41.0 deg from the kink; 40.9 deg holds the 45 deg guardrail of the +-10 % local sweep
+            // study and leaves the tip within 0.1 m. The inner panel has its own angle (`inboard_le_sweep_deg`).
             sweep_deg: 40.9,
             tip_twist_deg: -2.0,
             wing_x_shift_m: 0.0,
@@ -233,156 +270,160 @@ pub fn b747_400() -> AircraftPreset {
             airfoil_camber_scale: 1.0,
             ..DesignVector::default()
         },
-        airfoil_class_source: "Design-era declaration: the 747 wing was designed in 1964-1966 (747-400 EIS 1989 with the same planform plus winglets), before supercritical sections reached transport service, so its technology is conventional. Boeing publishes no 747 sections; the DSMA-523A surrogate (UIUC Airfoil Coordinates Database; 11.0 % t/c) is only the nearest conventional-transonic shape in the library, used as in the DC-10 preset, and its thickness is an ESTIMATE, not the 747 value.",
+        speed_schedule_source: crate::presets::SpeedScheduleSource::SourcedLadder,
+        airfoil_class_source: "Design-era declaration: the 747 wing was designed in 1964-1966 (747-400 EIS 1989 with the same planform plus winglets), before supercritical sections reached transport service, so its technology is conventional; its upper-surface velocities peak close to the leading edge, the influence of peaky sections (Obert, Aerodynamic Design of Transport Aircraft, 2009, p. 239). Boeing publishes no 747 section coordinates, so the wing draws the five 747 stations Obert prints (Fig. 24.82, p. 243, from NASA SP-347), digitised as B747-Y109 (side of the body) to B747-Y500 (2y/b 0.50), each at its own span station; the thickness stations set the t/c.",
         geometry: GeometryConfig {
             wing: WingConfig {
-                // Reference wing = the manufacturer's published values (geometry freeze 2026-10-12, owner decision); the drawn planform stays the geometry.
-                // S 525 m2: Boeing 747-400 gross wing area (reference_wing_area_m2 of this preset). The 747-400 W&B MAC (about 8.33 m, LEMAC near 29.7 m) is recalled, not
-                // retrieved (the EASA TCDS refers to the W&B manual): MAC and LEMAC follow the drawn reference trapezoid. Built drawn S 574 m2 (Yehudi extension); trapezoid 516.7 m2.
-                reference_wing: crate::ReferenceWingConfig::published(525.0, None, None),
-                // Leading edge at the centreline 18.4 m aft of the nose (18.19 m on a
-                // pure 41.3 deg line through the drawn side-of-body point): the
-                // straight leading edge of the section 2.2.1 plan view
-                // run in from the side of the body. With no wing shift this
-                // puts the MAC leading edge at 30.1 m (the model MAC of this
-                // trapezoid is 8.76 m); a 747-400 weight-and-balance LEMAC near
-                // 29.7 m is recalled, not retrieved (estimate).
-                root_datum_x_m: 18.4,
-                // z positions are ESTIMATES from the section 2.2.1 front and
-                // side views: low wing at the lower third of the body, about
-                // 7 deg of dihedral at the 1 g shape.
-                root_z_m: -1.22, // step B w2: root 0.17 m high against the front view, hump-crown reference (B); was -1.0466 (round 2), -2.0 earlier
-                break_z_m: -0.1709, // geometry round 2 (wing lane); was -1.0
-                tip_z_m: 1.5384, // geometry round 2 (wing lane); was 2.5
+                // Reference wing = the manufacturer's published values; the drawn planform stays the geometry.
+                // S 524.90 m2 (5,650 ft2), MAC 327.78 in (8.33 m), span 195.67 ft (59.64 m): Boeing 747-400 wing reference values (FAA DOT/FAA/AR-04/44 Table 1, retrieved).
+                // MAC and LEMAC: NASA CR-2144 (Heffley and Jewell, Aircraft Handling Qualities Data, 1972), Fig. IX-2, printed p. 213, prints
+                // c = 27.31 ft (the 327.78 in above) with 0.25 c at F.S. 1339.9 in. The nose tip is F.S. 93.3 in (+-6 in) read on the same figure's
+                // side view by its own F.S. 307.9 and F.S. 1339.9 marks [E]: LEMAC (1339.9 - 93.3) in - 0.25 c = 29.582 m aft of the nose
+                // (the drawn reference trapezoid of the kink and tip lines has MAC 9.15 m at 29.78 m; built drawn S about 575 m2 with the Yehudi).
+                reference_wing: crate::ReferenceWingConfig::published(
+                    B747_400_REFERENCE_AREA_M2,
+                    Some(327.78 * 0.0254),
+                    Some((1339.9 - 93.3) * 0.0254 - 0.25 * 327.78 * 0.0254),
+                ),
+                // Section 2.2.1 plan trace, y = 3.5 to 19.5 m: LE x = 21.24 + 0.9133 (y - 3.5), so 18.04 m on the centreline
+                // (was 18.4 with one 40.9 deg line, which left the outer wing up to 0.6 m forward of the drawing).
+                root_datum_x_m: 18.04,
+                inboard_le_sweep_deg: Some(42.4),
+                // Heights: section 2.2.1 front view (wing upper and lower lines both halves) and side view (root upper line
+                // z -0.7 m at x = 23 m, tip line 1.35 m). The two views disagree by 0.3 to 0.5 m, so the heights lie between them.
+                root_z_m: -1.74, // was -1.22
+                break_z_m: -0.37, // was -0.1709
+                tip_z_m: 0.95, // D6-58326-1 Rev F 2.2.1 front view: wing and winglet top 0.2 m lower at the tip; was 1.138
                 root_twist_deg: 4.0,
                 break_twist_deg: 1.5,
-                // Trailing-edge kink of the drawn planform at y = 13.2 m of the
-                // 32.22 m semispan (drawing read).
-                break_span_fraction: 0.4219, // step B w2: y = 13.2 m of the 31.29 m wing-proper semispan (was 0.4097 of 32.22 m)
-                // Side of the 6.50 m body at y = 3.25 m; chord there from the
-                // reference trapezoid, 11.24 m over the 12.02 m root chord.
+                // Section 2.2.1 plan: trailing-edge kink where the 0.323 and 0.582 m/m lines cross, y = 13.2 m of 31.29 m.
+                break_span_fraction: 0.4219,
+                // Side of the 6.50 m body, y = 3.25 m; section 2.2.1 plan trace: LE 21.01 m, TE 35.92 m, chord 14.91 m.
                 side_of_body_span_fraction: Some(3.25 / 31.29),
-                side_of_body_chord_ratio: Some(0.907), // step B w2: drawn 14.6 m / 16.1 m (Yehudi extension); was 0.935 (11.24 m / 12.02 m)
+                side_of_body_chord_ratio: Some(0.9263), // 14.91 / 16.10; was 0.928
                 kink_span_fraction: Some(0.4219),
-                // The drawn leading edge is straight.
                 outboard_sweep_decrement_deg: 0.0,
-                wing_profile_interpolation: crate::WingProfileInterpolation::C2Spline, // step B w2 (loft-wing report); was Linear
-                // Step B w2: the -400 winglet (ACAP D6-58326-1 Rev F section 1.3: the -400 has winglets, the -400D none).
-                // No winglet dimension is printed; front view (3x zoom, measure/B747-400): top 1.3 m above the wing tip,
-                // 0.93 m outboard (cant 35.6 deg from vertical, C); plan view: tip chord 1.8 m, tip trailing edge at the
-                // published 50.78 m (the leading edge sweeps 65.3 deg in the device plane to put it there). The published
-                // 64.44 m span (211 ft 5 in) includes the winglets, so the wing proper ends at y = 31.29 m.
+                // Section 2.2.1 plan: the leading edge breaks at y = 21.6 m, 0.9133 m/m inboard, 0.833 outboard (hidden by
+                // the outer pylon at the break; lines read either side). 37.77 m there against 37.37 m on the straight line.
+                edge_stations: vec![crate::WingEdgeStation { span_fraction: 0.6903, le_offset_m: 0.40, te_offset_m: 0.0 }],
+                wing_profile_interpolation: crate::WingProfileInterpolation::C2Spline,
+                // the -400 winglet (ACAP D6-58326-1 Rev F section 1.3: the -400 has winglets, the -400D none).
+                // No winglet dimension is printed. Section 2.2.1: top about 1.1 m above the wing tip in the front view, 1.45 m in the
+                // side view (1.45 m kept with the side-view top, was 1.3 m), 0.93 m outboard (cant 32.7 deg from vertical); plan view: tip
+                // chord 1.8 m, tip trailing edge at the published 50.78 m (leading edge 62.3 deg in the device plane; was 65.3 deg).
+                // The published 64.44 m span (211 ft 5 in) includes the winglets, so the wing proper ends at y = 31.29 m.
                 wingtip_device: Some(crate::WingtipDevice {
                     kind: crate::WingtipDeviceKind::Winglet,
-                    height_m: 1.3,
+                    height_m: 1.45,
                     down_height_m: 0.0,
-                    cant_deg: 35.6,
+                    cant_deg: 32.7,
                     root_chord_m: None,
+                    root_te_flare: None,
                     tip_chord_m: 1.8,
-                    le_sweep_deg: 65.3,
+                    le_sweep_deg: 62.3,
                     toe_out_deg: 0.0,
                     blend_radius_m: 0.0,
+                    arc_start_deg: None,
+                    // Section 2.2.1 plan: the wing leading edge runs on to (46.30, 31.66), its outline 31.71, with a rounded corner, then a tip edge near y 31.71 to x 47.20 where the winglet leading edge starts;
+                    // trailing edge on the drawn line, x 49.83 at y 31.60, 49.96 at y 31.72. Offsets from the wing-tip leading edge (45.76, 31.29). The root and these sections keep the wing-tip plane,
+                    // so the depth of the last one stays under the drawn tip edge (front view: outer skin y 31.71 at z 1.0) and the winglet turns up from it. The drawn winglet tip reaches y 32.45 against the printed 32.22: printed kept.
+                    path_stations: [(0.347, 0.311, 0.01, 3.72), (0.537, 0.37, 0.02, 3.66), (1.437, 0.42, 0.05, 2.76)]
+                        .map(|(dx_m, dy_m, dz_m, chord_m)| crate::WingtipPathStation { dx_m, dy_m, dz_m, chord_m })
+                        .to_vec(),
                     airfoil: None,
                     span_includes_device: true,
                     include_in_vlm: true,
                 }),
-                root_airfoil: "dsma523a".to_owned(),
-                tip_airfoil: "dsma523a".to_owned(),
-                airfoil_class: crate::AirfoilClass::Conventional,
+                // Sections: Boeing publishes no 747 coordinates. Obert (2009), Fig. 24.82 (p. 243, from NASA SP-347) draws
+                // the stations at 2y/b 0.109, 0.206, 0.303, 0.40 and 0.50, digitised as B747-Y109 ... B747-Y500
+                // (alas-geom data/digitised_sections.txt; thin-airfoil c_m,c/4 -0.014, -0.014, -0.030, -0.016, -0.044).
+                // Each is a section station at its own span station. 2y/b is on the span of the source wing, the
+                // 747-100/-200 59.64 m (195.67 ft, the -400 reference span above; the -400 adds the tip extension and
+                // winglet): y = 2y/b x 29.82 m, so 2y/b 0.109 is the side of the 6.50 m body, y 3.25 m. Fractions of the
+                // 31.29 m semispan: eta = 2y/b x 29.82 / 31.29. Inboard of Y109 the root holds it; outboard of Y500 the
+                // tip holds Y500. Was Y109 root and Y500 tip only, then the conventional-class surrogate pair (b737a
+                // root, b737d outboard; -0.013 and -0.022), and before that DSMA-523A, an aft-loaded section (-0.149).
+                root_airfoil: "B747-Y109".to_owned(),
+                tip_airfoil: "B747-Y500".to_owned(),
+                section_stations: [
+                    (3.25 / 31.29, "B747-Y109"), // 2y/b 0.109, y 3.25 m (side of body)
+                    (0.1963, "B747-Y206"),       // 2y/b 0.206, y 6.14 m
+                    (0.2888, "B747-Y303"),       // 2y/b 0.303, y 9.04 m
+                    (0.3812, "B747-Y400"),       // 2y/b 0.400, y 11.93 m
+                    (0.4765, "B747-Y500"),       // 2y/b 0.500, y 14.91 m
+                ]
+                .map(|(span_fraction, airfoil)| crate::WingSectionStation { span_fraction, airfoil: airfoil.to_owned() })
+                .to_vec(),
+                airfoil_class: crate::AirfoilClass::Peaky,
                 // Thickness: NASA SP-347 via Obert (2009) Fig. 24.82, p. 243 (PDF p. 262): t/c 13.5 % at 2y/b 0.109, 10.4 % 0.206,
                 // 8.9 % 0.303, 8.0 % 0.40-0.50, held outboard (ESTIMATE); the CRM distribution before was 1.5-2 points thicker.
-                thickness_stations: vec![
-                    crate::WingThicknessStation {
-                        span_fraction: 0.1039,
-                        thickness_scale: 1.2273, // t/c 0.1100 -> 0.1350 (2y/b 0.101)
-                    },
-                    crate::WingThicknessStation {
-                        span_fraction: 0.2121,
-                        thickness_scale: 0.9455, // t/c 0.1100 -> 0.1040 (2y/b 0.206)
-                    },
-                    crate::WingThicknessStation {
-                        span_fraction: 0.3120,
-                        thickness_scale: 0.8091, // t/c 0.1100 -> 0.0890 (2y/b 0.303)
-                    },
-                    crate::WingThicknessStation {
-                        span_fraction: 0.4219,
-                        thickness_scale: 0.7273, // t/c 0.1100 -> 0.0800 (2y/b 0.410)
-                    },
-                    crate::WingThicknessStation {
-                        span_fraction: 0.5147, // printed plateau end, 2y/b 0.500 (x 32.22/31.29); also pins the C2 spline flat (without it the spline rose 2.6e-4 after the kink)
-                        thickness_scale: 0.7280, // t/c 0.1100 -> 0.0801 (printed plateau 0.0800; +0.0001 keeps the C2 spline from rising)
-                    },
-                    crate::WingThicknessStation {
-                        span_fraction: 1.0000,
-                        thickness_scale: 0.7286, // t/c 0.1098 -> 0.0800 (held, estimate)
-                    },
-                ],
-                // Dihedral (geometry round 2): heights fitted to the manufacturer front view; fractions over the 31.29 m wing-proper semispan (stations 2, 3 moved onto thickness nodes).
-                dihedral_stations: vec![
-                    crate::WingDihedralStation {
-                        span_fraction: 0.2121, // moved from 0.2058 onto the thickness node (0.0063 apart gave 0.00315-semispan sliver panels; z unchanged, 0.011 m shift of the fitted line)
-                        z_m: -0.5746,
-                        flight_rise_m: None,
-                    },
-                    crate::WingDihedralStation {
-                        span_fraction: 0.3120, // moved from 0.3088 onto the thickness node (sliver panel; z unchanged)
-                        z_m: -0.3985,
-                        flight_rise_m: None,
-                    },
-                    crate::WingDihedralStation {
-                        span_fraction: 0.5147,
-                        z_m: 0.1161,
-                        flight_rise_m: None,
-                    },
-                    crate::WingDihedralStation {
-                        span_fraction: 0.6691,
-                        z_m: 0.5408,
-                        flight_rise_m: None,
-                    },
-                    crate::WingDihedralStation {
-                        span_fraction: 0.8235,
-                        z_m: 0.8996,
-                        flight_rise_m: None,
-                    },
-                ],
+                // On the section stations above (eta = 2y/b x 29.82 / 31.29; formerly x 32.22 / 31.29, the -400 span
+                // with winglets, which put 2y/b 0.206-0.50 up to 1.2 m outboard), plus the kink and the tip on the plateau.
+                // Multipliers act on the section law's own maximum t/c on the aerodynamic 101-station sampling.
+                // (span fraction, thickness multiplier): t/c of the section law -> documented t/c.
+                thickness_stations: [
+                    (0.1039, 0.9772), // t/c 0.1382 -> 0.1350 (B747-Y109, 2y/b 0.109)
+                    (0.1963, 1.0158), // t/c 0.1024 -> 0.1040 (B747-Y206, 2y/b 0.206)
+                    (0.2888, 1.0363), // t/c 0.0859 -> 0.0890 (B747-Y303, 2y/b 0.303)
+                    (0.3812, 0.9802), // t/c 0.0816 -> 0.0800 (B747-Y400, 2y/b 0.40)
+                    (0.4219, 0.9792), // t/c 0.0817 -> 0.0800 (kink, Y400-Y500 blend)
+                    (0.4765, 0.9778), // t/c 0.0818 -> 0.0800 (B747-Y500, 2y/b 0.50, printed plateau end)
+                    (0.6691, 0.9778), // t/c 0.0818 -> 0.0800 (held, estimate; plateau nodes on the dihedral stations keep the C2 spline flat)
+                    (0.8235, 0.9778), // t/c 0.0818 -> 0.0800 (held, estimate)
+                    (1.0000, 0.9778), // t/c 0.0818 -> 0.0800 (held, estimate)
+                ]
+                .map(|(span_fraction, thickness_scale)| crate::WingThicknessStation { span_fraction, thickness_scale })
+                .to_vec(),
+                // Dihedral: section 2.2.1 front and side views as at root_z_m; fractions of the 31.29 m semispan, on thickness nodes where they can be.
+                // The first two follow the section stations (were 0.2121 z -0.955 and 0.3120 z -0.70), z read on that polyline.
+                // (span fraction, z m):
+                dihedral_stations: [(0.1963, -1.013), (0.2888, -0.759), (0.5147, -0.064), (0.6691, 0.361), (0.8235, 0.70)]
+                    .map(|(span_fraction, z_m)| crate::WingDihedralStation { span_fraction, z_m, flight_rise_m: None })
+                    .to_vec(),
                 ..WingConfig::default()
             },
             empennage: EmpennageConfig {
-                tail_airfoil: "naca0012".to_owned(),
+                // 2.2.1 front view over the side chords: fin t/c 0.116 at z 6 m, 0.09 at z 11-13 m, 11 % across the height.
+                vstab_airfoil: Some("naca0011".to_owned()),
+                tail_airfoil: "naca0009".to_owned(), // 2.2.1 front view: tailplane root depth 0.34 m under the drawn lower edge at 12 %; 9 % reads the drawn depth
                 // Section 2.2.1: tailplane span 72 ft 9 in (22.17 m), tip
                 // trailing edge 229 ft 2 in (69.85 m) aft of the nose. Plan
                 // drawing reads: tip leading edge 67.07 m, root leading edge
                 // 56.9 m at the centreline (10.2 m aft to the tip), tip chord
                 // 2.8 m, centreline chord 11.1 m. Height is a side-view read.
-                // Step B w2: the tailplane sweep (42.6 deg), span, tip trailing edge and root position match the drawing
-                // within 0.2 deg / 0.1 m (measure/B747-400): unchanged. Height and dihedral (C, one view) also stay.
-                // geo/tailfit 2026-10-11: tailplane straight-edge fit to the drawing, centreline values; was off 11.73, chords 11.1/2.8, tip (10.2, 11.085, 1.320)
+                // the tailplane sweep (42.6 deg), span, tip trailing edge and root position match the drawing
+                // within 0.2 deg / 0.1 m (B747-400): unchanged. Height and dihedral (C, one view) also stay.
+                // Tail fit: tailplane straight-edge fit to the drawing, centreline values.
                 hstab_offset_from_tail_m: 11.65,
-                hstab_z_m: 2.160, // geometry round 2 (wing lane): upper surface at the root matched to the front view; was 2.7
+                hstab_z_m: 2.310, // upper surface at the root kept on the 2.2.1 front view with the thinner section (was 2.160)
                 hstab_root_chord_m: 10.01,
                 hstab_tip_chord_m: 2.64,
                 hstab_root_twist_deg: -2.0,
                 hstab_tip_twist_deg: -2.0,
-                hstab_tip_le_m: (10.31, 11.085, 1.320), // tailplane dihedral matched to the front view; was z 0.8
+                hstab_tip_le_m: (10.31, 11.085, 1.05), // 2.2.1 front view: tip 0.27 m above the drawn tip with the old section and root; was z 1.320
                 // Side view (drawing read): fin root leading edge 53.5 m aft of
                 // the nose at the aft crown, tip leading edge 13.3 m behind it
                 // and 10.2 m above the root line, tip trailing edge at the
                 // 70.67 m overall length. The fin tip lands at about 19.4 m
                 // above the ground (ACAP section 2.3.1 prints 18.80 to
                 // 19.51 m for the tail height K).
-                // Step B w2 (Rev F 2.2.1 side view, measure/B747-400): the model leading edge is 0.72 m forward of the
+                // the model leading edge is 0.72 m forward of the
                 // drawn one at the crown line (54.91 vs 55.63 m, B): offset 15.13 -> 14.41 m moves the whole fin aft
                 // (the measurement table prints 15.85, which has the wrong sign for the L - offset datum). The tip
                 // leading edge then sits 12.55 m behind the root (was 13.3 m): the drawn sweep is 49.9 deg against 52.5
                 // deg (C) and the tip trailing edge lands on the published 70.67 m overall length (231 ft 10.25 in).
                 // Root chord 13.3 -> 12.35 m: with the leading edge moved the trailing edge at the crown line falls on
                 // the drawn 66.98 m (chord 11.4 m there against 11.35 m drawn, C).
-                // geo/tailfit 2026-10-11: fin straight-edge fit to the drawing at the root line (rms 0.013/0.011 m); was off 14.41, chords 12.35/3.9, tip (12.55, 0.0, 10.2)
+                // Root chord: trailing edge 0.15 m aft of the drawn line at the side-view door scale (door 5 and overall length); tip corner stays on the printed 70.67 m.
                 vstab_offset_from_tail_m: 14.29,
                 vstab_z_m: 3.6,
-                vstab_root_chord_m: 12.19,
-                vstab_tip_chord_m: 4.27,
-                vstab_tip_le_m: (12.11, 0.0, 10.2),
+                vstab_root_chord_m: 12.02, // was 12.19
+                vstab_tip_chord_m: 4.22, // tip trailing edge on the printed 70.67 m overall length; was 4.27
+                vstab_tip_le_m: (12.11, 0.0, 10.41), // W1: fin top 14.06 m in the side view (was 10.2)
+                // ACAP side view: dorsal line leaves the crown at x 53.0 m, nearly straight, and joins the fin LE about z 4.98 m.
+                vstab_dorsal_length_m: Some(1.33),
+                vstab_dorsal_height_m: Some(1.38),
+                vstab_dorsal_shoulder: Some(0.1),
                 ..EmpennageConfig::default()
             },
             fuselage: FuselageConfig {
@@ -455,22 +496,15 @@ pub fn b747_400() -> AircraftPreset {
             },
             engine: EngineConfig {
                 engine_name: "CF6-80C2".to_owned(),
-                // ACAP section 2.2.1 plan view: engine centrelines 38 ft 4 in
-                // (11.68 m) and 69 ft (21.03 m) from the airplane centreline.
+                // Section 2.2.1 plan view: engine centrelines 38 ft 4 in (11.68 m) and 69 ft (21.03 m).
+                nacelle_model: crate::NacelleModel::V2,
                 spanwise_positions_m: vec![11.68, -11.68, 21.03, -21.03],
-                // ESTIMATE: nacelle centre about 1.5 m under the wing station;
-                // the 2.84 m GE nacelle low-point clearance of section 2.2.1
-                // is the cross-check.
-                // Step B w2: both nacelle centres 0.90 m lower (inboard 7.24 m below the hump crown against 6.33 m modelled,
-                // outboard 6.39 against 5.51 m; B). The published ground clearances (ACAP 2.3.1: P 0.71-0.93 m inboard,
-                // N 1.32-1.80 m outboard) also put the nacelles lower than the old position. Was -1.346 (round 2).
-                z_m: -2.25,
-                // Section 2.2.1 inlet stations 75 ft 6 in (23.01 m) and 105 ft
-                // 6 in (32.16 m) aft of the nose (CF6-80C2 row). The model
-                // leading edge at the two engine stations is 28.46 m and
-                // 36.65 m, so the offsets are 5.45 m and 4.49 m; one offset
-                // serves both pairs, so the inlets land 0.5 m off.
-                inlet_x_offset_m: 4.97,
+                // Section 2.2.1 front and side views, nacelle centres -2.66 and -1.77 m (the views disagree by 0.3 m on the inner pair). Was -2.25.
+                z_m: -2.14,
+                // Section 2.2.1 table: CF6-80C2 inlets 23.01 and 32.16 m against LE 28.71 and 37.25 m; the drawn
+                // nacelles sit 0.25 m aft, at the PW4200 row. Offsets below put the built inlets on the CF6-80C2 row.
+                inlet_x_offset_m: 5.345, // mean of the pairs below
+                inlet_x_per_engine_m: vec![5.65, 5.65, 5.04, 5.04],
                 ..EngineConfig::default()
             },
             ..GeometryConfig::default()
@@ -480,7 +514,7 @@ pub fn b747_400() -> AircraftPreset {
             cruise_mach: 0.85,
             cruise_altitude_m: 10_668.0,
             mtow_kg: 396_893.0,
-            max_wing_area_m2: 525.0,
+            max_wing_area_m2: B747_400_REFERENCE_AREA_M2,
             min_wing_loading_kg_m2: 550.0,
             cabin_preset: "Custom".to_owned(),
             optimize_passenger_capacity: true,
@@ -491,6 +525,8 @@ pub fn b747_400() -> AircraftPreset {
             // Maximum zero-fuel weight 246,073 kg less operating empty weight
             // 178,755 kg (ACAP section 2.1.1: 148,412 lb = 67,318 kg).
             max_structural_payload_kg: 67_318.0,
+            // Superseded at registration: the profile declares the TCDS VMO/MMO, so VD is the
+            // CS 25.335(b) value on VC = VMO (`crate::design_speeds`, `registry`).
             dive_speed_m_s: 210.0,
             ..DesignRequirements::default()
         },

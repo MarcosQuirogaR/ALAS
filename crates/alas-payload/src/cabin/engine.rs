@@ -198,9 +198,16 @@ fn build_passenger_layout_with_mass_semantics(
         galleys: monument_counts.galleys,
         accessible_lavatories: monument_counts.accessible_lavatories,
         wheelchair_stowages: monument_counts.wheelchair_stowages,
+        dropped_monuments: monument_counts.dropped,
         exit_type: exits.exit_type,
         exit_pairs: exits.pairs,
         exit_capacity: exits.capacity_total,
+        min_cabin_crew: super::crew::minimum_cabin_crew(
+            "",
+            &items,
+            seating.deck_caps.total,
+            g.x_min,
+        ),
         max_certifiable_capacity: seating.deck_caps.total,
         geometric_capacity: seating.geometric_deck_caps.total,
         source_capacity_cap,
@@ -213,6 +220,7 @@ fn build_passenger_layout_with_mass_semantics(
         hold_capacity_t: bags.hold_capacity / 1000.0,
         hold_used_t: bags.hold_used / 1000.0,
         hold_ulds: bags.hold_ulds,
+        hold_capacity: bags.installed,
         forward_hold_baggage_fraction: bags.forward_fraction,
         hold_compartment_masses_kg: bags.compartment_masses_kg,
         overload_kg: bags.overload_kg,
@@ -238,6 +246,8 @@ fn build_passenger_layout_with_mass_semantics(
         total_mass,
         cg_x,
         cg_y,
+        balance: None,
+        all_coach_capacity: None,
         summary: LayoutSummary::Passenger(Box::new(summary)),
     }
 }

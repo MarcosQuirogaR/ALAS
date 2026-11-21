@@ -17,12 +17,14 @@ use alas_geom::aircraft::fuselage::Fuselage;
 use alas_geom::aircraft::wing::Wing;
 
 use super::airframe_geometry::nacelle_dimensions;
-use super::military_cargo::MilitaryCargoHold;
+use super::military_cargo::{carries_main_deck_freight, MilitaryCargoHold};
 use super::movable_area::movable_surface_area;
 use super::{
     estimate_flops_transport, FlopsTransportEvaluation, FlopsTransportInputs,
     FlopsTransportUnverifiedReason, PartialFlopsTransportBreakdown, PropulsionSizing,
 };
+
+pub(crate) mod gust_ratio;
 
 pub(super) fn main_wing(plane: &Airplane) -> Option<&Wing> {
     plane
@@ -47,13 +49,51 @@ pub(crate) fn primary_fuselage(plane: &Airplane) -> Option<&Fuselage> {
         .filter(|fuselage| fuselage.xsecs.len() >= 2)
 }
 
+/// Maximum fuselage width `WF` and the body depth `DF`, m.
+///
+/// FLOPS equations 56, 110 and 113 (NASA/TM-2017-219627 Vol. I) and the LTH
+/// furnishings relation read one width and one depth as the size of the whole
+/// body. The depth is the one the maximum-width body holds over half its
+/// length (the length-weighted median over the stations within 0.5 percent of
+/// the maximum width), so a constant section answers with its own depth and
+/// an upswept ramp tail leaves it unchanged, while a local fairing that
+/// stands above the main body over a short stretch, such as a part-length
+/// upper deck, does not set the depth of the whole length. The published
+/// 747-100 body weight (Obert, *Aerodynamic Design of Transport Aircraft*,
+/// 2009, Fig. 42.20, p. 578: 70,684 lb) is the check: equation 56 gives
+/// +13.8 percent on the hump depth and +1.6 percent on the main-body section.
 pub(super) fn max_fuselage_width_depth(fuselage: &Fuselage) -> (f64, f64) {
-    fuselage
+    let (width, max_depth) = fuselage
         .xsecs
         .iter()
-        .fold((0.0, 0.0), |(width, depth), xsec| {
+        .fold((0.0_f64, 0.0_f64), |(width, depth), xsec| {
             (width.max(xsec.width), depth.max(xsec.height))
+        });
+    let mut spans: Vec<(f64, f64)> = fuselage
+        .xsecs
+        .windows(2)
+        .filter(|pair| pair[0].width.min(pair[1].width) >= 0.995 * width)
+        .map(|pair| {
+            (
+                0.5 * (pair[0].height + pair[1].height),
+                pair[1].xyz_c[0] - pair[0].xyz_c[0],
+            )
         })
+        .filter(|(_, length)| *length > 0.0)
+        .collect();
+    let total: f64 = spans.iter().map(|(_, length)| length).sum();
+    if total <= 0.0 {
+        return (width, max_depth);
+    }
+    spans.sort_by(|a, b| b.0.total_cmp(&a.0));
+    let mut covered = 0.0;
+    for (depth, length) in spans {
+        covered += length;
+        if covered >= 0.5 * total {
+            return (width, depth);
+        }
+    }
+    (width, max_depth)
 }
 
 fn positive_optional(
@@ -149,6 +189,7 @@ pub fn evaluate_product_at_design_gross_mass(
     flops: &FlopsTransportConfig,
     turboprop: &FlopsTurbopropConfig,
     design_gross_mass_kg: Option<f64>,
+    military_cargo_floor: f64,
 ) -> FlopsTransportEvaluation {
     let mut reasons = Vec::new();
     // Only equations 121 and 122 read an engine rating. A turbofan feeds them
@@ -157,7 +198,11 @@ pub fn evaluate_product_at_design_gross_mass(
     // instead of being given a thrust it does not have.
     let (rated_thrust_per_engine_n, propulsion_sizing) = match geometry.engine.active_model() {
         Ok(ActiveEngineModel::Turbofan(spec)) => (
-            spec.rated_thrust_kn * 1_000.0,
+            geometry
+                .engine
+                .mass_basis_thrust_kn()
+                .unwrap_or(spec.rated_thrust_kn)
+                * 1_000.0,
             PropulsionSizing::RatedThrust,
         ),
         Ok(ActiveEngineModel::Turboprop(_)) => (
@@ -196,33 +241,14 @@ pub fn evaluate_product_at_design_gross_mass(
     let compartment_length =
         (fuselage_length - geometry.fuselage.cabin_start_x_m - geometry.fuselage.tailcone_length_m)
             .max(0.0);
-    let wing_engines = match count_optional(
-        flops.wing_mounted_engine_count,
-        FlopsTransportUnverifiedReason::EngineMounting,
-    ) {
-        Ok(value) => value,
-        Err(reason) => {
-            reasons.push(reason);
-            0
-        }
-    };
-    let fuselage_engines = match count_optional(
-        flops.fuselage_mounted_engine_count,
-        FlopsTransportUnverifiedReason::EngineMounting,
-    ) {
-        Ok(value) => value,
-        Err(reason) => {
-            reasons.push(reason);
-            0
-        }
-    };
-    let engine_count = match wing_engines.checked_add(fuselage_engines) {
-        Some(value) => value,
-        None => {
-            reasons.push(FlopsTransportUnverifiedReason::EngineMounting);
-            0
-        }
-    };
+    let (wing_engines, fuselage_engines) = geometry
+        .engine
+        .resolved_engine_mounting(
+            flops.wing_mounted_engine_count,
+            flops.fuselage_mounted_engine_count,
+        )
+        .unwrap_or((0, 0));
+    let engine_count = wing_engines + fuselage_engines;
     // The same diameter the structure group prices the nacelles with.
     let nacelle_diameter = nacelle_dimensions(plane, geometry).0;
     let maximum_mach = match positive_optional(
@@ -384,11 +410,29 @@ pub fn evaluate_product_at_design_gross_mass(
     }
     // A declared main-deck freight hold is the military-freighter attribute:
     // its loadable floor (floor plus load-bearing ramp, at the clear width)
-    // sizes the cargo-handling system, and a ramp makes it rear-loading.
-    let military_cargo = cabin.cargo.freight_hold.map(|hold| MilitaryCargoHold {
-        floor_area_m2: (hold.floor_length_m + hold.ramp_length_m) * hold.clear_width_m,
-        rear_ramp: hold.ramp_length_m > 0.0,
-    });
+    // sizes the cargo-handling system, and a ramp makes it rear-loading. The
+    // ramp belongs to the fuselage only when the fuselage equation actually in
+    // use is the military-transport one: equation 56 with CARGF 1, not the
+    // pressurized regional method, which has no cargo-floor term.
+    let fuselage_owns_ramp = military_cargo_floor >= 1.0
+        && !super::structure::pressurized_fuselage::priced_by_pressurized_method(flops);
+    // A civil main-deck freighter carries the same pallet handling system and
+    // handling gear over its main-deck floor (military_cargo.rs, "Civil
+    // main-deck freighters"); it has no ramp.
+    let military_cargo = cabin
+        .cargo
+        .freight_hold
+        .map(|hold| MilitaryCargoHold {
+            floor_area_m2: (hold.floor_length_m + hold.ramp_length_m) * hold.clear_width_m,
+            rear_ramp: hold.ramp_length_m > 0.0,
+            fuselage_owns_ramp,
+            military: true,
+            body_wetted_area_m2: fuselage.area_wetted(),
+        })
+        .or_else(|| {
+            carries_main_deck_freight(requirements, cabin)
+                .then(|| super::military_cargo::civil_main_deck_hold(fuselage, geometry))
+        });
     let inputs = FlopsTransportInputs {
         maximum_mach,
         design_range_nmi,
@@ -405,6 +449,13 @@ pub fn evaluate_product_at_design_gross_mass(
         first_class_passenger_count: first,
         business_class_passenger_count: business,
         tourist_class_passenger_count: tourist,
+        // A converted freighter keeps the systems of the airliner it was
+        // (military_cargo.rs, "Civil main-deck freighters").
+        systems_passenger_count: carries_main_deck_freight(requirements, cabin)
+            .then_some(cabin.cargo.converted_freighter_seats)
+            .flatten()
+            .and_then(|seats| usize::try_from(seats).ok()),
+        all_coach_passenger_count: flops.all_coach_passenger_count,
         flight_crew_count,
         flight_attendant_count,
         galley_crew_count,
@@ -420,11 +471,15 @@ pub fn evaluate_product_at_design_gross_mass(
         containerized_cargo_kg,
         containerized_baggage_kg,
         apu_installed: flops.apu_installed,
+        bleed_air_system: flops.bleed_air_system,
         cargo_loading,
         cabin_equipment_method: flops.cabin_equipment_method,
         haul_class: flops.haul_class.unwrap_or_default(),
         propulsion_sizing,
         military_cargo,
+        executive_cabin: flops
+            .executive_cabin
+            .map(super::executive_cabin::ExecutiveCabinInputs::declared),
     };
     if !inputs.wing_area_m2.is_finite() || inputs.wing_area_m2 <= 0.0 {
         reasons.push(FlopsTransportUnverifiedReason::MainWingGeometry);
@@ -434,7 +489,7 @@ pub fn evaluate_product_at_design_gross_mass(
     }
     match estimate_flops_transport(&inputs) {
         Ok(breakdown) => FlopsTransportEvaluation::Verified {
-            inputs,
+            inputs: Box::new(inputs),
             provenance: Box::new(flops.provenance.clone()),
             breakdown,
         },
@@ -471,6 +526,7 @@ mod tests {
             flops,
             turboprop,
             None,
+            0.0,
         )
     }
 
@@ -538,6 +594,7 @@ mod tests {
             .expect("default geometry is a valid product fixture");
         let requirements = DesignRequirements::default();
         let flops = FlopsTransportConfig {
+            manual_cabin_inputs: false,
             maximum_mach: Some(0.84),
             design_range_nmi: Some(3_000.0),
             flight_crew_count: Some(2),
@@ -553,11 +610,14 @@ mod tests {
             fuel_tank_count: Some(4),
             maximum_fuel_capacity_kg: Some(100_000.0),
             apu_installed: true,
+            bleed_air_system: true,
             containerized_cargo_kg: Some(0.0),
             cargo_loading: Some(alas_config::CargoHoldLoading::Containerized),
             containerized_baggage_fraction: None,
             cabin_equipment_method: alas_config::CabinEquipmentMethod::FlopsTransportV1,
             haul_class: None,
+            executive_cabin: None,
+            all_coach_passenger_count: None,
             provenance: FlopsTransportProvenance {
                 mission: complete_provenance("test design mission"),
                 cabin: complete_provenance("test cabin layout"),
@@ -865,6 +925,7 @@ mod tests {
 
     fn complete_test_config() -> FlopsTransportConfig {
         FlopsTransportConfig {
+            manual_cabin_inputs: false,
             maximum_mach: Some(0.84),
             design_range_nmi: Some(3_000.0),
             flight_crew_count: Some(2),
@@ -880,11 +941,14 @@ mod tests {
             fuel_tank_count: Some(4),
             maximum_fuel_capacity_kg: Some(100_000.0),
             apu_installed: true,
+            bleed_air_system: true,
             containerized_cargo_kg: Some(0.0),
             cargo_loading: Some(alas_config::CargoHoldLoading::Containerized),
             containerized_baggage_fraction: None,
             cabin_equipment_method: alas_config::CabinEquipmentMethod::FlopsTransportV1,
             haul_class: None,
+            executive_cabin: None,
+            all_coach_passenger_count: None,
             provenance: FlopsTransportProvenance {
                 mission: complete_provenance("test design mission"),
                 cabin: complete_provenance("test cabin layout"),

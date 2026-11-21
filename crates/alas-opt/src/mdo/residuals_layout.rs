@@ -53,7 +53,8 @@ use rake::dihedral_tip_station;
 
 use super::sizing::SizingOutcome;
 use super::types::ConstraintFamily::Geometry;
-use super::types::ConstraintResidual;
+use super::types::{CandidateDrag, ConstraintResidual};
+use alas_aero::analysis::AeroAnalysis;
 
 /// The wing-to-fuselage layout residuals for one sized candidate.
 pub(super) fn layout_residuals(
@@ -64,13 +65,13 @@ pub(super) fn layout_residuals(
     let plane = &outcome.plane;
     let mut residuals = Vec::new();
     residuals.extend(root_to_kink_te_angle_residual(outcome, config, role));
-    residuals.extend(wing_root_incidence_residuals(config, role));
+    residuals.extend(wing_root_incidence_residuals(outcome, config, role));
     if let (Some(fuselage_length), Some(root), Some(tip)) = (
         fuselage_length_m(plane),
         root_station(plane),
         dihedral_tip_station(plane, config),
     ) {
-        residuals.extend(dihedral_residuals(root, tip, role));
+        residuals.extend(dihedral_residuals(root, tip));
         residuals.extend(apex_on_fuselage_residuals(root, fuselage_length, role));
         residuals.extend(wingbox_depth_residual(root, plane, config, role));
         residuals.extend(vertical_position_residual(root, config, role));
@@ -139,11 +140,10 @@ struct WingStation {
 }
 
 fn root_station(plane: &Airplane) -> Option<WingStation> {
-    let section = plane.wings.first()?.xsecs.first()?;
-    Some(WingStation {
-        xyz_le: section.xyz_le,
-        chord: section.chord,
-    })
+    let wing = plane.wings.first()?;
+    wing.xsecs.first()?;
+    let (xyz_le, chord) = wing.design_root();
+    Some(WingStation { xyz_le, chord })
 }
 
 fn tip_station(plane: &Airplane) -> Option<WingStation> {
@@ -187,22 +187,33 @@ fn root_thickness_ratio(plane: &Airplane) -> Option<f64> {
 /// `PlausibilityLimits::min_tip_washout_deg`'s own doc comment records for
 /// the identical field. The window is that measured span with a two-degree
 /// margin each side.
+///
+/// A clean-sheet transport derives its setting angle (`sizing::wing_setting`): the
+/// root incidence read is the one the candidate was evaluated with.
 fn wing_root_incidence_residuals(
+    outcome: &SizingOutcome,
     config: &AlasConfig,
     role: ResidualRole,
 ) -> Vec<ConstraintResidual> {
-    const MIN_DEG: f64 = 0.0;
-    const MAX_DEG: f64 = 6.5;
-    let incidence = config.geometry.wing.root_twist_deg;
+    let incidence = outcome
+        .sized
+        .fuel_artifacts
+        .tail_sizing
+        .wing_incidence_deg
+        .map_or(config.geometry.wing.root_twist_deg, |[root, _, _]| root);
     signed_window_residuals(
         "wing_root_incidence",
         incidence,
-        MIN_DEG,
-        MAX_DEG,
+        WING_ROOT_INCIDENCE_WINDOW_DEG.0,
+        WING_ROOT_INCIDENCE_WINDOW_DEG.1,
         "deg",
         role,
     )
 }
+
+/// The root incidence window, degrees: the measured span of the registered
+/// airliners (+2.0 to +4.5) with two degrees of margin each side.
+pub(crate) const WING_ROOT_INCIDENCE_WINDOW_DEG: (f64, f64) = (0.0, 6.5);
 
 /// Mean geometric dihedral of the main wing, root to tip, degrees: the angle
 /// the leading edge rises out of the `y`-`z` plane, positive tip-above-root.
@@ -214,44 +225,45 @@ fn mean_dihedral_deg(root: WingStation, tip: WingStation) -> f64 {
     dz.atan2(dy).to_degrees()
 }
 
-/// Dihedral band by wing vertical position (low root at or below the
-/// fuselage centreline vs. high/shoulder root at or above it -- root
-/// vertical position, `geometry.wing.root_z_m`, is fixed configuration, not
-/// a design variable, so the classification is stable for one candidate).
+/// The geometric dihedral against Raymer's initial-estimate guidelines,
+/// reported, never ranked.
 ///
-/// # Source and band
+/// # Source and role
 ///
-/// A high wing already contributes positive effective (pendulum/fin)
-/// dihedral from the fuselage side area below it, so it is conventionally
-/// built with little or none; a low wing has the opposite effect and is
-/// conventionally built with more, offset somewhat by sweep's own
-/// contribution to effective dihedral. This qualitative relation is standard
-/// conceptual-design guidance (Raymer, *Aircraft Design: A Conceptual
-/// Approach*, dihedral-selection discussion; Roskam, *Airplane Design Part
-/// II*, wing geometry selection). Measured on this program's seven low-wing
-/// registered airliners, geometric dihedral runs 7.18 deg (A340-300) to 8.58
-/// deg (A320-200); the low-wing band is that span with margin, [3.0, 10.0]
-/// deg. The one registered high/shoulder wing (ATR72-600) is built with 0.0
-/// deg, consistent with the qualitative rule above; the high-wing band,
-/// [-5.0, 5.0] deg, is therefore a single measured point plus the same
-/// literature-qualitative margin rather than an independently-fitted range,
-/// and is stated as such.
-/// Lower high-wing bound: see [`rake`] (Raymer Table 4.2).
-fn dihedral_residuals(
-    root: WingStation,
-    tip: WingStation,
-    role: ResidualRole,
-) -> Vec<ConstraintResidual> {
+/// Raymer, *Aircraft Design: A Conceptual Approach*, 6th ed., sec. 4.1.5,
+/// Table 4.2, p. 89: low wing 5 to 7 deg unswept (civil), 3 to 7 deg
+/// subsonic swept; high wing 0 to 2 and -5 to -2 deg. The window here is the
+/// envelope of the two subsonic columns for the root's vertical position
+/// (low below the fuselage centreline, high otherwise; `geometry.wing.root_z_m`
+/// is configuration, not a design variable): low [3, 7], high [-5, 2] deg.
+/// Raymer states the table is an initial estimate from DATCOM data, to be
+/// revised after the stability analysis of the layout: dihedral is chosen
+/// for the dihedral effect, which sweep (about 1 deg per 10 deg) and wing
+/// position also supply. A geometric band is therefore not a requirement:
+/// the Learjet 60 flies with 2.5 deg (FlightSafety Learjet 60 Pilot
+/// Training Manual, ch. 19), below the swept low-wing guideline. The
+/// band this replaces, [3, 10] deg low and [-5, 5] deg high, was fitted on
+/// the registered airliners and rejected that real aircraft. The
+/// requirement the dihedral serves, a stabilizing dihedral effect, is
+/// ranked by `lateral_dihedral_effect` (`residuals_lateral`).
+fn dihedral_residuals(root: WingStation, tip: WingStation) -> Vec<ConstraintResidual> {
     let dihedral_deg = mean_dihedral_deg(root, tip);
     let low_wing = root.xyz_le[2] < 0.0;
-    let (min_deg, max_deg) = if low_wing { (3.0, 10.0) } else { (-5.0, 5.0) };
-    signed_window_residuals("wing_dihedral", dihedral_deg, min_deg, max_deg, "deg", role)
+    let (min_deg, max_deg) = if low_wing { (3.0, 7.0) } else { (-5.0, 2.0) };
+    signed_window_residuals(
+        "wing_dihedral",
+        dihedral_deg,
+        min_deg,
+        max_deg,
+        "deg",
+        ResidualRole::Diagnostic,
+    )
 }
 
 /// The wing root leading and trailing edges must sit on the fuselage that
 /// carries them, and the apex station must sit inside a band conventional
 /// transports use -- the geometric-interference check
-/// `docs/optimizer-design-vector.md` names as a known gap.
+/// `docs/optimizer-design-vector.md` lists with the body-clearance rows.
 ///
 /// # Source and band
 ///
@@ -397,15 +409,21 @@ fn vertical_position_residual(
 /// The wave drag is read from the candidate's cruise drag,
 /// [`super::types::CandidateDrag::wave_cd`]: for a natively trimmed
 /// candidate the trimmed drag table, which tabulates
-/// `alas_aero::analysis::AeroAnalysis::wave_drag` (the Lock/Korn law, Raymer,
-/// *Aircraft Design: A Conceptual Approach*, Korn equation, with
-/// `CDw = C (M - M_crit)^4` and `M_crit` from the drag-divergence criterion
-/// `dCD/dM = 0.1`) on the quarter-chord sweep and the area-weighted
-/// thickness ratio; for an external polar, its measured wave term. The
-/// residual and the fuel burn therefore see one wave drag.
+/// `alas_aero::analysis::AeroAnalysis::wave_drag` (the law
+/// `geometry.wing.drag_divergence_law` resolves to: by default the
+/// Shevell-Kroo crest-critical method, else Korn's relation or Torenbeek's
+/// Eq. 10.48 with the Lock rise) on the wing's sweep and thickness ratio; for
+/// an external polar, its measured wave term. The residual and the fuel burn
+/// therefore see one wave drag.
 ///
-/// The lift coefficient is that of mid-cruise at the sizing cruise Mach and
-/// altitude, at [`super::types::SizedCandidate::mid_cruise_mass_kg`]: the
+/// The lift coefficient is that of mid-cruise at the sizing cruise Mach, at
+/// the level the design mission flies that mass at (mission closed: the
+/// closure plan's segment begun at or above it, as the report reads it,
+/// `cruise_mass::closure_mid_cruise_level_m`; under Hard MTOW the closure
+/// plan's level at half its cruise distance; legal levels held to 300 ft/min
+/// residual climb and 1.3 g buffet at the top-of-climb mass, plus steps; the
+/// configured cruise altitude only without a plan), at
+/// [`super::types::SizedCandidate::mid_cruise_mass_kg`]: the
 /// design mission flown from the candidate's takeoff loading,
 /// `TOW - (F - R) / 2` with `F` the fuel loaded at brake release and `R` the
 /// fuel its dispatch keeps on landing ([`super::cruise_mass`]). Under Hard
@@ -416,27 +434,70 @@ fn vertical_position_residual(
 /// # Ceiling
 ///
 /// Sweep is consistent with the cruise Mach when the aircraft cruises at or
-/// below its drag-divergence Mach, `dCD/dM = 0.1` (the definition the Korn
-/// relation and the Lock law share; Raymer, Korn equation). Under
-/// `CDw = C (M - M_crit)^4` that slope is reached at
-/// `M_dd - M_crit = (0.1 / 4C)^(1/3)`, where the wave drag is
-/// `C (0.1 / 4C)^(4/3)`: 26.9 drag counts at the configured `C = 20`. The
-/// ceiling is that value, so the residual is the drag-divergence criterion
-/// expressed on the wave drag the missions fly. An insufficiently swept
-/// wing at a high cruise Mach fails this quickly: the rise is quartic in
-/// the Mach excess past `M_crit`.
+/// below the drag-divergence Mach of the law in force, at the mid-cruise lift
+/// coefficient, within the accuracy of the relation that locates that Mach:
+/// the gate admits a cruise Mach up to
+/// [`alas_aero::analysis::DRAG_DIVERGENCE_MACH_RMS_ERROR`] (0.023, the rms
+/// error of the `M_dd` relations against the registered drag rises) above
+/// it for Korn and Eq. 10.48; for Shevell-Kroo the method's own documented
+/// scatter replaces it (`DivergenceLaw::divergence_mach_scatter`: 0.047, the
+/// standard deviation over the 29 aircraft of Ciornei 2005, Tables C.1-C.4).
+/// One estimate per law, never two added. The ceiling is the law's own wave
+/// drag at that Mach, `alas_aero::analysis::DivergenceLaw::wave_cd` at
+/// `DivergenceLaw::drag_divergence_mach(CL) + error`, so it is reached
+/// exactly when the cruise Mach is that far past divergence:
+/// - Shevell-Kroo (product default): divergence at `dCD/dM = 0.05`,
+///   `M_div = M_cc [1.02 + 0.08 (1 - cos L)]`, and the ceiling
+///   `0.0019 cos^3 L ((M_div + 0.047)/M_cc)^14.641`, about 40 to 60 counts
+///   on the swept transports (it depends on sweep and on `M_div / M_cc`);
+/// - Korn or Eq. 10.48 with the Lock rise `CDw = C (M - M_crit)^4`:
+///   divergence at `dCD/dM = 0.1`, `M_dd - M_crit = (0.1 / 4C)^(1/3)`, and the
+///   ceiling `C ((0.1 / 4C)^(1/3) + 0.023)^4`, 58.4 counts at `C = 20`.
+///   A ceiling derived from one law and applied to the drag of another is not
+///   a divergence criterion: the Lock value read against the Shevell table
+///   sits 0.03 to 0.05 in Mach past Shevell's divergence. A gate with no
+///   tolerance rejected certified aircraft at their published cruise Mach. An
+///   insufficiently swept wing at a high cruise Mach fails this quickly: the
+///   rise is steep past divergence under either law.
+///
+/// An external polar carries no law of its own; its ceiling is that of the
+/// analysis' law on the candidate's wing.
+///
+/// # Role by design mode
+///
+/// The `M_dd` relation reads the drag rise of the registered aircraft with an rms error
+/// of 0.023 in Mach, in-sample (`alas_aero::analysis::wave` module). A fixed certified
+/// aircraft (`DesignMode::BaselineSandbox`) cruises at a published Mach, which is a fact
+/// of the aircraft and not a design choice; a shortfall inside that rms (B787-9 0.004,
+/// DC-10 0.011, LJ60 0.003 in Mach) is the relation's error, not a defect of the baseline,
+/// so the row is a Diagnostic there and still reports the shortfall. The modes that design
+/// or adapt the wing (clean sheet, reference adaptation) choose sweep for their cruise
+/// Mach, and the row stays a hard requirement.
 fn wave_drag_ceiling_residual(
     outcome: &SizingOutcome,
     config: &AlasConfig,
     role: ResidualRole,
 ) -> Vec<ConstraintResidual> {
-    /// `dCD/dM` at drag divergence (Korn/Lock).
-    const DRAG_DIVERGENCE_SLOPE: f64 = 0.1;
-    let rise = config.drag_model.wave_drag_coefficient;
-    let wave_drag_ceiling_cd = rise * (DRAG_DIVERGENCE_SLOPE / (4.0 * rise)).powf(4.0 / 3.0);
+    let role = if config.optimizer.design_space.mode == alas_config::DesignMode::BaselineSandbox {
+        ResidualRole::Diagnostic
+    } else {
+        role
+    };
     let req = &config.requirements;
     let sized = &outcome.sized;
-    let atmosphere = alas_atmo::Atmosphere::new(req.cruise_altitude_m);
+    // The mid-cruise point is flown where the mission flies it (the LJ60
+    // starts cruise at 10,105 m against its configured 12,497 m): mission
+    // closed, at the level its closure's plan flies the mid-cruise mass at,
+    // as the report reads it (`cruise_mass::closure_mid_cruise_level_m`);
+    // else at the closure plan's half-distance level. A plan on the
+    // takeoff-band floor (an unswept wing at Mach 0.84 "cruised" at 482 m)
+    // is no cruise: the gate reads the configured design altitude instead.
+    let plan = sized.fuel_artifacts.frozen_plan.as_ref();
+    let plan = plan.filter(|plan| plan.holds_a_cruise_level());
+    let half_distance_m = plan.map(|plan| plan.level_at_cruise_fraction_m(0.5));
+    let mid_altitude_m = super::cruise_mass::closure_mid_cruise_level_m(config, sized)
+        .unwrap_or_else(|_| half_distance_m.unwrap_or(req.cruise_altitude_m));
+    let atmosphere = alas_atmo::Atmosphere::new(mid_altitude_m);
     let mach = req.cruise_mach;
     let v_m_s = mach * atmosphere.speed_of_sound();
     let q_pa = 0.5 * atmosphere.density() * v_m_s.powi(2);
@@ -446,11 +507,33 @@ fn wave_drag_ceiling_residual(
         return Vec::new();
     }
     let wave_drag_cd = sized.fuel_artifacts.drag.wave_cd(cl_mid, mach);
+    // The ceiling comes from the law the wave column is tabulated on.
+    let drag_model = config.resolved_drag_model();
+    let law = match &sized.fuel_artifacts.drag {
+        CandidateDrag::Table(table) => *table.divergence_law(),
+        CandidateDrag::External(_) => AeroAnalysis::new(
+            &outcome.plane,
+            AeroAnalysis::quarter_chord_sweep_deg(&outcome.plane, outcome.history.dv.sweep_deg),
+            Some(config.geometry.clone()),
+            Some(drag_model.clone()),
+            Some(config.analysis.clone()),
+        )
+        .divergence_law(None),
+    };
+    let divergence_mach = law.drag_divergence_mach(cl_mid);
+    // A hard row must not reject a design inside its own method's documented
+    // prediction error, one estimate per law (not two added).
+    let ceiling_mach = divergence_mach + law.divergence_mach_scatter();
+    let wave_drag_ceiling_cd = law.wave_cd(ceiling_mach, cl_mid, drag_model.wave_drag_coefficient);
     // The start of cruise is reported beside the mid-cruise point the gate
     // is evaluated at: the loaded takeoff mass, climb burn not deducted, so
     // an upper bound of the heaviest cruise state.
     let start_mass_kg = sized.start_of_cruise_mass_kg();
-    let cl_start = start_mass_kg * req.gravity_m_s2 / (q_pa * outcome.plane.s_ref);
+    let start_altitude_m = plan.map_or(req.cruise_altitude_m, |plan| plan.cruise_altitude_m);
+    let start_atmosphere = alas_atmo::Atmosphere::new(start_altitude_m);
+    let start_q_pa =
+        0.5 * start_atmosphere.density() * (mach * start_atmosphere.speed_of_sound()).powi(2);
+    let cl_start = start_mass_kg * req.gravity_m_s2 / (start_q_pa * outcome.plane.s_ref);
     let start_drag_cd = sized.fuel_artifacts.drag.wave_cd(cl_start, mach);
     vec![ConstraintResidual::scaled(
         "sweep_consistent_with_cruise_mach",
@@ -462,8 +545,8 @@ fn wave_drag_ceiling_residual(
         role,
     )
     .with_detail(format!(
-        "gated at mid-cruise: mass {mid_cruise_mass_kg:.0} kg, CL {cl_mid:.4}, wave CD {wave_drag_cd:.5}; \
-         start of cruise (not gated): mass {start_mass_kg:.0} kg, CL {cl_start:.4}, wave CD {start_drag_cd:.5}"
+        "gated at mid-cruise: mass {mid_cruise_mass_kg:.0} kg, level {mid_altitude_m:.0} m, CL {cl_mid:.4}, wave CD {wave_drag_cd:.5}, divergence Mach {divergence_mach:.3}, ceiling at Mach {ceiling_mach:.3}; \
+         start of cruise (not gated): mass {start_mass_kg:.0} kg, level {start_altitude_m:.0} m, CL {cl_start:.4}, wave CD {start_drag_cd:.5}"
     ))]
 }
 

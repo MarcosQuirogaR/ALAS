@@ -3,6 +3,7 @@
 
 //! Global gradient-free design optimization using Differential Evolution.
 
+mod convergence;
 mod diagnostics;
 mod optimizer;
 mod result;
@@ -10,14 +11,16 @@ mod stage_summary;
 #[cfg(test)]
 mod tests;
 
+pub use convergence::{ConvergenceIndicator, SETTLED_WINDOW_GAIN};
 pub use diagnostics::{DiagnosticSearchOutcome, NoFeasibleDesign, RestorationDiagnostics};
 pub use result::{
     DeliveredAcceptance, OptimizationError, OptimizationResult, ParetoCandidate, SearchDiagnostics,
-    CANCELLED, REPORTING_FIDELITY_FALLBACK, REPORTING_FIDELITY_REJECTED,
+    ViolatedConstraint, CANCELLED, REGISTERED_DESIGN_RETAINED, REPORTING_FIDELITY_FALLBACK,
+    REPORTING_FIDELITY_REJECTED, START_DESIGN_RETAINED,
 };
 pub use stage_summary::{
-    BaselineComparison, PreGateReasons, ReportingBaseline, SizingWorkSummary, StageRejections,
-    StageSummary, WorkDistribution, SEARCH_SCOPE,
+    BaselineComparison, LadderPhase, PreGateReasons, ReportingBaseline, SizingWorkSummary,
+    StageRejections, StageSummary, WorkDistribution, SEARCH_SCOPE,
 };
 
 use std::sync::atomic::AtomicBool;
@@ -76,14 +79,23 @@ fn validate_bounds(bounds: &[(f64, f64)]) -> Result<(), OptimizationError> {
     Ok(())
 }
 
-fn ensure_feasible(result: OptimizationResult) -> Result<OptimizationResult, OptimizationError> {
-    if result.best_valid {
-        Ok(result)
-    } else {
-        Err(OptimizationError::NoFeasibleDesign(
-            NoFeasibleDesign::from_history(&result.history),
-        ))
+/// Flag a search that found no feasible design instead of aborting it.
+///
+/// The winner of such a search is the least-violating candidate of the
+/// feasibility-first ranking (total constraint violation, then objective;
+/// Deb 2000), so the result still carries a usable, reviewable design. It is
+/// marked `best_valid == false`, not converged, and terminated as
+/// `"no_feasible_design"`; the per-candidate violations stay in the history
+/// and the reporting stage lists each violated constraint. Cancellation keeps
+/// its own label: a stopped search has not decided feasibility.
+fn flag_if_infeasible(mut result: OptimizationResult) -> OptimizationResult {
+    if !result.best_valid && !result.was_cancelled() {
+        if let Some(diagnostics) = result.search_diagnostics.as_mut() {
+            diagnostics.converged = false;
+        }
+        result.termination = "no_feasible_design".to_owned();
     }
+    result
 }
 
 /// The search's view of one recorded evaluation, read at its own history row.
@@ -243,6 +255,40 @@ trait SearchObjective {
     fn runs_concurrently(&self) -> bool {
         false
     }
+
+    /// Signed normalized margins of the hard residuals of history row `row`
+    /// (`raw residual / max(|limit|, |actual|)`, positive violated), when the objective
+    /// keeps them: what a surrogate of the constraints is fitted to.
+    fn margins(&self, _row: usize) -> Option<&[(&'static str, f64)]> {
+        None
+    }
+
+    /// Mark history row `row` as not deliverable for `reason`: the search
+    /// found a defect of the analysis at that design
+    /// (`product_search::support`). A no-op for an objective that keeps no
+    /// such verdict.
+    fn flag_row(&mut self, _row: usize, _reason: &str) {}
+
+    /// The factor on the selected engine history row `row` requires, when
+    /// the objective sized an engine there and keeps it.
+    fn engine_factor(&self, _row: usize) -> Option<f64> {
+        None
+    }
+
+    /// Start the engine sizing of every later analysis of this objective
+    /// from `factor` (`SizingControls::initial_engine_factor`). A no-op for
+    /// an objective that keeps no such control.
+    fn set_engine_start(&mut self, _factor: Option<f64>) {}
+
+    /// The slope of the engine sizing's map from installed to aimed factor
+    /// history row `row` measured, when it sized an engine over two closures.
+    fn engine_slope(&self, _row: usize) -> Option<f64> {
+        None
+    }
+
+    /// Take `slope` as the first update's slope of every later engine sizing
+    /// of this objective (`SizingControls::initial_engine_slope`).
+    fn set_engine_slope(&mut self, _slope: Option<f64>) {}
 
     /// Per-candidate `(duration, finished after the cancellation request)`
     /// of the last batch of a concurrent objective.

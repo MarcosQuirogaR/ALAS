@@ -52,6 +52,8 @@ fn converged_result() -> OptimizationResult {
         termination: "converged".to_owned(),
         pareto_front: Vec::new(),
         search_diagnostics: Some(SearchDiagnostics {
+            engine_start: None,
+            engine_slope: None,
             restoration: None,
             converged: true,
             analysis_evaluations: 225,
@@ -75,6 +77,8 @@ fn converged_result() -> OptimizationResult {
             baseline: None,
             winner_history_row: None,
             evaluation_trace: Default::default(),
+            plan_completed: false,
+            convergence: None,
             baseline_clamped: false,
         }),
         delivered_acceptance: None,
@@ -104,6 +108,8 @@ fn acceptance(verified: bool, delivered_is_search_finalist: bool) -> DeliveredAc
         wall_time_s: 1.2,
         analyses: 2,
         baseline: None,
+        worst_violation: None,
+        phases: Vec::new(),
     }
 }
 

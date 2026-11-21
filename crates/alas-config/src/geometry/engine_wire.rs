@@ -30,8 +30,14 @@ pub(super) struct EngineConfigWire {
     z_per_engine_m: Vec<f64>,
     inlet_x_offset_m: f64,
     #[serde(default)]
+    #[serde(skip_serializing_if = "Vec::is_empty")]
+    inlet_x_per_engine_m: Vec<f64>,
+    #[serde(default)]
     #[serde(skip_serializing_if = "Option::is_none")]
     centre_engine: Option<CentreEngineInstallation>,
+    #[serde(default)]
+    #[serde(skip_serializing_if = "Option::is_none")]
+    aft_fuselage: Option<AftFuselageEngineInstallation>,
     #[serde(default)]
     thrust_kn: Option<f64>,
     bypass_ratio: f64,
@@ -63,7 +69,9 @@ impl From<EngineConfig> for EngineConfigWire {
             z_m: value.z_m,
             z_per_engine_m: value.z_per_engine_m,
             inlet_x_offset_m: value.inlet_x_offset_m,
+            inlet_x_per_engine_m: value.inlet_x_per_engine_m,
             centre_engine: value.centre_engine,
+            aft_fuselage: value.aft_fuselage,
             thrust_kn,
             bypass_ratio: value.bypass_ratio,
             overall_pressure_ratio: value.overall_pressure_ratio,
@@ -95,7 +103,9 @@ impl TryFrom<EngineConfigWire> for EngineConfig {
             z_m: value.z_m,
             z_per_engine_m: value.z_per_engine_m,
             inlet_x_offset_m: value.inlet_x_offset_m,
+            inlet_x_per_engine_m: value.inlet_x_per_engine_m,
             centre_engine: value.centre_engine,
+            aft_fuselage: value.aft_fuselage,
             bypass_ratio: value.bypass_ratio,
             overall_pressure_ratio: value.overall_pressure_ratio,
             fan_pressure_ratio: value.fan_pressure_ratio,

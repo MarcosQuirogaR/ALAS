@@ -27,6 +27,30 @@
 //! * The root chord's trailing edge is aligned with the wing-tip trailing edge
 //!   and the root chord defaults to the wing-tip chord, so the root section
 //!   coincides with the wing tip and the surfaces are continuous.
+//! * `root_te_flare` moves the trailing edge aft around the junction, see
+//!   [`WingtipTeFlare`]. The built wing-tip section and the device root get that
+//!   much more chord with the leading edge in place, and the extra chord fades
+//!   out along the device path. Only the built surfaces see it: the planform
+//!   stations stay on the straight lines, so `S_ref`, `c_ref` and `b_ref` do not
+//!   move in the `Published` and `Trapezoid` conventions; a `Drawn` reference takes
+//!   the built area. The wing chord runs linearly from the last station inboard of
+//!   the tip, so edge stations on the wing set where the flare begins.
+//!
+//! # Path stations
+//!
+//! `path_stations` puts drawn sections between the root and the tip of a sharp
+//! winglet: a wing leading edge that runs on past the device root, a tip edge, a
+//! device leading edge that starts further aft. They are offsets from the wing-tip
+//! leading edge like the sections themselves. The tip stays where `height_m`,
+//! `cant_deg` and `le_sweep_deg` put it, so the lateral reach, and with it the wing
+//! proper and the overall span, do not depend on them.
+//!
+//! The root and the path stations are the wing running on to the device: their
+//! sections stay in the plane of the wing-tip section, with its spanwise axis
+//! ([`DeviceStation::in_wing_plane`]). A section that bisected the path there
+//! would lean with the turn into the device, and its depth would stand off the
+//! drawn tip edge on the outside of the turn. The device proper lofts from the
+//! last path station to the tip.
 //!
 //! # Blending
 //!
@@ -34,6 +58,8 @@
 //! plane and turns through a circular arc of that radius onto the straight
 //! device axis at `cant_deg`; the arc is sampled with [`ARC_STATIONS`]
 //! stations. A winglet with `blend_radius_m == 0` has a sharp kink.
+//! `arc_start_deg` starts the arc at that slope above the horizontal instead,
+//! for a wing whose last panel already climbs; `None` starts it level.
 //!
 //! # Span convention
 //!
@@ -78,6 +104,11 @@ pub struct DeviceStation {
     /// Section twist about the spanwise axis in the aircraft-builder
     /// convention, degrees (`-toe_out_deg`).
     pub twist_deg: f64,
+    /// The section lies in the plane of the wing-tip section and keeps its
+    /// spanwise axis, instead of bisecting the device path there: the root and
+    /// the path stations of a device that has path stations (see the module
+    /// documentation).
+    pub in_wing_plane: bool,
 }
 
 /// Why a device cannot be built.
@@ -115,6 +146,39 @@ pub enum WingtipDeviceError {
     },
 }
 
+/// Trailing-edge flare of a device at its junction with the wing.
+#[derive(Debug, Clone, Copy, PartialEq, Serialize, Deserialize)]
+#[serde(deny_unknown_fields)]
+pub struct WingtipTeFlare {
+    /// Trailing edge aft of its unflared position at the device root, m (>= 0).
+    pub offset_m: f64,
+    /// Distance along the device path over which the offset fades linearly to
+    /// zero, m (> 0, below `height_m`).
+    pub fade_length_m: f64,
+}
+
+/// Most path stations one device may declare.
+pub const MAX_WINGTIP_PATH_STATIONS: usize = 6;
+
+/// Shortest step between two neighbouring device sections in the YZ plane, m. A
+/// section is a lattice section, so a shorter step would be a sliver strip.
+pub const MIN_WINGTIP_PATH_STEP_M: f64 = 0.05;
+
+/// One drawn section between the device root and tip, relative to the wing-tip
+/// leading edge (right half), metres. See the module documentation.
+#[derive(Debug, Clone, Copy, PartialEq, Serialize, Deserialize)]
+#[serde(deny_unknown_fields)]
+pub struct WingtipPathStation {
+    /// Leading-edge x offset, aft positive.
+    pub dx_m: f64,
+    /// Outboard y offset.
+    pub dy_m: f64,
+    /// Vertical offset, up positive.
+    pub dz_m: f64,
+    /// Chord.
+    pub chord_m: f64,
+}
+
 /// A wingtip device (see the module documentation for frame and signs).
 #[derive(Debug, Clone, PartialEq, Serialize, Deserialize)]
 #[serde(deny_unknown_fields)]
@@ -133,6 +197,9 @@ pub struct WingtipDevice {
     /// Root chord, m; `None` takes the wing-tip chord.
     #[serde(default, skip_serializing_if = "Option::is_none")]
     pub root_chord_m: Option<f64>,
+    /// Trailing-edge flare around the junction; `None` keeps the edge straight.
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub root_te_flare: Option<WingtipTeFlare>,
     /// Tip chord, m (> 0, not above the root chord).
     pub tip_chord_m: f64,
     /// Leading-edge sweep in the device plane, deg, positive aft, in `(-30, 80)`.
@@ -144,6 +211,14 @@ pub struct WingtipDevice {
     /// Radius of the blend arc, m; 0 for a sharp kink. Ignored by fences.
     #[serde(default)]
     pub blend_radius_m: f64,
+    /// Slope the blend arc starts at, deg above the horizontal, in
+    /// `[0, 90 - cant_deg)`; `None` starts it level.
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub arc_start_deg: Option<f64>,
+    /// Drawn sections between root and tip, root to tip; empty for none. Sharp
+    /// winglets without a flare only. `dy_m` and `dz_m` must not fall along the list.
+    #[serde(default, skip_serializing_if = "Vec::is_empty")]
+    pub path_stations: Vec<WingtipPathStation>,
     /// Airfoil name; `None` takes the wing-tip airfoil.
     #[serde(default, skip_serializing_if = "Option::is_none")]
     pub airfoil: Option<String>,
@@ -228,6 +303,15 @@ impl WingtipDevice {
             self.blend_radius_m >= 0.0,
             "[0, inf)",
         )?;
+        if let Some(start) = self.arc_start_deg {
+            finite("arc_start_deg", start)?;
+            range(
+                "arc_start_deg",
+                start,
+                start >= 0.0 && start < 90.0 - self.cant_deg,
+                "[0, 90 - cant_deg)",
+            )?;
+        }
         if let Some(root) = self.root_chord_m {
             finite("root_chord_m", root)?;
             range("root_chord_m", root, root > 0.0, "(0, inf)")?;
@@ -238,6 +322,23 @@ impl WingtipDevice {
                 "<= root chord",
             )?;
         }
+        if let Some(flare) = self.root_te_flare {
+            finite("root_te_flare.offset_m", flare.offset_m)?;
+            finite("root_te_flare.fade_length_m", flare.fade_length_m)?;
+            range(
+                "root_te_flare.offset_m",
+                flare.offset_m,
+                flare.offset_m >= 0.0,
+                "[0, inf)",
+            )?;
+            range(
+                "root_te_flare.fade_length_m",
+                flare.fade_length_m,
+                flare.fade_length_m > 0.0 && flare.fade_length_m < self.height_m,
+                "(0, height_m)",
+            )?;
+        }
+        self.validate_path_stations()?;
         if self.kind == WingtipDeviceKind::Fence {
             range(
                 "cant_deg",
@@ -258,14 +359,96 @@ impl WingtipDevice {
         Ok(())
     }
 
+    /// The path stations are finite, in order, and clear of each other and of the
+    /// root and tip.
+    fn validate_path_stations(&self) -> Result<(), WingtipDeviceError> {
+        if self.path_stations.is_empty() {
+            return Ok(());
+        }
+        let out_of_range = |field, value, range| WingtipDeviceError::OutOfRange {
+            field,
+            value,
+            range,
+        };
+        let count = self.path_stations.len();
+        if count > MAX_WINGTIP_PATH_STATIONS {
+            return Err(out_of_range(
+                "path_stations",
+                count as f64,
+                "at most 6 stations",
+            ));
+        }
+        if self.kind == WingtipDeviceKind::Fence
+            || self.blend_radius_m != 0.0
+            || self.root_te_flare.is_some()
+        {
+            return Err(out_of_range(
+                "path_stations",
+                count as f64,
+                "only on a sharp winglet without a flare",
+            ));
+        }
+        let (mut y, mut z) = (0.0, 0.0);
+        let tip_y = self.height_m * self.cant_deg.to_radians().tan();
+        for station in &self.path_stations {
+            for (field, value) in [
+                ("path_stations.dx_m", station.dx_m),
+                ("path_stations.dy_m", station.dy_m),
+                ("path_stations.dz_m", station.dz_m),
+                ("path_stations.chord_m", station.chord_m),
+            ] {
+                if !value.is_finite() {
+                    return Err(WingtipDeviceError::NonFinite { field, value });
+                }
+            }
+            if station.chord_m <= 0.0 {
+                return Err(out_of_range(
+                    "path_stations.chord_m",
+                    station.chord_m,
+                    "(0, inf)",
+                ));
+            }
+            let (step_y, step_z) = (station.dy_m - y, station.dz_m - z);
+            if step_y < 0.0 || step_z < 0.0 {
+                return Err(out_of_range(
+                    "path_stations.dy_m",
+                    station.dy_m,
+                    "not below the previous section in y or z",
+                ));
+            }
+            if step_y.hypot(step_z) < MIN_WINGTIP_PATH_STEP_M {
+                return Err(out_of_range(
+                    "path_stations.dy_m",
+                    station.dy_m,
+                    "at least 0.05 m from the previous section",
+                ));
+            }
+            (y, z) = (station.dy_m, station.dz_m);
+        }
+        let (step_y, step_z) = (tip_y - y, self.height_m - z);
+        if step_y < 0.0 || step_z < 0.0 || step_y.hypot(step_z) < MIN_WINGTIP_PATH_STEP_M {
+            return Err(out_of_range(
+                "path_stations.dy_m",
+                y,
+                "at least 0.05 m inside the tip in y and z",
+            ));
+        }
+        Ok(())
+    }
+
     /// Turn angle of the blend arc, rad: from the wing plane to the axis.
     fn arc_turn_rad(&self) -> f64 {
         (90.0 - self.cant_deg).to_radians()
     }
 
+    /// Slope the blend arc starts at, rad.
+    fn arc_start_rad(&self) -> f64 {
+        self.arc_start_deg.unwrap_or(0.0).to_radians()
+    }
+
     /// Vertical rise consumed by the blend arc, m.
     fn arc_rise_m(&self) -> f64 {
-        self.blend_radius_m * (1.0 - self.arc_turn_rad().cos())
+        self.blend_radius_m * (self.arc_start_rad().cos() - self.arc_turn_rad().cos())
     }
 
     /// Outboard reach of the device tip beyond the wing tip, m. For a fence it
@@ -294,9 +477,10 @@ impl WingtipDevice {
     /// upward; a fence lists its lower tip first, then root, then upper tip.
     ///
     /// `wing_tip_chord_m` is the chord of the wing-tip section the device is
-    /// attached to. Offsets are relative to the wing-tip leading edge, with the
-    /// root trailing edge aligned to the wing-tip trailing edge, so the root
-    /// section's `dx_m` is `wing_tip_chord_m - root_chord`.
+    /// attached to, before any flare. Offsets are relative to the wing-tip leading
+    /// edge, with the root trailing edge aligned to the wing-tip trailing edge, so
+    /// the root section's `dx_m` is `wing_tip_chord_m - root_chord`. A flare adds a
+    /// station where it ends and chord on the sections before it.
     ///
     /// Requires a valid device ([`Self::validate`]).
     #[must_use]
@@ -305,6 +489,11 @@ impl WingtipDevice {
         let root_dx_m = wing_tip_chord_m - root_chord_m;
         let twist_deg = -self.toe_out_deg;
         let tan_sweep = self.le_sweep_deg.to_radians().tan();
+        let flare_chord_m = |s: f64| {
+            self.root_te_flare.map_or(0.0, |flare| {
+                flare.offset_m * (1.0 - s / flare.fade_length_m).max(0.0)
+            })
+        };
         if self.kind == WingtipDeviceKind::Fence {
             let station = |dz_m: f64, chord_m: f64, run: f64| DeviceStation {
                 dx_m: root_dx_m + run * tan_sweep,
@@ -312,6 +501,7 @@ impl WingtipDevice {
                 dz_m,
                 chord_m,
                 twist_deg,
+                in_wing_plane: false,
             };
             let mut stations = Vec::with_capacity(3);
             if self.down_height_m > 0.0 {
@@ -322,7 +512,13 @@ impl WingtipDevice {
                     self.down_height_m,
                 ));
             }
-            stations.push(station(0.0, root_chord_m, 0.0));
+            stations.push(station(0.0, root_chord_m + flare_chord_m(0.0), 0.0));
+            if let Some(flare) = self.root_te_flare {
+                let s = flare.fade_length_m;
+                let t = s / self.height_m;
+                let chord_m = root_chord_m + t * (self.tip_chord_m - root_chord_m);
+                stations.push(station(s, chord_m, s));
+            }
             stations.push(station(self.height_m, self.tip_chord_m, self.height_m));
             return stations;
         }
@@ -333,30 +529,76 @@ impl WingtipDevice {
         let (mut y, mut z) = (0.0, 0.0);
         if self.blend_radius_m > 0.0 {
             let turn = self.arc_turn_rad();
+            let start = self.arc_start_rad();
             let r = self.blend_radius_m;
             for i in 1..ARC_STATIONS {
-                let theta = turn * i as f64 / (ARC_STATIONS - 1) as f64;
-                path.push((r * theta.sin(), r * (1.0 - theta.cos()), r * theta));
+                let theta = start + (turn - start) * i as f64 / (ARC_STATIONS - 1) as f64;
+                path.push((
+                    r * (theta.sin() - start.sin()),
+                    r * (start.cos() - theta.cos()),
+                    r * (theta - start),
+                ));
             }
             let last = path[path.len() - 1];
             (y, z, s_end_arc) = last;
         }
         let straight = (self.height_m - z) / cant.cos();
+        let flare_end = self.root_te_flare.map(|flare| {
+            let s = flare.fade_length_m;
+            if s < s_end_arc {
+                let start = self.arc_start_rad();
+                let r = self.blend_radius_m;
+                let theta = start + s / r;
+                (
+                    r * (theta.sin() - start.sin()),
+                    r * (start.cos() - theta.cos()),
+                    s,
+                )
+            } else {
+                let run = s - s_end_arc;
+                (y + run * cant.sin(), z + run * cant.cos(), s)
+            }
+        });
         y += straight * cant.sin();
         path.push((y, self.height_m, s_end_arc + straight));
         let total = s_end_arc + straight;
-        path.into_iter()
+        if let Some(point) = flare_end {
+            if path.iter().all(|p| (p.2 - point.2).abs() > 1.0e-9) {
+                path.insert(path.partition_point(|p| p.2 < point.2), point);
+            }
+        }
+        let mut stations: Vec<DeviceStation> = path
+            .into_iter()
             .map(|(y_m, z_m, s)| {
                 let t = if total > 0.0 { s / total } else { 0.0 };
                 DeviceStation {
                     dx_m: root_dx_m + s * tan_sweep,
                     dy_m: y_m,
                     dz_m: z_m,
-                    chord_m: root_chord_m + t * (self.tip_chord_m - root_chord_m),
+                    chord_m: root_chord_m
+                        + t * (self.tip_chord_m - root_chord_m)
+                        + flare_chord_m(s),
                     twist_deg,
+                    in_wing_plane: false,
                 }
             })
-            .collect()
+            .collect();
+        if !self.path_stations.is_empty() {
+            stations[0].in_wing_plane = true;
+        }
+        let tip = stations.len() - 1;
+        stations.splice(
+            tip..tip,
+            self.path_stations.iter().map(|station| DeviceStation {
+                dx_m: station.dx_m,
+                dy_m: station.dy_m,
+                dz_m: station.dz_m,
+                chord_m: station.chord_m,
+                twist_deg,
+                in_wing_plane: true,
+            }),
+        );
+        stations
     }
 }
 
@@ -384,10 +626,13 @@ mod tests {
             down_height_m: 0.0,
             cant_deg: 15.0,
             root_chord_m: Some(1.7),
+            root_te_flare: None,
             tip_chord_m: 0.6,
             le_sweep_deg: 45.0,
             toe_out_deg: 2.0,
             blend_radius_m: 1.2,
+            arc_start_deg: None,
+            path_stations: Vec::new(),
             airfoil: None,
             span_includes_device: true,
             include_in_vlm: false,
@@ -427,6 +672,77 @@ mod tests {
     }
 
     #[test]
+    fn the_arc_starts_at_its_slope_and_a_level_start_changes_no_bit() {
+        let level = sharklet();
+        let mut zero = sharklet();
+        zero.arc_start_deg = Some(0.0);
+        assert_eq!(level.stations(1.2), zero.stations(1.2));
+        let turn = 75.0f64.to_radians();
+        let arc_end = level.stations(1.2)[ARC_STATIONS - 1];
+        assert_eq!(arc_end.dy_m, 1.2 * turn.sin());
+        assert_eq!(arc_end.dz_m, 1.2 * (1.0 - turn.cos()));
+
+        let mut climbing = sharklet();
+        climbing.arc_start_deg = Some(30.0);
+        climbing.validate().expect("valid");
+        let s = climbing.stations(1.2);
+        let step = (75.0f64 - 30.0) / (ARC_STATIONS - 1) as f64;
+        // A chord of a circle leans at the mean of the slopes at its ends.
+        let first = (s[1].dz_m / s[1].dy_m).atan().to_degrees();
+        assert!((first - (30.0 + step / 2.0)).abs() < 1e-9, "{first}");
+        assert!((s[s.len() - 1].dz_m - 2.4).abs() < 1e-12);
+        climbing.arc_start_deg = Some(75.0);
+        assert!(climbing.validate().is_err());
+    }
+
+    #[test]
+    fn path_stations_sit_between_root_and_tip_and_leave_the_tip_and_the_reach() {
+        let mut plain = sharklet();
+        plain.kind = WingtipDeviceKind::Winglet;
+        plain.blend_radius_m = 0.0;
+        let station = |dy_m, dz_m| WingtipPathStation {
+            dx_m: 0.5,
+            dy_m,
+            dz_m,
+            chord_m: 1.0,
+        };
+        let mut drawn = plain.clone();
+        drawn.path_stations = vec![station(0.2, 0.0), station(0.2, 0.4)];
+        drawn.validate().expect("valid");
+        assert_eq!(drawn.lateral_reach_m(), plain.lateral_reach_m());
+        let (a, b) = (plain.stations(1.2), drawn.stations(1.2));
+        assert_eq!(b.len(), a.len() + 2);
+        // The root and the path stations stay in the wing-tip plane; the tip and
+        // every section of a device without path stations bisect the path.
+        assert_eq!(
+            DeviceStation {
+                in_wing_plane: false,
+                ..b[0]
+            },
+            a[0]
+        );
+        assert_eq!(b[b.len() - 1], a[a.len() - 1]);
+        assert_eq!((b[2].dy_m, b[2].dz_m, b[2].chord_m), (0.2, 0.4, 1.0));
+        assert_eq!(b[2].twist_deg, a[0].twist_deg);
+        let held: Vec<bool> = b.iter().map(|s| s.in_wing_plane).collect();
+        assert_eq!(held, [true, true, true, false]);
+        assert!(a.iter().all(|s| !s.in_wing_plane));
+        // Out of order, a sliver, past the tip, on a blended device.
+        for list in [
+            vec![station(0.2, 0.4), station(0.2, 0.2)],
+            vec![station(0.2, 0.4), station(0.21, 0.41)],
+            vec![station(5.0, 0.4)],
+        ] {
+            let mut bad = plain.clone();
+            bad.path_stations = list;
+            assert!(bad.validate().is_err());
+        }
+        let mut bad = sharklet();
+        bad.path_stations = vec![station(0.2, 0.4)];
+        assert!(bad.validate().is_err());
+    }
+
+    #[test]
     fn fence_extends_above_and_below_at_zero_cant() {
         let device = WingtipDevice {
             kind: WingtipDeviceKind::Fence,
@@ -434,10 +750,13 @@ mod tests {
             down_height_m: 1.0,
             cant_deg: 0.0,
             root_chord_m: None,
+            root_te_flare: None,
             tip_chord_m: 1.0,
             le_sweep_deg: 0.0,
             toe_out_deg: 0.0,
             blend_radius_m: 0.0,
+            arc_start_deg: None,
+            path_stations: Vec::new(),
             airfoil: None,
             span_includes_device: false,
             include_in_vlm: false,
@@ -464,5 +783,61 @@ mod tests {
         let mut device = sharklet();
         device.tip_chord_m = 2.0;
         assert!(device.validate().is_err());
+        for (offset_m, fade_length_m) in [(-0.1, 0.5), (f64::NAN, 0.5), (0.1, 0.0), (0.1, 2.4)] {
+            let mut device = sharklet();
+            device.root_te_flare = Some(WingtipTeFlare {
+                offset_m,
+                fade_length_m,
+            });
+            assert!(device.validate().is_err(), "{offset_m} {fade_length_m}");
+        }
+    }
+
+    #[test]
+    fn the_flare_end_station_lies_on_an_arc_that_starts_on_a_slope() {
+        let mut device = sharklet();
+        device.arc_start_deg = Some(25.0);
+        device.root_te_flare = Some(WingtipTeFlare {
+            offset_m: 0.1,
+            fade_length_m: 0.31,
+        });
+        let start = 25.0_f64.to_radians();
+        let r = device.blend_radius_m;
+        let stations = device.stations(1.7);
+        // Every station but the straight end, the flare end among them, on the circle.
+        assert_eq!(stations.len(), ARC_STATIONS + 2);
+        for station in &stations[..stations.len() - 1] {
+            let y_centre = station.dy_m + r * start.sin();
+            let z_centre = station.dz_m - r * start.cos();
+            assert!(
+                (y_centre.hypot(z_centre) - r).abs() < 1.0e-12,
+                "{station:?}"
+            );
+        }
+    }
+
+    #[test]
+    fn a_flare_adds_chord_that_fades_out_and_leaves_the_rest_of_the_device() {
+        let plain = sharklet();
+        let mut flared = sharklet();
+        flared.root_te_flare = Some(WingtipTeFlare {
+            offset_m: 0.2,
+            fade_length_m: 1.6,
+        });
+        flared.validate().expect("valid");
+        let (a, b) = (plain.stations(1.2), flared.stations(1.2));
+        assert_eq!(b.len(), a.len() + 1);
+        assert!((b[0].chord_m - a[0].chord_m - 0.2).abs() < 1e-12);
+        assert_eq!(b[0].dx_m, a[0].dx_m);
+        assert_eq!(b[b.len() - 1], a[a.len() - 1]);
+        assert_eq!(flared.lateral_reach_m(), plain.lateral_reach_m());
+        // The added station lies on the straight leg, on the plain leading and trailing edges.
+        let (before, added, tip) = (a[a.len() - 2], b[b.len() - 2], a[a.len() - 1]);
+        let u = (added.dz_m - before.dz_m) / (tip.dz_m - before.dz_m);
+        assert!((added.dy_m - before.dy_m - u * (tip.dy_m - before.dy_m)).abs() < 1e-12);
+        assert!((added.dx_m - before.dx_m - u * (tip.dx_m - before.dx_m)).abs() < 1e-12);
+        assert!(
+            (added.chord_m - before.chord_m - u * (tip.chord_m - before.chord_m)).abs() < 1e-12
+        );
     }
 }

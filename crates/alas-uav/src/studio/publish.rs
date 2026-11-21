@@ -1,7 +1,7 @@
 // SPDX-License-Identifier: AGPL-3.0-or-later
 // Copyright (C) 2026 Marcos Quiroga Rodriguez
 
-//! Publications derived from the master parameters (UAV-PLAN 2.2).
+//! Publications derived from the master parameters.
 //!
 //! The skeleton publishes named datums; parts reference them by name only, so
 //! changing a master parameter and calling [`refresh`] regenerates the datums

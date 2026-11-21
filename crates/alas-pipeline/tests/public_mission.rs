@@ -281,3 +281,54 @@ fn b787_regression_does_not_cut_off_after_takeoff_or_publish_untrimmed_cruise() 
     assert!(trim.cm_residual.abs() < 1.0e-6);
     assert!(trim.trim_ih_deg.is_finite());
 }
+
+/// The final feasibility stage judges the aerodromes the dispatched plan
+/// flies: a stated field length longer than the configured runway is reported
+/// as ignored there, and on a plan that flies the other way it belongs to an
+/// aerodrome the plan does not use, so the finding is that it does not apply.
+#[test]
+fn the_final_feasibility_stage_reads_the_dispatched_endpoints() {
+    use alas_pipeline::FindingCode;
+    let mut config = config_for_preset("A220-300");
+    let departure = get_airport(&config.departure_airport).unwrap().clone();
+    let arrival = get_airport(&config.arrival_airport).unwrap().clone();
+    config.toda_override_m = Some(departure.toda_m + 500.0);
+    let run = |route: Route| {
+        DesignPipeline::new(config.clone())
+            .run_with_environment_and_route(&options(), &RunEnvironment::default(), Some(route))
+            .expect("A220 public mission run")
+    };
+    let has = |result: &alas_pipeline::PipelineResult, code: FindingCode| {
+        result
+            .feasibility
+            .findings
+            .iter()
+            .any(|finding| finding.code == code)
+    };
+
+    let mut flown = dispatched_route(&config);
+    flown.origin_airport = Some(departure.clone());
+    flown.dest_airport = Some(arrival.clone());
+    let configured = run(flown);
+    assert!(
+        has(&configured, FindingCode::TakeoffOverrideIgnored),
+        "the stated length is longer than the departure it belongs to"
+    );
+
+    let mut swapped = Route::great_circle(
+        &arrival,
+        &departure,
+        config.mission.great_circle_points as usize,
+    );
+    swapped.source = RouteSource::SimbriefApi;
+    swapped.origin_airport = Some(arrival.clone());
+    swapped.dest_airport = Some(departure.clone());
+    let result = run(swapped);
+    assert!(!has(&result, FindingCode::TakeoffOverrideIgnored));
+    assert!(
+        has(&result, FindingCode::StatedFieldLengthNotApplied),
+        "the plan departs from {} not {}",
+        arrival.icao,
+        departure.icao
+    );
+}

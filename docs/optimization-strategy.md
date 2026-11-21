@@ -21,7 +21,7 @@ Screening and full analysis share that pool; single-candidate evaluations also
 run inside it. Results enter history in input order. Worker count changes
 scheduling, not seeded candidate generation or selection order; through a
 time-limit stop it changes how many evaluations fit, so a time-limited run is
-replayed with its recorded evaluation counts. The coordinator
+replayed with its recorded evaluation counts. The dispatching thread
 forwards cancellation to an owned token checked inside multidisciplinary and
 mission loops, including during a single long candidate evaluation.
 

@@ -7,7 +7,7 @@
 
 use alas_report::scene::Scene;
 use alas_viz::SceneView;
-use egui::{vec2, Align, Color32, FontId, Frame, Id, Layout, RichText, TextStyle, Ui};
+use egui::{vec2, Align, FontId, Frame, Id, Layout, RichText, TextStyle, Ui};
 
 use crate::state::{AppState, PreviewCamera, PreviewTab};
 use crate::views::tr;
@@ -17,6 +17,10 @@ mod fullscreen_preview;
 use fullscreen_preview::show_fullscreen_preview;
 #[path = "preview_dock_cache.rs"]
 mod preview_dock_cache;
+#[path = "preview_dock_legend.rs"]
+mod preview_dock_legend;
+#[cfg(test)]
+use preview_dock_legend::show_cabin_legend;
 
 const AIRCRAFT_CAMERA_ID: &str = "aircraft_3d";
 const AIRCRAFT_VIEW_KEY: &str = "preview_dock::aircraft_3d";
@@ -28,6 +32,31 @@ const PREVIEW_LEGEND_GAP: f32 = 5.0;
 const LEGEND_INNER_MARGIN: f32 = 7.0;
 const LEGEND_ROW_GAP: f32 = 3.0;
 const CONTROLS_INNER_MARGIN: egui::Vec2 = vec2(5.0, 3.0);
+
+/// The pages where the aircraft is being edited, and so the only pages that
+/// show the dock: Aircraft with its geometry, mass, aerodynamics, propulsion,
+/// control-surface and landing-gear sections, Cabin, Payload and Design Space.
+/// Mission, Analyses, Results, Files, Sandbox (which has its own viewport) and
+/// the tool pages have nothing to see in it. The user's open/closed choice
+/// (`AppState::preview_open`) is one setting for all of these pages and is
+/// not changed by visiting the others.
+pub fn page_shows_preview_dock(page_id: &str) -> bool {
+    matches!(
+        page_id,
+        "inputs"
+            | "cabin"
+            | "payload"
+            | "design_space"
+            | "geometry"
+            | "control_surfaces"
+            | "landing_gear"
+            | "mass_model"
+            | "mass_advanced"
+            | "aerodynamics"
+            | "engine_designer"
+            | "propulsion_advanced"
+    )
+}
 
 /// Render the preview dock's contents into the given side panel.
 pub fn show_preview_dock(state: &mut AppState, ui: &mut Ui) {
@@ -53,11 +82,12 @@ pub fn show_preview_dock(state: &mut AppState, ui: &mut Ui) {
     let view_key = AIRCRAFT_VIEW_KEY.to_owned();
     refit_on_subject_change(state, ui.ctx(), &view_key);
     let mut camera_changed = false;
+    fit_to_pane(state, ui);
 
-    match &state.preview_scene {
+    match state.preview_scene.clone() {
         Some(scene) => {
             let (revision, tab) = (state.preview_scene_revision, state.preview_tab);
-            let scene = preview_dock_cache::dock_scene(ui.ctx(), &view_key, revision, tab, scene);
+            let scene = preview_dock_cache::dock_scene(ui.ctx(), &view_key, revision, tab, &scene);
             let width = ui.available_width().max(220.0);
             // The right-side dock owns the full remaining height, so the
             // viewport stays vertical instead of becoming a wide bottom row.
@@ -72,7 +102,7 @@ pub fn show_preview_dock(state: &mut AppState, ui: &mut Ui) {
                     .cache_key(&view_key)
                     .cache_revision(revision),
             );
-            let response = response.on_hover_text(tr("Drag to orbit the camera; scroll to zoom"));
+            let response = response.on_hover_text_at_pointer(tr("Left drag: orbit; right, middle or Shift + left drag: pan; wheel: zoom; middle or double click: pivot"));
             camera_changed |= handle_camera_response(state, &response, &active_camera_id);
             camera_changed |= show_aircraft_viewer_controls(
                 state,
@@ -82,7 +112,8 @@ pub fn show_preview_dock(state: &mut AppState, ui: &mut Ui) {
                 &view_key,
             );
             if state.preview_tab == PreviewTab::Cabin {
-                show_cabin_legend(ui, response.rect);
+                let entries = preview_dock_legend::cabin_entries(state, ui.ctx());
+                preview_dock_legend::show_cabin_legend_for(ui, response.rect, &entries);
             }
             if response.double_clicked() {
                 open_fullscreen_preview(state, ui.ctx(), &view_key, &active_camera_id);
@@ -209,12 +240,6 @@ fn show_aircraft_viewer_controls(
     requested != current || reset
 }
 
-fn legend_item(ui: &mut Ui, color: Color32, label: &str) {
-    let (rect, _) = ui.allocate_exact_size(vec2(10.0, 10.0), egui::Sense::hover());
-    ui.painter().rect_filled(rect, 2.0, color);
-    ui.label(RichText::new(tr(label)).size(11.0));
-}
-
 /// The width a [`centered_row`] with this id occupied on the previous frame,
 /// or the caller's estimate when nothing has been measured yet.
 fn remembered_row_width(ui: &Ui, row_id: Id, estimate: f32) -> f32 {
@@ -291,95 +316,6 @@ fn controls_row_width(ui: &Ui) -> f32 {
     exterior + interior + reset + 2.0 * ui.spacing().item_spacing.x
 }
 
-const LEGEND_LABELS: [&str; 6] = [
-    "First class",
-    "Business class",
-    "Economy class",
-    "Galley",
-    "Lavatory",
-    "Exit",
-];
-
-fn legend_item_width(ui: &Ui, label: &str) -> f32 {
-    10.0 + ui.spacing().item_spacing.x + text_width(ui, &tr(label), FontId::proportional(11.0))
-}
-
-fn legend_row_width(ui: &Ui, labels: &[&str]) -> f32 {
-    labels
-        .iter()
-        .map(|label| legend_item_width(ui, label))
-        .sum::<f32>()
-        + ui.spacing().item_spacing.x * labels.len().saturating_sub(1) as f32
-}
-
-/// Height of a legend row: the tallest translated label or the swatch.
-fn legend_row_height(ui: &Ui) -> f32 {
-    LEGEND_LABELS
-        .iter()
-        .map(|label| text_size(ui, &tr(label), FontId::proportional(11.0)).y)
-        .fold(10.0_f32, f32::max)
-}
-
-/// Height of the legend card: title row, two entry rows, the vertical spacing
-/// between them and the frame's inner margin.
-fn legend_frame_height(ui: &Ui) -> f32 {
-    let title_height = text_size(ui, &tr("Cabin legend"), FontId::proportional(12.0)).y;
-    2.0 * LEGEND_INNER_MARGIN + title_height + 2.0 * legend_row_height(ui) + 2.0 * LEGEND_ROW_GAP
-}
-
-/// Draw a readable screen-space key that never follows the 3-D camera.
-///
-/// The legend is always present for the cabin view and sits along the bottom
-/// edge of the viewport, away from the cabin geometry, which the camera can
-/// otherwise place under a top-mounted card. Its six entries use two explicit
-/// rows so the final entries remain inside the dock when translated labels or
-/// a narrow dock need more room. The card is sized from its measured content
-/// and anchored to the bottom of the legend region, so its lower edge keeps
-/// the overlay margin from the viewport edge.
-fn show_cabin_legend(ui: &mut Ui, viewport: egui::Rect) {
-    let (_, region) = preview_overlay_rects(viewport, PreviewTab::Cabin);
-    let frame_height = legend_frame_height(ui).min(region.height());
-    let rect = egui::Rect::from_min_size(
-        egui::pos2(region.left(), region.bottom() - frame_height),
-        vec2(region.width(), frame_height),
-    );
-    ui.allocate_new_ui(egui::UiBuilder::new().max_rect(rect), |ui| {
-        Frame::group(ui.style())
-            .fill(ui.visuals().panel_fill)
-            .inner_margin(egui::Margin::same(LEGEND_INNER_MARGIN))
-            .show(ui, |ui| {
-                ui.vertical_centered(|ui| {
-                    // Keep the longest translated row inside the minimum
-                    // 300-point dock while preserving a visible gap between
-                    // each swatch/label pair.
-                    ui.spacing_mut().item_spacing = vec2(4.0, LEGEND_ROW_GAP);
-                    ui.label(RichText::new(tr("Cabin legend")).strong().size(12.0));
-                    let row_height = legend_row_height(ui);
-                    let first_row_width = legend_row_width(ui, &LEGEND_LABELS[..3]);
-                    let first_row_id = Id::new(("cabin_legend_row", 0));
-                    centered_row(ui, first_row_id, first_row_width, row_height, |ui| {
-                        legend_item(ui, Color32::from_rgb(142, 68, 173), "First class");
-                        legend_item(ui, Color32::from_rgb(41, 128, 185), "Business class");
-                        legend_item(ui, Color32::from_rgb(39, 174, 96), "Economy class");
-                    });
-                    let second_row_width = legend_row_width(ui, &LEGEND_LABELS[3..]);
-                    let second_row_id = Id::new(("cabin_legend_row", 1));
-                    centered_row(ui, second_row_id, second_row_width, row_height, |ui| {
-                        legend_item(ui, Color32::from_rgb(230, 126, 34), "Galley");
-                        legend_item(ui, Color32::from_rgb(93, 173, 226), "Lavatory");
-                        legend_item(ui, Color32::from_rgb(231, 76, 60), "Exit");
-                    });
-                    // Claim any sub-pixel remainder so the painted card ends
-                    // exactly at the region's bottom edge.
-                    let remainder = ui.available_size_before_wrap();
-                    if remainder.y > 0.0 {
-                        ui.allocate_space(vec2(0.0, remainder.y));
-                    }
-                });
-            });
-    });
-}
-
 /// Compute the screen-space rectangles shared by the controls and cabin key.
 ///
 /// Both overlays are centred on the canvas rather than on the dock's content
@@ -419,7 +355,7 @@ fn preview_overlay_rects(viewport: egui::Rect, tab: PreviewTab) -> (egui::Rect, 
 
 /// Hide the generated cabin heading in the live viewer while leaving the
 /// report scene builders and exported scene metadata unchanged.
-fn preview_scene_for_tab(mut scene: Scene, tab: PreviewTab) -> Scene {
+pub(crate) fn preview_scene_for_tab(mut scene: Scene, tab: PreviewTab) -> Scene {
     if tab == PreviewTab::Cabin {
         scene.title = None;
         scene.render_title = false;
@@ -430,6 +366,71 @@ fn preview_scene_for_tab(mut scene: Scene, tab: PreviewTab) -> Scene {
 fn reset_camera(state: &mut AppState, camera_id: &str, view_key: &str) {
     *state.preview_camera_mut(camera_id) = PreviewCamera::isometric();
     state.view_state_mut(view_key).reset();
+    // The default camera is framed again for the pane as it is now.
+    state.preview_fit = None;
+    state.preview_pan = (0.0, 0.0);
+}
+
+/// The default view's pitch for a pane of `size` points: the isometric pitch up
+/// to a pane as tall as it is wide, rising to a steep oblique view for a pane
+/// twice as tall, so the projected aircraft is as tall as the pane allows.
+fn pane_pitch_deg(size: (f64, f64)) -> f64 {
+    let base = PreviewCamera::isometric().pitch_deg;
+    let tall = ((size.1 / size.0.max(1.0) - 1.2) / 0.8).clamp(0.0, 1.0);
+    base + tall * (58.0 - base)
+}
+
+/// Frame the aircraft to fill the pane when the dock opens, is resized or is
+/// reset. The pane's size is the viewport the dock is about to draw; while the
+/// pointer is down (dragging the dock's edge) the last fit is only rescaled,
+/// and the fit is made again on release.
+fn fit_to_pane(state: &mut AppState, ui: &Ui) {
+    let size = (
+        f64::from(ui.available_width().max(220.0).round()),
+        f64::from(ui.available_height().max(180.0).round()),
+    );
+    // Interior: the controls row and the legend card lie over the pane, so the cabin is fitted to
+    // the band between them.
+    let reserved = if state.preview_tab == PreviewTab::Cabin {
+        let entries = preview_dock_legend::cabin_entries(state, ui.ctx());
+        preview_dock_legend::reserved_bands(ui, (size.0 as f32, size.1 as f32), &entries)
+    } else {
+        (0.0, 0.0)
+    };
+    let stale = state.preview_fit.is_none_or(|fit| {
+        (fit.canvas.0 - size.0).abs() > 1.0
+            || (fit.canvas.1 - size.1).abs() > 1.0
+            || (fit.reserved.0 - reserved.0).abs() > 1.0
+            || (fit.reserved.1 - reserved.1).abs() > 1.0
+    });
+    if !stale || (state.preview_fit.is_some() && ui.input(|input| input.pointer.any_down())) {
+        return;
+    }
+    // A tall pane would leave the view's top and bottom empty at the default
+    // pitch: while the camera is untouched, tilt it toward a plan view so the
+    // aircraft's projection is taller. A camera the user turned is kept.
+    let current = state.active_preview_camera();
+    let untouched = (current.pitch_deg - PreviewCamera::isometric().pitch_deg).abs() < 1.0e-9
+        || state
+            .preview_auto_pitch
+            .is_some_and(|pitch| (current.pitch_deg - pitch).abs() < 1.0e-9);
+    if untouched {
+        let pitch = pane_pitch_deg(size);
+        state.preview_camera_mut(AIRCRAFT_CAMERA_ID).pitch_deg = pitch;
+        state.preview_auto_pitch = Some(pitch);
+    }
+    // A resize frames the aircraft afresh: a zoom made for the old pane would
+    // push it past the new one.
+    state.preview_camera_mut(AIRCRAFT_CAMERA_ID).zoom = 1.0;
+    state.preview_pan = (0.0, 0.0);
+    let camera = state.active_preview_camera();
+    state.preview_fit = Some(crate::sandbox::scene::LivePreviewFit {
+        canvas: size,
+        elev_deg: camera.pitch_deg,
+        azim_deg: camera.yaw_deg,
+        reserved,
+    });
+    state.update_preview_scene();
 }
 
 /// Apply orbit and zoom input to the 3-D camera only.
@@ -442,28 +443,65 @@ fn handle_camera_response(
     camera_id: &str,
 ) -> bool {
     let mut changed = false;
-    if !response.double_clicked()
-        && (response.dragged_by(egui::PointerButton::Primary)
-            || response.dragged_by(egui::PointerButton::Middle))
-    {
-        // The response is backed by a scene that is rebuilt after every
-        // camera change.  Applying the gesture total against an origin tied
-        // to that response lets the next frame replay stale input and makes
-        // the projection appear to snap back.  Consume only this frame's
-        // motion so the keyed camera remains the single source of truth.
-        let delta = response.drag_motion();
-        state
-            .preview_camera_mut(camera_id)
-            .apply_orbit_motion(delta);
-        changed = delta.is_finite();
+    let mut zoom = None;
+    // Shared mapping (see `nav_input`). Only this frame's motion is
+    // consumed: the scene is rebuilt after every camera change, so replaying
+    // a gesture total would snap the projection back.
+    match crate::nav_input::read(response) {
+        crate::nav_input::NavAction::Pan(delta) if delta.is_finite() => {
+            state.preview_pan.0 += f64::from(delta.x);
+            state.preview_pan.1 += f64::from(delta.y);
+            changed = true;
+        }
+        crate::nav_input::NavAction::Rotate(delta) => {
+            state
+                .preview_camera_mut(camera_id)
+                .apply_orbit_motion(delta);
+            changed = delta.is_finite();
+        }
+        _ => {}
+    }
+    if crate::nav_input::pivot_clicked(response) {
+        // No surface pick here: re-centre the view on the point under the cursor.
+        if let Some(p) = response
+            .interact_pointer_pos()
+            .or_else(|| response.hover_pos())
+        {
+            let d = response.rect.center() - p;
+            if d.is_finite() {
+                state.preview_pan.0 += f64::from(d.x);
+                state.preview_pan.1 += f64::from(d.y);
+                changed = true;
+            }
+        }
     }
     if response.hovered() {
         let scroll_y = response.ctx.input(|input| input.smooth_scroll_delta.y);
         if scroll_y.abs() > f32::EPSILON {
-            let factor = f64::from((1.0 + scroll_y * 0.0015).clamp(0.5, 1.5));
-            state
-                .preview_camera_mut(camera_id)
-                .apply_zoom_factor(factor);
+            // About 10 % per wheel notch (50 points), so three notches at a
+            // wingtip still leave the aircraft in the pane.
+            zoom = Some((f64::from(scroll_y) * 0.002).exp().clamp(0.7, 1.4));
+        }
+    }
+    if let Some(factor) = zoom {
+        {
+            // Zoom towards the cursor: the point under it stays under it.
+            let cursor = response.hover_pos().map_or((0.0, 0.0), |p| {
+                let d = p - response.rect.center();
+                (f64::from(d.x), f64::from(d.y))
+            });
+            let fit_pan = crate::sandbox::scene::dock_fit_pan();
+            let mut total = (
+                fit_pan.0 + state.preview_pan.0,
+                fit_pan.1 + state.preview_pan.1,
+            );
+            crate::sandbox::navigation::zoom_towards_cursor(
+                state.preview_camera_mut(camera_id),
+                &mut total,
+                factor,
+                cursor,
+            );
+            state.preview_pan = (total.0 - fit_pan.0, total.1 - fit_pan.1);
             changed = true;
         }
     }
@@ -535,6 +573,55 @@ mod tests {
     use crate::state::{AppState, PreviewCamera};
     use alas_report::scene::Scene;
     use egui::{pos2, vec2, Context};
+
+    /// A tall pane tilts the default view toward a plan view; a wide or square
+    /// one keeps the isometric pitch.
+    #[test]
+    fn a_tall_pane_tilts_the_default_pitch() {
+        let base = PreviewCamera::isometric().pitch_deg;
+        assert_eq!(super::pane_pitch_deg((900.0, 600.0)), base);
+        assert_eq!(super::pane_pitch_deg((430.0, 480.0)), base);
+        let tall = super::pane_pitch_deg((430.0, 740.0));
+        assert!(tall > base + 20.0 && tall < 60.0, "{tall}");
+        assert!(super::pane_pitch_deg((300.0, 900.0)) >= tall);
+    }
+
+    /// The fit (and the pitch chosen for a tall pane) is made once per pane size:
+    /// later frames at the same size rebuild nothing, so the preview costs no more
+    /// per frame than before.
+    #[test]
+    fn the_fit_is_made_once_per_pane_size() {
+        let ctx = Context::default();
+        let mut state = AppState::default();
+        let input = || egui::RawInput {
+            screen_rect: Some(egui::Rect::from_min_size(
+                pos2(0.0, 0.0),
+                vec2(430.0, 760.0),
+            )),
+            ..Default::default()
+        };
+        let mut revisions = Vec::new();
+        for _ in 0..4 {
+            let _ = ctx.run(input(), |ctx| {
+                egui::CentralPanel::default().show(ctx, |ui| super::fit_to_pane(&mut state, ui));
+            });
+            revisions.push(state.preview_scene_revision);
+        }
+        assert_eq!(
+            revisions[2], revisions[3],
+            "no rebuild once the pane size is known"
+        );
+        assert_eq!(
+            revisions[1], revisions[3],
+            "and the fit settled by the second frame"
+        );
+        let pitch = state.active_preview_camera().pitch_deg;
+        assert!(
+            pitch > PreviewCamera::isometric().pitch_deg + 10.0,
+            "tall pane tilts: {pitch}"
+        );
+        assert_eq!(state.preview_auto_pitch, Some(pitch));
+    }
 
     #[test]
     fn exterior_and_interior_share_one_fullscreen_slot() {
@@ -630,7 +717,7 @@ mod tests {
     #[test]
     fn cabin_preview_hides_the_generated_scene_heading() {
         let mut scene = Scene::new(800.0, 520.0, None);
-        scene.title = Some("Cabin / Payload - 3D".to_owned());
+        scene.title = Some("Cabin / Payload \u{2013} 3D".to_owned());
 
         let scene = preview_scene_for_tab(scene, crate::state::PreviewTab::Cabin);
 

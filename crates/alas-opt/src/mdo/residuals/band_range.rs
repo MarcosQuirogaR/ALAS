@@ -5,7 +5,7 @@
 //!
 //! The band searches the takeoff mass, and the objective rewards a lighter
 //! aircraft, so without a capability requirement the search gives the
-//! registered aircraft's range away (C919 band winner of 2026-10-18: corner B
+//! registered aircraft's range away (a C919 band winner had corner B
 //! range 2,249 -> 996 nmi). A band design must keep the registered aircraft's
 //! corner B: the maximum structural payload flown at the maximum takeoff
 //! mass, with the fuel the mass budget leaves (limited by the tanks), over the
@@ -85,25 +85,26 @@ fn range_model(config: &AlasConfig, sized: &SizedCandidate) -> Option<(SegmentMi
 }
 
 /// The registered aircraft's maximum structural payload at the corner, kg:
-/// the tightest of the declared cap, the preset MZFW less the modelled OEW and
-/// the mass budget `MTOW - OEW`; with no cap and no MZFW, the carried payload
-/// (the report's `payload_capacity_estimate`).
+/// the preset MZFW less the modelled OEW (the declared cap then does not
+/// bind) or, without a published MZFW, the declared cap, either bounded by the
+/// mass budget `MTOW - OEW`; with no cap and no MZFW, the carried payload (the
+/// report's `payload_capacity_estimate`).
 fn baseline_payload_kg(config: &AlasConfig, sized: &SizedCandidate) -> f64 {
     let positive = |value: f64| value.is_finite() && value > 0.0;
     let oew_kg = sized.operating_empty_mass_kg;
     let mut payload_kg = (config.requirements.mtow_kg - oew_kg).max(0.0);
-    let mzfw_limit_kg = presets::get(&config.preset)
-        .ok()
-        .and_then(|preset| preset.reference.mzfw_kg)
+    let mzfw_limit_kg = presets::published_mzfw_kg(config)
         .map(|mzfw_kg| mzfw_kg - oew_kg)
         .filter(|kg| positive(*kg));
     if let Some(limit_kg) = mzfw_limit_kg {
         payload_kg = payload_kg.min(limit_kg);
     }
     let cap_kg = config.requirements.max_structural_payload_kg;
-    if positive(cap_kg) {
+    if mzfw_limit_kg.is_some() {
+        // The MZFW line is the structural maximum; the declared cap does not bind.
+    } else if positive(cap_kg) {
         payload_kg = payload_kg.min(cap_kg);
-    } else if mzfw_limit_kg.is_none() {
+    } else {
         payload_kg = payload_kg.min(sized.payload_kg.max(0.0));
     }
     payload_kg
@@ -116,7 +117,7 @@ fn baseline_payload_kg(config: &AlasConfig, sized: &SizedCandidate) -> f64 {
 /// registered aircraft at its own mass meets the floor up to the search
 /// resolution, with no model offset to absorb. The report's baseline column
 /// is the same aircraft closed as a baseline sandbox
-/// (`baseline_closure_config`); its corner B fuel differed from this one by at most 0.1 % in the 2026-10-19 probe.
+/// (`baseline_closure_config`); its corner B fuel differed from this one by at most 0.1 % in a probe.
 fn resolve(config: &AlasConfig) -> Option<BaselineCornerB> {
     let design = presets::get(&config.preset).ok()?.design_vector;
     let baseline = config.clone();

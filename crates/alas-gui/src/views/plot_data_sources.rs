@@ -14,7 +14,7 @@ use crate::state::AppState;
 /// Plots drawn directly by the GUI from state that is always available.
 pub(crate) fn standalone_plots(state: &AppState, run_label: &str) -> Vec<PlotData> {
     let mut plots = Vec::new();
-    if let Some(config) = state.typed_config() {
+    if let Some(config) = state.typed_config_arc() {
         let points = super::mission_profile_preview::profile_points(&config);
         let mut plot = crate::export::line_plot(
             "mission_profile_preview",

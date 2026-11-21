@@ -14,7 +14,7 @@
 use alas_config::{presets, GeometryConfig};
 use alas_geom::aircraft::airplane::Airplane;
 use alas_geom::aircraft::fuselage::Fuselage;
-use alas_geom::aircraft::wing::{Wing, WingXSec};
+use alas_geom::aircraft::wing::Wing;
 use alas_geom::builder::AircraftBuilder;
 
 fn built(preset: &str) -> (GeometryConfig, Airplane) {
@@ -69,12 +69,38 @@ fn highest_top(bodies: &[&Fuselage], x: f64) -> Option<f64> {
         .reduce(f64::max)
 }
 
-/// Area of the fin's straight-edged trapezoid between height `z_m` and its
-/// tip, m^2.
-fn area_above(root: &WingXSec, tip: &WingXSec, z_m: f64) -> f64 {
-    let s = (z_m - root.xyz_le[2]) / (tip.xyz_le[2] - root.xyz_le[2]);
-    let chord = root.chord + s * (tip.chord - root.chord);
-    0.5 * (chord + tip.chord) * (tip.xyz_le[2] - z_m)
+/// Area of the built fin between height `z_m` and its tip, m^2: the sum of the
+/// panel trapezoids above `z_m`, so a rounded or raked tip (the A320 and A220
+/// fins carry edge stations at the tip) is counted as drawn.
+fn area_above(fin: &Wing, z_m: f64) -> f64 {
+    // Below the first section the straight root edge is carried down to `z_m`.
+    let mut xsecs = fin.xsecs.clone();
+    if let [root, next, ..] = fin.xsecs.as_slice() {
+        if z_m < root.xyz_le[2] {
+            let s = (z_m - root.xyz_le[2]) / (next.xyz_le[2] - root.xyz_le[2]);
+            let mut below = root.clone();
+            below.xyz_le[2] = z_m;
+            below.chord = root.chord + s * (next.chord - root.chord);
+            xsecs.insert(0, below);
+        }
+    }
+    xsecs
+        .windows(2)
+        .filter(|pair| pair[1].xyz_le[2] > z_m)
+        .map(|pair| {
+            let (lower, upper) = (&pair[0], &pair[1]);
+            let (z0, z1) = (lower.xyz_le[2], upper.xyz_le[2]);
+            let (z_start, chord_start) = if z0 < z_m {
+                (
+                    z_m,
+                    lower.chord + (upper.chord - lower.chord) * (z_m - z0) / (z1 - z0),
+                )
+            } else {
+                (z0, lower.chord)
+            };
+            0.5 * (chord_start + upper.chord) * (z1 - z_start)
+        })
+        .sum()
 }
 
 #[test]
@@ -134,9 +160,12 @@ fn the_a320_and_a220_fins_close_their_published_areas() {
     let (geometry, plane) = built("A320-200");
     let fin = fin_of(&plane);
     let body = &geometry.fuselage;
-    let crown = body.cabin_z_m + body.height_m.unwrap_or(body.diameter_m) / 2.0;
-    let area = area_above(&fin.xsecs[0], fin.xsecs.last().unwrap(), crown);
-    // geo/close 2026-10-12: the tail-fit reads the drawn fin (crown area 21.31 m^2) instead of closing the published 21.5 m^2 (-0.9 %); was (area - 21.5).abs() < 0.05
+    // The fin height is measured from the fuselage top line, which the preset
+    // states as the root line `vstab_z_m` (the body height of the lofted
+    // fuselage no longer sets it).
+    let _ = body;
+    let area = area_above(fin, geometry.empennage.vstab_z_m);
+    // The tail fit reads the drawn fin (crown area 21.31 m^2) instead of closing the published 21.5 m^2 (-0.9 %).
     assert!((area - 21.31).abs() < 0.05, "A320 fin area {area:.2} m^2");
 
     // A220-300: ACP Issue 013 Table 6, 28.2 m^2 (304 ft^2) to the fuselage
@@ -144,7 +173,9 @@ fn the_a320_and_a220_fins_close_their_published_areas() {
     let (geometry, plane) = built("A220-300");
     let fin = fin_of(&plane);
     let axis = geometry.fuselage.cabin_z_m;
-    let area = area_above(&fin.xsecs[0], fin.xsecs.last().unwrap(), axis);
-    // geo/close 2026-10-12: the drawn fin (tail-fit, top cut at the drawn 5.89 m) gives 33.98 m^2 to the axis, +20 % over Table 6 (28.2): the documented drawing-vs-table conflict, drawing wins; was (area - 28.2).abs() < 0.05
-    assert!((area - 33.98).abs() < 0.05, "A220 fin area {area:.2} m^2");
+    let area = area_above(fin, axis);
+    // The drawn fin (tail fit, top cut at the drawn 5.89 m; chords root 5.09 m, tip 1.80 m)
+    // gives 30.69 m^2 to the axis, +8.8 % over Table 6 (28.2): the documented drawing-vs-table
+    // difference, the drawing wins.
+    assert!((area - 30.69).abs() < 0.05, "A220 fin area {area:.2} m^2");
 }

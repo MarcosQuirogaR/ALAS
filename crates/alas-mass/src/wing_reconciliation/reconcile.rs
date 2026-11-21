@@ -30,8 +30,10 @@ use super::geometry::{
     validate_secondary_breakdown,
 };
 use super::non_optimum;
+use super::sizing_cause::{self as checks, StructuralMaterialRole as Role};
 use super::support::{design_requirements, reconcile_against_reference, StructuralInventory};
 use super::{declared_integral_wing_fuel_kg_m, design_gross_mass_kg, WingReconciliationError};
+use super::{ReconciliationBasis, StructuralSizingCause as Cause};
 
 #[path = "reference_cache.rs"]
 mod reference_cache;
@@ -80,6 +82,7 @@ pub fn size_design_wing_box(
 /// box never partially applied.
 pub fn reconcile_structural_wing(
     config: &AlasConfig,
+    design: &DesignVector,
     plane: &Airplane,
     reference: Option<ReferenceWingMass>,
     design_box: DesignWingBox,
@@ -96,11 +99,13 @@ pub fn reconcile_structural_wing(
     let primary_declaration = design_box.declaration;
     match config.optimizer.design_space.mode {
         DesignMode::CleanSheet => {
-            let wing = main_wing(plane).ok_or(WingReconciliationError::StructuralSizing)?;
+            let wing = main_wing(plane).ok_or(Cause::MissingMainWing)?;
             let inventory = clean_sheet_secondary(config, wing, candidate_primary)?;
             let feedback =
                 reconcile_clean_sheet_wing(candidate_primary, inventory.secondary_wing_mass())
-                    .map_err(|_| WingReconciliationError::StructuralSizing)?;
+                    .map_err(|error| {
+                        checks::reconciliation(ReconciliationBasis::CleanSheet, &error)
+                    })?;
             // The inventory is always additive to the sized box, so the
             // candidate is still evaluable when a plausibility gate fails; the
             // gate only removes the right to present the wing as complete.
@@ -114,7 +119,7 @@ pub fn reconcile_structural_wing(
         DesignMode::ReferenceAdaptation | DesignMode::BaselineSandbox => {
             let reference = match reference {
                 Some(value) => value,
-                None => reference_wing(config)?,
+                None => reference_wing(config, design)?,
             };
             reconcile_against_reference(reference, candidate_primary, primary_declaration)
         }
@@ -144,14 +149,10 @@ pub(super) fn primary_structure_geometry(
     wing: &Wing,
 ) -> Result<alas_geom::wing_structure::WingStructureGeometry, WingReconciliationError> {
     let (spar_fractions, spar_full_span) = config.structures.resolved_spars();
-    let root = wing
-        .xsecs
-        .first()
-        .ok_or(WingReconciliationError::StructuralSizing)?;
-    let tip = wing
-        .xsecs
-        .last()
-        .ok_or(WingReconciliationError::StructuralSizing)?;
+    let count = wing.xsecs.len();
+    let (Some(root), Some(tip)) = (wing.xsecs.first(), wing.xsecs.last()) else {
+        return Err(Cause::TooFewCrossSections { count }.into());
+    };
     alas_geom::wing_structure::WingStructureGeometry::new(
         dv,
         &config.geometry.wing,
@@ -160,7 +161,7 @@ pub(super) fn primary_structure_geometry(
         &spar_fractions,
         Some(&spar_full_span),
     )
-    .map_err(|_| WingReconciliationError::StructuralSizing)
+    .map_err(|error| Cause::BoxGeometry(error).into())
 }
 
 fn prepare_primary_wing<'a>(
@@ -177,23 +178,14 @@ fn prepare_primary_wing<'a>(
     // input, not the downstream solve, so it must run regardless of the
     // flag; `crates/alas-pipeline/src/pipeline.rs` is what actually skips
     // the NASTRAN/report stage when it is false.
-    let wing = main_wing(plane).ok_or(WingReconciliationError::StructuralSizing)?;
-    if !wing.symmetric || wing.xsecs.len() < 2 || config.structures.spanwise_stations < 2 {
-        return Err(WingReconciliationError::StructuralSizing);
-    }
-    let geometry = primary_structure_geometry(config, dv, wing)?;
-    let root = wing
-        .xsecs
-        .first()
-        .ok_or(WingReconciliationError::StructuralSizing)?;
-    let skin = alas_config::materials::get(&config.structures.skin_material)
-        .map_err(|_| WingReconciliationError::StructuralSizing)?;
-    let web = alas_config::materials::get(&config.structures.spar_web_material)
-        .map_err(|_| WingReconciliationError::StructuralSizing)?;
-    let cap = alas_config::materials::get(&config.structures.spar_cap_material)
-        .map_err(|_| WingReconciliationError::StructuralSizing)?;
-    let rib = alas_config::materials::get(&config.structures.rib_material)
-        .map_err(|_| WingReconciliationError::StructuralSizing)?;
+    let wing = main_wing(plane).ok_or(Cause::MissingMainWing)?;
+    checks::sizable(wing, config.structures.spanwise_stations)?;
+    let mut geometry = primary_structure_geometry(config, dv, wing)?;
+    alas_struct::span_load::attach_design_span_load(&mut geometry, plane, requirements);
+    let skin = checks::material(&config.structures, Role::Skin)?;
+    let web = checks::material(&config.structures, Role::SparWeb)?;
+    let cap = checks::material(&config.structures, Role::SparCap)?;
+    let rib = checks::material(&config.structures, Role::Rib)?;
     // The wing-carried masses `size_wingbox`'s own signature cannot see, and
     // this caller can: the aircraft's declared integral wing-tank capacity in
     // place of the geometric estimate, and its wing-mounted powerplant. Both
@@ -222,9 +214,14 @@ fn prepare_primary_wing<'a>(
         &config.mass_model,
         requirements,
     );
-    let uses_declared_fuel = declared_fuel.is_some();
     let fuel = declared_fuel.unwrap_or_else(|| {
-        alas_struct::tanks::integral_fuel_running_mass_kg_m(&geometry, &stations, front, rear)
+        alas_struct::tanks::integral_fuel_running_mass_kg_m(
+            &geometry,
+            &stations,
+            front,
+            rear,
+            crate::tanks::inventory_density_kg_m3(config),
+        )
     });
     Ok(reference_cache::PreparedSizing {
         geometry,
@@ -233,7 +230,6 @@ fn prepare_primary_wing<'a>(
         engine: &config.geometry.engine,
         mass_model: &config.mass_model,
         materials: [skin, web, cap, rib],
-        declared_fuel: uses_declared_fuel,
         fuel,
         wing_mounted,
         torque: alas_struct::torque_sources::TorqueSources::from_config(config, requirements),
@@ -243,7 +239,7 @@ fn prepare_primary_wing<'a>(
             wing,
             requirements,
         ),
-        root_x_m: root.xyz_le[0],
+        root_x_m: wing.design_root().0[0],
     })
 }
 
@@ -258,19 +254,26 @@ pub fn main_wing(plane: &Airplane) -> Option<&Wing> {
 
 /// Obtain the complete empirical wing item used as the frozen reference in
 /// reference-adaptation and baseline-sandbox modes. The reference vector is
-/// the registered preset's vector when one is named; a blank configuration has
-/// the canonical default vector.
-fn reference_wing(config: &AlasConfig) -> Result<ReferenceWingMass, WingReconciliationError> {
-    let reference_dv = if config.preset.is_empty() {
-        DesignVector::default()
-    } else {
+/// the registered preset's vector when one is named; a baseline sandbox
+/// without one (the GUI sandbox opened from a preset, identity cleared) is
+/// its own reference, `design`; any other blank configuration has the
+/// canonical default vector.
+fn reference_wing(
+    config: &AlasConfig,
+    design: &DesignVector,
+) -> Result<ReferenceWingMass, WingReconciliationError> {
+    let reference_dv = if !config.preset.is_empty() {
         alas_config::presets::get(&config.preset)
-            .map_err(|_| WingReconciliationError::StructuralSizing)?
+            .map_err(|_| Cause::ReferencePreset)?
             .design_vector
+    } else if config.optimizer.design_space.mode == DesignMode::BaselineSandbox {
+        *design
+    } else {
+        DesignVector::default()
     };
     let reference_plane = AircraftBuilder::new(Some(config.geometry.clone()))
         .build(Some(&reference_dv), false)
-        .map_err(|_| WingReconciliationError::StructuralSizing)?;
+        .map_err(|_| Cause::ReferenceAircraftBuild)?;
     let requirements = design_requirements(config);
     let prepared = prepare_primary_wing(config, &reference_dv, &reference_plane, &requirements)?;
     let reference_primary = reference_cache::reference_primary(prepared)?;
@@ -287,10 +290,7 @@ fn reference_wing(config: &AlasConfig) -> Result<ReferenceWingMass, WingReconcil
         &config.landing_gear,
     )
     .map_err(|_| WingReconciliationError::MassCoordinates)?;
-    if !masses.wing.is_finite() || masses.wing <= 0.0 || !coords.wing.iter().all(|v| v.is_finite())
-    {
-        return Err(WingReconciliationError::StructuralSizing);
-    }
+    checks::reference_wing(masses.wing, coords.wing)?;
     Ok(ReferenceWingMass {
         total_mass_kg: masses.wing,
         centroid_m: coords.wing,
@@ -313,6 +313,10 @@ pub fn clean_sheet_secondary(
     wing: &Wing,
     sized_box: SizedWingboxMass,
 ) -> Result<WingNonBoxInventory, WingReconciliationError> {
+    // The inventory prices structure, so the part of the plan buried in the body
+    // is the carried box and no leading- or trailing-edge strip beside it.
+    let wing = wing.carried_box();
+    let wing: &Wing = &wing;
     let mm = &config.mass_model;
     let control = &config.control_surfaces;
     let (fractions, full_span) = config.structures.resolved_spars();
@@ -321,18 +325,25 @@ pub fn clean_sheet_secondary(
         .zip(full_span)
         .filter_map(|(fraction, full)| full.then_some(*fraction))
         .fold(0.0, f64::max);
-    let flap_area = configured_surface_area(
-        wing,
-        control.flap_span_start_frac,
-        control.flap_span_end_frac,
-        control.flap_chord_fraction,
-    );
+    // An inboard aileron between two flaps is not flap.
+    let flap_bands: Vec<(f64, f64, f64)> = control
+        .flap_bands()
+        .into_iter()
+        .map(|(start, end)| {
+            (
+                start,
+                end,
+                configured_surface_area(wing, start, end, control.flap_chord_fraction),
+            )
+        })
+        .collect();
+    let flap_area: f64 = flap_bands.iter().map(|band| band.2).sum();
     let mounted_to_wing =
         config.landing_gear.n_mlg_struts == 0 || config.landing_gear.n_mlg_struts >= 2;
     let design_gross_mass_kg = design_gross_mass_kg(config);
     let torenbeek_arguments = (
         design_gross_mass_kg,
-        config.requirements.ultimate_load_factor,
+        config.requirements.design_ultimate_load_factor(),
         design_gross_mass_kg * mm.suspended_mass_fraction,
         config.requirements.dive_speed_m_s,
         mm.max_airspeed_for_flaps_ms,
@@ -351,6 +362,7 @@ pub fn clean_sheet_secondary(
         torenbeek_arguments.6,
         None,
         torenbeek_arguments.7,
+        control.has_spoilers(),
     );
     validate_secondary_breakdown(breakdown)?;
     let group_total_kg = mass_wing_with_control_surface_area(
@@ -364,17 +376,32 @@ pub fn clean_sheet_secondary(
         torenbeek_arguments.6,
         None,
         torenbeek_arguments.7,
+        control.has_spoilers(),
     );
 
     let surfaces = WingMovableSurfaces {
         trailing_edge_flaps: MovableSurface {
             area_m2: flap_area,
-            centroid_m: surface_centroid(
-                wing,
-                control.flap_span_start_frac,
-                control.flap_span_end_frac,
-                (1.0 - 0.5 * control.flap_chord_fraction).clamp(0.0, 1.0),
-            ),
+            centroid_m: {
+                let chordwise = (1.0 - 0.5 * control.flap_chord_fraction).clamp(0.0, 1.0);
+                match flap_bands.as_slice() {
+                    [(start, end, _)] => surface_centroid(wing, *start, *end, chordwise),
+                    bands => {
+                        let centroids: Vec<[f64; 3]> = bands
+                            .iter()
+                            .map(|(start, end, _)| surface_centroid(wing, *start, *end, chordwise))
+                            .collect();
+                        std::array::from_fn(|axis| {
+                            bands
+                                .iter()
+                                .zip(&centroids)
+                                .map(|(band, centroid)| band.2 * centroid[axis])
+                                .sum::<f64>()
+                                / flap_area
+                        })
+                    }
+                }
+            },
         },
         leading_edge_devices: MovableSurface {
             area_m2: configured_surface_area(
@@ -390,19 +417,46 @@ pub fn clean_sheet_secondary(
                 (0.5 * control.slat_chord_fraction).clamp(0.0, 1.0),
             ),
         },
-        ailerons: MovableSurface {
-            area_m2: configured_surface_area(
+        ailerons: {
+            let outboard_area = configured_surface_area(
                 wing,
                 control.aileron_span_start_frac,
                 control.aileron_span_end_frac,
                 control.aileron_chord_fraction,
-            ),
-            centroid_m: surface_centroid(
+            );
+            let outboard = surface_centroid(
                 wing,
                 control.aileron_span_start_frac,
                 control.aileron_span_end_frac,
                 (1.0 - 0.5 * control.aileron_chord_fraction).clamp(0.0, 1.0),
-            ),
+            );
+            // A zero chord states the aircraft has no inboard aileron.
+            if control.inboard_aileron_chord_fraction > 0.0 {
+                let inboard_area = configured_surface_area(
+                    wing,
+                    control.inboard_aileron_span_start_frac,
+                    control.inboard_aileron_span_end_frac,
+                    control.inboard_aileron_chord_fraction,
+                );
+                let inboard = surface_centroid(
+                    wing,
+                    control.inboard_aileron_span_start_frac,
+                    control.inboard_aileron_span_end_frac,
+                    (1.0 - 0.5 * control.inboard_aileron_chord_fraction).clamp(0.0, 1.0),
+                );
+                let area_m2 = outboard_area + inboard_area;
+                MovableSurface {
+                    area_m2,
+                    centroid_m: std::array::from_fn(|axis| {
+                        (outboard_area * outboard[axis] + inboard_area * inboard[axis]) / area_m2
+                    }),
+                }
+            } else {
+                MovableSurface {
+                    area_m2: outboard_area,
+                    centroid_m: outboard,
+                }
+            }
         },
         spoilers: MovableSurface {
             area_m2: configured_surface_area(
@@ -435,8 +489,7 @@ pub fn clean_sheet_secondary(
         surfaces,
         fixed_structure: fixed_non_box_structure(config, wing),
     };
-    let inventory =
-        build_wing_inventory(&inputs).map_err(|_| WingReconciliationError::StructuralSizing)?;
+    let inventory = build_wing_inventory(&inputs).map_err(Cause::Inventory)?;
     // Box-side non-optimum items (Torenbeek 2013, section 11.5), driven by the
     // sized box's own quantities; absent for a box that did not come from the
     // sizer. The secondary base of the miscellaneous item is the movable

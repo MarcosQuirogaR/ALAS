@@ -201,7 +201,7 @@ fn solved_static() -> StructuralAnalysisResult {
         nastran: Some(nastran),
         nastran95: None,
         patran: None,
-        torenbeek_wing_mass_kg: 0.0,
+        ledger_complete_wing_mass_kg: 0.0,
         wing_mass: None,
         evaluation_inputs: None,
     }
@@ -274,7 +274,7 @@ fn finite_extreme_stress_is_not_accepted_as_available_evidence() {
 
 #[test]
 fn artefact_corner_peak_in_a_load_introduction_zone_is_a_warning_not_a_strength_veto() {
-    // A320 wingbox, 2026-10-07: the pull-up corner maximum was 835 MPa on a
+    // A320 wingbox: the pull-up corner maximum was 835 MPa on a
     // transition-rib element whose four corners were RBE3 reference grids,
     // while the centroid stress outside the load-introduction zones was far
     // below the allowable.

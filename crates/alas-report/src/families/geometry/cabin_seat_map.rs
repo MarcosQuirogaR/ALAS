@@ -48,8 +48,8 @@ pub(super) fn draw_main_deck_services(
             let (color, label) = match item.kind {
                 ItemKind::Galley => (Color::from_hex("#e67e22"), "G"),
                 ItemKind::WheelchairStowage => (Color::from_hex("#f1c40f"), "W"),
-                ItemKind::AccessibleLav => (Color::from_hex("#2471a3"), "AL"),
-                _ => (Color::from_hex("#5dade2"), "L"),
+                ItemKind::AccessibleLav => (Color::from_hex("#ec407a"), "AL"),
+                _ => (Color::from_hex("#26c6da"), "L"),
             };
             let left = p0[0].min(p1[0]).clamp(left_edge, right_edge);
             let right = p0[0].max(p1[0]).clamp(left_edge, right_edge);

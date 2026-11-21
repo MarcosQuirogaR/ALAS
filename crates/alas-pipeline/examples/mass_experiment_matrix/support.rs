@@ -101,6 +101,7 @@ pub(crate) fn buildup_json(buildup: &FlopsMassBuildup) -> Value {
             "main_gear_length": buildup.airframe.sources.main_gear_length,
             "nose_gear_length": buildup.airframe.sources.nose_gear_length,
             "baseline_engine_mass": buildup.airframe.sources.baseline_engine_mass,
+            "gear_mass": buildup.airframe.sources.gear_mass,
         },
         "class_split": [
             buildup.inputs.first_class_passenger_count,

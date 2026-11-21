@@ -52,15 +52,42 @@ pub(super) fn geometry_residuals(
         ));
     }
 
-    residuals.push(ConstraintResidual::scaled(
-        "wing_area",
-        Geometry,
-        plane.s_ref,
-        req.max_wing_area_m2,
-        "m^2",
-        plane.s_ref - req.max_wing_area_m2,
-        role,
-    ));
+    // A redesigned registered aircraft keeps its wing area within
+    // `REGISTERED_WING_AREA_FRACTION` of the registered wing's, in place of
+    // the declared maximum, on both sides (`mdo::registered_area`); a clean
+    // sheet keeps the declared maximum.
+    match super::registered_area::registered_wing_area(config) {
+        Some(registered) => {
+            let (lower_m2, upper_m2) = registered.s_ref_window_m2();
+            residuals.push(ConstraintResidual::scaled(
+                "wing_area",
+                Geometry,
+                plane.s_ref,
+                upper_m2,
+                "m^2",
+                plane.s_ref - upper_m2,
+                role,
+            ));
+            residuals.push(ConstraintResidual::scaled(
+                "wing_area_floor",
+                Geometry,
+                plane.s_ref,
+                lower_m2,
+                "m^2",
+                lower_m2 - plane.s_ref,
+                role,
+            ));
+        }
+        None => residuals.push(ConstraintResidual::scaled(
+            "wing_area",
+            Geometry,
+            plane.s_ref,
+            req.max_wing_area_m2,
+            "m^2",
+            plane.s_ref - req.max_wing_area_m2,
+            role,
+        )),
+    }
 
     // The requirement is a design wing loading, MTOW over area: the design
     // gross mass the components were sized against. That is the closed
@@ -213,8 +240,11 @@ fn plausibility_residuals(
 
     // Tail arm as a fraction of the body that has to carry it.
     if let (Some(wing), Some(hstab)) = (plane.wings.first(), plane.wings.get(1)) {
-        let arm_m = hstab.aerodynamic_center(AC_CHORD_FRACTION)[0]
-            - wing.aerodynamic_center(AC_CHORD_FRACTION)[0];
+        // From the carried box: the plan buried in the body does not lengthen it.
+        let arm_m = hstab
+            .reference_planform()
+            .aerodynamic_center(AC_CHORD_FRACTION)[0]
+            - wing.carried_box().aerodynamic_center(AC_CHORD_FRACTION)[0];
         let body_length_m = fuselage_length_m(plane).unwrap_or(dv.fuselage_length_m);
         if body_length_m > 0.0 && arm_m.is_finite() {
             residuals.extend(window_residuals(

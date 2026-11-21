@@ -28,7 +28,10 @@ pub use super::structures_dynamics::{
     figure_structures_modes, figure_structures_patran, figure_structures_stress,
     figure_structures_vibration,
 };
-pub use designer_preview::figure_structures_designer_preview;
+pub use designer_preview::{
+    figure_structures_designer_preview, figure_structures_designer_preview_sized,
+    structures_plot_rect, STRUCTURES_PREVIEW_CANVAS,
+};
 pub use loads::figure_structures_loads;
 pub use sizing::figure_structures_sizing;
 
@@ -73,17 +76,7 @@ pub(super) fn mass_breakdown_items(
 /// decimal places both agree for the mass magnitudes this program ever
 /// prints) and comma grouping from the right.
 pub(super) fn format_thousands(value: f64) -> String {
-    let rounded = value.round();
-    let sign = if rounded < 0.0 { "-" } else { "" };
-    let digits = format!("{:.0}", rounded.abs());
-    let mut grouped = String::new();
-    for (i, ch) in digits.chars().rev().enumerate() {
-        if i > 0 && i % 3 == 0 {
-            grouped.push(',');
-        }
-        grouped.push(ch);
-    }
-    format!("{sign}{}", grouped.chars().rev().collect::<String>())
+    crate::numfmt::grouped(value, 0)
 }
 
 /// `_true_spar_xy`: the chordwise (X) position of the spar at `frac` chord
@@ -266,10 +259,10 @@ mod tests {
 
     #[test]
     fn format_thousands_groups_from_the_right_and_keeps_the_sign() {
-        assert_eq!(format_thousands(6200.0), "6,200");
+        assert_eq!(format_thousands(6200.0), "6 200");
         assert_eq!(format_thousands(999.0), "999");
-        assert_eq!(format_thousands(1_000_000.0), "1,000,000");
-        assert_eq!(format_thousands(-2500.4), "-2,500");
+        assert_eq!(format_thousands(1_000_000.0), "1 000 000");
+        assert_eq!(format_thousands(-2500.4), "-2 500");
     }
 
     #[test]

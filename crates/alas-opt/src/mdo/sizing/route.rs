@@ -54,8 +54,8 @@ impl Route {
 pub(super) fn resolve(config: &AlasConfig) -> Route {
     let departure_record = airport_dataset::resolve(&config.departure_airport).ok();
     let arrival_record = airport_dataset::resolve(&config.arrival_airport).ok();
-    let departure = airports::get(&config.departure_airport).ok();
-    let arrival = airports::get(&config.arrival_airport).ok();
+    let departure = config.departure_airport_record().ok();
+    let arrival = config.arrival_airport_record().ok();
     let explicit_range = config.optimizer.objective.design_range_nmi > 0.0;
     let coordinates = |record: &Option<airport_dataset::ProvenancedAirport>| {
         record

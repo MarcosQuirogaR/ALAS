@@ -51,8 +51,8 @@ use alas_prop::mission_turbofan::{
 };
 use alas_prop::system::{
     FailureState, OperatingMode, PropulsionDemand, PropulsionError, PropulsionLoads,
-    PropulsionOrchestrator, PropulsionRequest, PropulsionResult, PropulsionState, ResourceKind,
-    TechnologyTrace,
+    PropulsionOrchestrator, PropulsionPoint, PropulsionRequest, PropulsionState, TechnologyTrace,
+    ValidityStatus,
 };
 
 use super::drag::MissionDragSource;
@@ -69,6 +69,7 @@ use super::drag::MissionDragSource;
 pub const FLIGHT_IDLE_LIMIT: &str = "flight-idle-thrust";
 
 /// What one call to the aerodynamics analysis produces.
+#[derive(Clone)]
 pub struct AeroSolution {
     /// The aircraft lift coefficient, after the fuselage correction.
     pub lift_coefficient: f64,
@@ -271,6 +272,35 @@ impl MissionAnalyses {
         .0
     }
 
+    /// Whether the propulsion deck evaluates `demand` at this flight point
+    /// inside its evidence domain, as the deck itself reports it.
+    ///
+    /// A mission consumer reads this at the points of a flown leg to mark
+    /// fuel and thrust that rest on an extrapolated deck. The force and fuel
+    /// of the point are not recomputed here and are not changed by it.
+    pub fn propulsion_validity(
+        &self,
+        atmosphere: &Us1976Values,
+        altitude_m: f64,
+        velocity_m_s: f64,
+        mach: f64,
+        gravity_m_s2: f64,
+        demand: PropulsionDemand,
+    ) -> Result<ValidityStatus, PropulsionError> {
+        let freestream =
+            freestream_from_atmosphere(atmosphere, altitude_m, velocity_m_s, mach, gravity_m_s2);
+        let request = PropulsionRequest {
+            flight: (&freestream).into(),
+            demand,
+            mode: OperatingMode::Normal,
+            failure: FailureState::None,
+            loads: PropulsionLoads::default(),
+            state: PropulsionState::default(),
+            time_step_s: None,
+        };
+        Ok(self.propulsion.evaluate(&request)?.validity)
+    }
+
     /// [`Self::thrust`], plus whether the deck answered from its own
     /// flight-idle floor rather than from the command it was given.
     ///
@@ -292,18 +322,66 @@ impl MissionAnalyses {
         gravity_m_s2: f64,
         throttle: f64,
     ) -> (ThrustOutput, bool) {
+        self.thrust_for_demand(
+            atmosphere,
+            altitude_m,
+            velocity_m_s,
+            mach,
+            gravity_m_s2,
+            PropulsionDemand::NormalizedForce(throttle),
+        )
+    }
+
+    /// Force and fuel at a rated-fraction `demand` (the deck's own demand for a share of the
+    /// force available at a rating), not the normalized throttle: a take-off leg flies the
+    /// take-off rating and burns what that rating burns.
+    pub fn thrust_at_demand(
+        &self,
+        atmosphere: &Us1976Values,
+        altitude_m: f64,
+        velocity_m_s: f64,
+        mach: f64,
+        gravity_m_s2: f64,
+        demand: PropulsionDemand,
+    ) -> ThrustOutput {
+        self.thrust_for_demand(
+            atmosphere,
+            altitude_m,
+            velocity_m_s,
+            mach,
+            gravity_m_s2,
+            demand,
+        )
+        .0
+    }
+
+    pub(crate) fn thrust_for_demand(
+        &self,
+        atmosphere: &Us1976Values,
+        altitude_m: f64,
+        velocity_m_s: f64,
+        mach: f64,
+        gravity_m_s2: f64,
+        demand: PropulsionDemand,
+    ) -> (ThrustOutput, bool) {
+        // The throttle of the frozen compatibility probe (a rejected trial point).
+        let throttle = match demand {
+            PropulsionDemand::NormalizedForce(throttle) => throttle,
+            PropulsionDemand::RatedFraction { fraction, .. } => fraction,
+            _ => f64::NAN,
+        };
         let freestream =
             freestream_from_atmosphere(atmosphere, altitude_m, velocity_m_s, mach, gravity_m_s2);
         let request = PropulsionRequest {
             flight: (&freestream).into(),
-            demand: PropulsionDemand::NormalizedForce(throttle),
+            demand,
             mode: OperatingMode::Normal,
             failure: FailureState::None,
             loads: PropulsionLoads::default(),
             state: PropulsionState::default(),
             time_step_s: None,
         };
-        let result = match self.propulsion.evaluate(&request) {
+        let result = match self.propulsion.evaluate_point(&request) {
             Ok(result) => result,
             Err(PropulsionError::InvalidInput { .. } | PropulsionError::NonFiniteOutput(_))
                 if self.legacy_turbofan.is_some() =>
@@ -361,11 +439,11 @@ impl MissionAnalyses {
 
     fn project_propulsion_result(
         &self,
-        result: PropulsionResult,
+        result: PropulsionPoint,
         velocity_m_s: f64,
         gravity_m_s2: f64,
     ) -> Result<ThrustOutput, PropulsionError> {
-        let fuel_flow_rate_kg_s = jet_a_mass_flow(&result.resource_flows)?;
+        let fuel_flow_rate_kg_s = jet_a_mass_flow(&result)?;
         match result.trace {
             Some(TechnologyTrace::LegacyTurbofan(mut output)) => {
                 output.thrust_n = result.body_force_n[0];
@@ -410,11 +488,9 @@ fn rejected_thrust_output() -> ThrustOutput {
     }
 }
 
-fn jet_a_mass_flow(flows: &[alas_prop::system::ResourceFlow]) -> Result<f64, PropulsionError> {
-    flows
-        .iter()
-        .find(|flow| flow.resource == ResourceKind::JetA)
-        .and_then(|flow| flow.mass_flow_kg_s)
+fn jet_a_mass_flow(point: &PropulsionPoint) -> Result<f64, PropulsionError> {
+    point
+        .jet_a_mass_flow_kg_s
         .ok_or(PropulsionError::UnsupportedDemand(
             "mission requires a Jet-A mass-flow result",
         ))
@@ -423,7 +499,38 @@ fn jet_a_mass_flow(flows: &[alas_prop::system::ResourceFlow]) -> Result<f64, Pro
 #[cfg(test)]
 mod projection_tests {
     use super::*;
-    use alas_prop::system::ResourceFlow;
+    use alas_prop::system::{
+        ModelIdentity, ModelProvenance, PropulsionResult, ResourceFlow, ResourceKind,
+    };
+
+    /// The point a model reporting `flows` answers with, through the
+    /// conversion every default `evaluate_point` uses.
+    fn point_with(flows: Vec<ResourceFlow>) -> PropulsionPoint {
+        PropulsionPoint::from(PropulsionResult {
+            body_force_n: [0.0; 3],
+            body_moment_nm: [0.0; 3],
+            resource_flows: flows,
+            state_derivatives: Vec::new(),
+            shaft_power_w: None,
+            electrical_power_w: None,
+            heat_rejection_w: None,
+            torque_nm: None,
+            rotational_speed_rpm: None,
+            achieved_demand: PropulsionDemand::NormalizedForce(0.5),
+            active_limits: Vec::new(),
+            residuals: Vec::new(),
+            validity: ValidityStatus::Valid,
+            provenance: ModelProvenance {
+                model: ModelIdentity {
+                    family: "test".to_owned(),
+                    version: "1".to_owned(),
+                },
+                dataset: None,
+                sources: Vec::new(),
+            },
+            trace: None,
+        })
+    }
 
     #[test]
     fn unsupported_resource_flow_is_an_error_and_rejected_iterate() {
@@ -433,17 +540,17 @@ mod projection_tests {
             ResourceKind::Custom("other".into()),
             ResourceKind::JetA,
         ] {
-            let flows = [ResourceFlow {
+            let flows = vec![ResourceFlow {
                 resource,
                 mass_flow_kg_s: None,
                 power_w: Some(1.0),
             }];
             assert!(matches!(
-                jet_a_mass_flow(&flows),
+                jet_a_mass_flow(&point_with(flows)),
                 Err(PropulsionError::UnsupportedDemand(_))
             ));
         }
-        assert!(jet_a_mass_flow(&[]).is_err());
+        assert!(jet_a_mass_flow(&point_with(Vec::new())).is_err());
         let rejected = rejected_thrust_output();
         assert!(rejected.thrust_n.is_nan());
         assert!(rejected.fuel_flow_rate_kg_s.is_nan());
@@ -452,12 +559,12 @@ mod projection_tests {
     #[test]
     fn jet_a_projection_preserves_positive_consumption_including_zero() {
         for value in [0.0, 0.75] {
-            let flows = [ResourceFlow {
+            let flows = vec![ResourceFlow {
                 resource: ResourceKind::JetA,
                 mass_flow_kg_s: Some(value),
                 power_w: None,
             }];
-            assert!(matches!(jet_a_mass_flow(&flows), Ok(got) if got == value));
+            assert!(matches!(jet_a_mass_flow(&point_with(flows)), Ok(got) if got == value));
         }
     }
 }

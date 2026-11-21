@@ -121,7 +121,11 @@ impl TopAxes {
         // the same number of pixels as one metre longitudinally. Expanding
         // the shorter displayed range preserves that relationship without
         // cropping any of the aircraft geometry.
-        Self(Axes2D::new(rect, y_range, (-x_range.1, -x_range.0)).with_equal_aspect())
+        Self(
+            Axes2D::new(rect, y_range, (-x_range.1, -x_range.0))
+                .with_equal_aspect()
+                .with_negated_y_tick_labels(),
+        )
     }
 
     pub(super) fn point(&self, span_y: f64, long_x: f64) -> Point2D {
@@ -156,6 +160,11 @@ pub(super) fn draw_planform_fill(
         let sides: &[f64] = if wing.symmetric { &[1.0, -1.0] } else { &[1.0] };
         for &sign in sides {
             let pts: Vec<(f64, f64)> = poly.iter().map(|&(y, x)| (y * sign, x)).collect();
+            scene.data_trace.name_next_polygon(side_name(
+                &format!("{} planform", wing.name),
+                sign,
+                wing.symmetric,
+            ));
             scene.add(SceneElement::Polygon {
                 points: axes.polygon(&pts),
                 fill: Some(Fill::new(color)),
@@ -165,11 +174,50 @@ pub(super) fn draw_planform_fill(
     }
 }
 
-/// Draw one control-surface patch (mirrored if `mirror`) and register its
-/// legend entry if not already present: the body of `add_top_patch`.
+/// Plot-data name of a polygon: the surface, with its side (+Y or -Y of the
+/// span axis, metres) when the surface is mirrored.
+fn side_name(name: &str, sign: f64, mirrored: bool) -> String {
+    if !mirrored {
+        name.to_owned()
+    } else if sign > 0.0 {
+        format!("{name} +Y")
+    } else {
+        format!("{name} -Y")
+    }
+}
+
+/// Fixed palette slot of each control-surface type, so a surface keeps its
+/// colour on every aircraft whichever other surfaces are drawn.
+fn surface_slot(name: &str) -> usize {
+    match name {
+        "Slat" => 0,
+        "Flap" => 1,
+        "Aileron" => 2,
+        "Spoiler" => 3,
+        "Elevator" => 4,
+        "Rudder" => 5,
+        _ => 6,
+    }
+}
+
+/// The colour of control surface `name` (fixed by name), registering its
+/// legend entry on first use.
+pub(super) fn surface_entry(legend: &mut Vec<(String, Color)>, name: &str) -> Color {
+    if let Some((_, color)) = legend.iter().find(|(entry, _)| entry == name) {
+        return *color;
+    }
+    let color = crate::theme::series_color(surface_slot(name));
+    legend.push((name.to_owned(), color));
+    color
+}
+
+/// Draw one control-surface patch (mirrored if `mirror`) in the colour of its
+/// surface type (fixed by name, see [`surface_entry`]),
+/// registering the legend entry if not already present: the body of
+/// `add_top_patch`.
 ///
-/// Eleven parameters: the same list upstream's own `add_top_patch` closes
-/// over (span/chord bounds, styling, and the mutable scene/legend state it
+/// Ten parameters: the list upstream's own `add_top_patch` closes over
+/// (span/chord bounds, the series name, and the mutable scene/legend state it
 /// writes into). A struct would only relocate this list, not shorten it, and
 /// every call site below spells every argument out, so there is nowhere for
 /// a mismatched field to hide silently.
@@ -183,24 +231,23 @@ pub(super) fn draw_top_patch(
     span_hi: f64,
     frac_lo: f64,
     frac_hi: f64,
-    color_hex: &str,
     name: &str,
     mirror: bool,
 ) {
     let poly = cs_surface_patch(xsecs, 1, span_lo, span_hi, frac_lo, frac_hi);
-    let color = Color::from_hex(color_hex);
+    let color = surface_entry(legend, name);
     let edge = Stroke::new(Color::rgb(0, 0, 0), 0.6);
     let sides: &[f64] = if mirror { &[1.0, -1.0] } else { &[1.0] };
     for &sign in sides {
         let pts: Vec<(f64, f64)> = poly.iter().map(|&(s, x)| (s * sign, x)).collect();
+        scene
+            .data_trace
+            .name_next_polygon(side_name(name, sign, mirror));
         scene.add(SceneElement::Polygon {
             points: axes.polygon(&pts),
             fill: Some(Fill::new(color)),
             stroke: Some(edge.clone()),
         });
-    }
-    if !legend.iter().any(|(n, _)| n == name) {
-        legend.push((name.to_owned(), color));
     }
 }
 

@@ -12,7 +12,7 @@
 //! Mass: the sum of the tree nodes' masses ([`tree_mass`]) - `Allowance` and
 //! `Ballast` nodes carry a mass, `Payload` nodes and any other mass-bearing
 //! node need `mass_override_kg`.  A mass-bearing node without a mass is an
-//! error, never a default; the airframe lane will replace this by the
+//! error, never a default; the airframe module will replace this by the
 //! bottom-up estimate.
 
 use std::collections::BTreeMap;

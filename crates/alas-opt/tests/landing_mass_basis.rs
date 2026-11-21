@@ -1,7 +1,7 @@
 // SPDX-License-Identifier: AGPL-3.0-or-later
 // Copyright (C) 2026 Marcos Quiroga Rodriguez
 
-//! Audit SIZ-03: a coupled clean-sheet design sized by the mission (legacy
+//! A coupled clean-sheet design sized by the mission (legacy
 //! `SizedByMission` / `Unconstrained`) reads one landing mass in the gear
 //! design, the dispatch limit and the `landing_mass` residual.
 //!
@@ -69,7 +69,7 @@ fn the_landing_limit_is_the_gear_design_landing_mass_and_not_a_fraction_of_the_d
             landed_kg <= limit_kg + config.optimizer.objective.sizing_tolerance_kg,
             "{sizing:?}: {landed_kg} vs {limit_kg}"
         );
-        // The declared MTOW is not a landing-mass basis (SIZ-03).
+        // The declared MTOW is not a landing-mass basis.
         let declared_fraction_kg =
             config.mass_model.mlw_fraction_mtow * config.requirements.mtow_kg;
         assert!(

@@ -46,11 +46,12 @@ fn enabled_native_mission_is_present_in_a_normal_pipeline_result() {
         .solutions
         .last()
         .is_some_and(|solution| solution.throttle_limited));
-    assert!(mission
-        .segments
+    assert!(mission.segments.iter().all(|segment| segment
+        .conditions
+        .throttle
         .iter()
-        .flat_map(|segment| segment.conditions.throttle.iter())
-        .all(|throttle| (0.0..=1.0).contains(throttle)));
+        .zip(&segment.conditions.available_throttle_floor)
+        .all(|(throttle, floor)| *throttle >= floor.min(0.0) - 1.0e-3 && *throttle <= 1.001)));
     assert!(!result
         .feasibility
         .contains(crate::FindingCode::MissionThrottleLimitViolation));
@@ -462,4 +463,39 @@ fn a_headless_run_can_be_cancelled_and_joined_instead_of_being_abandoned() {
         error.starts_with("Cancelled safely"),
         "a cancelled run must be distinguishable from a failed one: {error}"
     );
+}
+
+#[test]
+fn a_configured_dispatch_account_makes_no_request_unless_the_run_opted_in() {
+    let mut config = AlasConfig::default();
+    config.mission.simbrief_username = "someone".to_owned();
+    let planned = DesignPipeline::new(config)
+        .plan_active_route(None)
+        .unwrap_or_else(|error| panic!("route planning: {error}"))
+        .unwrap_or_else(|| panic!("a route is planned without the dispatch tier"));
+    assert_eq!(
+        planned.status.simbrief,
+        SimbriefFetchStatus::TransportFailed(LIVE_DISPATCH_NOT_ENABLED.to_owned())
+    );
+    assert_ne!(
+        planned.status.selected_source,
+        alas_route::route::RouteSource::SimbriefApi
+    );
+}
+
+#[test]
+fn a_live_snapshot_is_never_classified_as_an_accepted_result() {
+    let config = AlasConfig::from_value(&serde_json::json!({ "preset": "A320-200" }))
+        .unwrap_or_else(|error| panic!("{error}"));
+    let design = alas_config::presets::get("A320-200")
+        .unwrap_or_else(|error| panic!("{error}"))
+        .design_vector;
+    let delivery = DeliveryClassification::classify(
+        &config,
+        &design,
+        &FeasibilityReport::default(),
+        &RunCompletion::InProgress,
+    );
+    assert!(!delivery.is_success());
+    assert!(delivery.render().contains("still in progress"));
 }

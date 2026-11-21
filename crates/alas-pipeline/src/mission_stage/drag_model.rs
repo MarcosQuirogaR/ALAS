@@ -40,8 +40,12 @@ impl MissionDragModel for CandidateMissionDrag {
                     // The viscous (parasite) term carries the lift-dependent
                     // viscous drag `kappa CD0 CL^2` (zero unless configured),
                     // so `.breakdown()` consumers keep three terms.
-                    parasite: cd0 + table.viscous_lift_cd(lift_coefficient, cd0),
-                    induced: table.induced_cd(lift_coefficient),
+                    // It also carries the upsweep's change at the trimmed
+                    // body attitude.
+                    parasite: cd0
+                        + table.viscous_lift_cd(lift_coefficient, cd0)
+                        + table.upsweep_attitude_cd(lift_coefficient, mach),
+                    induced: table.induced_cd_at(lift_coefficient, mach),
                     wave: table.wave_cd(lift_coefficient, mach),
                 }
             }

@@ -3,7 +3,7 @@
 
 //! Shared View-menu and detachable appearance controls.
 //!
-//! Keeping them outside the shell keeps the application coordinator focused on
+//! Keeping them outside the shell keeps the application shell focused on
 //! panel composition while guaranteeing the menu and movable panel edit the
 //! same state.
 
@@ -13,7 +13,7 @@ use crate::state::{AppState, Language};
 use crate::theme::{apply_theme, AppTheme};
 
 fn tr(text: &str) -> String {
-    alas_i18n::t(Some(text), None).into_owned()
+    crate::views::tr(text)
 }
 
 /// Switch the application theme and redraw every live scene that bakes
@@ -35,9 +35,10 @@ pub(crate) fn render_view_options(
     ui: &mut Ui,
     close_menu: bool,
 ) {
+    ui.label(egui::RichText::new(tr("Theme")).weak().small());
     for theme in [AppTheme::Dark, AppTheme::Light, AppTheme::Grey] {
         let is_current = state.theme == theme;
-        if ui.selectable_label(is_current, tr(theme.name())).clicked() {
+        if ui.radio(is_current, tr(theme.name())).clicked() {
             switch_theme(state, ctx, theme);
             if close_menu {
                 ui.close_menu();
@@ -45,25 +46,34 @@ pub(crate) fn render_view_options(
         }
     }
     ui.separator();
+    let on_page = crate::views::page_shows_preview_dock(&state.active_page);
     if ui
-        .selectable_label(state.preview_open, tr("3D Live Preview"))
+        .add_enabled(
+            on_page,
+            egui::Checkbox::new(&mut (state.preview_open && on_page), tr("3D Live Preview")),
+        )
+        .on_disabled_hover_text(tr("The 3D preview is shown on the aircraft pages."))
         .clicked()
     {
         state.preview_open = !state.preview_open;
+        if close_menu {
+            ui.close_menu();
+        }
     }
     ui.separator();
     if ui
-        .selectable_label(state.reduced_animations, tr("Reduced Animations"))
+        .checkbox(
+            &mut state.reduced_animations.clone(),
+            tr("Reduced Animations"),
+        )
         .clicked()
     {
         state.reduced_animations = !state.reduced_animations;
     }
     ui.separator();
+    ui.label(egui::RichText::new(tr("Language")).weak().small());
     for (lang, label) in [(Language::En, "English"), (Language::Es, "Spanish")] {
-        if ui
-            .selectable_label(state.language == lang, tr(label))
-            .clicked()
-        {
+        if ui.radio(state.language == lang, tr(label)).clicked() {
             state.language = lang;
             alas_i18n::set_language(Some(lang.code()));
             if close_menu {
@@ -72,10 +82,8 @@ pub(crate) fn render_view_options(
         }
     }
     ui.separator();
-    if ui
-        .selectable_label(state.zoom_auto, tr("Automatic zoom"))
-        .clicked()
-    {
+    ui.label(egui::RichText::new(tr("Zoom")).weak().small());
+    if ui.radio(state.zoom_auto, tr("Automatic zoom")).clicked() {
         state.zoom_auto = true;
         state.zoom = auto_zoom_factor(ctx);
         if close_menu {
@@ -164,7 +172,9 @@ pub(crate) fn handle_zoom_shortcuts(ctx: &Context, zoom: &mut f32, zoom_auto: &m
         let ctrl = Modifiers::CTRL;
         let zoom_in = input.consume_key(ctrl, Key::Plus) || input.consume_key(ctrl, Key::Equals);
         let zoom_out = input.consume_key(ctrl, Key::Minus);
-        let reset = input.consume_key(ctrl, Key::Num0);
+        // Ctrl+0 resets whichever way the platform reports the key.
+        let reset = input.consume_key(ctrl, Key::Num0)
+            || (input.modifiers.ctrl && input.key_pressed(Key::Num0));
         let wheel_factor = if input.modifiers.ctrl {
             input.zoom_delta()
         } else {
@@ -174,8 +184,10 @@ pub(crate) fn handle_zoom_shortcuts(ctx: &Context, zoom: &mut f32, zoom_auto: &m
     });
 
     if reset {
-        *zoom = zoom_after_command(*zoom, ZoomCommand::Reset);
-        *zoom_auto = false;
+        // Ctrl+0 returns to the size the window opened at: the automatic
+        // zoom, not a fixed 100 %.
+        *zoom = auto_zoom_factor(ctx);
+        *zoom_auto = true;
     } else {
         if zoom_in {
             *zoom = zoom_after_command(*zoom, ZoomCommand::In);

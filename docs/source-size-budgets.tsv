@@ -11,7 +11,6 @@ crates/alas-cfd/src/mesh_preflight.rs	521	Backend-neutral meshing preflight and 
 crates/alas-cfd/src/results.rs	672	Pending decomposition into modules with interfaces.
 crates/alas-cfd/src/surface_native_mesh.rs	508	Pending decomposition into modules with interfaces.
 crates/alas-config/src/flops_structure.rs	627	Declared inputs for the NASA FLOPS airframe and propulsion mass equations. Pending decomposition into modules with interfaces.
-crates/alas-config/src/mass.rs	509	Mass architecture and parameters of the production and comparison builds; field help text is #[config(...)] metadata that cannot move to a child module without leaving the field undocumented.
 crates/alas-config/src/settings.rs	570	The one object that fully specifies a run. Pending decomposition into modules with interfaces.
 crates/alas-config/src/systems_mass.rs	686	Product selection and declared architecture for transport subsystem mass. Pending decomposition into modules with interfaces.
 crates/alas-config/src/validation.rs	763	The checks a configuration has to pass that no single field can make. Pending decomposition into modules with interfaces.
@@ -20,13 +19,10 @@ crates/alas-geom/src/aircraft/airfoil.rs	518	Airfoil geometry: construction from
 crates/alas-gui/src/sandbox/drag.rs	1329	Parameter-based direct manipulation in the sandbox viewport. Pending decomposition into modules with interfaces.
 crates/alas-gui/src/sandbox/fields.rs	1067	The sandbox's inventory of independent geometry parameters. Pending decomposition into modules with interfaces.
 crates/alas-gui/src/sandbox/session.rs	543	The workspace mode contract: one guided case, one sandbox case, and the explicit transitions between them. Pending decomposition into modules with interfaces.
-crates/alas-gui/src/sandbox/viewport.rs	527	The sandbox's central 3D viewport: orbit and zoom, the floating controls over the design space (camera presets, geometry-category buttons, the parameter search, the action row and the Summary card) and the parameter drag handles. Pending decomposition into modules with interfaces.
-crates/alas-gui/src/views/inputs_custom.rs	972	Custom airfoil import and sandbox-only custom geometry editors. Pending decomposition into modules with interfaces.
+crates/alas-gui/src/views/inputs_custom.rs	983	Custom airfoil import and sandbox-only custom geometry editors. Pending decomposition into modules with interfaces.
 crates/alas-gui/src/views/inputs_view.rs	722	The Setup > Inputs page: preset + engine selectors, the mission-requirements form, the route airports, and the per-run toggles. Pending decomposition into modules with interfaces.
-crates/alas-gui/src/views/mission_profile_inputs.rs	632	The Inputs-page mission profile editor. Pending decomposition into modules with interfaces.
 crates/alas-gui/src/views/preview_dock.rs	527	The right-side unified aircraft viewer, rendered live from the current configuration with exterior/interior visibility, drag-to-orbit, and true camera zoom. Pending decomposition into modules with interfaces.
 crates/alas-gui/src/views/results_view.rs	538	The Results page: summary stat tiles, then a tab per discipline, each a grid of figures. Pending decomposition into modules with interfaces.
-crates/alas-gui/src/views/tools_view/cards.rs	543	Card renderers for the external-tools page. Pending decomposition into modules with interfaces.
 crates/alas-mass/src/flops_transport/airframe.rs	615	Resolve a built ALAS transport into the FLOPS structural and propulsion inputs, and evaluate whichever of the two groups is selected. Pending decomposition into modules with interfaces.
 crates/alas-mass/src/flops_transport/equations.rs	589	Closed-form FLOPS transport equations in their published imperial units. Pending decomposition into modules with interfaces.
 crates/alas-mass/src/flops_transport/mod.rs	516	NASA FLOPS transport systems, equipment, and operating-item mass. Pending decomposition into modules with interfaces.
@@ -36,8 +32,8 @@ crates/alas-mission/src/segments.rs	556	One leg of a mission, and the two-unknow
 crates/alas-mission/src/solve.rs	704	Solving a segment, and flying a mission one segment at a time. Pending decomposition into modules with interfaces.
 crates/alas-opt/src/cancellation.rs	817	Typed, timestamped telemetry for cooperative cancellation. Pending decomposition into modules with interfaces.
 crates/alas-opt/src/mdo/mission_model.rs	877	The common segment mission model shared by the optimizer's sizing loop and the pipeline's fuel-policy bridge. Pending decomposition into modules with interfaces.
-crates/alas-opt/src/mdo/mission_model/integrate.rs	739	Quasi-steady integration of a planned profile against the propulsion deck, with an energy ledger that makes the bookkeeping checkable. Pending decomposition into modules with interfaces.
-crates/alas-opt/src/mdo/mission_model/profile.rs	849	Vertical-profile geometry: segments with consistent kinematics and the cruise-altitude adaptation that keeps a short route from being overflown. Pending decomposition into modules with interfaces.
+crates/alas-opt/src/mdo/mission_model/integrate.rs	694	Quasi-steady integration of a planned profile against the propulsion deck, with an energy ledger that makes the bookkeeping checkable. Pending decomposition into modules with interfaces.
+crates/alas-opt/src/mdo/mission_model/profile.rs	873	Vertical-profile geometry: segments with consistent kinematics and the cruise-altitude adaptation that keeps a short route from being overflown. Pending decomposition into modules with interfaces.
 crates/alas-opt/src/mdo/propulsion.rs	784	The off-design propulsion deck every candidate mission is priced with. Pending decomposition into modules with interfaces.
 crates/alas-opt/src/mdo/residuals_geometry.rs	561	The planform, wing-loading and accommodation requirement family. Pending decomposition into modules with interfaces.
 crates/alas-payload/src/build.rs	590	The entry point every consumer uses, and the fast auto-sizer that runs before any interior is built. Pending decomposition into modules with interfaces.
@@ -48,8 +44,12 @@ crates/alas-pipeline/src/export.rs	670	Exporting design databases to JSON, Selig
 crates/alas-pipeline/src/feasibility.rs	785	Explicit physical-feasibility findings for a completed design run. Pending decomposition into modules with interfaces.
 crates/alas-pipeline/src/mission_stage.rs	593	Native mission orchestration for the design pipeline. Pending decomposition into modules with interfaces.
 crates/alas-pipeline/src/pipeline.rs	2386	Complete multi-stage aircraft design, analysis, optimization and export pipeline. Pending decomposition into modules with interfaces.
-crates/alas-report/src/families/geometry/sandbox_scene.rs	539	The sandbox workspace's central aircraft scene. Pending decomposition into modules with interfaces.
 crates/alas-report/src/families/structures_dynamics/modes.rs	744	Rayleigh-versus-MSC/NASTRAN-95 normal-mode frequencies and spanwise shapes. Pending decomposition into modules with interfaces.
-xtask/src/dist.rs	1804	Packaging and distribution assembly task for xtask. Pending decomposition into modules with interfaces.
+xtask/src/dist.rs	1753	Packaging and distribution assembly task for xtask. Pending decomposition into modules with interfaces.
 crates/alas-opt/src/mdo/residuals_layout.rs	524	Residual layout for the MDO problem. Frozen at the current size pending decomposition into modules with interfaces.
 crates/alas-pipeline/examples/model_reference_dump/main.rs	656	Per-preset dump of every model output that has a real-world counterpart, assembled in one function.
+crates/alas-config/src/presets/narrowbody/e195_e2.rs	505	E195-E2 preset with its sourced geometry, gear and APM notes; grew past 500 in the v1.5 fix-sprint merges. Pending decomposition (v1.6).
+crates/alas-pipeline/src/feasibility/mass_balance.rs	501	Mass and balance feasibility; grew past 500 in the v1.5 fix-sprint merges. Pending decomposition into modules with interfaces (v1.6).
+crates/alas-plausibility/src/case.rs	510	Extracts the rule inputs from a pipeline run; grew past 500 in the v1.5 fix-sprint merges. Pending decomposition into modules with interfaces (v1.6).
+crates/alas-prop/src/turboprop/types.rs	504	Turboprop model types; grew past 500 in the v1.5 fix-sprint merges. Pending decomposition into modules with interfaces (v1.6).
+crates/alas-report/src/families/propulsion/technology.rs	506	Propulsion technology report family; grew past 500 in the v1.5 fix-sprint merges. Pending decomposition into modules with interfaces (v1.6).

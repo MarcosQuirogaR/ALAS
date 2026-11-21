@@ -14,7 +14,7 @@
 //! mission quantity the search is minimising.
 
 use alas_config::design_variables::DesignVector;
-use alas_config::{AlasConfig, TailSizing};
+use alas_config::{AlasConfig, DesignPayloadSource, TailSizing};
 use alas_geom::aircraft::airplane::Airplane;
 use alas_geom::builder::{AircraftBuilder, BuildError};
 use alas_geom::loft::LoftError;
@@ -59,9 +59,7 @@ pub(crate) use alas_mass::wing_reconciliation::StructuralInventory;
 
 /// Failure with the `geometry_build` reason, for every early exit below.
 fn geometry_build_failure() -> CandidateFailure {
-    CandidateFailure {
-        reason: "geometry_build",
-    }
+    CandidateFailure::new("geometry_build")
 }
 
 /// Build the candidate's geometry and payload-recomputed configuration.
@@ -87,6 +85,13 @@ pub(crate) fn build_geometry_with_fuselage_policy(
     preserve_explicit_fuselage_length: bool,
 ) -> Result<(AlasConfig, DesignVector, Airplane), CandidateFailure> {
     let _profile = alas_math::stage_profile::scope(alas_math::stage_profile::Stage::Geometry);
+    // A redesigned registered aircraft is built with its wing where it
+    // balances (`wing_position`).
+    if let Some(balanced) =
+        super::wing_position::balanced(config, x, preserve_explicit_fuselage_length)?
+    {
+        return Ok(balanced);
+    }
     let (mut candidate_config, mut dv, tail_sizing) =
         resolve_before_build(config, x, preserve_explicit_fuselage_length)?;
     let plane = rebuild_airplane(&mut candidate_config, &mut dv, &tail_sizing)?;
@@ -126,6 +131,7 @@ pub(crate) fn rebuild_airplane(
     sizing: &TailSizing,
 ) -> Result<Airplane, CandidateFailure> {
     sizing.apply_to(&mut config.geometry.empennage, dv);
+    sizing.apply_wing_to(&mut config.geometry.wing, dv);
     let builder = AircraftBuilder::new(Some(config.geometry.clone()));
     // The nacelles are part of the candidate, not a reporting embellishment:
     // `alas_mass::stations` places the propulsion group at the nacelle
@@ -134,9 +140,10 @@ pub(crate) fn rebuild_airplane(
     // entry per drawn body. Building the search's aircraft without them made
     // the optimizer balance and trim a different aircraft from the one
     // `alas-pipeline`'s finalist report builds with `include_engines = true`.
-    let plane = builder
+    let mut plane = builder
         .build(Some(dv), true)
         .map_err(|_| geometry_build_failure())?;
+    alas_aero::analysis::apply_tail_efficiency(&mut plane, config);
     if plane.s_ref <= 0.0 || plane.c_ref <= 0.0 {
         return Err(geometry_build_failure());
     }
@@ -152,6 +159,15 @@ pub(crate) fn rebuild_airplane(
 /// returned [`DesignVector`] rebuilds the same geometry.  Cargo layouts keep
 /// their explicit hold sizing and do not use the passenger cabin relation.
 pub(crate) fn size_fuselage_from_cabin(
+    config: &AlasConfig,
+    design: &mut DesignVector,
+) -> Result<(), CandidateFailure> {
+    cabin_memo::solve_or_recall(config, design, solve_fuselage_from_cabin)
+}
+
+/// The uncached solve behind [`size_fuselage_from_cabin`]: a pure function of
+/// `config` and `design`, which it changes in `fuselage_length_m` only.
+pub(super) fn solve_fuselage_from_cabin(
     config: &AlasConfig,
     design: &mut DesignVector,
 ) -> Result<(), CandidateFailure> {
@@ -183,10 +199,8 @@ pub(crate) fn size_fuselage_from_cabin(
             Err(BuildError::LoftBuild(LoftError::LengthTooShort { .. })) => return Ok(-1),
             Err(_) => return Err(geometry_build_failure()),
         };
-        let layout =
-            build_payload_layout(&plane, config, 0.0, 0.0).map_err(|_| CandidateFailure {
-                reason: "payload_layout",
-            })?;
+        let layout = build_payload_layout(&plane, config, 0.0, 0.0)
+            .map_err(|_| CandidateFailure::new("payload_layout"))?;
         match layout.summary {
             // Size against the seats the detailed row packer actually lays
             // out.  `max_certifiable_capacity` is a useful regulatory cap,
@@ -295,6 +309,8 @@ pub(crate) fn first_mass_pass(
         total_mass: payload_layout.total_mass,
         cg_x: payload_layout.cg_x,
         cg_y: payload_layout.cg_y,
+        equipment_mass: payload_layout.equipment_mass(),
+        equipment_cg: payload_layout.equipment_cg(),
     };
     let capacity = match &payload_layout.summary {
         LayoutSummary::Passenger(passenger) => PayloadCapacity {
@@ -326,13 +342,44 @@ pub(crate) fn first_mass_pass(
     ))
 }
 
+/// The payload a `payload_adjusted` mission flown on its charted range caps
+/// the configured load case at, kg: the payload the chart pairs with that
+/// range (`DesignPayloadSource::ConfiguredWithinChart`). `None` for every
+/// other plan.
+pub(crate) fn chart_payload_cap_kg(config: &AlasConfig) -> Option<f64> {
+    let mission = config.mtow_plan().design_mission?;
+    match mission.payload_source {
+        DesignPayloadSource::ConfiguredWithinChart => mission.payload_kg,
+        _ => None,
+    }
+}
+
+/// The payload layout the closure, the balance and the loading ledgers fly:
+/// [`structurally_capped_payload_layout`], then, when the plan caps the
+/// configured load case at the charted payload ([`chart_payload_cap_kg`]),
+/// reduced to it the same way ([`super::route_payload_cap`]: every item
+/// scaled, the payload centre of gravity kept), so the dispatch, the balance
+/// and the loading envelope carry one payload.
+pub(crate) fn capped_payload_layout(
+    config: &AlasConfig,
+    dv: &DesignVector,
+    plane: &Airplane,
+    oew_kg: f64,
+    x_oew_m: f64,
+) -> Result<PayloadLayout, CandidateFailure> {
+    let layout = structurally_capped_payload_layout(config, dv, plane, oew_kg, x_oew_m)?;
+    let (layout, _chart_offloaded_kg) =
+        super::route_payload_cap::cap_route_payload(layout, chart_payload_cap_kg(config), 0.0);
+    Ok(layout)
+}
+
 /// The payload layout of `config` against the empty mass `oew_kg` at
 /// `x_oew_m`, bounded the way the report bounds it: a registered design may
 /// not carry more than its published maximum zero-fuel mass less the modeled
 /// empty mass, so the layout limits its freight by that and the seated payload
 /// is offloaded to it ([`super::route_payload_cap`], applied by the report in
 /// `payload_pass`).
-pub(crate) fn capped_payload_layout(
+pub(crate) fn structurally_capped_payload_layout(
     config: &AlasConfig,
     dv: &DesignVector,
     plane: &Airplane,
@@ -353,9 +400,7 @@ pub(crate) fn capped_payload_layout(
     )
     .map_err(|error| {
         tracing::warn!(%error, "payload layout failed; candidate rejected");
-        CandidateFailure {
-            reason: "payload_layout",
-        }
+        CandidateFailure::new("payload_layout")
     })?;
     let (layout, _offloaded_kg) = super::route_payload_cap::cap_route_payload(
         layout,
@@ -397,6 +442,8 @@ pub(crate) fn seated_payload_pass(
             total_mass: layout.total_mass,
             cg_x: layout.cg_x,
             cg_y: layout.cg_y,
+            equipment_mass: layout.equipment_mass(),
+            equipment_cg: layout.equipment_cg(),
         };
         if let Some((settled_summary, settled, analysis)) = previous.take() {
             if settled_summary == summary {
@@ -425,9 +472,7 @@ pub(crate) fn seated_payload_pass(
     }
     previous
         .map(|(_, layout, analysis)| (layout, analysis))
-        .ok_or(CandidateFailure {
-            reason: "payload_layout",
-        })
+        .ok_or(CandidateFailure::new("payload_layout"))
 }
 
 type FirstMassPassOutput = (
@@ -439,6 +484,7 @@ type FirstMassPassOutput = (
     StructuralReference,
 );
 
+mod cabin_memo;
 mod structural;
 pub(crate) use structural::mass_analysis_with_structural_feedback;
 

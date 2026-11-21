@@ -36,6 +36,10 @@ const EMBEDDED: &[(&str, &str)] = &[
         include_str!("../../../data/lofts/a340_300.json"),
     ),
     (
+        "a350_900",
+        include_str!("../../../data/lofts/a350_900.json"),
+    ),
+    (
         "a380_800",
         include_str!("../../../data/lofts/a380_800.json"),
     ),
@@ -50,9 +54,11 @@ const EMBEDDED: &[(&str, &str)] = &[
         include_str!("../../../data/lofts/b747_400.json"),
     ),
     ("b787_9", include_str!("../../../data/lofts/b787_9.json")),
+    ("c295", include_str!("../../../data/lofts/c295.json")),
     ("c919", include_str!("../../../data/lofts/c919.json")),
     ("dc_10", include_str!("../../../data/lofts/dc_10.json")),
     ("e195_e2", include_str!("../../../data/lofts/e195_e2.json")),
+    ("lj60", include_str!("../../../data/lofts/lj60.json")),
 ];
 
 /// `(preset name, loft id)`: the loft a preset's fuselage references. Every
@@ -61,15 +67,18 @@ const PRESET_LOFTS: &[(&str, &str)] = &[
     ("A220-300", "a220_300"),
     ("A320-200", "a320_200"),
     ("A340-300", "a340_300"),
+    ("A350-900", "a350_900"),
     ("A380-800", "a380_800"),
     ("A400M", "a400m"),
     ("ATR72-600", "atr72_600"),
     ("AVE", "ave"),
     ("B747-400", "b747_400"),
     ("B787-9", "b787_9"),
+    ("C295", "c295"),
     ("C919", "c919"),
     ("DC-10", "dc_10"),
     ("E195-E2", "e195_e2"),
+    ("LJ60", "lj60"),
 ];
 
 /// Hand-made fixtures that exist only to exercise the builder path end to end:
@@ -225,26 +234,23 @@ mod tests {
     }
 
     #[test]
-    fn the_registry_lists_all_twelve_presets() {
+    fn the_registry_lists_all_registered_lofts() {
+        // Every registered preset references one embedded loft, and the
+        // embedded set is exactly those: derived from the preset registry so
+        // a newly registered aircraft cannot go stale here.
         let mut ids = embedded_loft_ids();
         ids.sort_unstable();
+        let mut referenced: Vec<&str> = crate::presets::available()
+            .into_iter()
+            .map(|preset| {
+                preset_loft_id(preset)
+                    .unwrap_or_else(|| panic!("{preset} references no embedded loft"))
+            })
+            .collect();
+        referenced.sort_unstable();
         assert_eq!(
-            ids,
-            [
-                "a220_300",
-                "a320_200",
-                "a340_300",
-                "a380_800",
-                "a400m",
-                "atr72_600",
-                "ave",
-                "b747_400",
-                "b787_9",
-                "c919",
-                "dc_10",
-                "e195_e2"
-            ],
-            "all twelve registered presets (waves 1 and 2, integration step A)"
+            ids, referenced,
+            "the embedded lofts are the registered presets' lofts"
         );
         assert_eq!(preset_loft_id("A340-300"), Some("a340_300"));
         assert!(embedded_loft("a340_300").is_some());

@@ -22,9 +22,12 @@
 //! (no flap induced-drag model beyond the configured increments): a recorded
 //! limitation.
 //!
-//! CS 25.115 (net flight path, 0.8/0.9/1.0 percent) is a take-off
-//! obstacle-clearance reduction, weaker than the 25.121(b) gradient, so it is
-//! reported as a Diagnostic margin only (no obstacle model).
+//! CS 25.115 (net flight path, 0.8/0.9/1.0 percent) reduces the gross take-off
+//! gradient; the reduction is smaller than the 25.121(b) gradient, so a
+//! positive net gradient is implied by the second segment. The margin row is
+//! kept as a guard at zero, not as a modelled requirement. Clearing the
+//! obstacles of the departure aerodrome by 35 ft (CAT.POL.A.210) is the
+//! `net_path` module's check, from the aerodrome's obstacle survey.
 
 use alas_atmo::us1976_compute_values;
 use alas_config::airports::Airport;
@@ -130,6 +133,26 @@ fn speed_at_cl(mass_kg: f64, gravity_m_s2: f64, rho: f64, s_ref_m2: f64, cl: f64
     (2.0 * mass_kg * gravity_m_s2 / (rho * s_ref_m2 * cl)).sqrt()
 }
 
+/// Net gradient of the final take-off segment the installed thrust delivers
+/// (CS 25.121(c) basis, reduced by the CS 25.115(b) decrement), `None` when
+/// the check cannot be evaluated.
+pub(super) fn final_segment_net_gradient(
+    inputs: &CertificationInputs<'_>,
+    available_tw: f64,
+) -> Option<f64> {
+    let n_engines = inputs.engine_out.n_engines() as i64;
+    let ClimbOutcome::Evaluated(check) = final_segment(inputs, n_engines) else {
+        return None;
+    };
+    net_path_gradient_margin(
+        n_engines,
+        check.gradient,
+        check.required_sls_tw * check.thrust_ratio,
+        available_tw,
+        check.thrust_ratio,
+    )
+}
+
 fn final_segment(inputs: &CertificationInputs<'_>, n_engines: i64) -> ClimbOutcome {
     let Some(departure) = inputs.departure else {
         return gap("departure aerodrome unresolved; final segment not scored");
@@ -149,10 +172,10 @@ fn final_segment(inputs: &CertificationInputs<'_>, n_engines: i64) -> ClimbOutco
         cl,
     );
     let mach = speed / atmosphere.speed_of_sound_m_s;
-    let clean =
-        inputs
-            .drag
-            .cd_airport_base_at_atmosphere(cl, mach, altitude_m, departure.isa_deviation_c);
+    let clean = inputs
+        .drag
+        // The final take-off segment is flown clean.
+        .cd_airport_base_at_atmosphere(cl, mach, altitude_m, departure.isa_deviation_c, 0.0);
     let cd0 = inputs
         .drag
         .cd_at_atmosphere(0.0, mach, altitude_m, departure.isa_deviation_c);
@@ -188,13 +211,41 @@ fn final_segment(inputs: &CertificationInputs<'_>, n_engines: i64) -> ClimbOutco
 /// recovered speed records) therefore climbs out at take-off flaps; a type
 /// whose landing flap adds much more lift (every jet in the registry) stays in
 /// the landing configuration, which is the previous behaviour.
-fn approach_configuration(perf: &alas_config::PerformanceConfig) -> (f64, f64) {
+fn approach_configuration(
+    perf: &alas_config::PerformanceConfig,
+    landing_deflection_deg: f64,
+) -> (f64, f64) {
     let landing = (perf.cl_max_land, perf.landing_flap_delta_cd);
     let takeoff = (perf.cl_max_to, perf.oei_climb_delta_cd);
     let qualifies = takeoff.0.is_finite()
         && takeoff.0 > 0.0
         && takeoff.1.is_finite()
         && takeoff.0 * APPROACH_CONFIG_MAX_VSR_OVER_LANDING.powi(2) >= perf.cl_max_land;
+    // The clause admits any flap setting whose VSR is at most 1.10 VSR0, so the
+    // go-around is flown at the lowest setting that qualifies, not at full landing
+    // flap: its drag is the landing increment scaled by Raymer Eq. 12.61 at that
+    // setting (`approach_flap_drag_ratio`); by construction its CLmax is
+    // `CLmax_land / 1.10^2`.
+    let intermediate = alas_config::presets::approach_flap_drag_ratio(
+        perf.cl_max_clean,
+        perf.cl_max_le_increment,
+        perf.cl_max_land,
+        APPROACH_CONFIG_MAX_VSR_OVER_LANDING,
+        landing_deflection_deg,
+    )
+    .map(|ratio| {
+        (
+            perf.cl_max_land / APPROACH_CONFIG_MAX_VSR_OVER_LANDING.powi(2),
+            ratio * perf.landing_flap_delta_cd,
+        )
+    });
+    let landing = intermediate.map_or(landing, |approach| {
+        if approach.1 < landing.1 {
+            approach
+        } else {
+            landing
+        }
+    });
     if qualifies && takeoff.1 <= landing.1 {
         takeoff
     } else {
@@ -208,7 +259,12 @@ fn approach_climb(inputs: &CertificationInputs<'_>, n_engines: i64) -> ClimbOutc
     };
     let perf = &inputs.config.performance;
     let g = inputs.config.requirements.gravity_m_s2;
-    let (cl_max_approach, flap_delta_cd) = approach_configuration(perf);
+    let landing_deflection_deg = perf
+        .landing_flap_deflection_deg
+        .unwrap_or(alas_config::presets::DEFAULT_LANDING_FLAP_DEG);
+    let (cl_max_approach, flap_delta_cd) = approach_configuration(perf, landing_deflection_deg);
+    let flap_lift_cl =
+        crate::mdo::drag_table::high_lift_lift_shift(cl_max_approach, perf.cl_max_clean);
     let Some(cl) = cl_at_speed_ratio(cl_max_approach, APPROACH_CLIMB_MAX_OVER_VSR) else {
         return gap("approach-configuration CLmax is invalid");
     };
@@ -226,6 +282,7 @@ fn approach_climb(inputs: &CertificationInputs<'_>, n_engines: i64) -> ClimbOutc
         mach,
         arrival.elevation_m,
         arrival.isa_deviation_c,
+        flap_lift_cl,
     );
     let cd0 = inputs
         .drag
@@ -323,6 +380,7 @@ fn landing_climb(inputs: &CertificationInputs<'_>, n_engines: i64) -> ClimbOutco
         mach,
         arrival.elevation_m,
         arrival.isa_deviation_c,
+        crate::mdo::drag_table::high_lift_lift_shift(perf.cl_max_land, perf.cl_max_clean),
     );
     let thrust = inputs.engine_out.thrust(
         EngineOutCondition {
@@ -373,8 +431,9 @@ fn landing_climb(inputs: &CertificationInputs<'_>, n_engines: i64) -> ClimbOutco
 /// `required_gradient` and `required_inflight_tw` are the 25.121(b) gradient
 /// and the in-flight engine-equivalent thrust-to-weight that holds it;
 /// `available_sls_tw` the installed static thrust over weight and
-/// `thrust_ratio` the V2 thrust over static thrust. A Diagnostic only:
-/// without an obstacle model this is not a constraint.
+/// `thrust_ratio` the V2 thrust over static thrust. The residual built from it
+/// is a guard at zero (implied by the 25.121(b) second segment); obstacle
+/// clearance is the `net_path` module's check.
 pub fn net_path_gradient_margin(
     n_engines: i64,
     required_gradient: f64,
@@ -401,8 +460,9 @@ pub fn net_path_gradient_margin(
 }
 
 /// Optimizer residuals for the three climb checks: a thrust-requirement
-/// residual per evaluated check, a Diagnostic evidence-gap flag per check
-/// that could not be evaluated.
+/// residual per evaluated check, and a failed-check flag (at `role`) per
+/// check that could not be evaluated: a climb that cannot be demonstrated is
+/// not compliant.
 pub(super) fn certification_residuals(
     inputs: &CertificationInputs<'_>,
     available_tw: f64,
@@ -446,7 +506,7 @@ pub(super) fn certification_residuals(
                 "bool",
                 1.0,
                 1.0,
-                ResidualRole::Diagnostic,
+                role,
             )],
         })
         .collect()

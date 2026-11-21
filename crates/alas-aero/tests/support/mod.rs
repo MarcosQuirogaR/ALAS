@@ -23,11 +23,13 @@ pub mod vorlax;
 use std::collections::HashMap;
 
 use alas_aero::analysis::AeroAnalysis;
+use alas_atmo::Atmosphere;
 use alas_config::analysis::AnalysisConfig;
 use alas_config::geometry::GeometryConfig;
 use alas_config::physics::DragModelConfig;
 use alas_geom::asb::airplane::Airplane;
 use alas_geom::builder::AircraftBuilder;
+use alas_testkit::reference_ambient::reference_ambient;
 use serde::Deserialize;
 
 #[derive(Debug, Deserialize)]
@@ -244,12 +246,12 @@ pub fn reference_mesh() -> AnalysisConfig {
 }
 
 /// The frozen Python drag-model defaults: viscous margin 1.10 and no
-/// lift-dependent viscous term. The product defaults moved to the fitted
-/// margin with the lift-dependent fraction on (`DEFAULT_VISCOUS_MARGIN`);
+/// lift-dependent viscous term. The product default is the sourced leakage
+/// and protuberance allowance of the propulsion class (`DEFAULT_VISCOUS_MARGIN`);
 /// the generator's `_aero` still runs the frozen convention.
 pub fn frozen_drag_model() -> DragModelConfig {
     DragModelConfig {
-        viscous_margin: 1.10,
+        viscous_margin: Some(1.10),
         lift_dependent_viscous_fraction: 0.0,
         ..DragModelConfig::default()
     }
@@ -276,4 +278,57 @@ pub fn names<T>(cases: &HashMap<String, T>) -> Vec<&String> {
     let mut names: Vec<&String> = cases.keys().collect();
     names.sort();
     names
+}
+
+/// The altitude at which the product's atmosphere has the static pressure
+/// `pressure_pa`, by bisection on the monotone pressure of the standard
+/// atmosphere (m, geopotential, between -1 km and 20 km).
+fn altitude_of_pressure(pressure_pa: f64) -> f64 {
+    let (mut low, mut high) = (-1000.0_f64, 20_000.0_f64);
+    for _ in 0..200 {
+        let middle = 0.5 * (low + high);
+        if Atmosphere::new(middle).pressure() > pressure_pa {
+            low = middle;
+        } else {
+            high = middle;
+        }
+    }
+    0.5 * (low + high)
+}
+
+/// An atmosphere that gives the empirical buildup the Reynolds number the
+/// reference's fitted atmosphere gave it at `altitude_m`.
+///
+/// The fixtures were generated with the reference's fitted atmosphere, which
+/// differs from the U.S. Standard Atmosphere, 1976 the product evaluates by up
+/// to 1.9 % in temperature and 1.7 % in density near 11 km. The buildup reads
+/// the ambient state only through `Re / (M l) = rho a / mu`, so that is the
+/// quantity to restore. The reference's state at the altitude is read from
+/// `golden/atmo/differentiable.json`. The product's standard-day state is
+/// moved through an explicit state, a pressure level and a temperature
+/// deviation: the temperature is the reference's (so the viscosity is, by
+/// Sutherland's law, which both evaluate with the same constants), and the
+/// pressure level is the one at which `rho a = p sqrt(gamma / (R T))`, with
+/// the product's gas constant, equals the reference's. The product's gas
+/// constant (287.0528742 J/(kg K)) differs from the reference's (287.0530720)
+/// by 6.9e-7, so the pressure of the level is lower than the reference's by
+/// 3.4e-7 relative; matching the pressure instead would leave a 3.4e-7
+/// difference in the Reynolds number, which is outside `Tier::Closed`.
+pub fn reference_reynolds_atmosphere(altitude_m: f64) -> Atmosphere {
+    let reference = reference_ambient(altitude_m);
+    let level = Atmosphere::new(altitude_m);
+    let gas_constant = alas_atmo::GAS_CONSTANT_AIR;
+    let gamma = level.ratio_of_specific_heats();
+    let density_speed = reference.density_kg_m3 * reference.speed_of_sound_m_s;
+    let pressure = density_speed / (gamma / (gas_constant * reference.temperature_k)).sqrt();
+    let level = Atmosphere::new(altitude_of_pressure(pressure));
+    let atmosphere =
+        level.with_temperature_deviation(reference.temperature_k - level.temperature());
+    let got = atmosphere.density() * atmosphere.speed_of_sound() / atmosphere.dynamic_viscosity();
+    let want = density_speed / reference.dynamic_viscosity_pa_s;
+    assert!(
+        (got / want - 1.0).abs() < 1e-12,
+        "rho a / mu at {altitude_m} m: {got} against the recorded {want}"
+    );
+    atmosphere
 }

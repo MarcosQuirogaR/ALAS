@@ -53,7 +53,7 @@ pub(crate) struct NominalCache<T> {
     resolutions: KeyMap<usize>,
 }
 
-impl<T: Copy> NominalCache<T> {
+impl<T: Clone> NominalCache<T> {
     pub(crate) const fn new() -> Self {
         Self {
             cells: OnceLock::new(),
@@ -87,7 +87,7 @@ impl<T: Copy> NominalCache<T> {
                 .entry(key.clone())
                 .or_default(),
         );
-        *cell.get_or_init(|| {
+        cell.get_or_init(|| {
             alas_math::stage_profile::count(
                 alas_math::stage_profile::Counter::NominalResolutions,
                 1,
@@ -104,6 +104,7 @@ impl<T: Copy> NominalCache<T> {
             }
             resolve(config)
         })
+        .clone()
     }
 
     /// How many times the value of `config` was resolved.

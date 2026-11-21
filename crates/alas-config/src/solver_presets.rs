@@ -108,45 +108,46 @@ fn build() -> Vec<SolverPreset> {
         SolverPreset {
             name: "quick_draft",
             display_name: "Quick Draft",
-            description: "Fast, rough pass: 15 s of screening and at most 60 s of refinement. \
-                          Good for iterating on requirements/geometry before committing to a \
-                          full run.",
+            description: "Fast, rough pass: 256 exploration candidates and 100 refinement \
+                          analyses, about half the time of the balanced plan. Good for \
+                          iterating on requirements/geometry before committing to a full run.",
             settings: SolverSettings {
-                screening: stage(10_000, 15.0),
-                refinement: stage(10_000, 60.0),
-                ..SolverSettings::interactive()
+                screening: stage(256, 15.0),
+                refinement: stage(100, 60.0),
+                ..SolverSettings::default()
             },
         },
         SolverPreset {
             name: "balanced",
             display_name: "Balanced (Recommended)",
-            description: "The default tradeoff: 30 s of screening and at most 2 min of \
-                          refinement.",
-            // The wall-clock-limited default the desktop application starts from, so
-            // the recommended preset and an unconfigured interactive run are one run.
-            settings: SolverSettings::interactive(),
+            description: "The default plan: 384 exploration candidates and 120 refinement \
+                          analyses, sized for at most five minutes on a 16-thread desktop.",
+            // The reproducible default every front end starts from, so the
+            // recommended preset and an unconfigured run are one run.
+            settings: SolverSettings::default(),
         },
         SolverPreset {
             name: "thorough",
             display_name: "Thorough",
-            description: "A larger refinement budget, at most 4 min, for a closer local \
-                          optimum on a final design.",
+            description: "A larger plan, 1024 exploration candidates and 168 refinement \
+                          analyses, about twice the time of the balanced plan, for a closer \
+                          local optimum on a final design.",
             settings: SolverSettings {
-                screening: stage(30_000, 60.0),
-                refinement: stage(30_000, 240.0),
-                ..SolverSettings::interactive()
+                screening: stage(1_024, 60.0),
+                refinement: stage(168, 240.0),
+                ..SolverSettings::default()
             },
         },
         SolverPreset {
             name: "exhaustive",
             display_name: "Exhaustive",
-            description: "The largest budgets the stages accept: 2 min of screening and 5 min \
-                          of refinement. Slowest option; use for a final high-confidence \
-                          optimization.",
+            description: "The largest plan: 2048 exploration candidates and 248 refinement \
+                          analyses, about four times the time of the balanced plan. Slowest \
+                          option; use for a final high-confidence optimization.",
             settings: SolverSettings {
-                screening: stage(40_000, 120.0),
-                refinement: stage(40_000, crate::optimizer::MAXIMUM_STAGE_TIME_LIMIT_S),
-                ..SolverSettings::interactive()
+                screening: stage(2_048, 120.0),
+                refinement: stage(248, crate::optimizer::MAXIMUM_STAGE_TIME_LIMIT_S),
+                ..SolverSettings::default()
             },
         },
     ]
@@ -183,11 +184,18 @@ mod tests {
     }
 
     #[test]
-    fn the_recommended_preset_is_what_an_unconfigured_interactive_run_does() {
-        assert_eq!(
-            get("balanced").unwrap().settings,
-            SolverSettings::interactive()
-        );
+    fn the_recommended_preset_is_what_an_unconfigured_run_does() {
+        assert_eq!(get("balanced").unwrap().settings, SolverSettings::default());
+        // Every preset is a seeded candidate plan: none stops on a clock.
+        for preset in registry() {
+            assert!(preset.settings.stop_on_evaluations_only, "{}", preset.name);
+            assert_eq!(
+                preset.settings.seed,
+                SolverSettings::default().seed,
+                "{}",
+                preset.name
+            );
+        }
     }
 
     #[test]

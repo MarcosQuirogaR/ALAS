@@ -141,16 +141,28 @@ fn vlm_reference_sweep(
     let mut analysis = config.analysis.clone();
     analysis.spanwise_resolution = analysis.fine_spanwise_resolution;
     analysis.chordwise_resolution = analysis.fine_chordwise_resolution;
-    let vlm_polar = AeroAnalysis::new(
+    // The reference follows the product basis: the stretched lattice when the
+    // compressible lattice is on. The frozen compatibility basis (report
+    // polar not compressible) keeps the relabelled sweep.
+    let aero = AeroAnalysis::new(
         &report.airplane,
         quarter_chord_sweep_deg(report),
         Some(config.geometry.clone()),
-        Some(config.drag_model.clone()),
-        Some(analysis),
+        Some(config.resolved_drag_model()),
+        Some(analysis.clone()),
+    );
+    crate::full_analysis::run_polar(
+        &aero,
+        &report.airplane,
+        &analysis,
+        mach,
+        altitude_m,
+        // The report's basis, not the flag alone: a reference-compatibility
+        // report carries the relabelled polar and is compared on it.
+        analysis.compressible_trim && report.polar.compressible_mach.is_some(),
+        None,
     )
-    .run_sweep(mach, altitude_m)
-    .map_err(|error| format!("{label}-condition ALAS VLM sweep failed: {error}"))?;
-    Ok(vlm_polar)
+    .map_err(|error| format!("{label}-condition ALAS VLM sweep failed: {error}"))
 }
 
 pub(super) fn takeoff_comparison_reference(
@@ -179,15 +191,13 @@ pub(super) fn linear_cruise_comparison_reference(
 ) -> Result<AvlComparisonReference, String> {
     let (mach, altitude_m, phase) = cruise_condition(report, config);
     let vlm_polar = vlm_reference_sweep(report, config, mach, altitude_m, "cruise")?;
-    // At cruise Mach the VLM lift `cl[k]` is the incompressible value at the
-    // geometric angle, reported at the compressibility-corrected angle
-    // `alpha_deg[k]` (`compressible_report_alpha`). AVL applies its own
-    // Prandtl-Glauert correction at the physical angle it is given, so it is
-    // run at the reporting axis: the pair `(alpha_deg[k], cl[k])` and AVL at
-    // `alpha_deg[k]` are the same physical state. At the geometric angles the
-    // two differ by about 1/beta (A320 at Mach 0.76: CL 0.45 against 0.29 at
-    // zero angle). The take-off comparison keeps the geometric axis, where
-    // beta is within 3 percent of 1.
+    // With the compressible lattice on, `alpha_deg[k]` is the true geometric
+    // angle and `cl[k]` the stretched-lattice lift at it; AVL applies its own
+    // Prandtl-Glauert correction at the angle it is given, so the pair and AVL
+    // are the same physical state. With the lattice off, the polar carries the
+    // relabelled reporting angle for the incompressible lift and AVL is run on
+    // that axis (A320 at Mach 0.76: CL 0.45 against 0.29 at zero angle on the
+    // geometric one). The take-off comparison keeps the geometric axis.
     let geometric_alpha_deg = vlm_polar.alpha_deg.clone();
     Ok(AvlComparisonReference {
         phase: phase.to_owned(),

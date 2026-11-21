@@ -95,6 +95,8 @@ use crate::cancellation::{CancelPhase, CancelScope};
 mod evaluation;
 #[path = "lshade_de_ops.rs"]
 mod ops;
+#[path = "lshade_de_types.rs"]
+mod types;
 pub(super) use evaluation::{evaluate, track_winner};
 use evaluation::{feasible_fraction, prefix_termination, record, tally};
 use ops::{
@@ -102,6 +104,7 @@ use ops::{
     linear_reduced_size, normalized_spread, push_archive, reduce_population, relative_change,
     repair_midpoint, sample_cr, sample_f, selection_improvement, stagnation_stops, unevaluated,
 };
+pub(crate) use types::{Outcome, Settings, Termination};
 
 /// Default population floor. The L-SHADE paper uses four; eight preserves
 /// a wider late search for evaluator adapters with limited concurrency.
@@ -128,99 +131,6 @@ const EPSILON_CONTROL_FRACTION: f64 = 0.2;
 /// not count as progress (engineering estimate: well below the 0.1 % a
 /// conceptual fuel comparison can resolve, above round-off).
 pub(crate) const IMPROVEMENT_TOLERANCE: f64 = 1.0e-4;
-
-/// Resolved settings for one refinement run.
-#[derive(Debug, Clone, Copy, PartialEq)]
-pub(crate) struct Settings {
-    /// Hard evaluation ceiling after reserving reporting work.
-    pub(crate) max_evaluations: usize,
-    /// Estimated affordable evaluations for population and epsilon schedules.
-    pub(crate) schedule_evaluations: usize,
-    /// Evaluations after which the run stops; `max_evaluations` unless a
-    /// time-limited run is being replayed.
-    pub(crate) stop_after: usize,
-    /// Initial population `N_init`.
-    pub(crate) population: usize,
-    /// Floor of linear population reduction, capped by the initial size.
-    pub(crate) minimum_population: usize,
-    /// Whole-batch quantum of the population schedule: the reduced size is
-    /// rounded to a multiple of it (never below the floor), so every
-    /// generation dispatches whole evaluator waves. `1` keeps the plain
-    /// linear schedule.
-    pub(crate) population_quantum: usize,
-    pub(crate) seed: u64,
-    /// Success-history adaptation of `F` and `CR` instead of the static pair.
-    pub(crate) adaptation: bool,
-    /// Normalized design-space spread below which a stagnated population
-    /// counts as converged.
-    pub(crate) spread_tolerance: f64,
-    /// Generations without an improvement above [`IMPROVEMENT_TOLERANCE`]
-    /// before the run stops as stagnated or converged; the effective window
-    /// and the budget share spent first are [`ops::stagnation_stops`].
-    pub(crate) stagnation_generations: usize,
-    /// Wall-clock limit of the generation guard; a deadline-aware evaluator
-    /// also checks between individual candidate dispatches.
-    pub(crate) time_limit: Option<Duration>,
-    /// The evaluator stops its queue at the deadline, so the generation
-    /// guard need not reserve an entire last batch's projected wall time.
-    pub(crate) intra_batch_deadline: bool,
-    /// Evaluations kept back for feasibility restoration while no feasible
-    /// design has been found.
-    pub(crate) infeasible_reserve: usize,
-    /// Pre-gate rejections after which no further generation starts.
-    pub(crate) max_rejects: usize,
-}
-
-/// Why the run stopped.
-#[derive(Debug, Clone, Copy, PartialEq, Eq)]
-pub(crate) enum Termination {
-    /// Stagnated with the population collapsed below the spread tolerance.
-    Converged,
-    /// The feasible best stopped improving; the population is still spread.
-    Stagnated,
-    EvaluationBudget,
-    TimeBudget,
-    /// The design-vector pre-gate rejected as many candidates as the stage
-    /// allows.
-    PregateExhausted,
-    Cancelled,
-}
-
-impl Termination {
-    pub(crate) fn label(self) -> &'static str {
-        match self {
-            Self::Converged => "converged",
-            Self::Stagnated => "stagnated",
-            Self::EvaluationBudget => "evaluation_budget",
-            Self::TimeBudget => "time_budget",
-            Self::PregateExhausted => "pregate_exhausted",
-            Self::Cancelled => crate::differential_evolution::CANCELLED,
-        }
-    }
-}
-
-/// What one run measured about itself.
-#[derive(Debug, Clone)]
-pub(crate) struct Outcome {
-    pub(crate) winner: ScoredPoint,
-    /// The first initial member's score: the caller's baseline when it
-    /// passes one first.
-    pub(crate) first_scored: Option<ScoredPoint>,
-    pub(crate) termination: Termination,
-    pub(crate) generations_completed: usize,
-    /// Scores that passed the design-vector pre-gate, initial population
-    /// included: the count the budget bounds.
-    pub(crate) evaluations: usize,
-    /// Scores the pre-gate rejected ([`Tier::PreGateFailed`]).
-    pub(crate) rejected: usize,
-    pub(crate) population_initial: usize,
-    pub(crate) population_final: usize,
-    pub(crate) epsilon_final: f64,
-    /// Fraction of the final population that was strictly feasible.
-    pub(crate) feasible_fraction: f64,
-    /// Objective of the first feasible candidate, in evaluation order.
-    pub(crate) first_feasible_cost: Option<f64>,
-}
 
 /// Success-history memory, used only when adaptation is enabled.
 struct Memory {
@@ -293,6 +203,49 @@ pub(crate) fn run_with_admission(
     admits: Option<&super::Admission<'_>>,
     evaluate_batch: &mut EvaluateBatch<'_>,
 ) -> Outcome {
+    run_guided(
+        bounds,
+        seeds,
+        settings,
+        started,
+        scope,
+        admits,
+        None,
+        evaluate_batch,
+    )
+}
+
+/// [`run_with_admission`] with trial pre-selection: for every target the
+/// kernel builds [`super::Guidance::alternatives`] alternative trials from
+/// independent draws of the same operator and the guide names the one to
+/// analyse (its index), among the alternatives the admission check passes
+/// when any does. The selection and every reported score are
+/// unchanged: a guide only decides which trial is paid for (pre-selection
+/// by a surrogate: R. G. Regis, "Evolutionary Programming for
+/// High-Dimensional Constrained Expensive Black-Box Optimization Using
+/// Radial Basis Functions," IEEE Trans. Evol. Comput. 18(3), 2014, DOI
+/// 10.1109/TEVC.2013.2262111).
+///
+/// Local trials around the incumbent for the worst members (Regis and
+/// Shoemaker's dynamic coordinate search, Engineering Optimization 45(5),
+/// 2013) were measured beside this and dropped: at 384 exploration
+/// candidates they changed the refined gain from -1.14 to -1.12 % on the
+/// A320-200 and from -4.93 to -4.54 % on the LJ60.
+///
+/// The guide is called in target order from the seeded stream, so a guide
+/// that is a function of the scores so far keeps the run reproducible.
+// One argument per independent input of the kernel, as its callers pass them.
+#[allow(clippy::too_many_arguments)]
+pub(crate) fn run_guided(
+    bounds: &[(f64, f64)],
+    seeds: &[Vec<f64>],
+    settings: Settings,
+    started: Instant,
+    scope: &CancelScope<'_>,
+    admits: Option<&super::Admission<'_>>,
+    mut guide: Option<super::Guidance<'_, '_>>,
+    evaluate_batch: &mut EvaluateBatch<'_>,
+) -> Outcome {
     let budget = settings.max_evaluations.max(1);
     let schedule = settings.schedule_evaluations.max(1).min(budget);
     let stop_after = settings.stop_after.min(budget);
@@ -311,6 +264,8 @@ pub(crate) fn run_with_admission(
         feasible_fraction: 0.0,
         first_feasible_cost: None,
         rejected: 0,
+        best_by_generation: Vec::new(),
+        spread_final: 1.0,
     };
 
     scope.enter(CancelPhase::DeInitialPopulation, 0);
@@ -347,6 +302,9 @@ pub(crate) fn run_with_admission(
         return outcome;
     }
 
+    outcome
+        .best_by_generation
+        .push(outcome.winner.valid().then_some(outcome.winner.cost));
     let mut violations: Vec<f64> = scored
         .iter()
         .filter(|point| point.tier == Tier::ClosedInfeasible)
@@ -422,22 +380,47 @@ pub(crate) fn run_with_admission(
                 (STATIC_F, STATIC_CR)
             };
             parameters.push((f, cr));
-            let pbest = choose_pbest(&scored[..size], epsilon, P_BEST_FRACTION, &mut rng);
-            let r1 = choose_distinct(size, &[target], &mut rng);
-            let r2 = choose_from_union(size, archive.len(), &[target, r1], &mut rng);
-            let r2_vec = population.get(r2).unwrap_or_else(|| &archive[r2 - size]);
-            let base = &population[target];
-            let forced = active[rng.below(active.len())];
-            let mut trial = base.clone();
-            for j in 0..bounds.len() {
-                if j == forced || rng.unit() < cr {
-                    let value = base[j]
-                        + f * (population[pbest][j] - base[j])
-                        + f * (population[r1][j] - r2_vec[j]);
-                    trial[j] = repair_midpoint(value, base[j], bounds[j]);
+            let alternatives = guide
+                .as_ref()
+                .map_or(1, |guidance| guidance.alternatives.max(1));
+            let mut built = Vec::with_capacity(alternatives);
+            for _ in 0..alternatives {
+                let pbest = choose_pbest(&scored[..size], epsilon, P_BEST_FRACTION, &mut rng);
+                let r1 = choose_distinct(size, &[target], &mut rng);
+                let r2 = choose_from_union(size, archive.len(), &[target, r1], &mut rng);
+                let r2_vec = population.get(r2).unwrap_or_else(|| &archive[r2 - size]);
+                let base = &population[target];
+                let forced = active[rng.below(active.len())];
+                let mut trial = base.clone();
+                for j in 0..bounds.len() {
+                    if j == forced || rng.unit() < cr {
+                        let value = base[j]
+                            + f * (population[pbest][j] - base[j])
+                            + f * (population[r1][j] - r2_vec[j]);
+                        trial[j] = repair_midpoint(value, base[j], bounds[j]);
+                    }
                 }
+                built.push(trial);
             }
-            trials.push(trial);
+            let chosen = match guide.as_mut() {
+                Some(guidance) if built.len() > 1 => {
+                    // The guide ranks the alternatives the pre-gate admits
+                    // when there are any: a trial no analysis will see
+                    // costs its generation a lane.
+                    let admitted: Vec<usize> = admits.map_or_else(Vec::new, |admits| {
+                        (0..built.len()).filter(|&i| admits(&built[i])).collect()
+                    });
+                    if admitted.is_empty() || admitted.len() == built.len() {
+                        (guidance.choose)(&built).min(built.len() - 1)
+                    } else {
+                        let subset: Vec<Vec<f64>> =
+                            admitted.iter().map(|&i| built[i].clone()).collect();
+                        admitted[(guidance.choose)(&subset).min(subset.len() - 1)]
+                    }
+                }
+                _ => 0,
+            };
+            trials.push(built.swap_remove(chosen));
         }
 
         let trial_scores = evaluate(
@@ -456,6 +439,9 @@ pub(crate) fn run_with_admission(
             break;
         }
         outcome.generations_completed += 1;
+        outcome
+            .best_by_generation
+            .push(outcome.winner.valid().then_some(outcome.winner.cost));
 
         let mut successes = Vec::new();
         for (target, trial) in trial_scores.into_iter().enumerate() {
@@ -517,6 +503,10 @@ pub(crate) fn run_with_admission(
     }
 
     outcome.population_final = size.min(scored.len());
+    outcome.spread_final = normalized_spread(
+        &population[..outcome.population_final.min(population.len())],
+        bounds,
+    );
     let live = &scored[..outcome.population_final];
     outcome.feasible_fraction = feasible_fraction(live);
     outcome

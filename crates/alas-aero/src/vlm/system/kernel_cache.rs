@@ -71,7 +71,7 @@ pub(super) fn build_kernel_cache(
             if let Some(columns) = &columns {
                 evaluate_row(
                     point,
-                    field_panel.wing_index,
+                    field_panel.core_component,
                     columns,
                     (4.0 * std::f64::consts::PI, 1.0),
                     scratch,
@@ -92,7 +92,7 @@ pub(super) fn build_kernel_cache(
                     source_panel.left_vortex_vertex,
                     source_panel.right_vortex_vertex,
                     (4.0 * std::f64::consts::PI, 1.0),
-                    inter_surface_core(field_panel.wing_index, source_panel),
+                    inter_surface_core(field_panel.core_component, source_panel),
                 );
             }
         };
@@ -140,27 +140,54 @@ pub(super) fn velocity_at_points(
     let n = panels.len();
     let far_field = |i: usize| add3(steady_freestream_velocity, rotation_velocities[i]);
     if let Some(kernel) = kernel {
-        // One exact division per source, rather than the same division at
-        // every field point. The cached and direct kernels retain their
-        // operation order.
+        return induced_from_kernel(kernel, n, vortex_strengths)
+            .iter()
+            .enumerate()
+            .map(|(i, &sum)| add3(sum, far_field(i)))
+            .collect();
+    }
+    // No cache (a system's first solve, or a lattice above the cache limit):
+    // stream each row of the same bracket the cache stores through the row
+    // kernel and sum it at once, so the fast path serves this evaluation too
+    // and no n^2 table is held. Each point's sum is the cached path's sum
+    // (the same bracket times the same `gamma / (4 pi)`, added in panel
+    // order), which the cache's own doc shows is the direct kernel's value.
+    if let Some(columns) = super::fast_kernel::all_columns(panels, crate::vlm::speed::fast_kernel())
+    {
         let constants: Vec<f64> = vortex_strengths
             .iter()
             .map(|gamma| gamma / (4.0 * std::f64::consts::PI))
             .collect();
-        // Four field points advance together so their independent running
-        // sums overlap the add latency; each point still adds its panels in
-        // ascending order, so every sum is the one-point-at-a-time sum.
+        let row_sum = |scratch: &mut RowScratch, point: [f64; 3], component| {
+            evaluate_row(
+                point,
+                component,
+                &columns,
+                (4.0 * std::f64::consts::PI, 1.0),
+                scratch,
+            );
+            let [vx, vy, vz] = &scratch.velocity;
+            constants
+                .iter()
+                .enumerate()
+                .fold([0.0, 0.0, 0.0], |acc, (j, &constant)| {
+                    add3(acc, [constant * vx[j], constant * vy[j], constant * vz[j]])
+                })
+        };
         let mut induced = vec![[0.0_f64; 3]; points.len()];
         if n < PARALLEL_PANEL_THRESHOLD {
-            kernel
-                .chunks(n * KERNEL_ROW_BLOCK)
-                .zip(induced.chunks_mut(KERNEL_ROW_BLOCK))
-                .for_each(|(rows, out)| kernel_rows(rows, n, &constants, out));
+            let mut scratch = RowScratch::default();
+            for ((sum, &point), panel) in induced.iter_mut().zip(points).zip(panels) {
+                *sum = row_sum(&mut scratch, point, panel.core_component);
+            }
         } else {
-            kernel
-                .par_chunks(n * KERNEL_ROW_BLOCK)
-                .zip(induced.par_chunks_mut(KERNEL_ROW_BLOCK))
-                .for_each(|(rows, out)| kernel_rows(rows, n, &constants, out));
+            induced
+                .par_iter_mut()
+                .zip(points.par_iter())
+                .zip(panels.par_iter())
+                .for_each_init(RowScratch::default, |scratch, ((sum, &point), panel)| {
+                    *sum = row_sum(scratch, point, panel.core_component);
+                });
         }
         return induced
             .iter()
@@ -181,7 +208,7 @@ pub(super) fn velocity_at_points(
                         TRAILING_VORTEX_DIRECTION,
                         gamma,
                         VORTEX_CORE_RADIUS,
-                        inter_surface_core(panels[point_index].wing_index, panel),
+                        inter_surface_core(panels[point_index].core_component, panel),
                     );
                     add3(acc, contribution)
                 });
@@ -202,6 +229,78 @@ pub(super) fn velocity_at_points(
             .map(|(i, (&point, &rotation_velocity))| at_point(i, point, rotation_velocity))
             .collect()
     }
+}
+
+/// The velocity the horseshoes of strengths `vortex_strengths` induce at
+/// every vortex center, from the cached `kernel` of `n` panels: the
+/// near-field sum of [`velocity_at_points`] without the far field.
+pub(super) fn induced_from_kernel(
+    kernel: &[[f64; 3]],
+    n: usize,
+    vortex_strengths: &[f64],
+) -> Vec<[f64; 3]> {
+    // One exact division per source, rather than the same division at
+    // every field point. The cached and direct kernels retain their
+    // operation order.
+    let constants: Vec<f64> = vortex_strengths
+        .iter()
+        .map(|gamma| gamma / (4.0 * std::f64::consts::PI))
+        .collect();
+    // Four field points advance together so their independent running
+    // sums overlap the add latency; each point still adds its panels in
+    // ascending order, so every sum is the one-point-at-a-time sum.
+    let mut induced = vec![[0.0_f64; 3]; n];
+    if n < PARALLEL_PANEL_THRESHOLD {
+        kernel
+            .chunks(n * KERNEL_ROW_BLOCK)
+            .zip(induced.chunks_mut(KERNEL_ROW_BLOCK))
+            .for_each(|(rows, out)| kernel_rows(rows, n, &constants, out));
+    } else {
+        kernel
+            .par_chunks(n * KERNEL_ROW_BLOCK)
+            .zip(induced.par_chunks_mut(KERNEL_ROW_BLOCK))
+            .for_each(|(rows, out)| kernel_rows(rows, n, &constants, out));
+    }
+    induced
+}
+
+/// [`induced_from_kernel`] for several strength vectors in one pass over
+/// the kernel: one velocity vector per entry of `strengths`.
+pub(super) fn induced_columns_from_kernel(
+    kernel: &[[f64; 3]],
+    n: usize,
+    strengths: &[Vec<f64>],
+) -> Vec<Vec<[f64; 3]>> {
+    let constants: Vec<Vec<f64>> = strengths
+        .iter()
+        .map(|column| {
+            column
+                .iter()
+                .map(|gamma| gamma / (4.0 * std::f64::consts::PI))
+                .collect()
+        })
+        .collect();
+    let count = constants.len();
+    let row = |i: usize| -> Vec<[f64; 3]> {
+        let mut sums = vec![[0.0_f64; 3]; count];
+        for (j, entry) in kernel[i * n..(i + 1) * n].iter().enumerate() {
+            for (sum, column) in sums.iter_mut().zip(&constants) {
+                let constant = column[j];
+                sum[0] += entry[0] * constant;
+                sum[1] += entry[1] * constant;
+                sum[2] += entry[2] * constant;
+            }
+        }
+        sums
+    };
+    let rows: Vec<Vec<[f64; 3]>> = if n < PARALLEL_PANEL_THRESHOLD {
+        (0..n).map(row).collect()
+    } else {
+        (0..n).into_par_iter().map(row).collect()
+    };
+    (0..count)
+        .map(|c| rows.iter().map(|sums| sums[c]).collect())
+        .collect()
 }
 
 /// Field points advanced together by [`kernel_rows`].

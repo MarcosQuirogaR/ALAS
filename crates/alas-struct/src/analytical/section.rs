@@ -33,7 +33,7 @@ pub(super) fn mass_per_length(
 ) -> Vec<f64> {
     let n = sizing.chord.len();
     let mut m_y: Vec<f64> = (0..n)
-        .map(|j| 2.0 * skin_cover_fraction * sizing.chord[j] * sizing.t_skin * skin_rho)
+        .map(|j| 2.0 * skin_cover_fraction * sizing.chord[j] * sizing.skin_at(j) * skin_rho)
         .collect();
     for s in &sizing.spars {
         for (j, (m, (&h, &a))) in m_y.iter_mut().zip(s.h.iter().zip(&s.a_cap)).enumerate() {
@@ -92,7 +92,7 @@ pub(super) fn ei_curve(
         let b_box = (frac_max - frac_min) * sizing.chord[j];
         let h_mean: f64 = sizing.spars.iter().map(|s| s.h[j]).sum::<f64>() / n_spars;
         let d_skin = h_mean / 2.0;
-        let i_skin = 2.0 * b_box * sizing.t_skin * d_skin.powi(2);
+        let i_skin = 2.0 * b_box * sizing.skin_at(j) * d_skin.powi(2);
         *e += skin_mat.e_pa * i_skin;
     }
     ei

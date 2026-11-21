@@ -1,7 +1,7 @@
 // SPDX-License-Identifier: AGPL-3.0-or-later
 // Copyright (C) 2026 Marcos Quiroga Rodriguez
 
-//! Live feasibility traffic lights (UAV-PLAN 6.2).
+//! Live feasibility traffic lights.
 //!
 //! * **L0** (closed form, recomputed on every edit): packaging, mass basis,
 //!   static margin per load case, tail volume coefficients, wing loading and

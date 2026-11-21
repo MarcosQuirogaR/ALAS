@@ -1,0 +1,144 @@
+diff --git a/CMakeLists.txt b/CMakeLists.txt
+index 76f5d9f..5dcf300 100644
+--- a/CMakeLists.txt
++++ b/CMakeLists.txt
+@@ -4,9 +4,81 @@ project(Nastran95_Project Fortran)
+ # Set the default Fortran compiler
+ set(CMAKE_Fortran_COMPILER gfortran CACHE STRING "Fortran compiler")
+ 
++# NASTRAN-95 keeps open core in the fixed COMMON /ZZZZZZ/ array declared by
++# bin/nastrn.f. OCMEM selects a portion of this allocation at run time; it
++# cannot exceed the dimension compiled into the executable. A 64M-word
++# allocation is 256 MiB with the GNU INTEGER representation and is suitable
++# for the larger ALAS wing meshes on a 64-bit host.
++set(NASTRAN95_OPEN_CORE_WORDS "64000000" CACHE STRING
++    "Maximum NASTRAN-95 open-core allocation, in 4-byte words")
++if (NOT NASTRAN95_OPEN_CORE_WORDS MATCHES "^[1-9][0-9]*$")
++  message(FATAL_ERROR "NASTRAN95_OPEN_CORE_WORDS must be a positive integer")
++endif()
++
++option(NASTRAN95_EXPERIMENTAL_SELECTIVE_OPTIMIZATION
++    "Use GNU -O3 except mis/ifp1c.f; requires solver regression before production use" OFF)
++
++# An explicit GNU optimization flag set that replaces the -O0 default (and the
++# selective -O3 above) for every source file. Empty means "not used". The
++# legacy DIMENSION CORE(1) open-core idiom is what optimization breaks, so
++# the intended values pair an -O level with the GCC switches that stop the
++# compiler from reasoning about those declared array bounds, for example
++# "-O2 -fno-aggressive-loop-optimizations -fno-strict-aliasing". Requires the
++# same SOL 101/103 regression as the selective option before production use.
++set(NASTRAN95_OPTIMIZATION_FLAGS "" CACHE STRING
++    "Explicit GNU optimization flags replacing the default -O0 (experimental)")
++
++# Source globs, relative to this directory and separated by semicolons, that
++# stay at -O0 when NASTRAN95_OPTIMIZATION_FLAGS is set. The bisection tool for
++# finding which legacy routines the optimizer breaks: the production SOL 101
++# deck fails in the input file processor (USER FATAL MESSAGE 321 from
++# mis/ifp.f) under both selective -O3 and -O2 with loop/aliasing guards, so
++# the card-processing families are the first to be excluded while the matrix
++# kernels (decomposition, forward-backward substitution, multiply-add, the
++# eigensolvers) keep the optimization.
++set(NASTRAN95_UNOPTIMIZED_GLOBS "" CACHE STRING
++    "Semicolon-separated source globs kept at -O0 under NASTRAN95_OPTIMIZATION_FLAGS (experimental)")
++
++# The inverse policy: when this list is non-empty, every source stays at the
++# -O0 default and only the matching files receive NASTRAN95_OPTIMIZATION_FLAGS.
++# This is the safe way to optimize the solver: the wall time of the production
++# decks sits in a few dozen matrix kernels (decomposition, forward-backward
++# substitution, multiply-add, the eigensolvers, matrix packing), while the
++# thousand-odd card-processing and bookkeeping routines carry the legacy
++# idioms the optimizer breaks and gain nothing from it.
++set(NASTRAN95_OPTIMIZED_GLOBS "" CACHE STRING
++    "Semicolon-separated source globs that alone receive NASTRAN95_OPTIMIZATION_FLAGS (experimental)")
++
+ # Set the Fortran compilation flags depending on the compiler
+ if (CMAKE_Fortran_COMPILER_ID MATCHES "GNU")
+-  set(CMAKE_Fortran_FLAGS "${CMAKE_Fortran_FLAGS} -O3 -w -fallow-invalid-boz -fallow-argument-mismatch -fdec")
++  # -fno-automatic: this code keeps locals in static storage across calls (see the
++  # comment in mis/tmtsio.f); without it the card scanner's saved A67777 guard is
++  # stack garbage. -O0: -O3 miscompiles the DIMENSION CORE(1) idiom in mis/ifp1c.f.
++  set(NASTRAN95_OPTIMIZATION "-O0")
++  if(NASTRAN95_EXPERIMENTAL_SELECTIVE_OPTIMIZATION)
++    set(NASTRAN95_OPTIMIZATION "-O3")
++    set_source_files_properties(mis/ifp1c.f PROPERTIES COMPILE_FLAGS "-O0")
++  endif()
++  if(NOT "${NASTRAN95_OPTIMIZATION_FLAGS}" STREQUAL "" AND NOT "${NASTRAN95_OPTIMIZED_GLOBS}" STREQUAL "")
++    foreach(optimized_pattern IN LISTS NASTRAN95_OPTIMIZED_GLOBS)
++      file(GLOB optimized_sources CONFIGURE_DEPENDS
++           "${CMAKE_CURRENT_SOURCE_DIR}/${optimized_pattern}")
++      if(optimized_sources)
++        set_source_files_properties(${optimized_sources} PROPERTIES
++                                    COMPILE_FLAGS "${NASTRAN95_OPTIMIZATION_FLAGS}")
++      endif()
++    endforeach()
++  elseif(NOT "${NASTRAN95_OPTIMIZATION_FLAGS}" STREQUAL "")
++    set(NASTRAN95_OPTIMIZATION "${NASTRAN95_OPTIMIZATION_FLAGS}")
++    foreach(unoptimized_pattern IN LISTS NASTRAN95_UNOPTIMIZED_GLOBS)
++      file(GLOB unoptimized_sources CONFIGURE_DEPENDS
++           "${CMAKE_CURRENT_SOURCE_DIR}/${unoptimized_pattern}")
++      if(unoptimized_sources)
++        set_source_files_properties(${unoptimized_sources} PROPERTIES COMPILE_FLAGS "-O0")
++      endif()
++    endforeach()
++  endif()
++  set(CMAKE_Fortran_FLAGS "${CMAKE_Fortran_FLAGS} ${NASTRAN95_OPTIMIZATION} -w -fallow-invalid-boz -fallow-argument-mismatch -fdec -fno-automatic")
+ elseif (CMAKE_Fortran_COMPILER_ID MATCHES "Intel")
+   set(CMAKE_Fortran_FLAGS "${CMAKE_Fortran_FLAGS} /Qipo /O3 /MP /integer-size=64 /Qdiag-disable:10448 /Qdiag-disable:warn")
+ endif()
+@@ -32,7 +104,7 @@ endfunction()
+ 
+ 
+ # Collect source files
+-efile(BD_SOURCES GLOB "bd/*.f" EXCLUDE "bd/semdbd.f")
++efile(BD_SOURCES GLOB "bd/*.f")
+ efile(MIS_SOURCES GLOB "mis/*.f")
+ 
+ foreach(SRC_FILE ${MIS_SOURCES})
+@@ -54,10 +126,16 @@ add_library(nas $<TARGET_OBJECTS:nasmis_obj>
+ # Create executables
+ add_executable(nastran "bin/nastrn.f" $<TARGET_OBJECTS:nasbd_obj>)
+ target_link_libraries(nastran PRIVATE nas)
++set_source_files_properties(bin/nastrn.f PROPERTIES Fortran_PREPROCESS ON)
++target_compile_definitions(nastran PRIVATE
++  ALAS_NASTRAN95_OPEN_CORE_WORDS=${NASTRAN95_OPEN_CORE_WORDS})
+ set_target_properties(nastran PROPERTIES
+   RUNTIME_OUTPUT_DIRECTORY ${PROJECT_BINARY_DIR}/bin
+   Fortran_FLAGS "${FORTRAN_FLAGS}"
+ )
++file(MAKE_DIRECTORY "${PROJECT_BINARY_DIR}/bin")
++file(WRITE "${PROJECT_BINARY_DIR}/bin/nastran95-open-core.txt"
++  "${NASTRAN95_OPEN_CORE_WORDS}\n")
+ 
+ add_executable(nasthelp "um/nasthelp.f")
+ set_target_properties(nasthelp PROPERTIES
+diff --git a/bin/nastrn.f b/bin/nastrn.f
+index 7a9bb0f..1b681f8 100755
+--- a/bin/nastrn.f
++++ b/bin/nastrn.f
+@@ -1,4 +1,7 @@
+-      PROGRAM NASTRN        
++#ifndef ALAS_NASTRAN95_OPEN_CORE_WORDS
++#define ALAS_NASTRAN95_OPEN_CORE_WORDS 64000000
++#endif
++      PROGRAM NASTRN        
+ C        
+       CHARACTER*80    VALUE
+       CHARACTER*5     TMP
+@@ -9,7 +12,7 @@ C
+       COMMON / SOFDSN / SDSN(10)
+       COMMON / LOGOUT / LOUT
+       COMMON / RESDIC / IRDICT, IROPEN
+-      COMMON / ZZZZZZ / IZ(14000000)
++      COMMON / ZZZZZZ / IZ(ALAS_NASTRAN95_OPEN_CORE_WORDS)
+       COMMON / DBM    / IDBBAS, IDBFRE, IDBDIR, INDBAS, INDCLR, INDCBP
+      &,                 NBLOCK, LENALC, IOCODE, IFILEX, NAME,   MAXALC
+      &,                 MAXBLK, MAXDSK, IDBLEN, IDBADR, IBASBF, INDDIR
+@@ -17,7 +20,7 @@ C
+       INCLUDE 'NASNAMES.COM'
+       CHARACTER*80    SDSN
+       EQUIVALENCE    ( ISYSTM, SYSTM )
+-      LENOPC = 14000000
++      LENOPC = ALAS_NASTRAN95_OPEN_CORE_WORDS
+ C        
+ C     SAVE STARTING CPU TIME AND WALL CLOCK TIME IN /SYSTEM/        
+ C      

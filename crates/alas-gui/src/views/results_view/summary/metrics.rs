@@ -30,6 +30,64 @@ pub(super) fn static_margin_rows(
     ]
 }
 
+/// Neutral-point conditions of the selected design, each as percent MAC from
+/// the leading edge of the MAC (P2 m6: `NeutralPointConditions` was computed
+/// and stored but never shown). The conditions are station x positions in m
+/// (`neutral_point_conditions`); the MAC frame converts them.
+pub(super) fn neutral_point_rows(report: &AnalysisReport) -> Vec<(&'static str, String)> {
+    let not_evaluated = || vec![("Neutral point conditions", tr("Not evaluated"))];
+    let (Some(conditions), Some(frame)) = (
+        report.neutral_point_conditions.as_ref(),
+        report.airplane.mac_frame(),
+    ) else {
+        return not_evaluated();
+    };
+    let pct = |x_m: f64| {
+        let value = neutral_point_pct_mac(x_m, frame.x_lemac_m, frame.chord_m);
+        if value.is_finite() {
+            super::super::format_pct_mac(value)
+        } else {
+            tr("Not evaluated")
+        }
+    };
+    vec![
+        (
+            "Neutral point, clean low speed",
+            pct(conditions.clean_low_speed),
+        ),
+        ("Neutral point, cruise (rigid)", pct(conditions.cruise)),
+        (
+            "Neutral point, cruise (flexible)",
+            pct(conditions.elastic_band.0),
+        ),
+        ("Neutral point, high lift", pct(conditions.high_lift)),
+        ("Neutral point, critical", pct(conditions.critical)),
+    ]
+}
+
+/// Percent MAC of a station `x_m` from the MAC leading edge `x_lemac_m` over
+/// the MAC chord `chord_m` (NaN for a non-positive chord).
+pub(super) fn neutral_point_pct_mac(x_m: f64, x_lemac_m: f64, chord_m: f64) -> f64 {
+    if chord_m > 0.0 {
+        100.0 * (x_m - x_lemac_m) / chord_m
+    } else {
+        f64::NAN
+    }
+}
+
+/// What qualifies the centre-of-gravity figures when the engines' longitudinal
+/// station was not measured on the built geometry.
+pub(super) fn propulsion_station_caption(result: &alas_pipeline::PipelineResult) -> Option<String> {
+    use alas_pipeline::PropulsionStationEvidence::{Unknown, WingCentroidFallback};
+    match result.feasibility.propulsion_station {
+        WingCentroidFallback => Some(tr(
+            "Propulsion station estimated at the wing centroid, not measured on a nacelle",
+        )),
+        Unknown => Some(tr("Propulsion station unknown")),
+        _ => None,
+    }
+}
+
 pub(super) fn aircraft_metrics(
     state: &AppState,
     result: &alas_pipeline::PipelineResult,
@@ -46,23 +104,28 @@ pub(super) fn aircraft_metrics(
             .map(|report| report.static_margin),
     ));
     metrics.push((
-        "CG (baseline)",
+        "CG (baseline, sizing mass)",
         result.baseline_report.as_ref().map_or_else(
             || tr("Not evaluated"),
             |report| format_cg_pct_mac(report.cg_pct_mac),
         ),
     ));
     metrics.push((
-        "CG envelope (optimized)",
+        "CG envelope (all loading states)",
         result.optimized_report.as_ref().map_or_else(
             || tr("No optimized design in this run"),
-            |report| match report.cg_envelope_ok {
-                Some(true) => "OK".to_owned(),
-                Some(false) => tr("Violation"),
+            // The verdict of the feasibility gate: the hard constraints over
+            // every loading state of the item ledger, not the lumped check.
+            |_| match &result.feasibility.model_cg {
+                Some(assessment) if assessment.hard_constraints_pass() => "OK".to_owned(),
+                Some(_) => tr("Violation"),
                 None => tr("Not evaluated"),
             },
         ),
     ));
+    if let Some(caption) = propulsion_station_caption(result) {
+        metrics.push(("CG basis note", caption));
+    }
     if let Some(report) = selected_analysis(result) {
         if report.airplane.b_ref.is_finite()
             && report.airplane.b_ref > 0.0
@@ -73,6 +136,9 @@ pub(super) fn aircraft_metrics(
             metrics.push(("Wing area", format!("{:.1} m\u{b2}", report.airplane.s_ref)));
         }
     }
+    if let Some(report) = selected_analysis(result) {
+        metrics.extend(neutral_point_rows(report));
+    }
     metrics
 }
 
@@ -82,12 +148,40 @@ pub(super) fn mission_metrics(
     let fuel = &result.feasibility.fuel_loading;
     let mut metrics = vec![("Mission status", mission_status_label(result))];
     metrics.push((
-        "Maximum mission range",
-        maximum_mission_range_km(result).map_or_else(
-            || tr("Not established"),
-            |range_km| format!("{range_km:.0} km"),
-        ),
+        "Distance reached by the flown mission",
+        maximum_mission_range_km(result)
+            .filter(|_| {
+                result
+                    .mission_result
+                    .as_ref()
+                    .is_some_and(|mission| mission.completed_summary().is_some())
+            })
+            .map_or_else(
+                || tr("Not established"),
+                |range_km| format!("{range_km:.0} km"),
+            ),
     ));
+    // Airport to airport is fixed by the route; the distance actually flown
+    // also counts every loiter, diversion and reserve leg of the plan.
+    let route = serde_json::json!({
+        "departure_airport": result.config.departure_airport,
+        "arrival_airport": result.config.arrival_airport,
+    });
+    if let Some(route_m) = crate::views::mission_profile_inputs::route_distance_m(&route) {
+        metrics.push(("Route distance", format!("{:.0} km", route_m / 1_000.0)));
+    }
+    let flown_m = result
+        .mission_result
+        .as_ref()
+        .and_then(|mission| mission.completed_summary())
+        .map(|summary| summary.distance_flown_m)
+        .filter(|flown| flown.is_finite());
+    if let Some(flown_m) = flown_m {
+        metrics.push((
+            "Total flown distance",
+            format!("{:.0} km", flown_m / 1_000.0),
+        ));
+    }
     let burned = fuel
         .mission
         .burned_fuel_kg
@@ -99,16 +193,37 @@ pub(super) fn mission_metrics(
             |burned_kg| format!("{:.2} t", burned_kg / 1_000.0),
         ),
     ));
+    // The margin is the flown route's: the fuel the route is dispatched with
+    // less the fuel it burns, not the full-tank design loading's.
+    let flown_kg = fuel
+        .flown_carried_fuel_kg
+        .filter(|kg| kg.is_finite() && *kg >= 0.0);
     metrics.extend(fuel_margin_rows(
         fuel.mission.status,
-        fuel.analyzed_carried_fuel_kg,
+        flown_kg.unwrap_or(fuel.analyzed_carried_fuel_kg),
         burned,
     ));
     if fuel.analyzed_carried_fuel_kg.is_finite() && fuel.analyzed_carried_fuel_kg >= 0.0 {
+        // Under a hard MTOW the analyzed load is the full-tank design loading
+        // and the route is flown at its own dispatch mass: say which is which
+        // and show the flown route's fuel beside it.
+        let flown = fuel
+            .flown_carried_fuel_kg
+            .filter(|kg| kg.is_finite() && *kg >= 0.0);
         metrics.push((
-            "Fuel carried",
+            if flown.is_some() {
+                "Fuel carried, design loading (MTOW basis)"
+            } else {
+                "Fuel carried"
+            },
             format!("{:.1} t", fuel.analyzed_carried_fuel_kg / 1_000.0),
         ));
+        if let Some(flown_kg) = flown {
+            metrics.push((
+                "Fuel carried, flown route",
+                format!("{:.1} t", flown_kg / 1_000.0),
+            ));
+        }
         let (capacity, evidence) = match fuel.usable_capacity.capacity_kg {
             Some(capacity_kg) if capacity_kg.is_finite() && capacity_kg >= 0.0 => (
                 format!("{:.1} t", capacity_kg / 1_000.0),
@@ -279,7 +394,11 @@ pub(super) fn trim_metrics(result: &alas_pipeline::PipelineResult) -> Vec<(&'sta
     if l_over_d.is_finite() && l_over_d > 0.0 {
         metrics.push(("Cruise L/D", format!("{l_over_d:.1}")));
         metrics.push(("Cruise L/D basis", tr(provenance)));
+        if let Some(note) = alas_pipeline::cruise_point_off_polar_note(report) {
+            metrics.push(("Cruise L/D basis note", note));
+        }
     }
+    metrics.extend(super::cruise_point::rows(result, report));
     match report.trimmed_design_point.as_ref() {
         Some(point) => {
             metrics.push(("Cruise trim", tr("Solved")));
@@ -376,6 +495,14 @@ pub(super) fn freight_hold_labels(
 }
 
 pub(super) fn payload_summary_metrics(layout: &PayloadLayout) -> Vec<(&'static str, String)> {
+    let mut rows = payload_class_metrics(layout);
+    // The class rows above are the seated cabin or the loaded cargo; the total
+    // also carries the declared zones' occupants and point masses.
+    rows.push(("Total payload", tonnes(layout.total_mass / 1_000.0)));
+    rows
+}
+
+fn payload_class_metrics(layout: &PayloadLayout) -> Vec<(&'static str, String)> {
     match &layout.summary {
         LayoutSummary::Passenger(summary) => {
             let classes = summary

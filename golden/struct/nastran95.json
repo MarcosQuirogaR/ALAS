@@ -1,32 +1,35 @@
 {
-  "solver_note": "NASTRAN-95 (Foadsf fork, gfortran -O0 -fno-automatic) cross-checked against MSC Nastran Student Edition 2026.1; peak vertical deflection of subcase 1 (pull-up), metres.",
+  "solver_note": "NASTRAN-95 (Foadsf fork 060ed900 + alas-local.patch, GNU Fortran 16.2.0 winlibs, -O0 -fno-automatic, Windows x86_64) vs MSC Nastran Student Edition 2026.1 (servermode analysis.exe), regenerated 2026-10-27 by task N1G on the nine-rib layout (sized once, chordwise points 6/10/20); peak vertical deflection of subcase 1 (pull-up at the ultimate load factor), metres.",
   "refinements": [
     {
-      "num_ribs": 5,
+      "num_ribs": 9,
       "chordwise": 6,
-      "grids": 50,
-      "peak_grid": 41,
-      "n95_peak_t3": 2.7575560000,
-      "msc_peak_t3": 2.9750200000,
-      "rel_diff": -0.0730966515
+      "grids": 86,
+      "peak_grid": 77,
+      "n95_peak_t3": 5.3131720000,
+      "deck_sha256": "4d8b75f4f23ae6f6071382a648cc7e180cb50bf9c303d014135e14396ec60eb5",
+      "msc_peak_t3": 5.5656700000,
+      "rel_diff": -0.0453670448
     },
     {
       "num_ribs": 9,
       "chordwise": 10,
       "grids": 154,
       "peak_grid": 137,
-      "n95_peak_t3": 4.0297180000,
-      "msc_peak_t3": 4.1677020000,
-      "rel_diff": -0.0331079333
+      "n95_peak_t3": 5.1482150000,
+      "deck_sha256": "688c989c2b1c50daa7692601b6e2ffd5827e7fe4a350f2806ca7e22de94cba0e",
+      "msc_peak_t3": 5.3573480000,
+      "rel_diff": -0.0390366652
     },
     {
-      "num_ribs": 16,
+      "num_ribs": 9,
       "chordwise": 20,
-      "grids": 568,
-      "peak_grid": 531,
-      "n95_peak_t3": 4.1591220000,
-      "msc_peak_t3": 4.2506920000,
-      "rel_diff": -0.0215423747
+      "grids": 326,
+      "peak_grid": 289,
+      "n95_peak_t3": 5.1410230000,
+      "deck_sha256": "d1cf463aba9d1e89c131cc5b851f7bcb1658023ce14d360b5f9eeeca0c66e01e",
+      "msc_peak_t3": 5.3382670000,
+      "rel_diff": -0.0369490698
     }
   ]
 }

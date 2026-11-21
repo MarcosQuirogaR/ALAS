@@ -12,7 +12,10 @@
 use alas_config::{AlasConfig, DesignMode, FuelScheme};
 use alas_mass::dispatch::{solve_dispatch, DispatchLimits, DispatchStatus};
 use alas_pipeline::quick_analysis::band::{classify_band, design_mission_band_check, BandStatus};
-use alas_pipeline::quick_analysis::corners::RangeBasis;
+use alas_pipeline::quick_analysis::corners::mtow_line::MTOW_LINE_INTERIOR_POINTS;
+use alas_pipeline::quick_analysis::corners::{
+    chart_corner_masses, payload_point_range, RangeBasis,
+};
 use alas_pipeline::quick_analysis::{payload_range_corners, report_oew_kg};
 use alas_pipeline::{DesignPipeline, PipelineOptions, PipelineResult, RunEnvironment};
 use alas_report::families::performance;
@@ -90,6 +93,55 @@ fn the_chart_and_quick_analysis_agree_and_reserves_shorten_the_range() {
             "corner {index}: reserves must shorten the range"
         );
     }
+}
+
+/// Between B and C the chart is flown, not drawn as a chord: each point on
+/// the takeoff-mass line is the corner rule applied to its payload (the
+/// single-point pricing flies the same load on the same model to the bit),
+/// and the range grows as payload is traded for fuel at that mass.
+#[test]
+fn the_takeoff_mass_line_is_flown_by_the_corner_rule() {
+    let result = a320();
+    let report = result.baseline_analysis.as_ref().unwrap();
+    let config = &result.config;
+    let chart = performance::payload_range_data(report, config).unwrap();
+    let (b, c) = (chart.points[1], chart.points[2]);
+    assert!(
+        b.payload_kg > c.payload_kg,
+        "the A320 fills its tank below MTOW: {b:?} {c:?}"
+    );
+    assert_eq!(chart.mtow_line.len(), MTOW_LINE_INTERIOR_POINTS);
+    let masses = chart_corner_masses(report, config).unwrap().masses;
+    let mut previous = (b.range_nm, b.payload_kg);
+    for point in &chart.mtow_line {
+        let range_nm = point.range_m / NMI;
+        assert!(
+            range_nm > previous.0 && point.payload_kg < previous.1,
+            "{point:?}"
+        );
+        assert!((point.tow_kg - masses.mtow_kg).abs() < 1e-6, "{point:?}");
+        assert!(!point.stated);
+        previous = (range_nm, point.payload_kg);
+    }
+    assert!(c.range_nm > previous.0 && c.payload_kg < previous.1);
+    let point = chart.mtow_line[1];
+    let single = payload_point_range(
+        config,
+        report,
+        &masses,
+        point.payload_kg,
+        &config.fuel_policy,
+        None,
+        None,
+    )
+    .unwrap();
+    assert_eq!(single.tow_kg.to_bits(), point.tow_kg.to_bits());
+    assert_eq!(single.fuel_kg.to_bits(), point.fuel_kg.to_bits());
+    assert_eq!(single.range_m.to_bits(), point.range_m.to_bits());
+    assert_eq!(
+        single.reserve_fuel_kg.to_bits(),
+        point.reserve_fuel_kg.to_bits()
+    );
 }
 
 /// Along a line of constant payload the takeoff mass the fuel policy

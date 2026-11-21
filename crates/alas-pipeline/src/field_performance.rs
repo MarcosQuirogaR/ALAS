@@ -8,11 +8,11 @@ use alas_config::{ActiveEngineModel, AlasConfig};
 use alas_opt::mdo::propulsion::turboprop_unit_model;
 use alas_opt::mdo::{
     field_polar, jet_takeoff_field, EngineOutCondition, EngineOutModel, EngineOutRating,
-    JetFieldInputs, YawAirframe,
+    JetFieldInputs, V2ClimbOutPolar, YawAirframe,
 };
 use alas_perf::performance::{
     compute_field_performance_for_propulsion, compute_v_speeds_at_masses, landing_runway_share,
-    FieldInputs, FieldPerformance, FieldPropulsion,
+    FieldInputs, FieldPerformance, FieldPolar, FieldPropulsion,
 };
 use alas_prop::turboprop::{Pw127mRating, TurbopropCommand, TurbopropCondition, TurbopropMode};
 
@@ -71,8 +71,7 @@ pub fn calculate(
         takeoff_mass_kg,
         landing_mass_kg,
         jet_static_tw,
-        cd0,
-        k,
+        &FieldPolar::parabola(cd0, k),
     )
 }
 
@@ -94,8 +93,7 @@ pub fn calculate_with_airframe(
     takeoff_mass_kg: f64,
     landing_mass_kg: f64,
     jet_static_tw: f64,
-    cd0: f64,
-    k: f64,
+    polar: &FieldPolar,
 ) -> Result<FieldPerformance, String> {
     let perf = &config.performance;
     let share = dry_landing_distance_share(config);
@@ -130,16 +128,39 @@ pub fn calculate_with_airframe(
                 jet_static_tw * takeoff_mass_kg * config.requirements.gravity_m_s2;
             let model = EngineOutModel::new(config, airframe, wing_area_m2, None)?
                 .with_weight_kg(takeoff_mass_kg);
-            let solved = jet_takeoff_field(&JetFieldInputs {
-                perf,
-                engine_out: &model,
-                airport,
-                wing_area_m2,
-                mass_kg: takeoff_mass_kg,
-                static_thrust_n,
-                polar: (cd0, k),
-                speeds: field.v_speeds,
-            })?;
+            // One rotation per ground plane of the lift-off lift (the declared
+            // plane, or both ends of an undeclared clearance), the longer field
+            // kept, as the optimiser residual does.
+            let speeds = field.v_speeds;
+            let fly = |liftoff| {
+                jet_takeoff_field(&JetFieldInputs {
+                    perf,
+                    engine_out: &model,
+                    airport,
+                    wing_area_m2,
+                    mass_kg: takeoff_mass_kg,
+                    static_thrust_n,
+                    polar,
+                    speeds,
+                    climb_out: airframe.map(|a| {
+                        V2ClimbOutPolar::of(
+                            config,
+                            alas_opt::mdo::climb_out_aspect_ratio(
+                                config,
+                                a.plane.b_ref,
+                                a.plane.s_ref,
+                            ),
+                        )
+                    }),
+                    liftoff,
+                })
+            };
+            let solved = alas_opt::mdo::longest_on_ground_planes(
+                airframe.map(|a| a.plane),
+                config,
+                fly,
+                |solved| solved.tofl_m,
+            )?;
             field.todr_m = solved.tofl_m;
             field.bfl_m = solved.balanced_m;
             field.asd_m = solved.accelerate_stop_m;
@@ -197,9 +218,9 @@ pub fn calculate_with_airframe(
                     engine_count,
                     thrust_n: &thrust,
                     engine_out_thrust_n: Some(&engine_out_thrust),
-                    zero_lift_drag_coefficient: cd0 + perf.oei_climb_delta_cd,
+                    zero_lift_drag_coefficient: polar.cd0 + perf.oei_climb_delta_cd,
                     ground_roll_gear_drag_coefficient: perf.takeoff_gear_delta_cd,
-                    induced_drag_factor: k,
+                    induced_drag_factor: polar.k,
                     // The translated replay ignores the term and is not asked
                     // for evidence it does not use.
                     failed_engine_drag_coefficient: if perf.legacy_field_correlations {
@@ -212,7 +233,7 @@ pub fn calculate_with_airframe(
                             wing_area_m2,
                             takeoff_mass_kg,
                             static_per_engine_n,
-                            cd0,
+                            polar.cd0,
                         )?
                     },
                 },
@@ -269,7 +290,7 @@ pub fn report_field_polar(
     report: &AnalysisReport,
     mach: f64,
     airport: &Airport,
-) -> Result<(f64, f64), String> {
+) -> Result<FieldPolar, String> {
     let artifacts = report.fuel.artifacts(config, &report.design)?;
     field_polar(&artifacts.drag, &config.performance, mach, airport)
 }
@@ -300,7 +321,7 @@ mod tests {
                 elevation_m: elevation,
                 ..airport.clone()
             };
-            let (cd0, k) = report_field_polar(&config, &report, 0.2, &airport)
+            let polar = report_field_polar(&config, &report, 0.2, &airport)
                 .unwrap_or_else(|reason| panic!("polar: {reason}"));
             calculate_with_airframe(
                 &config,
@@ -313,8 +334,7 @@ mod tests {
                 mtow * weight_scale,
                 mlw * weight_scale,
                 0.3,
-                cd0,
-                k,
+                &polar,
             )
             .unwrap_or_else(|reason| panic!("field: {reason}"))
         };
@@ -447,8 +467,9 @@ mod tests {
                 let report = crate::full_analysis::FullAnalysis::new(config.clone())
                     .run(&design, true)
                     .unwrap_or_else(|reason| panic!("analysis: {reason}"));
-                report_field_polar(&config, &report, 0.2, &airport)
-                    .unwrap_or_else(|reason| panic!("polar: {reason}"))
+                let polar = report_field_polar(&config, &report, 0.2, &airport)
+                    .unwrap_or_else(|reason| panic!("polar: {reason}"));
+                (polar.cd0, polar.k)
             } else {
                 (0.02, 0.04)
             };

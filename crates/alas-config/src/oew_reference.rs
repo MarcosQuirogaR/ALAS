@@ -31,8 +31,12 @@
 
 #[path = "oew_reference/c919.rs"]
 mod c919;
+#[path = "oew_reference/cg.rs"]
+mod cg;
 #[path = "oew_reference/e195_e2.rs"]
 mod e195_e2;
+#[path = "oew_reference/lj60.rs"]
+mod lj60;
 #[path = "oew_reference/military.rs"]
 mod military;
 #[path = "oew_reference/records.rs"]
@@ -40,6 +44,10 @@ mod records;
 #[path = "oew_reference/sources.rs"]
 mod sources;
 
+pub use cg::{
+    oew_cg_reference, oew_cg_references, LightCgBound, OewCgArrangement, OewCgReference,
+    PublishedLightCgState,
+};
 use serde::Serialize;
 
 /// How a published OEW relates to the registered preset configuration.
@@ -294,7 +302,9 @@ pub struct OewReference {
     /// The empty-mass figure the preset's declared structural payload
     /// (`requirements.max_structural_payload_kg`) was historically derived
     /// from as maximum zero-fuel mass minus this value. It documents a
-    /// declared input; it is not a reference.
+    /// declared input; it is not a reference. That declared value no longer
+    /// binds where the preset publishes an MZFW: the structural payload is the
+    /// MZFW less the modeled OEW, one rule for every preset.
     pub structural_payload_basis_oew_kg: Option<f64>,
     /// Free-text notes.
     pub notes: &'static str,
@@ -370,12 +380,30 @@ impl OewReference {
     }
 }
 
+/// Registered presets that carry no OEW record because no printed operating
+/// empty mass has been retrieved for them, with the reason. A record is added
+/// only from a printed source cited by title, edition and page; until then the
+/// preset's `reference.oew_kg` is `None` and nothing is compared.
+pub const PRESETS_WITHOUT_PRINTED_OEW: &[(&str, &str)] = &[
+    (
+        "A350-900",
+        "no printed OEW retrieved: the Airbus A350 Aircraft Characteristics (Feb 01/26) \
+         used for the preset is cited for MTOW, MZFW and the payload-range chart only",
+    ),
+    (
+        "C295",
+        "no empty mass in EASA TCDS EASA.A.186 Issue 08, Jane's All the World's Aircraft \
+         2008-2009 p.544-545 or the Airbus C295 product page (the preset's sources)",
+    ),
+];
+
 /// Every registered aircraft's record, in preset registration order.
 pub fn registry() -> &'static [OewReference] {
     static ALL: std::sync::OnceLock<Vec<OewReference>> = std::sync::OnceLock::new();
     ALL.get_or_init(|| {
         let mut all = records::RECORDS.to_vec();
         all.push(military::A400M);
+        all.push(lj60::LJ60_RECORD);
         all
     })
 }
@@ -398,16 +426,41 @@ pub fn registry_json() -> serde_json::Value {
 
 // A test asserts on values it constructed here directly, so a failed unwrap
 // or expect is the assertion failing, not a library invariant being broken.
-#[allow(clippy::unwrap_used, clippy::expect_used)]
+#[allow(clippy::unwrap_used, clippy::expect_used, clippy::print_stderr)]
 #[cfg(test)]
 mod tests {
     use super::*;
 
     #[test]
     fn every_registered_preset_has_exactly_one_record_in_registration_order() {
-        let presets: Vec<&str> = crate::presets::available();
+        // A preset without a printed OEW is skipped explicitly, by the
+        // declared list and its reason, never silently.
+        let unsourced = |preset: &str| {
+            PRESETS_WITHOUT_PRINTED_OEW
+                .iter()
+                .find(|(name, _)| *name == preset)
+                .map(|(_, reason)| *reason)
+        };
+        let mut expected = Vec::new();
+        for preset in crate::presets::available() {
+            match unsourced(preset) {
+                Some(reason) => eprintln!("{preset}: no OEW record ({reason})"),
+                None => expected.push(preset),
+            }
+        }
         let records: Vec<&str> = registry().iter().map(|record| record.preset).collect();
-        assert_eq!(records, presets);
+        assert_eq!(records, expected);
+        for (preset, _) in PRESETS_WITHOUT_PRINTED_OEW {
+            assert!(
+                crate::presets::available().contains(preset),
+                "{preset} is declared unsourced but not registered"
+            );
+            assert!(
+                get(preset).is_none(),
+                "{preset} has a record and is declared unsourced"
+            );
+            assert_eq!(preset_reference_oew_kg(preset), None, "{preset}");
+        }
     }
 
     #[test]

@@ -375,14 +375,30 @@ pub(super) fn draw_deck(
     scene: &mut Scene,
     map: SectionMap,
     deck: &DeckSlice<'_>,
+    liner: Option<&Ring>,
+    outer_min_y_m: f64,
     ink: &SectionInk,
 ) {
-    let half_width = deck.deck.usable_width_m * 0.5;
+    // The floor is drawn no wider than the cabin liner at its own height: a
+    // slab wider than the contour would cut the hull. The seats are not
+    // clipped; those that do not fit are reported as findings.
+    let floor_z = deck.deck.floor_z_m;
+    let mut half_width = deck.deck.usable_width_m * 0.5;
+    if let Some(liner) = liner {
+        let chord = [
+            floor_z - FLOOR_HALF_THICKNESS_M,
+            floor_z + FLOOR_HALF_THICKNESS_M,
+        ]
+        .iter()
+        .flat_map(|&z| [1.0, -1.0].map(|side| half_width_at(liner, z, side).unwrap_or(0.0)))
+        .fold(f64::INFINITY, f64::min);
+        half_width = half_width.min(chord * 0.985);
+    }
     poly(
         scene,
         map.ring(&rectangle(
             0.0,
-            deck.deck.usable_width_m,
+            2.0 * half_width,
             deck.deck.floor_z_m - FLOOR_HALF_THICKNESS_M,
             deck.deck.floor_z_m + FLOOR_HALF_THICKNESS_M,
         )),
@@ -403,14 +419,22 @@ pub(super) fn draw_deck(
         draw_bin(scene, map, bin, ink);
     }
     if deck.deck.passenger {
+        // Named outside the hull with a leader to the floor, so the label never
+        // sits on the shell ring.
+        let rim = map.at(outer_min_y_m, floor_z);
+        scene.add(SceneElement::Line {
+            p1: [rim[0] - 22.0, rim[1]],
+            p2: map.at(-half_width, floor_z),
+            stroke: Stroke::new(ink.muted, 0.8),
+        });
         label(
             scene,
             format!("{} deck", deck.deck.id),
-            map.at(-half_width, deck.deck.floor_z_m + 0.10),
+            [rim[0] - 26.0, rim[1]],
             ink.muted,
             9.0,
-            TextAlign::Left,
-            TextBaseline::Bottom,
+            TextAlign::Right,
+            TextBaseline::Middle,
             true,
         );
     }

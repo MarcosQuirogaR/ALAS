@@ -20,17 +20,20 @@
 //! Frame: body axes, x aft from the nose tip, z up, metres; masses kg.
 //!
 //! The ledger is rebuilt at a probe translation and each state's moment
-//! derivative is taken as the secant between the two ledgers, so every
-//! coupling of the ledger to the gear station (the gear's own mass and any
-//! payload placement that targets the empty-aircraft centre of gravity)
-//! enters the solve with a value the ledger itself produces. The rotation
+//! derivative is taken as the secant between the two ledgers, so the gear's
+//! own mass enters the solve with a value the ledger itself produces. The
+//! probe ledger keeps the configured closure's payload layout: translating
+//! the gear moves no payload, and a hold load re-packed against the moved
+//! empty aircraft changes its container tare, which the closure's payload
+//! does not carry. The rotation
 //! boundary is measured the same way, from the envelope's own physical limits
 //! at the two stations, and taken as the secant between them. It is not
 //! exactly affine: the pitch inertia about the main-gear contact grows with
 //! the square of the CG offset (`super::rotation::rotation_cg_offset_m`).
-//! Nor is the ledger: baggage fills discrete hold slots and a hold clamp can
-//! bind, so its centre of gravity is piecewise in the translation and the
-//! secant can miss the boundary by a slot step. The caller therefore
+//! Nor is the re-sized closure: it lays its payload out against its own
+//! empty aircraft, whose baggage fills discrete hold slots that a hold clamp
+//! can bind, so the secant can miss the boundary by a slot step and by the
+//! payload's own response to the move. The caller therefore
 //! re-checks the re-sized candidate at the solved station and re-solves from
 //! it when a mechanism is missed; the unchanged envelope remains the verdict.
 
@@ -41,15 +44,19 @@ use alas_perf::landing_gear::placement::{
     solve_main_gear_station, ForwardCgBoundary, GearPlacementState, MainGearPlacementInput,
 };
 
-use super::ledger_basis::{
-    assess_model_cg_envelope_from_states, minimum_nose_gear_fraction, registered_aft_cg_nose_load,
-};
+use super::ground_ends::{assess_model_cg_envelope_from_states, config_on};
+use super::ledger_basis::assess_on_one_ground_plane;
 use super::loading::operational_loading_states_with_z;
-use super::support::ground_z_m;
+use super::support::{ground_z_m, ground_z_on};
 use super::{
     unmeasured_main_gear_station, LedgerLoadingBasis, ModelCgConstraint, ModelCgLoadingState,
     PhaseLimits,
 };
+use alas_mass::stations::ground_plane_bases;
+use alas_mass::stations::GroundPlaneBasis;
+
+mod installation;
+use installation::installation_bounds_m;
 
 /// Relative margin inside the static nose-load window the placement solves to.
 ///
@@ -66,6 +73,22 @@ use super::{
 /// closure slack (about 40 times the largest drift observed); no limit or
 /// tolerance of the verdict is widened.
 const NOSE_LOAD_PLACEMENT_SLACK: f64 = 1.0e-6;
+
+/// Residual main-gear station move, as a fraction of the wheelbase, that does
+/// not justify a second full sizing closure.
+///
+/// The minimum nose-load share moves with the main-gear station by
+/// `d(nose share) = dx_mlg / wheelbase` (static moment about the main axle at
+/// fixed CG), so this is a nose-share tolerance of 0.1 %. That is the chart-read
+/// precision of the published nose-share curves (APM 5824 Rev 25 Fig 7.6, read
+/// to +-0.1 %), so a residual inside it is below the
+/// precision of the constraint it serves. Such a move is applied to the closure
+/// already sized as a rigid translation of the main group
+/// ([`MainGearPlacement::Residual`]), not by a further closure. The tip-back
+/// and rotation constraints are not bounded separately here: the envelope
+/// verdict on the kept closure assesses them, so a violation is reported
+/// (GEARTOL).
+const GEAR_STATION_RESIDUAL_NOSE_SHARE: f64 = 1.0e-3;
 
 /// The main-gear translation `config` already carries, m; zero for the
 /// configured stations.
@@ -88,6 +111,11 @@ pub enum MainGearPlacement {
     Translated(f64),
     /// No station inside the installation interval satisfies every state.
     Infeasible,
+    /// Translate the main group by this many metres beyond the configured
+    /// stations, a move whose nose-share change is inside the chart-read
+    /// precision [`GEAR_STATION_RESIDUAL_NOSE_SHARE`]: applied to the closure
+    /// already sized, without re-sizing it.
+    Residual(f64),
 }
 
 /// Whether the rule requires nose-wheel liftoff at `state`: exactly where
@@ -112,90 +140,6 @@ pub struct PlacementLedgers {
     pub neutral_point_x_m: f64,
     /// The mean aerodynamic chord of the envelope frame, m.
     pub mac_m: f64,
-}
-
-/// Leading edge and chord of `wing` at spanwise station `y_m`, m, linear
-/// between its sections; the root section inboard of it and the tip outboard.
-fn chord_at(wing: &alas_geom::aircraft::wing::Wing, y_m: f64) -> Option<(f64, f64)> {
-    let sections = &wing.xsecs;
-    let first = sections.first()?;
-    if y_m <= first.xyz_le[1] {
-        return Some((first.xyz_le[0], first.chord));
-    }
-    for pair in sections.windows(2) {
-        let (inboard, outboard) = (&pair[0], &pair[1]);
-        let span_m = outboard.xyz_le[1] - inboard.xyz_le[1];
-        if y_m <= outboard.xyz_le[1] && span_m > 0.0 {
-            let t = (y_m - inboard.xyz_le[1]) / span_m;
-            return Some((
-                inboard.xyz_le[0] + t * (outboard.xyz_le[0] - inboard.xyz_le[0]),
-                inboard.chord + t * (outboard.chord - inboard.chord),
-            ));
-        }
-    }
-    sections.last().map(|tip| (tip.xyz_le[0], tip.chord))
-}
-
-/// The main-gear installation interval for the effective station, m.
-///
-/// Each wing leg (the outboard pair, `L`/`R`) must stay under the main
-/// wing's chord at that leg's own spanwise station, `[x_LE(y), x_LE(y) +
-/// c(y)]`, where a wing-mounted leg reacts into the wing box and a
-/// fuselage-mounted (sponson) leg into the frames carrying the wing. A body
-/// leg (`Body-*`: the centre leg of a three-leg group, the inboard pair of a
-/// four-leg one) is a fuselage gear reacting into the keel and fuselage
-/// frames behind the wing box (Currey, *Aircraft Landing Gear Design:
-/// Principles and Practices*, ch. 3; the DC-10-30 centre gear stands 0.76 m
-/// aft of the wing-gear bogies, DAC-67803A Rev A Figure 7.2.2, behind the
-/// trailing edge of the wing's centreline chord), so its own interval is the
-/// fuselage, `[x_nose, x_tail]`. The lateral stations and labels are the
-/// gear sizing's own (`alas_perf::landing_gear::mlg_strut_positions` at half
-/// the configured track). A configured leg outside its interval bounds its
-/// own side at its configured station, so the rule never requires moving a
-/// real aircraft's gear. The legs translate together, so each leg's interval
-/// maps onto the effective station through its fixed offset.
-fn installation_bounds_m(
-    plane: &Airplane,
-    config: &AlasConfig,
-    effective_station_m: f64,
-    main_legs_m: &[f64],
-) -> Option<(f64, f64)> {
-    let wing = plane
-        .wings
-        .iter()
-        .find(|wing| wing.name == "Main Wing")
-        .or_else(|| plane.wings.first())?;
-    let half_track_m =
-        config.geometry.fuselage.diameter_m * config.landing_gear.track_diameter_factor / 2.0;
-    let count = i64::try_from(main_legs_m.len()).ok()?;
-    let lateral = alas_perf::landing_gear::mlg_strut_positions(count, half_track_m);
-    let fuselage = plane.fuselages.first()?;
-    let body_m = (
-        fuselage.xsecs.first()?.xyz_c[0],
-        fuselage.xsecs.last()?.xyz_c[0],
-    );
-    let mut bounds = (f64::NEG_INFINITY, f64::INFINITY);
-    for (index, &leg_m) in main_legs_m.iter().enumerate() {
-        let (label, y_m) = lateral
-            .get(index)
-            .map_or(("", 0.0), |(label, y)| (label.as_str(), y.abs()));
-        let (leading_edge_m, trailing_edge_m) = if label.starts_with("Body") {
-            body_m
-        } else {
-            let (leading_edge_m, chord_m) = chord_at(wing, y_m)?;
-            if chord_m <= 0.0 {
-                return None;
-            }
-            (leading_edge_m, leading_edge_m + chord_m)
-        };
-        if !leading_edge_m.is_finite() || !trailing_edge_m.is_finite() {
-            return None;
-        }
-        let offset_m = leg_m - effective_station_m;
-        bounds.0 = bounds.0.max(leading_edge_m.min(leg_m) - offset_m);
-        bounds.1 = bounds.1.min(trailing_edge_m.max(leg_m) - offset_m);
-    }
-    (bounds.0.is_finite() && bounds.1.is_finite() && bounds.0 <= bounds.1).then_some(bounds)
 }
 
 type LoadingStates = Vec<(ModelCgLoadingState, f64, f64, f64)>;
@@ -232,10 +176,10 @@ fn rotation_boundaries(
         .ok_or_else(|| "gear placement requires a main wing".to_owned())?
         .x_lemac_m;
     let boundary_x = |states: &LoadingStates, ledger: &LedgerLoadingBasis, config: &AlasConfig| {
-        assess_model_cg_envelope_from_states(
+        assess_on_one_ground_plane(
             plane,
             states.clone(),
-            ledger.takeoff_pitch_inertia_kg_m2,
+            Some(ledger),
             ledger.takeoff_cg_x_m,
             ledgers.neutral_point_x_m,
             ledgers.neutral_point_x_m,
@@ -294,7 +238,7 @@ pub fn configured_stations_suffice(
     let assessment = assess_model_cg_envelope_from_states(
         plane,
         states_of(configured),
-        configured.takeoff_pitch_inertia_kg_m2,
+        Some(&configured),
         configured.takeoff_cg_x_m,
         neutral_point_x_m,
         neutral_point_x_m,
@@ -316,6 +260,47 @@ pub fn configured_stations_suffice(
                     )
             })
     }))
+}
+
+/// The translation of the main-gear group that keeps a redesigned
+/// `candidate`'s wing-carried legs at their registered fraction of the local
+/// chord, m (aft positive); see `installation::wing_follow_translation_m`.
+/// `config` is the candidate's configuration; a translation it already
+/// carries is ignored (the stations are the published ones). The registered
+/// legs are resolved on the registered fuselage and the candidate's own on
+/// its fuselage, so a changed fuselage length (published stations scale with
+/// it) is not counted as a wing move. `None` leaves the group at its
+/// fuselage stations, also when the stations are not published ones (the
+/// fallback station is already a fraction of the candidate's own chord).
+#[must_use]
+pub fn wing_follow_translation_m(
+    registered: &Airplane,
+    candidate: &Airplane,
+    config: &AlasConfig,
+) -> Option<f64> {
+    let mut published = config.landing_gear.clone();
+    published.derived_main_gear = None;
+    let legs = |plane: &Airplane| {
+        let fuselage = plane.fuselages.first()?;
+        let frame = plane.mac_frame()?;
+        let start_x_m = fuselage.xsecs.first()?.xyz_c[0];
+        let length_m = fuselage.xsecs.last()?.xyz_c[0] - start_x_m;
+        let stations = published.resolved_station_positions(
+            start_x_m + length_m * config.mass_model.nlg_x_fraction,
+            frame.x_lemac_m + config.mass_model.mlg_x_fraction_mac * frame.chord_m,
+            start_x_m,
+            length_m,
+        );
+        stations.source_scaled.then_some(stations.main_gear_x_m)
+    };
+    let (registered_legs_m, candidate_legs_m) = (legs(registered)?, legs(candidate)?);
+    installation::wing_follow_translation_m(
+        registered,
+        candidate,
+        config,
+        &registered_legs_m,
+        &candidate_legs_m,
+    )
 }
 
 /// Solve the placement rule for one candidate.
@@ -363,6 +348,7 @@ pub fn place_main_gear(
     if let Some(error) = unmeasured_main_gear_station(plane, config, &stations) {
         return Err(error.to_string());
     }
+    let wheelbase_m = (stations.x_mlg_m - stations.x_nlg_m).abs();
     let probe_m = ledgers.probe_translation_m;
     if !probe_m.is_finite() || probe_m == 0.0 {
         return Err("gear placement probe translation must be finite and nonzero".to_owned());
@@ -375,68 +361,73 @@ pub fn place_main_gear(
 
     let configured = states_of(ledgers.configured);
     let probe = states_of(ledgers.probe);
-    let mut probe_config = config.clone();
-    probe_config.landing_gear.derived_main_gear = Some(DerivedMainGearStation {
-        translation_m: configured_translation_m(config) + probe_m,
-    });
-    let rotation = rotation_boundaries(
-        plane,
-        &ledgers,
-        (&configured, config),
-        (&probe, &probe_config),
-        stations.x_mlg_m,
-    )?;
-    let ground_m = ground_z_m(fuselage, config);
-    let published_split = registered_aft_cg_nose_load(config);
-    let mut placement_states = Vec::with_capacity(configured.len());
-    for ((&(state, x_m, z_m, mass_kg), &(probe_state, probe_x_m, _, probe_mass_kg)), boundary) in
-        configured.iter().zip(&probe).zip(rotation)
-    {
-        // Moving gear legs moves no mass between states: the two ledgers
-        // must agree on every state mass to their own summation round-off.
-        let roundoff_kg = 64.0 * f64::EPSILON * mass_kg.abs();
-        if state != probe_state || (mass_kg - probe_mass_kg).abs() > roundoff_kg {
-            return Err(format!(
+    let mut placement_states = Vec::with_capacity(configured.len() * 2);
+    // An undeclared clearance: the states of both ends of the class sample
+    // constrain the one station, so it satisfies every state on either plane.
+    for &basis in ground_plane_bases(&config.landing_gear) {
+        let on_end = config_on(basis, plane, config).map_err(|error| error.to_string())?;
+        let config = &*on_end;
+        let mut probe_config = config.clone();
+        probe_config.landing_gear.derived_main_gear = Some(DerivedMainGearStation {
+            translation_m: configured_translation_m(config) + probe_m,
+        });
+        let rotation = rotation_boundaries(
+            plane,
+            &ledgers,
+            (&configured, config),
+            (&probe, &probe_config),
+            stations.x_mlg_m,
+        )?;
+        let ground_m = ground_z_m(fuselage, config);
+        for (
+            (&(state, x_m, z_m, mass_kg), &(probe_state, probe_x_m, _, probe_mass_kg)),
+            boundary,
+        ) in configured.iter().zip(&probe).zip(rotation)
+        {
+            // Moving gear legs moves no mass between states: the two ledgers
+            // must agree on every state mass to their own summation round-off.
+            let roundoff_kg = 64.0 * f64::EPSILON * mass_kg.abs();
+            if state != probe_state || (mass_kg - probe_mass_kg).abs() > roundoff_kg {
+                return Err(format!(
                 "gear placement ledgers disagree on the {state:?} mass: {mass_kg} kg against {probe_mass_kg} kg"
             ));
-        }
-        // The mass that effectively travels with the main group in this
-        // state: the moment derivative of the rebuilt ledger.
-        let translated_kg = mass_kg * (probe_x_m - x_m) / probe_m;
-        if !translated_kg.is_finite() || translated_kg < 0.0 || translated_kg >= mass_kg {
-            return Err(format!(
+            }
+            // The mass that effectively travels with the main group in this
+            // state: the moment derivative of the rebuilt ledger.
+            let translated_kg = mass_kg * (probe_x_m - x_m) / probe_m;
+            if !translated_kg.is_finite() || translated_kg < 0.0 || translated_kg >= mass_kg {
+                return Err(format!(
                 "gear placement moment derivative {translated_kg} kg is outside [0, {mass_kg}) kg at {state:?}"
             ));
+            }
+            placement_states.push(GearPlacementState {
+                mass_kg,
+                main_gear_mass_kg: translated_kg,
+                moment_without_main_gear_kg_m: mass_kg * x_m - translated_kg * stations.x_mlg_m,
+                cg_height_m: z_m - ground_m,
+                minimum_nose_fraction: config.mass_model.pct_load_nlg_min
+                    * (1.0 + NOSE_LOAD_PLACEMENT_SLACK),
+                maximum_nose_fraction: super::support::nose_handling_fraction(config, mass_kg)
+                    * (1.0 - NOSE_LOAD_PLACEMENT_SLACK),
+                forward_cg_boundary: boundary,
+            });
         }
-        placement_states.push(GearPlacementState {
-            mass_kg,
-            main_gear_mass_kg: translated_kg,
-            moment_without_main_gear_kg_m: mass_kg * x_m - translated_kg * stations.x_mlg_m,
-            cg_height_m: z_m - ground_m,
-            minimum_nose_fraction: minimum_nose_gear_fraction(config, published_split, mass_kg)
-                * (1.0 + NOSE_LOAD_PLACEMENT_SLACK),
-            maximum_nose_fraction: config.mass_model.pct_load_nlg_max_handling
-                * (1.0 - NOSE_LOAD_PLACEMENT_SLACK),
-            forward_cg_boundary: boundary,
-        });
     }
-    let contour: Vec<FuselageLowerPoint> = fuselage
-        .xsecs
-        .iter()
-        .map(|section| FuselageLowerPoint {
-            x_m: section.xyz_c[0],
-            z_bottom_m: section.xyz_c[2] - section.height / 2.0,
-        })
-        .collect();
-    // The envelope measures tip-back from the most-aft main axle, which is
-    // never ahead of the effective station; solving at the effective station
-    // is therefore exact for a uniform group and conservative otherwise.
+    // Every keel station and ventral-fin edge: the solver skips what lies
+    // ahead of the station it tries.
+    let contour: Vec<FuselageLowerPoint> =
+        super::support::lower_contour_aft_of(plane, fuselage, f64::NEG_INFINITY);
+    // Tip-back and tail scrape pivot on the aft-most main station, as in the
+    // envelope; it translates with the group, a fixed distance aft of the
+    // effective (reaction) station the solver places.
     let solved = solve_main_gear_station(&MainGearPlacementInput {
         nose_gear_x_m: stations.x_nlg_m,
         requested_main_gear_x_m: stations.x_mlg_m,
+        rotation_pivot_offset_m: (stations.rotation_pivot_x_m() - stations.x_mlg_m).max(0.0),
         installation_bounds_m: bounds,
         minimum_tip_back_deg: config.landing_gear.min_tip_back_deg,
-        ground_z_m: ground_m,
+        ground_z_m: ground_z_on(GroundPlaneBasis::High, plane, config)
+            .ok_or_else(|| "gear placement requires a fuselage and a main wing".to_owned())?,
         lower_contour: &contour,
         states: &placement_states,
     })
@@ -444,6 +435,20 @@ pub fn place_main_gear(
     Ok(match solved {
         None => MainGearPlacement::Infeasible,
         Some(station_m) if station_m == stations.x_mlg_m => MainGearPlacement::Unchanged,
+        // A residual move that changes the nose share by less than the chart
+        // read precision is not worth a full re-sizing closure (GEARTOL); it
+        // is applied to the closure already sized. Kept at the configured
+        // stations instead, the re-sized closure's own round-off (1.5e-6 of
+        // the nose-share limit on an A220-300 payload-adjusted candidate,
+        // above the placement slack) was rejected as a violation the rule
+        // had declined to remove. The verdict stays with the envelope on that
+        // closure, so any remaining violation is reported, not hidden.
+        Some(station_m)
+            if (station_m - stations.x_mlg_m).abs()
+                <= GEAR_STATION_RESIDUAL_NOSE_SHARE * wheelbase_m =>
+        {
+            MainGearPlacement::Residual(station_m - stations.x_mlg_m)
+        }
         Some(station_m) => MainGearPlacement::Translated(station_m - stations.x_mlg_m),
     })
 }

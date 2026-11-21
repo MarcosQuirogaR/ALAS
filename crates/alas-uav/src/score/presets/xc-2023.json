@@ -4,7 +4,7 @@
   "family": "xtra_challenge",
   "name": "XtraChallenge 2023 (edition I), rice-bag payload",
   "status": "provisional",
-  "citation": "XtraChallenge 2023 Normativa Tecnica v3.00 (04.04.2023), s7 requirements, s8.5 circuit, s9 scoring (eq. 1-10); local copy refs/competitions/XC_XC_23_RT_V3.00.pdf. Provisional for 2026: the 2026 rules were not located, so this edition's formulas are the nearest primary text; the 2026 missions (secondary source only) differ.",
+  "citation": "XtraChallenge 2023 Normativa Tecnica v3.00 (04.04.2023), s7 requirements, s8.5 circuit, s9 scoring (eq. 1-10). Provisional for 2026: the 2026 rules were not located, so this edition's formulas are the nearest primary text; the 2026 missions (secondary source only) differ.",
   "gates": [
     {
       "id": "mtow",

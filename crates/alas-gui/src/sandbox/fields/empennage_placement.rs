@@ -8,7 +8,7 @@
 //! station ordering (for example the root station must lie inside the
 //! tailplane half-span).
 
-use super::{cfg, Bounds, Discipline, FieldKind, Spec};
+use super::{cfg, Bounds, Discipline, FieldKind, Spec, AIRFOILS};
 
 /// The panel group shared with the other tail placement fields.
 const PLACEMENT: &str = "Placement";
@@ -50,13 +50,17 @@ pub(super) const VSTAB_ROOT_LE_X: Spec = cfg(
     X_FROM_NOSE_M,
 );
 
-pub(super) const DORSAL_X_START: Spec = cfg(
-    "geometry.empennage.vstab_dorsal_x_start_m",
+pub(super) const DORSAL_LENGTH: Spec = cfg(
+    "geometry.empennage.vstab_dorsal_length_m",
     Discipline::VerticalTail,
     PLACEMENT,
-    "/geometry/empennage/vstab_dorsal_x_start_m",
+    "/geometry/empennage/vstab_dorsal_length_m",
     FieldKind::OptionalFloat,
-    X_FROM_NOSE_M,
+    Bounds {
+        min: 0.0,
+        max: 30.0,
+        decimals: 2,
+    },
 );
 
 pub(super) const DORSAL_HEIGHT: Spec = cfg(
@@ -69,6 +73,19 @@ pub(super) const DORSAL_HEIGHT: Spec = cfg(
         min: 0.0,
         max: 10.0,
         decimals: 2,
+    },
+);
+
+pub(super) const FIN_AIRFOIL: Spec = cfg(
+    "geometry.empennage.vstab_airfoil",
+    Discipline::VerticalTail,
+    AIRFOILS,
+    "/geometry/empennage/vstab_airfoil",
+    FieldKind::OptionalAirfoil,
+    Bounds {
+        min: 0.0,
+        max: 0.0,
+        decimals: 0,
     },
 );
 

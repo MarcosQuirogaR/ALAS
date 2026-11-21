@@ -45,6 +45,7 @@ pub mod airfoil_library;
 #[doc(hidden)]
 pub use aircraft as asb;
 pub mod builder;
+pub mod digitised_sections;
 pub mod loft;
 pub mod selig;
 pub mod wing_structure;

@@ -23,7 +23,21 @@ use alas_pipeline::{
 };
 use serde_json::{json, Value};
 
+/// The preset pipeline runs on a 256 MiB stack (the GUI's analysis worker and
+/// the benchmark use the same size): on the 1 MiB Windows main thread the
+/// A320-200 run overflowed before its first result.
+const AUDIT_STACK_BYTES: usize = 256 << 20;
+
 fn main() -> io::Result<()> {
+    std::thread::Builder::new()
+        .name("external-audit".to_owned())
+        .stack_size(AUDIT_STACK_BYTES)
+        .spawn(run)?
+        .join()
+        .unwrap_or_else(|panic| std::panic::resume_unwind(panic))
+}
+
+fn run() -> io::Result<()> {
     let (output_dir, strict, only, selection) = parse_args(env::args().skip(1))?;
     if output_dir.exists() {
         return Err(io::Error::new(
@@ -241,6 +255,11 @@ fn evaluate_preset(
         environment.nastran_solver = None;
         environment.patran_exe = None;
     }
+    let lfl_resolution = (
+        config.analysis.fine_spanwise_resolution,
+        config.analysis.fine_chordwise_resolution,
+    );
+    let wake_config = config.clone();
     let options = PipelineOptions {
         optimize: false,
         compare_baseline: false,
@@ -335,6 +354,8 @@ fn evaluate_preset(
         |value| {
             json!({
                 "status": value.status.as_str(),
+                "wake_model": value.wake_model(),
+                "reduced_fidelity": value.is_reduced_fidelity(),
                 "error": value.error,
                 "request": relative(&result_dir, &value.request_path),
             })
@@ -392,8 +413,23 @@ fn evaluate_preset(
             || result.flowunsteady_result.as_ref().is_some_and(|value| {
                 value.status == FlowUnsteadyAnalysisStatus::CompletedComparable
             }));
+    let lfl = if selection.named("lfl") {
+        result
+            .optimized_report
+            .as_ref()
+            .or(result.baseline_analysis.as_ref())
+            .map_or(Value::Null, |report| {
+                let mut value = like_for_like(&report.airplane, lfl_resolution, &result_dir);
+                value["tail_eta_study"] =
+                    tail_eta_study(&report.airplane, &wake_config, lfl_resolution, &result_dir);
+                value
+            })
+    } else {
+        Value::Null
+    };
     json!({
         "preset": name,
+        "lfl": lfl,
         "external_acceptance": external_acceptance,
         "openvsp": openvsp,
         "vspaero": vspaero,
@@ -440,6 +476,16 @@ fn avl_deltas(result: &alas_pipeline::AvlAnalysisResult) -> Value {
         "max_abs_dcl": dcl,
         "max_abs_dcm": dcm,
         "max_rel_dcl_where_cl_ge_0p1": rel,
+        "points_detail": polar.points.iter().enumerate().map(|(index, point)| json!({
+            "alpha_deg": point.alpha_deg,
+            "cl_avl": point.lift_coefficient,
+            "cl_vlm": vlm.cl[index],
+            "cm_avl": point.pitching_moment_coefficient,
+            "cm_vlm": vlm.cm[index],
+            "cdi_avl": point.induced_drag_coefficient,
+            "cdi_vlm": vlm.cd_induced.get(index),
+            "e_avl": point.span_efficiency,
+        })).collect::<Vec<_>>(),
     })
 }
 
@@ -493,4 +539,211 @@ fn format_report(document: &Value) -> String {
         }
     ));
     text
+}
+
+/// Incompressible, lifting-surface-only ALAS VLM quantities for a like-for-like
+/// comparison with AVL, plus the matching Mach-0 AVL deck (`deck_m0.avl`).
+///
+/// Per alpha in {1, 2, 3} deg: CL, Cm about `xyz_ref` (lattice only, no body
+/// slope), Trefftz CDi without the installation term. At 2 deg also the strip
+/// span load cl*c/cref of the main wing. The neutral point is
+/// `x_ref - (dCm/dalpha)/(dCL/dalpha) * c_ref` from the 1 and 3 deg solves.
+fn like_for_like(
+    airplane: &alas_geom::aircraft::airplane::Airplane,
+    resolution: (i64, i64),
+    result_dir: &Path,
+) -> Value {
+    // AVL has no tail dynamic-pressure ratio, so the like-for-like lattice
+    // flies the tail at the free-stream dynamic pressure. `tail_eta_study`
+    // reports the DATCOM 4.4.1 wake ratio and the superseded constant 0.78
+    // (with eta = 0.78 the tail-on neutral point sat 5-13 % MAC forward of
+    // AVL's, with eta = 1 within 0.5-3.3 %).
+    let mut free_stream_tail = airplane.clone();
+    free_stream_tail.set_horizontal_tail_dynamic_pressure_ratio(1.0);
+    let airplane = &free_stream_tail;
+    let mut wing_only = airplane.clone();
+    wing_only.wings.retain(|wing| wing.name == "Main Wing");
+    // Same planform, twist and incidence with a symmetric thin section:
+    // isolates camber handling from twist handling.
+    let mut flat = wing_only.clone();
+    let foil = alas_geom::aircraft::airfoil::Airfoil::from_coordinates(
+        "flat",
+        vec![
+            (1.0, 0.0),
+            (0.5, 0.01),
+            (0.0, 0.0),
+            (0.5, -0.01),
+            (1.0, 0.0),
+        ],
+    );
+    for wing in &mut flat.wings {
+        for xsec in &mut wing.xsecs {
+            xsec.airfoil = foil.clone();
+        }
+    }
+    // Untwisted rectangular wing (AR 40, chord 1 m) with the root section:
+    // thin-airfoil theory gives CL = CLa * (alpha - alpha_L0) for any AR, so
+    // CL(0)/CLa is an analytic check of each tool's camber handling.
+    let make_rect = |root_airfoil: &alas_geom::aircraft::airfoil::Airfoil, deck: &str| {
+        use alas_geom::aircraft::wing::{Wing, WingXSec};
+        let mut plane = airplane.clone();
+        plane.wings = vec![Wing::new(
+            "Main Wing",
+            vec![
+                WingXSec::new([0.0, 0.0, 0.0], 1.0, 0.0, root_airfoil.clone()),
+                WingXSec::new([0.0, 20.0, 0.0], 1.0, 0.0, root_airfoil.clone()),
+            ],
+            true,
+        )];
+        plane.xyz_ref = [0.25, 0.0, 0.0];
+        plane.s_ref = 40.0;
+        plane.c_ref = 1.0;
+        plane.b_ref = 40.0;
+        let mut value = like_for_like_one(&plane, resolution, result_dir, deck);
+        // Thin-airfoil alpha_L0 = -(1/pi) int_0^pi z'(x) (cos t - 1) dt of the
+        // section's own mean camber line (Anderson, Fundamentals of
+        // Aerodynamics, eq. 4.61), 4000 midpoint stations.
+        let n = 4000_usize;
+        let h = 1.0e-5;
+        let mut sum = 0.0;
+        for k in 0..n {
+            let theta = (k as f64 + 0.5) * std::f64::consts::PI / n as f64;
+            let x = 0.5 * (1.0 - theta.cos());
+            let z = root_airfoil.local_camber(&[x - h, x + h]);
+            sum +=
+                (z[1] - z[0]) / (2.0 * h) * (theta.cos() - 1.0) * std::f64::consts::PI / n as f64;
+        }
+        value["thin_airfoil_alpha_l0_deg"] = json!(-(sum / std::f64::consts::PI).to_degrees());
+        value
+    };
+    let rect = airplane
+        .wings
+        .first()
+        .and_then(|wing| wing.xsecs.first())
+        .map(|root| make_rect(&root.airfoil, "deck_rect_m0.avl"));
+    let rect_naca = alas_geom::aircraft::airfoil::Airfoil::from_name("naca4412")
+        .map(|foil| make_rect(&foil, "deck_rect_naca4412_m0.avl"));
+    json!({
+        "rect": rect,
+        "rect_naca4412": rect_naca,
+        "wing_flat": like_for_like_one(&flat, resolution, result_dir, "deck_flat_m0.avl"),
+        "full": like_for_like_one(airplane, resolution, result_dir, "deck_m0.avl"),
+        "wing_only": like_for_like_one(&wing_only, resolution, result_dir, "deck_wing_m0.avl"),
+    })
+}
+
+/// Tail dynamic-pressure ratio study: the DATCOM 4.4.1 wake ratio at the
+/// cruise state against the superseded constant 0.78 and the free stream, each
+/// with the lattice-only neutral point and Cm_alpha (rad^-1).
+fn tail_eta_study(
+    airplane: &alas_geom::aircraft::airplane::Airplane,
+    config: &alas_config::AlasConfig,
+    resolution: (i64, i64),
+    result_dir: &Path,
+) -> Value {
+    let req = &config.requirements;
+    let atmosphere = alas_atmo::Atmosphere::new(req.cruise_altitude_m);
+    let velocity = req.cruise_mach * atmosphere.speed_of_sound();
+    let q = 0.5 * atmosphere.density() * velocity * velocity;
+    let cl = req.required_cruise_cl(q, airplane.s_ref);
+    let sweep = alas_aero::analysis::AeroAnalysis::quarter_chord_sweep_deg(airplane, 25.0);
+    let aero = alas_aero::analysis::AeroAnalysis::new(
+        airplane,
+        sweep,
+        Some(config.geometry.clone()),
+        Some(config.resolved_drag_model()),
+        Some(config.analysis.clone()),
+    );
+    let wake = aero.horizontal_tail_wake(req.cruise_mach, req.cruise_altitude_m, cl);
+    let mut rows = Vec::new();
+    let mut etas = vec![("free_stream", 1.0), ("old_constant", 0.78)];
+    if let Some(wake) = wake {
+        etas.push(("datcom_wake", wake.ratio));
+    }
+    for (label, eta) in etas {
+        let mut plane = airplane.clone();
+        plane.set_horizontal_tail_dynamic_pressure_ratio(eta);
+        let one = like_for_like_one(&plane, resolution, result_dir, "deck_eta.avl");
+        rows.push(json!({
+            "label": label, "eta": eta, "x_np_m": one["x_np_m"],
+            "cm_alpha_per_rad": one["cm_alpha_per_rad"], "cl_alpha_per_rad": one["cl_alpha_per_rad"],
+            "x_ref_m": one["x_ref_m"], "c_ref_m": one["c_ref_m"],
+        }));
+    }
+    json!({
+        "cruise_cl": cl,
+        "wake": wake.map(|w| json!({
+            "ratio": w.ratio, "wing_cd0": w.wing_cd0, "centre_line_deficit": w.centre_line_deficit,
+            "half_width_m": w.half_width_m, "height_above_wake_m": w.height_above_wake_m,
+            "arm_m": w.arm_m, "alpha_deg": w.alpha_deg,
+            "centre_line_downwash_deg": w.centre_line_downwash_deg,
+        })),
+        "rows": rows,
+    })
+}
+
+fn like_for_like_one(
+    airplane: &alas_geom::aircraft::airplane::Airplane,
+    resolution: (i64, i64),
+    result_dir: &Path,
+    deck_name: &str,
+) -> Value {
+    use alas_aero::avl::{fit_vortex_budget, render_geometry, AvlDeckRequest};
+    use alas_aero::operating_point::OperatingPoint;
+    use alas_aero::vlm::VlmSystem;
+    let to_usize = |v: i64| usize::try_from(v).unwrap_or(0);
+    let (span_res, chord_res) = (to_usize(resolution.0).max(1), to_usize(resolution.1).max(1));
+    let system = match VlmSystem::assemble(airplane, span_res, chord_res) {
+        Ok(system) => system,
+        Err(error) => return json!({"error": error.to_string()}),
+    };
+    let atmosphere = alas_atmo::Atmosphere::new(0.0);
+    let mut points = Vec::new();
+    let mut loads = Value::Null;
+    for alpha in [1.0_f64, 2.0, 3.0] {
+        let op = OperatingPoint::new(atmosphere, 60.0, alpha, 0.0, 0.0, 0.0, 0.0);
+        let Ok(solved) = system.solve(&op) else {
+            return json!({"error": "VLM solve failed"});
+        };
+        let cdi = system.trefftz_induced_drag_coefficient(&solved, &op);
+        points.push(json!({
+            "alpha_deg": alpha, "cl": solved.cl_lift, "cm": solved.cm_pitch,
+            "cdi_trefftz_lattice": cdi,
+        }));
+        if (alpha - 2.0).abs() < 1.0e-9 {
+            let q = op.dynamic_pressure();
+            loads = json!(alas_aero::strips::wing_strips(&solved, &op, 0)
+                .iter()
+                .map(|strip| json!({
+                    "y_m": strip.y_m,
+                    "cl_c_over_cref": strip.lift_n / (q * strip.width_m * airplane.c_ref),
+                }))
+                .collect::<Vec<_>>());
+        }
+    }
+    let slope = |key: &str| {
+        (points[2][key].as_f64().unwrap_or(f64::NAN) - points[0][key].as_f64().unwrap_or(f64::NAN))
+            / 2.0
+    };
+    let (cla, cma) = (slope("cl"), slope("cm"));
+    let x_np = airplane.xyz_ref[0] - cma / cla * airplane.c_ref;
+    // The AVL deck at Mach 0 with the pipeline's lattice sizing.
+    let (chord, span) = fit_vortex_budget(airplane, chord_res.max(8), (span_res * 10).max(20), 8);
+    let deck = render_geometry(AvlDeckRequest {
+        airplane,
+        mach: 0.0,
+        chordwise_vortices: chord,
+        spanwise_vortices: span,
+    });
+    let deck_written = match deck {
+        Ok(text) => fs::write(result_dir.join(deck_name), text).is_ok(),
+        Err(_) => false,
+    };
+    json!({
+        "points": points, "cl_alpha_per_rad": cla.to_degrees(), "cm_alpha_per_rad": cma.to_degrees(),
+        "x_np_m": x_np, "x_ref_m": airplane.xyz_ref[0], "c_ref_m": airplane.c_ref,
+        "s_ref_m2": airplane.s_ref, "b_ref_m": airplane.b_ref,
+        "span_load_2deg": loads, "deck_written": deck_written,
+        "avl_lattice": [chord, span],
+    })
 }

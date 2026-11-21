@@ -26,7 +26,7 @@ pub(super) const MIN_DECK_SEPARATION_FRAC: f64 = 0.06;
 /// the same two conditions are a typed error. `AircraftBuilder::build` always
 /// supplies three wings and at least one fuselage, so neither is reachable
 /// from this program's own inputs.
-#[derive(Debug, Clone, Copy, PartialEq, Eq, thiserror::Error)]
+#[derive(Debug, Clone, PartialEq, thiserror::Error)]
 pub enum CabinGeometryError {
     /// The airplane has no fuselage to lay an interior out inside.
     #[error("the airplane has no fuselage, so there is no cabin to lay out")]
@@ -35,6 +35,17 @@ pub enum CabinGeometryError {
     /// report a centre of gravity against.
     #[error("the airplane has no wing, so there is no MAC to measure the payload CG against")]
     NoWings,
+    /// The declared floor zones or point masses are not physical (an inverted
+    /// extent, a duplicate id, a non-positive mass); the configuration
+    /// validation names the field.
+    #[error(
+        "the declared payload items are invalid; see the cabin.payload_items validation message"
+    )]
+    InvalidPayloadItems,
+    /// The drawn cabin section does not fit the outer section it was drawn
+    /// for: a depth outside it, or a hold wider than the skin there.
+    #[error("the drawn cabin section does not fit the outer section: {0}")]
+    SectionOutsideSkin(String),
 }
 
 /// Why an installed item cannot be evaluated or contained by the cabin.
@@ -78,6 +89,18 @@ pub struct DeckSpec {
     pub is_passenger: bool,
 }
 
+/// A stretch of one passenger deck that a declared floor zone (an office, a
+/// bedroom, an operations room) takes out of the seat layout.
+#[derive(Debug, Clone, Copy, PartialEq)]
+pub struct ReservedZone {
+    /// The deck's name: [`crate::layout::MAIN`] or [`crate::layout::UPPER`].
+    pub deck: &'static str,
+    /// Forward end, m.
+    pub x0: f64,
+    /// Aft end, m.
+    pub x1: f64,
+}
+
 /// The built fuselage, sampled: cabin extent, per-station section, and the
 /// decks inside it.
 #[derive(Debug, Clone, PartialEq)]
@@ -110,6 +133,10 @@ pub struct CabinGeometry {
     /// The level main-deck floor height of a body with a partial upper deck,
     /// m (z up); see `hump_deck`. `None` without an upper deck.
     pub(super) level_main_floor_z: Option<f64>,
+    /// The level floor of each passenger deck of a body without a partial
+    /// upper deck, m (z up), in `passenger_decks` order; empty on the frozen
+    /// reference frame and under a hump, which has its own level floor.
+    pub(super) level_deck_floors: Vec<f64>,
     /// Mean aerodynamic chord, which the centre of gravity is reported against.
     pub mac: f64,
     /// The main wing's aerodynamic centre, longitudinally.
@@ -131,12 +158,36 @@ pub struct CabinGeometry {
     /// empty when the cabin is bounded by the generic nose and tail-cone
     /// lengths instead.
     pub door_stations: Vec<crate::cabin::DoorStation>,
+    /// Floor that declared zones take away from the seat layout (empty
+    /// unless the configuration declares zones).
+    pub reserved_zones: Vec<ReservedZone>,
+    /// The underfloor hold's polygon on a body whose section is drawn or
+    /// classed; `None` keeps the baseline hold.
+    pub hold: Option<HoldSection>,
+    /// Whether the passenger floor stands at a drawn or class depth below the
+    /// crown; seat rows are then contained at armrest and shoulder height.
+    /// A double-decker and a hump body keep their deck tables for now.
+    pub(super) floor_datum_applied: bool,
+    /// Ratio of the drawn (or class) lining width to the lofted lining's chord
+    /// at the armrests and at the shoulders; one without a drawn section.
+    pub lining_scale: [f64; 2],
+    /// Whether the body has an underfloor hold; false only where the section
+    /// leaves no room for one (a turboprop). Bodies with their own deck tables
+    /// (double-decker, hump) keep it.
+    pub underfloor_hold: bool,
     /// Station coordinates, ascending. The three sampled series below are in
     /// this same order, which is what lets one interpolation index serve all.
     pub(super) x_stations: Vec<f64>,
     widths: Vec<f64>,
+    pub(super) shapes: Vec<f64>,
     heights: Vec<f64>,
     zcs: Vec<f64>,
+    /// `(centres, heights)` of the loadable interior of a container hold, in the
+    /// order of `x_stations`: it keeps the cabin keel (a flat structural floor)
+    /// where the outer belly line rises (`FuselageConfig::hold_interior_section`).
+    /// `None` where it is the outer loft. The lower deck and the hold's lining
+    /// read it; the passenger deck never does.
+    hold_interior: Option<(Vec<f64>, Vec<f64>)>,
 }
 
 impl CabinGeometry {
@@ -199,17 +250,57 @@ impl CabinGeometry {
         let mut order: Vec<usize> = (0..fus.xsecs.len()).collect();
         order.sort_by(|&a, &b| fus.xsecs[a].xyz_c[0].total_cmp(&fus.xsecs[b].xyz_c[0]));
 
-        let x_stations: Vec<f64> = order.iter().map(|&i| fus.xsecs[i].xyz_c[0]).collect();
-        let widths: Vec<f64> = order.iter().map(|&i| fus.xsecs[i].width).collect();
+        let mut x_stations: Vec<f64> = order.iter().map(|&i| fus.xsecs[i].xyz_c[0]).collect();
+        let mut widths: Vec<f64> = order.iter().map(|&i| fus.xsecs[i].width).collect();
+        let mut shapes: Vec<f64> = order.iter().map(|&i| fus.xsecs[i].shape).collect();
         let mut heights: Vec<f64> = order.iter().map(|&i| fus.xsecs[i].height).collect();
         let mut zcs: Vec<f64> = order.iter().map(|&i| fus.xsecs[i].xyz_c[2]).collect();
+        let mut hold_interior: Option<(Vec<f64>, Vec<f64>)> = None;
         if strict_envelope {
+            // The interior's keel steps back to the outer loft at the hold end,
+            // so the loft needs a definition station there: without one the
+            // floor is interpolated from the last station before the end to the
+            // first station after it, lifting it under the last container
+            // position of a hold that ends between two loft stations.
+            if let Some(end) = geometry_config
+                .fuselage
+                .hold_interior_end_x_m
+                .filter(|end| end.is_finite())
+            {
+                let at = x_stations.partition_point(|&x| x < end);
+                let inside = at > 0 && at < x_stations.len();
+                if inside && x_stations[at] > end && end > geometry_config.fuselage.cabin_start_x_m
+                {
+                    let (w, s, h, z) = (
+                        crate::numeric::interp(end, &x_stations, &widths),
+                        crate::numeric::interp(end, &x_stations, &shapes),
+                        crate::numeric::interp(end, &x_stations, &heights),
+                        crate::numeric::interp(end, &x_stations, &zcs),
+                    );
+                    x_stations.insert(at, end);
+                    widths.insert(at, w);
+                    shapes.insert(at, s);
+                    heights.insert(at, h);
+                    zcs.insert(at, z);
+                }
+            }
             // The loadable interior keeps the cabin keel up to the hold end,
-            // whatever the outer belly line does (unset: the outer loft).
-            for (i, x) in x_stations.iter().enumerate() {
-                (zcs[i], heights[i]) = geometry_config
-                    .fuselage
-                    .hold_interior_section(*x, zcs[i], heights[i]);
+            // whatever the outer belly line does (unset: the outer loft). It
+            // is a second series read only for the lower deck and for the
+            // hold's lining; the series above stay the outer loft the
+            // passenger deck stands in, so declaring a lower hold cannot move
+            // a seat row.
+            let interior: (Vec<f64>, Vec<f64>) = x_stations
+                .iter()
+                .enumerate()
+                .map(|(i, x)| {
+                    geometry_config
+                        .fuselage
+                        .hold_interior_section(*x, zcs[i], heights[i])
+                })
+                .unzip();
+            if interior.0 != zcs || interior.1 != heights {
+                hold_interior = Some(interior);
             }
         }
 
@@ -232,10 +323,15 @@ impl CabinGeometry {
             .find(|w| w.name == MAIN_WING)
             .or_else(|| plane.wings.first())
             .ok_or(CabinGeometryError::NoWings)?;
-        let root = wing.xsecs.first().ok_or(CabinGeometryError::NoWings)?;
+        wing.xsecs.first().ok_or(CabinGeometryError::NoWings)?;
+        // The holds stop at the centre wing box, which the side-of-body section
+        // sets; the plan of the wing around it inside the body is not structure.
+        let (box_le_m, box_chord_m) = wing.carried_root();
 
         let mac = plane.c_ref;
-        let x_wing_ac = wing.aerodynamic_center(AERODYNAMIC_CENTER_CHORD_FRACTION)[0];
+        let x_wing_ac = wing
+            .carried_box()
+            .aerodynamic_center(AERODYNAMIC_CENTER_CHORD_FRACTION)[0];
         // Canonical MAC frame (MAC-06) on the product path only: the main
         // wing's own `mac_station()` leading edge, never reconstructed from
         // `aerodynamic_center(0.25) - 0.25 * c_ref`. The frozen
@@ -282,22 +378,36 @@ impl CabinGeometry {
                 })
                 .unwrap_or_default(),
             level_main_floor_z: None,
+            level_deck_floors: Vec::new(),
             upper_deck,
             mac,
             x_wing_ac,
             x_lemac,
-            x_wing_le: root.xyz_le[0],
-            wing_root_chord: root.chord,
+            x_wing_le: box_le_m[0],
+            wing_root_chord: box_chord_m,
             passenger_decks,
             lower_deck,
             strict_envelope,
             door_stations: Vec::new(),
+            reserved_zones: Vec::new(),
+            hold: None,
+            floor_datum_applied: false,
+            lining_scale: [1.0, 1.0],
+            underfloor_hold: true,
             x_stations,
             widths,
+            shapes,
             heights,
             zcs,
+            hold_interior,
         };
         geometry.level_main_floor_z = geometry.level_main_floor();
+        if strict_envelope && geometry.upper_deck.is_none() {
+            if !geometry.is_double_deck {
+                geometry.apply_cabin_section(fg.cabin_section)?;
+            }
+            geometry.level_deck_floors = geometry.level_floors();
+        }
         Ok(geometry)
     }
 
@@ -318,6 +428,35 @@ impl CabinGeometry {
         interp(x, &self.x_stations, &self.zcs)
     }
 
+    /// The loadable interior's `(centre z, height)` at station `x`: the keel of
+    /// a container hold where one is declared, else the outer loft.
+    pub(super) fn interior_section_at(&self, x: f64) -> (f64, f64) {
+        match &self.hold_interior {
+            Some((zcs, heights)) => (
+                interp(x, &self.x_stations, zcs),
+                interp(x, &self.x_stations, heights),
+            ),
+            None => (self.zc_at(x), self.height_at(x)),
+        }
+    }
+
+    /// The section `(centre z, height)` that `deck` stands in at `x`: the outer
+    /// loft for a passenger deck, the loadable interior for a deck that carries
+    /// cargo (the lower holds, a freight hold on the main deck).
+    fn deck_section_at(&self, deck: &DeckSpec, x: f64) -> (f64, f64) {
+        if deck.is_passenger {
+            (self.zc_at(x), self.height_at(x))
+        } else {
+            self.interior_section_at(x)
+        }
+    }
+
+    /// `internal_half_height` of the section `deck` stands in.
+    fn deck_half_height(&self, deck: &DeckSpec, x: f64) -> f64 {
+        let rise = self.crown_rise_m(x);
+        ((self.deck_section_at(deck, x).1 - rise) / 2.0 - self.wall).max(0.1)
+    }
+
     /// Half the internal height at station `x`, the unit every deck fraction
     /// is measured in.
     ///
@@ -332,11 +471,50 @@ impl CabinGeometry {
     }
 
     /// Where `deck`'s floor sits at station `x`.
+    ///
+    /// An underfloor cargo floor is level, not a fixed fraction of the local
+    /// section: aft of the middle of the constant section, where the tail's
+    /// upsweep lifts the section centre, the fractional rule would lift the
+    /// floor with it and squeeze the hold below a container's height while the
+    /// belly is still far below. The hold floor there stays at the level it has
+    /// at the middle of the constant section, and rises only when the lining
+    /// keel, plus the floor-to-keel clearance (`FLOOR_KEEL_CLEARANCE_M`), forces
+    /// it up. It never goes below the fractional rule's own floor.
     pub fn floor_z(&self, deck: &DeckSpec, x: f64) -> f64 {
+        let rule = self.rule_floor_z(deck, x);
+        if deck.name != crate::layout::LOWER || !self.strict_envelope {
+            return rule;
+        }
+        let x_ref = 0.5 * (self.cabin_start_x + self.cabin_end_x);
+        if x <= x_ref {
+            return rule;
+        }
+        let level = self.rule_floor_z(deck, x_ref);
+        let (keel_zc, keel_height) = self.interior_section_at(x);
+        let keel =
+            keel_zc - 0.5 * self.crown_rise_m(x) - 0.5 * (keel_height - self.crown_rise_m(x))
+                + self.wall;
+        // Where the crown falls aft while the keel is held (the DC-10 from
+        // 32 m), the fractional rule sinks below the level floor: the floor
+        // stays level there and does not follow it down.
+        if rule < level {
+            return level;
+        }
+        level
+            .max(keel + super::hold::FLOOR_KEEL_CLEARANCE_M)
+            .min(rule)
+    }
+
+    /// The floor the section rule gives: the hump rule, a declared level floor,
+    /// or the deck's fraction of the local internal half-height.
+    fn rule_floor_z(&self, deck: &DeckSpec, x: f64) -> f64 {
         if self.upper_deck.is_some() {
             return self.hump_floor_z(deck, x);
         }
-        self.zc_at(x) + deck.floor_frac * self.internal_half_height(x)
+        if let Some(level) = self.level_floor_of(deck) {
+            return level;
+        }
+        self.deck_section_at(deck, x).0 + deck.floor_frac * self.deck_half_height(deck, x)
     }
 
     /// Where `deck`'s ceiling sits at station `x`.
@@ -344,16 +522,40 @@ impl CabinGeometry {
         if self.upper_deck.is_some() {
             return self.hump_ceil_z(deck, x);
         }
-        self.zc_at(x) + deck.ceil_frac * self.internal_half_height(x)
+        let section =
+            self.deck_section_at(deck, x).0 + deck.ceil_frac * self.deck_half_height(deck, x);
+        match self.level_deck_floors.first() {
+            // Under a level main floor the hold ceiling is the underside of
+            // that floor's beams: a plane at the depth it has at the middle of
+            // the constant section, not a fraction of the local section (which
+            // drops it wherever the crown falls). It never rises through the
+            // level main floor where the tail's upsweep lifts the section.
+            Some(&main_floor) if deck.name == crate::layout::LOWER => {
+                let ceiling = if self.strict_envelope {
+                    let x_ref = 0.5 * (self.cabin_start_x + self.cabin_end_x);
+                    self.deck_section_at(deck, x_ref).0
+                        + deck.ceil_frac * self.deck_half_height(deck, x_ref)
+                } else {
+                    section
+                };
+                ceiling.min(main_floor - MIN_DECK_SEPARATION_FRAC * self.deck_half_height(deck, x))
+            }
+            _ => section,
+        }
     }
 
     /// The headroom on `deck` at station `x`, floored at 0.3 m for the same
     /// reason [`Self::internal_half_height`] has a floor.
     pub fn deck_height(&self, deck: &DeckSpec, x: f64) -> f64 {
-        if self.upper_deck.is_some() {
+        // Under a hump or a level floor the floor is not the section rule's, so
+        // the headroom is measured between the planes the decks really have.
+        if self.upper_deck.is_some() || !self.level_deck_floors.is_empty() {
             return (self.ceil_z(deck, x) - self.floor_z(deck, x)).max(0.3);
         }
-        ((deck.ceil_frac - deck.floor_frac) * self.internal_half_height(x)).max(0.3)
+        if deck.name == crate::layout::LOWER {
+            return (self.ceil_z(deck, x) - self.floor_z(deck, x)).max(0.3);
+        }
+        ((deck.ceil_frac - deck.floor_frac) * self.deck_half_height(deck, x)).max(0.3)
     }
 
     /// An item height cut down to what `deck` has room for at station `x`.
@@ -364,16 +566,6 @@ impl CabinGeometry {
     /// The vertical centre of an item of height `h` resting on `deck`'s floor.
     pub fn item_z(&self, deck: &DeckSpec, x: f64, h: f64) -> f64 {
         self.floor_z(deck, x) + self.clamp_height(deck, x, h) / 2.0
-    }
-
-    /// The floor width available for seats or containers on `deck` at station
-    /// `x`, after both walls and the deck's own width factor.
-    pub fn usable_width(&self, deck: &DeckSpec, x: f64) -> f64 {
-        if self.strict_envelope {
-            self.usable_width_at_z(x, self.floor_z(deck, x)) * deck.width_factor
-        } else {
-            ((self.width_at(x) - 2.0 * self.wall).max(0.0) * deck.width_factor).max(0.0)
-        }
     }
 
     /// A station as a percentage of MAC.

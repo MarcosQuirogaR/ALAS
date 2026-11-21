@@ -37,7 +37,9 @@
 //! and `cosspace` because the builder is its only caller; it is built on that
 //! module's `linspace`.
 
+mod carry_through;
 mod custom_sections;
+mod dorsal;
 mod empennage;
 mod error;
 mod fin_root;
@@ -47,19 +49,23 @@ mod loft_build;
 mod loft_tests;
 mod mesh;
 mod nacelle;
+mod pod_surfaces;
 mod profile_sections;
 mod reference_wing;
 #[cfg(test)]
 mod reference_wing_tests;
 mod report;
+mod section_law;
 mod smooth_profiles;
 mod spacing;
 mod tail_attachment;
+mod tail_edges;
 mod tail_planform;
 #[cfg(test)]
 mod tail_planform_tests;
 #[cfg(test)]
 mod tests;
+mod ventral;
 mod wingtip;
 
 use crate::aircraft::spacing::linspace;
@@ -144,13 +150,13 @@ impl AircraftBuilder {
         geometry.wing.outboard_le_sweep_deg = None;
         // The frozen builder lofts one wing shape, the configured heights.
         geometry.wing.flight_tip_rise_semispan_fraction = None;
-        // And it has no spanwise profile stations or swept-back tip (geometry round 2).
+        // And it has no spanwise profile stations or swept-back tip.
         geometry.wing.flight_root_rise_m = None;
         geometry.wing.nacelles_hold_ground_height = false;
         geometry.wing.dihedral_stations.clear();
         geometry.wing.thickness_stations.clear();
-        geometry.wing.tip_rake_start_span_fraction = None;
-        geometry.wing.tip_rake_tip_chord_m = None;
+        // And no outboard trailing-edge break or swept-back tip.
+        geometry.wing.clear_outboard_edge_options();
         // And the tailcone loft: it has no belly upsweep.
         geometry.fuselage.belly_upsweep_length_m = None;
         // And the single-ellipsoid nose: it has no windshield or keel profile.
@@ -266,7 +272,7 @@ impl AircraftBuilder {
             self.build_main_wing(dv, &planform, &heights, &root_section, &tip_airfoil)?;
         let fuselage = self.build_fuselage_reported(dv, report)?;
         let seat = self.fin_seat(dv, &fuselage)?;
-        let mut wings = self.with_tail_surfaces(dv, main_wing, &tail_airfoil, &seat)?;
+        let mut wings = self.with_tail_surfaces(dv, main_wing, &tail_airfoil, &seat, &fuselage)?;
         wings.extend(self.build_wingtip_device(&wings[0], &tip_airfoil)?);
 
         let mut fuselages = vec![fuselage];
@@ -281,7 +287,9 @@ impl AircraftBuilder {
         // instead, since its golden fixture pins Python's own unfolded
         // `airplane.c_ref` (see that fixture's generator).
         let mac = match self.geometry_contract {
-            GeometryContract::Product => main_wing.mac_station().chord_m,
+            GeometryContract::Product => main_wing
+                .planform_datum
+                .map_or_else(|| main_wing.mac_station().chord_m, |d| d.gross_mac_m),
             GeometryContract::ReferenceCompatibility => main_wing.mean_aerodynamic_chord(),
         };
         // Initial CG seed (~quarter-MAC of the drawn wing), refined later.
@@ -334,35 +342,7 @@ impl AircraftBuilder {
             g.root_twist_deg,
             root_section.clone(),
         )];
-        // A derived side-of-body station lies on the straight root-to-kink
-        // panel (its trailing-edge clip is millimetres), and meshing it only
-        // when that clip happens to be active made the lattice section count
-        // depend on the design vector: adjacent candidates differed by eight
-        // sections and by fifteen percent in induced drag. Only an explicitly
-        // cranked station changes the loft, so only that one is meshed.
-        if let Some(side_of_body) = planform
-            .side_of_body
-            .filter(|_| g.side_of_body_chord_ratio.is_some())
-        {
-            let root_to_kink_fraction = side_of_body.y_m / planform.kink.y_m;
-            let side_of_body_z_m = if heights.interior.is_empty() {
-                heights.root_z_m + root_to_kink_fraction * (heights.break_z_m - heights.root_z_m)
-            } else {
-                heights.at(planform, side_of_body.y_m)
-            };
-            let side_of_body_twist_deg =
-                g.root_twist_deg + root_to_kink_fraction * (g.break_twist_deg - g.root_twist_deg);
-            xsecs.push(WingXSec::new(
-                [
-                    side_of_body.leading_edge_x_m,
-                    side_of_body.y_m,
-                    side_of_body_z_m,
-                ],
-                side_of_body.chord_m,
-                side_of_body_twist_deg,
-                root_section.clone(),
-            ));
-        }
+        xsecs.extend(self.inboard_loft_sections(planform, heights, root_section));
         xsecs.push(WingXSec::new(
             [
                 planform.kink.leading_edge_x_m,
@@ -373,12 +353,12 @@ impl AircraftBuilder {
             g.break_twist_deg,
             root_section.clone(),
         ));
-        if let Some(rake) = planform.tip_rake {
+        for station in planform.outboard_stations() {
             xsecs.push(self.tip_rake_section(
                 dv,
                 planform,
                 heights,
-                &rake,
+                &station,
                 root_section,
                 tip_airfoil,
             )?);
@@ -389,11 +369,13 @@ impl AircraftBuilder {
                 planform.tip.y_m,
                 heights.tip_z_m,
             ],
-            planform.tip.chord_m,
+            self.built_wing_tip_chord_m(planform.tip.chord_m)?,
             dv.tip_twist_deg,
             tip_airfoil.clone(),
         ));
-        self.apply_wing_profiles(planform, heights, root_section, tip_airfoil, &mut xsecs)?;
+        let law = self.section_law(dv, root_section, tip_airfoil)?;
+        let sections = (root_section, tip_airfoil, law.as_ref());
+        self.apply_wing_profiles(planform, heights, sections, &mut xsecs)?;
         self.append_custom_wing_sections(planform, heights, &mut xsecs)?;
 
         let wing = Wing::new("Main Wing", xsecs, true);
@@ -402,13 +384,13 @@ impl AircraftBuilder {
             &wing.translate([x_wing_global, 0.0, 0.0]),
             g.n_subdivisions,
         )?;
-        self.smooth_wing_profiles(
-            dv,
-            planform,
-            heights,
-            (root_section, tip_airfoil),
-            &mut wing,
-        )?;
+        self.smooth_wing_profiles(dv, planform, heights, sections, &mut wing)?;
+        let tip_flare_m = self.built_wing_tip_flare_m()?;
+        self.carry_side_of_body_through(dv, planform, tip_flare_m, &mut wing);
+        // A datum states the straight-edge tip; without one the wing says what the flare is.
+        if wing.planform_datum.is_none() {
+            wing.tip_te_flare_m = tip_flare_m;
+        }
         Ok(wing)
     }
 

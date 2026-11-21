@@ -10,6 +10,36 @@
 use alas_config::presets;
 use alas_geom::builder::AircraftBuilder;
 
+/// The fin tip leading edge of the planform (the point the tailplane seat is measured from): the
+/// last section minus the leading-edge offset of the last edge station, which rounds the drawn tip
+/// aft of the straight line (edge stations) and scales with the fin.
+fn planform_fin_tip_le(
+    fin: &alas_geom::aircraft::wing::Wing,
+    e: &alas_config::EmpennageConfig,
+    fin_scale: f64,
+) -> ([f64; 3], f64) {
+    let last = fin.xsecs.last().expect("fin tip");
+    let mut tip = last.xyz_le;
+    let (le, te) = e
+        .vstab_edge_stations
+        .last()
+        .map_or((0.0, 0.0), |s| (s.le_offset_m, s.te_offset_m));
+    tip[0] -= le * fin_scale;
+    (tip, last.chord + (le - te) * fin_scale)
+}
+
+/// How far the built tailplane root leading edge may stand from the straight-line seat in x: the
+/// tailplane's own leading-edge edge stations (a fillet or rounded tip) move its root
+/// section by less than their largest offset, which scales with the tail.
+fn root_edge_allowance(e: &alas_config::EmpennageConfig, tail_scale: f64) -> f64 {
+    e.hstab_edge_stations
+        .iter()
+        .map(|s| s.le_offset_m.abs())
+        .fold(0.0, f64::max)
+        * tail_scale
+        + 1e-9
+}
+
 #[test]
 fn attached_t_tail_follows_scaled_fin_in_product_geometry() {
     // Both registered T-tails: the ATR 72-600 and the A400M.
@@ -28,9 +58,10 @@ fn attached_t_tail_follows_scaled_fin(name: &str) {
         dv.fuselage_length_m += 0.5;
         let plane = builder.build(Some(&dv), false).expect("finite geometry");
         let h = &plane.wings[1].xsecs[0];
-        let v = plane.wings[2].xsecs.last().expect("fin tip");
+        let e = &preset.geometry.empennage;
+        let (v, v_chord) = planform_fin_tip_le(&plane.wings[2], e, scale * e.vstab_scale_ratio);
         // The seat is a fixed offset from the fin tip leading edge (zero on the ATR in x; the drawn
-        // tailplanes sit 0.6 m (ATR) and 1.0 m (A400M) below the fin top, geo/close 2026-10-12).
+        // tailplanes sit 0.6 m (ATR) and 1.0 m (A400M) below the fin top).
         let e = &preset.geometry.empennage;
         let offset = [
             e.vstab_offset_from_tail_m - e.hstab_offset_from_tail_m - e.vstab_tip_le_m.0,
@@ -38,14 +69,24 @@ fn attached_t_tail_follows_scaled_fin(name: &str) {
             e.hstab_z_m - e.vstab_z_m - e.vstab_tip_le_m.2,
         ];
         for (axis, off) in offset.iter().enumerate() {
-            assert!((h.xyz_le[axis] - v.xyz_le[axis] - off).abs() < 1e-9);
+            let tolerance = if axis == 0 {
+                root_edge_allowance(e, scale)
+            } else {
+                1e-9
+            };
+            assert!((h.xyz_le[axis] - v[axis] - off).abs() < tolerance);
         }
         // Both chords scale with the tail, so their ratio stays the declared one
         // (1 on the ATR 72-600; the A400M fin tip is 6.8 m against a 4.55 m
-        // tail-plane root, the plane sitting on a fin-tip fairing).
-        let e = &preset.geometry.empennage;
+        // tail-plane root, the plane sitting on a fin-tip fairing). The fin tip chord is the
+        // planform's; the tailplane root chord is moved by its own edge stations.
+        let fin_scale = scale * e.vstab_scale_ratio;
         assert!(
-            (h.chord / v.chord - e.hstab_root_chord_m / e.vstab_tip_chord_m).abs() < 1e-9,
+            (v_chord - e.vstab_tip_chord_m * fin_scale).abs() < 1e-9,
+            "{name}"
+        );
+        assert!(
+            (h.chord - e.hstab_root_chord_m * scale).abs() < 2.0 * root_edge_allowance(e, scale),
             "{name}"
         );
         assert!(h.xyz_le.iter().all(|v| v.is_finite()));
@@ -57,7 +98,9 @@ fn independent_tails_keep_their_existing_root_placement() {
     // The T-tails (ATR 72-600, A400M) attach the stabiliser to the fin tip.
     for preset in presets::registry()
         .iter()
-        .filter(|p| !matches!(p.name, "ATR72-600" | "A400M"))
+        // LJ60: its drawn tailplane now stands within the seat tolerance of the fin tip, so the
+        // geometric T-tail rule seats it on the fin (the drawn LJ60 fits).
+        .filter(|p| !matches!(p.name, "ATR72-600" | "A400M" | "LJ60"))
     {
         let builder = AircraftBuilder::new(Some(preset.geometry.clone()));
         let mut dv = preset.design_vector;
@@ -86,8 +129,8 @@ fn t_tail_root_follows_the_fin_scale_when_the_fin_is_resized() {
     dv.tail_scale = 0.9;
     let plane = builder.build(Some(&dv), false).expect("finite geometry");
     let h = &plane.wings[1].xsecs[0];
-    let v = plane.wings[2].xsecs.last().expect("fin tip");
     let e = &preset.geometry.empennage;
+    let (v, _) = planform_fin_tip_le(&plane.wings[2], e, dv.tail_scale * 1.25);
     let offset = [
         e.vstab_offset_from_tail_m - e.hstab_offset_from_tail_m - e.vstab_tip_le_m.0,
         0.0,
@@ -95,16 +138,24 @@ fn t_tail_root_follows_the_fin_scale_when_the_fin_is_resized() {
     ];
     for (axis, off) in offset.iter().enumerate() {
         assert!(
-            (h.xyz_le[axis] - v.xyz_le[axis] - off).abs() < 1e-9,
+            (h.xyz_le[axis] - v[axis] - off).abs()
+                < if axis == 0 {
+                    root_edge_allowance(e, dv.tail_scale)
+                } else {
+                    1e-9
+                },
             "axis {axis}"
         );
     }
 }
 
-/// Chord and area of a built fin's straight-edged trapezoid at and above the
-/// configured root line `z_m`: the drawn fin the scale ratio resizes, before
-/// the builder carries its edges to the body under the root.
+/// Chord and area of a built fin's straight-edged reference trapezoid at and above the configured
+/// root line `z_m`: the drawn fin the scale ratio resizes, before the builder carries its edges to
+/// the body under the root. The reference planform is read because the built fin is rounded at
+/// the tip by edge stations, so its own first and last sections no longer bound one
+/// straight-edged trapezoid.
 fn at_root_line(fin: &alas_geom::aircraft::wing::Wing, z_m: f64) -> (f64, f64) {
+    let fin = fin.reference_planform();
     let (root, tip) = (&fin.xsecs[0], fin.xsecs.last().expect("fin tip"));
     let s = (z_m - root.xyz_le[2]) / (tip.xyz_le[2] - root.xyz_le[2]);
     let chord = root.chord + s * (tip.chord - root.chord);
@@ -138,12 +189,27 @@ fn the_unmeshed_empennage_has_the_area_and_centre_of_the_meshed_tails() {
         // unfolded planform (its projected area is zero by construction).
         assert!((h.reference_area() / plane.wings[1].reference_area() - 1.0).abs() < 1e-9);
         for (light, full) in [(&h, &plane.wings[1]), (&v, &plane.wings[2])] {
-            assert!((light.unfolded_area() / full.unfolded_area() - 1.0).abs() < 1e-9);
+            // The tail areas and arms read the straight-edged reference planform
+            // (`Wing::reference_planform`); the built surface also carries edge stations.
+            let (light, full) = (&*light.reference_planform(), &*full.reference_planform());
+            assert!(
+                (light.unfolded_area() / full.unfolded_area() - 1.0).abs() < 1e-9,
+                "{}: {} vs {}",
+                preset.name,
+                light.unfolded_area(),
+                full.unfolded_area()
+            );
             let (a, b) = (
                 light.aerodynamic_center(0.25),
                 full.aerodynamic_center(0.25),
             );
-            assert!((a[0] - b[0]).abs() < 1e-9, "{}", preset.name);
+            assert!(
+                (a[0] - b[0]).abs() < 1e-9,
+                "{}: {} vs {}",
+                preset.name,
+                a[0],
+                b[0]
+            );
         }
     }
 }
@@ -160,6 +226,7 @@ fn fin_scale_ratio_scales_only_the_fin_and_keeps_the_t_tail_attached() {
         let sizing = alas_config::TailSizing {
             tail_scale: dv.tail_scale,
             vstab_scale_ratio: 1.25,
+            wing_incidence_deg: None,
         };
         sizing.apply_to(&mut geometry.empennage, &mut dv);
         assert_eq!(
@@ -181,7 +248,7 @@ fn fin_scale_ratio_scales_only_the_fin_and_keeps_the_t_tail_attached() {
             let h = &sized.wings[1].xsecs[0];
             let v = sized.wings[2].xsecs.last().expect("fin tip");
             let e = &preset.geometry.empennage;
-            let offset = e.hstab_z_m - e.vstab_z_m - e.vstab_tip_le_m.2; // geo/close: tailplane 0.6 m below the fin tip
+            let offset = e.hstab_z_m - e.vstab_z_m - e.vstab_tip_le_m.2; // tailplane 0.6 m below the fin tip
             assert!((h.xyz_le[2] - v.xyz_le[2] - offset).abs() < 1e-9);
         } else {
             assert!(

@@ -74,6 +74,9 @@ const DECLARED_DISTRIBUTION_REJECTED: NotAvailable = NotAvailable {
 /// SI throughout. `wing_mounted` carries the point masses for the modelled
 /// positive-`y` semi-wing only, and the items that could not be resolved into
 /// point masses; [`crate::scope::wing_mounted_relief`] builds both.
+/// `fuel_density_kg_m3` is the density, kg/m^3, the enclosed-volume estimate
+/// is filled at (the density the tank inventory is priced at); a declared
+/// distribution already carries its own mass and does not read it.
 #[allow(clippy::too_many_arguments)] // mirrors the unscoped entry point's signature
 pub fn size_wingbox_with_scope(
     wsg: &WingStructureGeometry,
@@ -84,12 +87,14 @@ pub fn size_wingbox_with_scope(
     cap_mat: &MaterialSpec,
     rib_mat: &MaterialSpec,
     fuel: &WingFuelRelief<'_>,
+    fuel_density_kg_m3: f64,
     wing_mounted: &WingMountedRelief,
 ) -> SizedWingbox {
     let n = cfg.spanwise_stations.max(0) as usize;
     let y = linspace(0.0, wsg.semi_span, n);
     let (front, rear) = box_chord_band(wsg);
-    let geometric = || tanks::integral_fuel_running_mass_kg_m(wsg, &y, front, rear);
+    let geometric =
+        || tanks::integral_fuel_running_mass_kg_m(wsg, &y, front, rear, fuel_density_kg_m3);
 
     let mut wing_mounted_omissions = wing_mounted.omitted.clone();
     let (fuel_kg_m, wing_fuel, wing_fuel_distribution) = match *fuel {
@@ -149,7 +154,7 @@ pub fn size_wingbox_with_scope(
     let scope = SizingScope {
         sizing_load_case: sizing.sizing_load_case,
         design_gross_mass_kg: req.mtow_kg,
-        ultimate_load_factor: req.ultimate_load_factor * cfg.additional_safety_factor,
+        ultimate_load_factor: req.design_ultimate_load_factor() * cfg.additional_safety_factor,
         gust_envelope,
         wing_fuel,
         wing_fuel_distribution,
@@ -168,13 +173,97 @@ fn enclosed_box_volume_case(running_mass_kg_m: &[f64], y: &[f64]) -> WingFuelDes
     WingFuelDesignCase::enclosed_box_volume(2.0 * trapezoid(running_mass_kg_m, y))
 }
 
+/// Relieved-load solves kept per thread, most recently used first, keyed on
+/// every input of [`solve_relieved`].
+///
+/// The candidate's design box, its reference reconciliation and its
+/// structural-feasibility check each reach the fixed point through a
+/// different entry point (`size_wingbox_with_torque_sources`,
+/// `size_wingbox_with_scope`) with the same geometry, loads, fuel and
+/// wing-mounted masses; they share the solve here. A hit returns the stored
+/// result, which the solve would reproduce bit for bit: it is deterministic
+/// in exactly these inputs.
+const RELIEVED_ENTRIES: usize = 16;
+
+type RelievedEntries = Vec<(String, (WingboxSizing, ReliefConvergence))>;
+
+thread_local! {
+    static RELIEVED: std::cell::RefCell<RelievedEntries> =
+        const { std::cell::RefCell::new(Vec::new()) };
+}
+
 /// The relieved-load fixed point: size, re-read the box's own running mass,
 /// size again, until the total stops moving.
 ///
 /// Shared by both product entry points so there is one loop, one tolerance and
-/// one convergence verdict.
+/// one convergence verdict. Repeated solves are served from `RELIEVED`.
 #[allow(clippy::too_many_arguments)] // the entry points' inputs plus the law they differ in
 pub(super) fn solve_relieved(
+    wsg: &WingStructureGeometry,
+    cfg: &StructuresConfig,
+    req: &DesignRequirements,
+    skin_mat: &MaterialSpec,
+    web_mat: &MaterialSpec,
+    cap_mat: &MaterialSpec,
+    rib_mat: &MaterialSpec,
+    fuel_kg_m: &[f64],
+    wing_mounted_point_masses: &[(f64, f64)],
+    torque_sources: &TorqueSources,
+    front: f64,
+    rear: f64,
+    case_set: CaseSet,
+) -> (WingboxSizing, ReliefConvergence) {
+    // The Debug representation prints every float in its shortest round-trip
+    // form, so equal keys are bit-equal inputs; a key with a non-finite value
+    // is not cached (NaN payloads print alike).
+    let key = format!(
+        "{:?}",
+        (
+            (wsg, cfg, req),
+            (skin_mat, web_mat, cap_mat, rib_mat),
+            (fuel_kg_m, wing_mounted_point_masses, torque_sources),
+            (front.to_bits(), rear.to_bits(), case_set),
+        )
+    );
+    let cacheable = !key.contains("NaN") && !key.contains("inf");
+    if cacheable {
+        let cached = RELIEVED.with(|entries| {
+            let mut entries = entries.borrow_mut();
+            let position = entries.iter().position(|(cached, _)| *cached == key)?;
+            entries[..=position].rotate_right(1);
+            Some(entries[0].1.clone())
+        });
+        if let Some(solved) = cached {
+            return solved;
+        }
+    }
+    let solved = solve_relieved_uncached(
+        wsg,
+        cfg,
+        req,
+        skin_mat,
+        web_mat,
+        cap_mat,
+        rib_mat,
+        fuel_kg_m,
+        wing_mounted_point_masses,
+        torque_sources,
+        front,
+        rear,
+        case_set,
+    );
+    if cacheable {
+        RELIEVED.with(|entries| {
+            let mut entries = entries.borrow_mut();
+            entries.insert(0, (key, solved.clone()));
+            entries.truncate(RELIEVED_ENTRIES);
+        });
+    }
+    solved
+}
+
+#[allow(clippy::too_many_arguments)] // the inputs of `solve_relieved`
+fn solve_relieved_uncached(
     wsg: &WingStructureGeometry,
     cfg: &StructuresConfig,
     req: &DesignRequirements,
@@ -413,6 +502,7 @@ mod tests {
             material(&structures.spar_cap_material),
             material(&structures.rib_material),
             fuel,
+            crate::tanks::JET_FUEL_DENSITY_KG_M3,
             &relief,
         )
     }
@@ -497,7 +587,13 @@ mod tests {
         let probe = probe("A320-200");
         let stations = super::super::sizing_stations(&probe.wsg, &probe.config.structures);
         let (front, rear) = box_chord_band(&probe.wsg);
-        let declared = tanks::integral_fuel_running_mass_kg_m(&probe.wsg, &stations, front, rear);
+        let declared = tanks::integral_fuel_running_mass_kg_m(
+            &probe.wsg,
+            &stations,
+            front,
+            rear,
+            crate::tanks::JET_FUEL_DENSITY_KG_M3,
+        );
         // A capacity the aircraft cannot avoid filling: DG - MZFW >= C.
         let case = WingFuelDesignCase::declared(15_000.0, 78_000.0, Some(62_000.0));
         assert!(matches!(case, WingFuelDesignCase::TankLimited { .. }));
@@ -522,7 +618,13 @@ mod tests {
         let probe = probe("A340-300");
         let stations = super::super::sizing_stations(&probe.wsg, &probe.config.structures);
         let (front, rear) = box_chord_band(&probe.wsg);
-        let declared = tanks::integral_fuel_running_mass_kg_m(&probe.wsg, &stations, front, rear);
+        let declared = tanks::integral_fuel_running_mass_kg_m(
+            &probe.wsg,
+            &stations,
+            front,
+            rear,
+            crate::tanks::JET_FUEL_DENSITY_KG_M3,
+        );
         // DG - MZFW = 20 000 < C = 40 000, so the case is a partial fill.
         let case = WingFuelDesignCase::declared(40_000.0, 200_000.0, Some(180_000.0));
         let scoped = size(

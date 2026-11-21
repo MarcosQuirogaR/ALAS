@@ -7,9 +7,11 @@ use super::*;
 /// flowfield Mach/Cp contour points and the panelled outline they are drawn over.
 ///
 /// The upper/lower arrays are each ordered by x/c with wake points excluded.
-/// Surface assignment follows the reference MSES analysis contract exactly:
-/// points with `y >= 0` are upper-surface samples and points with `y < 0` are
-/// lower-surface samples. `airfoil_x`/`airfoil_y` are the exact panelled
+/// Surface assignment follows the reference MSES analysis contract (sign of
+/// `y`) when the section stays about the chord line, else the nearer outline
+/// surface (see `is_upper_surface`):
+/// the sign rule files `y >= 0` samples as upper-surface and `y < 0` samples as
+/// lower-surface. `airfoil_x`/`airfoil_y` are the exact panelled
 /// geometry MSES solved, so a contour plot's outline matches its flowfield.
 #[derive(Debug, Clone, Default, PartialEq)]
 pub struct MsesPressureResult {
@@ -219,7 +221,7 @@ impl MsesPressureResult {
             if !(-0.01..=1.02).contains(&x) {
                 continue;
             }
-            if y >= 0.0 {
+            if is_upper_surface(x, y, airfoil_coordinates) {
                 upper.push((x, cp, mach));
             } else {
                 lower.push((x, cp, mach));
@@ -367,5 +369,96 @@ mod schedule_tests {
             assert_eq!(alphas[0], 0.75);
             assert_eq!(alphas[alphas.len() - 1], 3.75);
         }
+    }
+}
+
+/// Whether the boundary-layer sample at `(x, y)` lies on the upper surface of
+/// the solved section.
+///
+/// The reference contract is the sign of `y`, which holds only while the whole
+/// lower surface stays below the chord line. A section whose camber exceeds its
+/// local half-thickness aft (a rear-loaded section, or a 1/cos-scaled swept
+/// normal section) has lower-surface points with `y > 0`, and the sign rule
+/// then files them as upper-surface samples. When the panelled outline is
+/// available the sample is assigned to the nearer surface at its `x`; the sign
+/// rule remains the fallback for a degenerate outline.
+fn is_upper_surface(x: f64, y: f64, outline: &[(f64, f64)]) -> bool {
+    let sign_rule = y >= 0.0;
+    let Some(le) = outline
+        .iter()
+        .enumerate()
+        .min_by(|a, b| a.1 .0.total_cmp(&b.1 .0))
+        .map(|(i, _)| i)
+    else {
+        return sign_rule;
+    };
+    if le == 0 || le + 1 >= outline.len() {
+        return sign_rule;
+    }
+    let at = |piece: &[(f64, f64)]| -> Option<f64> {
+        piece.windows(2).find_map(|w| {
+            let (lo, hi) = (w[0].0.min(w[1].0), w[0].0.max(w[1].0));
+            if x < lo || x > hi {
+                return None;
+            }
+            let d = w[1].0 - w[0].0;
+            Some(if d.abs() < 1e-12 {
+                w[0].1
+            } else {
+                w[0].1 + (x - w[0].0) / d * (w[1].1 - w[0].1)
+            })
+        })
+    };
+    let (Some(a), Some(b)) = (at(&outline[..=le]), at(&outline[le..])) else {
+        return sign_rule;
+    };
+    let (upper_y, lower_y) = if a >= b { (a, b) } else { (b, a) };
+    if upper_y - lower_y < 1e-6 {
+        return sign_rule;
+    }
+    (y - upper_y).abs() <= (y - lower_y).abs()
+}
+
+#[cfg(test)]
+#[allow(clippy::unwrap_used, clippy::expect_used)]
+mod surface_assignment_tests {
+    use super::*;
+
+    /// Camber `0.06 sin(pi x)` with half-thickness `0.12 x (1 - x)`: aft of
+    /// about x = 0.8 the whole lower surface lies above the chord line.
+    fn cambered_outline() -> Vec<(f64, f64)> {
+        let camber = |x: f64| 0.06 * (std::f64::consts::PI * x).sin();
+        let half = |x: f64| 0.12 * x * (1.0 - x);
+        let xs: Vec<f64> = (0..=20).map(|i| f64::from(i) / 20.0).collect();
+        let mut outline: Vec<(f64, f64)> =
+            xs.iter().rev().map(|&x| (x, camber(x) + half(x))).collect();
+        outline.extend(xs.iter().skip(1).map(|&x| (x, camber(x) - half(x))));
+        outline
+    }
+
+    #[test]
+    fn aft_lower_surface_above_the_chord_is_not_filed_as_upper() {
+        let outline = cambered_outline();
+        let x: f64 = 0.9;
+        let camber = 0.06 * (std::f64::consts::PI * x).sin();
+        let half = 0.12 * x * (1.0 - x);
+        let (y_upper, y_lower) = (camber + half, camber - half);
+        assert!(
+            y_lower > 0.0,
+            "fixture must put the lower surface above y = 0"
+        );
+        let bl = format!("{x} {y_upper} {x} 0 -0.6 0 0 0.9\n{x} {y_lower} {x} 0 0.3 0 0 0.5\n");
+        let result =
+            MsesPressureResult::replay_raw_exports(0.0, bl, String::new(), &outline).unwrap();
+        assert_eq!(result.cp_upper, vec![-0.6]);
+        assert_eq!(result.cp_lower, vec![0.3]);
+        assert!(is_upper_surface(x, y_upper, &outline));
+        assert!(!is_upper_surface(x, y_lower, &outline));
+    }
+
+    #[test]
+    fn a_degenerate_outline_keeps_the_sign_rule() {
+        assert!(is_upper_surface(0.5, 0.01, &[]));
+        assert!(!is_upper_surface(0.5, -0.01, &[(0.0, 0.0), (1.0, 0.0)]));
     }
 }

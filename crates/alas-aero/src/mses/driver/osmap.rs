@@ -106,6 +106,8 @@ pub(super) struct SweepOutcome {
     pub(super) checkpoints: Vec<MsesConvergedCheckpoint>,
     /// Whether the caller stopped the sweep before all requested points ran.
     pub(super) cancelled: bool,
+    /// The solver tool failure that stopped the sweep early, if one did.
+    pub(super) stopped: Option<MsesSweepStop>,
 }
 
 /// The process-local OSMAP resource selected for one MSES driver.

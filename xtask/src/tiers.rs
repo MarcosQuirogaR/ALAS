@@ -247,14 +247,14 @@ pub fn classify(cases: &[Case]) -> Tiers {
 }
 
 /// The `default-filter` value of each profile for `tiers`.
-fn filters(tiers: &Tiers) -> [(&'static str, String); 4] {
+fn filters(tiers: &Tiers) -> [(&'static str, String); 6] {
     let integration = tiers.integration.join(" | ");
     let medium = tiers.medium.join(" | ");
+    let fast = format!("not ({integration} | {medium} | {NIGHTLY})");
     [
-        (
-            "default",
-            format!("not ({integration} | {medium} | {NIGHTLY})"),
-        ),
+        ("default", fast.clone()),
+        ("fast", fast),
+        ("merge", format!("not ({integration} | {NIGHTLY})")),
         ("integration", integration.clone()),
         ("slow", integration),
         ("medium", medium),
@@ -371,6 +371,8 @@ mod tests {
         let config = "[profile.default]\ndefault-filter = \"old\"\nx = 1\n\
                       [profile.integration]\ndefault-filter = \"old\"\n\
                       [profile.slow]\ndefault-filter = \"old\"\n\
+                      [profile.fast]\ndefault-filter = \"old\"\n\
+                      [profile.merge]\ndefault-filter = \"old\"\n\
                       [profile.medium]\ndefault-filter = \"old\"\n";
         let tiers = classify(&[case("p::heavy", "a", 61.0), case("p", "m", 6.0)]);
         let once = rewrite_config(config, &tiers).expect("rewrites");
@@ -380,6 +382,9 @@ mod tests {
         ));
         assert!(once.contains(
             "[profile.medium]\ndefault-filter = \"(package(p) & kind(lib) & test(=m))\"\n"
+        ));
+        assert!(once.contains(
+            "[profile.merge]\ndefault-filter = \"not (binary_id(p::heavy) | test(/_nightly$/))\"\n"
         ));
         assert_eq!(rewrite_config(&once, &tiers).expect("rewrites"), once);
     }

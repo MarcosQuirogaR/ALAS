@@ -4,52 +4,65 @@
 //! Reusable editing and compact-value rows for the UAV workflow.
 
 use alas_uav::optimizer::VariableBounds;
-use egui::{DragValue, RichText, Ui};
+use egui::{DragValue, RichText, TextStyle, Ui};
 
 use super::super::tr;
+use crate::views::form::{drag_box, label_row, CellGrid};
 
-pub(super) fn value(ui: &mut Ui, label: &str, value: &mut f64, suffix: &str) {
-    ui.label(RichText::new(tr(label)).strong());
-    ui.add_sized(
-        [numeric_width(ui), ui.spacing().interact_size.y],
-        numeric_drag(value, suffix),
-    );
-    ui.end_row();
-}
-
-pub(super) fn bounds_row(ui: &mut Ui, label: &str, bounds: &mut VariableBounds, suffix: &str) {
-    ui.label(RichText::new(tr(label)).strong());
-    ui.horizontal(|ui| {
-        let width = ((numeric_width(ui) - 28.0) * 0.5).clamp(74.0, 126.0);
-        ui.add_sized(
-            [width, ui.spacing().interact_size.y],
-            numeric_drag(&mut bounds.minimum, suffix),
-        );
-        ui.label(tr("to"));
-        ui.add_sized(
-            [width, ui.spacing().interact_size.y],
-            numeric_drag(&mut bounds.maximum, suffix),
-        );
+/// One field of a UAV form: a cell of the form grid, its caption over a box
+/// that fills the cell.
+fn field(grid: &mut CellGrid, ui: &mut Ui, label: &str, drag: DragValue<'_>) {
+    grid.cell(ui, |ui, width| {
+        label_row(ui, RichText::new(tr(label)).strong(), |_| {});
+        drag_box(ui, width, drag);
     });
-    ui.end_row();
 }
 
-pub(super) fn integer(ui: &mut Ui, label: &str, value: &mut u16) {
-    ui.label(RichText::new(tr(label)).strong());
-    ui.add_sized(
-        [numeric_width(ui), ui.spacing().interact_size.y],
-        DragValue::new(value).range(1..=u16::MAX),
-    );
-    ui.end_row();
+pub(super) fn value(grid: &mut CellGrid, ui: &mut Ui, label: &str, value: &mut f64, suffix: &str) {
+    field(grid, ui, label, numeric_drag(value, suffix));
 }
 
-pub(super) fn usize_value(ui: &mut Ui, label: &str, value: &mut usize) {
-    ui.label(RichText::new(tr(label)).strong());
-    ui.add_sized(
-        [numeric_width(ui), ui.spacing().interact_size.y],
-        DragValue::new(value).range(1..=100_000),
-    );
-    ui.end_row();
+/// A search range: the lower and the upper bound side by side, filling the
+/// cell together.
+pub(super) fn bounds_row(
+    grid: &mut CellGrid,
+    ui: &mut Ui,
+    label: &str,
+    bounds: &mut VariableBounds,
+    suffix: &str,
+) {
+    grid.cell(ui, |ui, width| {
+        label_row(ui, RichText::new(tr(label)).strong(), |_| {});
+        ui.horizontal(|ui| {
+            let to = tr("to");
+            let word = ui
+                .painter()
+                .layout_no_wrap(
+                    to.clone(),
+                    TextStyle::Body.resolve(ui.style()),
+                    egui::Color32::WHITE,
+                )
+                .size()
+                .x;
+            let each = ((width - word - 2.0 * ui.spacing().item_spacing.x) * 0.5).max(1.0);
+            drag_box(ui, each, numeric_drag(&mut bounds.minimum, suffix));
+            ui.label(to);
+            drag_box(ui, each, numeric_drag(&mut bounds.maximum, suffix));
+        });
+    });
+}
+
+pub(super) fn integer(grid: &mut CellGrid, ui: &mut Ui, label: &str, value: &mut u16) {
+    field(grid, ui, label, DragValue::new(value).range(1..=u16::MAX));
+}
+
+pub(super) fn usize_value(grid: &mut CellGrid, ui: &mut Ui, label: &str, value: &mut usize) {
+    field(grid, ui, label, DragValue::new(value).range(1..=100_000));
+}
+
+/// The integer seed of the deterministic search.
+pub(super) fn seed_value(grid: &mut CellGrid, ui: &mut Ui, label: &str, seed: &mut u64) {
+    field(grid, ui, label, DragValue::new(seed).speed(1));
 }
 
 pub(super) fn result_value(ui: &mut Ui, label: &str, value: f64) {
@@ -101,10 +114,6 @@ fn numeric_drag<'a>(value: &'a mut f64, suffix: &str) -> DragValue<'a> {
         .speed(step)
         .max_decimals(input_decimals(suffix))
         .suffix(unit_suffix(suffix))
-}
-
-fn numeric_width(ui: &Ui) -> f32 {
-    ui.available_width().clamp(112.0, 220.0)
 }
 
 fn input_decimals(suffix: &str) -> usize {

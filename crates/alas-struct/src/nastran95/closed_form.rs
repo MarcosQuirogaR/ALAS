@@ -56,7 +56,7 @@ use crate::loads::LoadCase;
 use crate::mesh::{Deck, Mat1, Param, ParamValue, Pshell, Rbe3, Shell, Spc1};
 
 /// Standard gravity, m/s^2 (ISO 80000-3).
-const G0_M_S2: f64 = 9.80665;
+const G0_M_S2: f64 = alas_atmo::STANDARD_GRAVITY;
 
 const TIP_FORCE_SET: i64 = 201;
 const GRAVITY_SET: i64 = 102;

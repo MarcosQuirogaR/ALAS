@@ -11,6 +11,7 @@
 mod cg_envelope;
 pub mod load_trim;
 mod mass_distribution;
+mod preview_np;
 
 use std::collections::BTreeMap;
 
@@ -24,7 +25,9 @@ use alas_payload::build::build_payload_layout;
 use alas_payload::oew::oew_and_cg;
 use alas_pipeline::full_analysis::{AnalysisReport, DesignPoint, PolarFit, PolarFitStatus};
 
-pub use super::mass_balance_layout::{figure_landing_gear_planform, figure_mass_breakdown};
+pub use super::mass_balance_layout::{
+    figure_landing_gear_planform, figure_landing_gear_planform_sized, figure_mass_breakdown,
+};
 
 /// Explain which mass architecture owns the live preview's values. The
 /// preview invokes the same mass-analysis product path as a full run, but it
@@ -39,8 +42,9 @@ pub(crate) fn mass_method_note(config: &AlasConfig) -> &'static str {
         }
     }
 }
-pub use cg_envelope::figure_cg_envelope;
+pub use cg_envelope::{figure_cg_envelope, figure_cg_envelope_sized};
 pub use mass_distribution::figure_mass_distribution;
+pub use preview_np::attach_preview_neutral_point;
 
 /// Construct the geometry-and-mass report used by live CG, gear, and control
 /// surface previews. The preview deliberately does not run aerodynamic VLM;
@@ -89,6 +93,24 @@ pub use mass_distribution::figure_mass_distribution;
 /// `alas-mass`.) With both halves of the rule applied, this preview's
 /// operating empty mass matches the full analysis's.
 pub fn quick_preview_report(
+    airplane: Airplane,
+    config: &AlasConfig,
+    design: DesignVector,
+) -> Result<AnalysisReport, String> {
+    // The report of the full run's own mass pass: the same takeoff fuel
+    // capped by the tanks, ledger-aligned stations and grouped FLOPS
+    // evaluation, so the CG sheet of this draft assesses the loading a run of
+    // the same inputs would. A cabin the pass cannot resolve is a state a
+    // user still editing reaches; the lumped draft below stands for it.
+    alas_pipeline::full_analysis::FullAnalysis::new(config.clone())
+        .mass_report(&design, airplane.clone())
+        .or_else(|_| lumped_preview_report(airplane, config, design))
+}
+
+/// The lumped two-pass draft of [`quick_preview_report`]: the operating empty
+/// mass and station, then the resolved cabin, with the payload layout absent
+/// when the cabin will not resolve.
+fn lumped_preview_report(
     airplane: Airplane,
     config: &AlasConfig,
     design: DesignVector,
@@ -147,6 +169,8 @@ pub fn quick_preview_report(
                     total_mass: layout.total_mass,
                     cg_x: layout.cg_x,
                     cg_y: layout.cg_y,
+                    equipment_mass: layout.equipment_mass(),
+                    equipment_cg: layout.equipment_cg(),
                 };
                 let (cabin_requirements, cabin_mass_model) =
                     alas_pipeline::full_analysis::cabin_sync::cabin_synchronized_for_cabin(
@@ -179,6 +203,7 @@ pub fn quick_preview_report(
         polar: PolarSweep {
             alpha_deg: Vec::new(),
             geometric_alpha_deg: Vec::new(),
+            compressible_mach: None,
             cl: Vec::new(),
             cd: Vec::new(),
             cd_induced: Vec::new(),
@@ -194,10 +219,10 @@ pub fn quick_preview_report(
             l_over_d: 0.0,
         },
         polar_fit: PolarFit {
-            cd0: 0.0,
-            c1: 0.0,
-            k: 0.0,
-            oswald_e: 0.0,
+            cd0: f64::NAN,
+            c1: f64::NAN,
+            k: f64::NAN,
+            oswald_e: f64::NAN,
             aspect_ratio: 0.0,
             // The preview intentionally skips aerodynamic analysis, so an
             // empty polar cannot be reported as a successful fit.

@@ -81,7 +81,8 @@ pub(crate) fn pre_gate_violation(
 /// exposed trailing-edge angle
 /// ([`crate::transport_planform::exposed_te_angle_deg`]), the aerodrome
 /// code span limit ([`AlasConfig::max_design_span_m`]) and the declared
-/// maximum wing area (`requirements.max_wing_area_m2`), each normalized by
+/// maximum wing area (`mdo::wing_area_upper_m2`: the registered window of a
+/// redesign, else `requirements.max_wing_area_m2`), each normalized by
 /// its limit as the residual table does. The reason is the first that fails
 /// in that order.
 ///
@@ -99,7 +100,7 @@ fn hard_geometry_violation(config: &AlasConfig, design: &DesignVector) -> Option
     let excess_span = config
         .max_design_span_m()
         .map_or(0.0, |limit| (design.span_m - limit) / limit);
-    let limit_m2 = config.requirements.max_wing_area_m2;
+    let limit_m2 = crate::mdo::wing_area_upper_m2(config);
     let excess_area = match config.geometry.wing.transport_planform(design) {
         Ok(planform) if limit_m2.is_finite() && limit_m2 > 0.0 => {
             let excess = (config.geometry.wing.reference_area_m2(&planform) - limit_m2) / limit_m2;
@@ -130,13 +131,18 @@ fn hard_geometry_violation(config: &AlasConfig, design: &DesignVector) -> Option
 const AREA_ROUNDOFF: f64 = 1.0e-9;
 
 /// A planform the builder cannot construct: a chord growing outboard by the
-/// relative excess `(outboard - inboard) / outboard`, any other defect 1.
+/// relative excess `(outboard - inboard) / outboard`, a tip-rake chord at or above
+/// the design tip chord by `(rake - tip) / rake`, any other defect 1.
 fn planform_violation(config: &AlasConfig, design: &DesignVector) -> Option<f64> {
     match config.geometry.wing.transport_planform(design) {
         Ok(_) => None,
         Err(alas_config::TransportPlanformError::NonMonotoneChord { inboard, outboard }) => {
             Some(((outboard - inboard) / outboard.abs().max(1.0e-9)).max(f64::MIN_POSITIVE))
         }
+        Err(alas_config::TransportPlanformError::TipRakeChordNotBelowTip {
+            rake_tip_chord_m: rake,
+            tip_chord_m: tip,
+        }) => Some(((rake - tip) / rake.abs().max(1.0e-9)).max(f64::MIN_POSITIVE)),
         Err(_) => Some(1.0),
     }
 }
@@ -480,7 +486,7 @@ mod tests {
             let bounds = DesignOptimizer::new(config.clone())
                 .resolved_bounds(None, None)
                 .unwrap();
-            let limit_m2 = config.requirements.max_wing_area_m2;
+            let limit_m2 = crate::mdo::wing_area_upper_m2(&config);
             let mut rng = crate::search_methods::rng::SearchRng::seed(11);
             let builder = alas_geom::builder::AircraftBuilder::new(Some(config.geometry.clone()));
             for values in crate::search_methods::latin_hypercube(&bounds, 40, &mut rng) {

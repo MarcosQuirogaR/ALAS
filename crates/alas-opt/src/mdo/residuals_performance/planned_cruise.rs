@@ -8,7 +8,7 @@
 //! flies: the planner (`optimum_step` policy) starts at the highest level
 //! that holds the 300 ft/min residual climb at the top-of-climb mass, which
 //! for a heavy aircraft is below the design level, and steps up as fuel
-//! burns. Owner decision 2026-10-14: the `cruise_thrust` check judges the
+//! burns. The `cruise_thrust` check judges the
 //! levels the plan actually flies. Every level cruise segment of the
 //! closure's frozen plan (initial level and each step level), at the mass the
 //! mission model reaches it with and the true airspeed it commands (Mach
@@ -24,12 +24,13 @@
 //! airport's deviation, `SegmentMissionModel::isa_deviation_c`): the mission
 //! applies it to every segment, so the Mach of the commanded true airspeed,
 //! the density behind the lift coefficient and the deck thrust are those of
-//! that day, the same state the mission planner's ceiling evaluates. The
-//! design-level fallback stays on the ISA day.
+//! that day, the same state the mission planner's ceiling evaluates: the US
+//! Standard Atmosphere 1976 and the gravity at the level, as the integrator
+//! (`CruiseDay::mission`). The design-level fallback stays on the ISA day.
 
 use alas_config::AlasConfig;
 
-use super::cruise_deck::{ambient, deck_cruise_at, DeckCruiseRequirements};
+use super::cruise_deck::{deck_cruise_at, CruiseDay, DeckCruiseRequirements};
 use super::oei_deck::EngineOutModel;
 use crate::mdo::sizing::candidate_model::candidate_mission_model;
 use crate::mdo::types::{CandidateDrag, CandidateFuelArtifacts};
@@ -106,12 +107,14 @@ pub fn planned_cruise_requirements(
         if !seen.insert((state.altitude_m.to_bits(), state.tas_m_s.to_bits())) {
             continue;
         }
-        let mach = state.tas_m_s / ambient(state.altitude_m, isa_deviation_c).1;
+        let day = CruiseDay::mission(state.altitude_m, isa_deviation_c, gravity_m_s2);
+        let mach = state.tas_m_s / day.speed_of_sound_m_s();
         let deck = deck_cruise_at(
             model,
             &artifacts.drag,
             gravity_m_s2,
             (state.altitude_m, mach, isa_deviation_c),
+            day,
             (takeoff_mass_kg, state.mass_kg),
             s_ref_m2,
         )?;
@@ -157,6 +160,7 @@ pub fn highest_cruise_level_m(
             drag,
             gravity_m_s2,
             (altitude_m, level.mach, level.isa_deviation_c),
+            CruiseDay::mission(altitude_m, level.isa_deviation_c, gravity_m_s2),
             (takeoff_mass_kg, level.mass_kg),
             s_ref_m2,
         )

@@ -36,6 +36,9 @@ use super::{
 };
 use crate::cargo::CargoLoadManager;
 use crate::geometry::{CabinGeometry, CabinGeometryError};
+use crewless::single_class_without_cabin_crew;
+
+mod crewless;
 
 /// What a first-time "Custom" freighter is filled to, as a fraction of the
 /// positions' geometric capacity.
@@ -149,13 +152,19 @@ fn apply_cabin_preset_with_semantics(
         }
         config.cabin.cargo.loading_strategy = "target_cg".to_owned();
 
-        let manager = CargoLoadManager::new(&cg_geom, config.cabin.cargo.clone());
+        // The frozen Python port sizes the preset from the reference loader's
+        // mass-only capacity; the native presets from what the positions hold
+        // at the stowage density.
+        let manager = if semantics == CabinPresetSemantics::FrozenPython {
+            CargoLoadManager::new_mass_limited(&cg_geom, config.cabin.cargo.clone())
+        } else {
+            CargoLoadManager::new(&cg_geom, config.cabin.cargo.clone())
+        };
         let capacity = manager.total_capacity();
         // A cabin preset owns the *capacity*: what this deck configuration
         // can hold, and therefore what the load case asks the hold for. It
         // deliberately never writes `requirements.cargo_objective_kg`, the
-        // mass the user asked the design to match (clarified ledger App
-        // Features 2, decision D10): a request a preset overwrote would not
+        // mass the user asked the design to match: a request a preset overwrote would not
         // be a requirement, and the objective's deviation would collapse to
         // zero on every candidate. The two quantities stay separate here and
         // are only brought together in the scoring, by
@@ -180,7 +189,7 @@ fn apply_cabin_preset_with_semantics(
     let mix = if semantics == CabinPresetSemantics::FrozenPython {
         frozen_reference_mix(&preset).unwrap_or(product_mix)
     } else {
-        product_mix
+        single_class_without_cabin_crew(product_mix, config, source_capacity_cap)
     };
     // Mirroring the preset's own mix into the per-class shares is what stops
     // the cabin page showing shares that did not produce the layout it is
@@ -276,7 +285,7 @@ fn apply_custom(
             simulate_passenger_counts_for_seat_mix_with_source_cap(
                 &cg_geom,
                 &config.cabin.passenger,
-                &mix,
+                &single_class_without_cabin_crew(mix.clone(), config, source_capacity_cap),
                 source_capacity_cap,
                 source_exit_layout,
             )
@@ -302,7 +311,11 @@ fn apply_custom(
 
     let cg_geom = cabin_geometry(config, design_vector, semantics)?;
     if config.requirements.aircraft_type == "cargo" {
-        let manager = CargoLoadManager::new(&cg_geom, config.cabin.cargo.clone());
+        let manager = if semantics == CabinPresetSemantics::FrozenPython {
+            CargoLoadManager::new_mass_limited(&cg_geom, config.cabin.cargo.clone())
+        } else {
+            CargoLoadManager::new(&cg_geom, config.cabin.cargo.clone())
+        };
         config.requirements.cargo_payload_kg = CUSTOM_CARGO_FILL * manager.total_capacity();
     } else {
         let counts = if semantics == CabinPresetSemantics::FrozenPython {
@@ -443,6 +456,7 @@ pub(super) fn apply_cabin_preset_to_geometry(
     if mix.is_empty() {
         return;
     }
+    let mix = single_class_without_cabin_crew(mix, config, source_capacity_cap);
     config.cabin.passenger.set_length_share_mix(&mix);
     let counts = simulate_passenger_counts_for_seat_mix_with_source_cap(
         g,

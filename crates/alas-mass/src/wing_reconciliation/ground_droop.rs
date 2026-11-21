@@ -3,7 +3,7 @@
 
 //! Static deflection of the wing standing on the ground, from the sized box.
 //!
-//! Owner decision (2026-10-12): the lofted geometry stays the drawn, unloaded
+//! Design rule: the lofted geometry stays the drawn, unloaded
 //! shape for the aerodynamics and the overlays; the ground clearances of the
 //! nacelles and the wing tip are that shape minus the wing's own static droop
 //! on the ground, computed here. The droop is a cantilever from the side of
@@ -30,7 +30,7 @@
 //! # Stiffness: a diagnostic EI
 //!
 //! `EI(y)` is the sized box with the 6 mm unstiffened covers credited at full
-//! modulus (audit STR-03). It is neither tuned nor calibrated here; whether it
+//! modulus. It is neither tuned nor calibrated here; whether it
 //! is physical is a validation question reported with the results.
 
 use alas_config::design_variables::DesignVector;
@@ -41,9 +41,10 @@ use alas_struct::ground_deflection::{
 };
 
 use super::reconcile::primary_structure_geometry;
+use super::sizing_cause::{material, StructuralMaterialRole as Role};
 use super::{
     declared_wing_fuel_case, main_wing, sized_primary_wing, structural_design_mass_kg,
-    WingReconciliationError,
+    StructuralSizingCause as Cause, WingReconciliationError,
 };
 
 /// The loading condition of the aircraft on the ground.
@@ -149,17 +150,14 @@ pub fn wing_ground_deflection(
     complete_wing_kg: f64,
     condition: GroundCondition,
 ) -> Result<WingGroundResponse, WingReconciliationError> {
-    let fail = WingReconciliationError::StructuralSizing;
-    let wing = main_wing(plane).ok_or(fail)?;
+    let wing = main_wing(plane).ok_or(Cause::MissingMainWing)?;
     let mut requirements = config.requirements.clone();
     requirements.mtow_kg = structural_design_mass_kg(config);
     let (_, sizing) = sized_primary_wing(config, design, plane, &requirements)?;
     let geometry = primary_structure_geometry(config, design, wing)?;
-    let skin = alas_config::materials::get(&config.structures.skin_material).map_err(|_| fail)?;
-    let web =
-        alas_config::materials::get(&config.structures.spar_web_material).map_err(|_| fail)?;
-    let cap =
-        alas_config::materials::get(&config.structures.spar_cap_material).map_err(|_| fail)?;
+    let skin = material(&config.structures, Role::Skin)?;
+    let web = material(&config.structures, Role::SparWeb)?;
+    let cap = material(&config.structures, Role::SparCap)?;
     let y = sizing.y_stations.clone();
     let ei = box_bending_stiffness_nm2(&sizing, skin, web, cap);
 
@@ -200,8 +198,13 @@ pub fn wing_ground_deflection(
             (rescale(&case.running_mass_kg_m, &y, 0.5 * total_kg), false)
         }
         (None, total) => {
-            let shape =
-                alas_struct::tanks::integral_fuel_running_mass_kg_m(&geometry, &y, front, rear);
+            let shape = alas_struct::tanks::integral_fuel_running_mass_kg_m(
+                &geometry,
+                &y,
+                front,
+                rear,
+                crate::tanks::inventory_density_kg_m3(config),
+            );
             // A geometric full-box estimate only when told how much fuel;
             // otherwise no fuel is invented.
             (rescale(&shape, &y, 0.5 * total.unwrap_or(0.0)), false)
@@ -228,7 +231,8 @@ pub fn wing_ground_deflection(
         })
         .collect();
     let support = support_station_m(config, geometry.semi_span);
-    let deflection = static_deflection(&y, &ei, &line_load, &forces, support).map_err(|_| fail)?;
+    let deflection = static_deflection(&y, &ei, &line_load, &forces, support)
+        .map_err(Cause::GroundDeflection)?;
     Ok(WingGroundResponse {
         deflection,
         ei_nm2: ei,
@@ -259,17 +263,14 @@ pub fn one_g_tip_rise_m(
     design: &DesignVector,
     plane: &Airplane,
 ) -> Result<f64, WingReconciliationError> {
-    let fail = WingReconciliationError::StructuralSizing;
-    let wing = main_wing(plane).ok_or(fail)?;
+    let wing = main_wing(plane).ok_or(Cause::MissingMainWing)?;
     let mut requirements = config.requirements.clone();
     requirements.mtow_kg = structural_design_mass_kg(config);
     let (_, sizing) = sized_primary_wing(config, design, plane, &requirements)?;
     let geometry = primary_structure_geometry(config, design, wing)?;
-    let skin = alas_config::materials::get(&config.structures.skin_material).map_err(|_| fail)?;
-    let web =
-        alas_config::materials::get(&config.structures.spar_web_material).map_err(|_| fail)?;
-    let cap =
-        alas_config::materials::get(&config.structures.spar_cap_material).map_err(|_| fail)?;
+    let skin = material(&config.structures, Role::Skin)?;
+    let web = material(&config.structures, Role::SparWeb)?;
+    let cap = material(&config.structures, Role::SparCap)?;
     let (front, rear) = alas_struct::sizing::box_chord_band(&geometry);
     let fuel = declared_wing_fuel_case(
         config,
@@ -287,6 +288,7 @@ pub fn one_g_tip_rise_m(
             &sizing.y_stations,
             front,
             rear,
+            crate::tanks::inventory_density_kg_m3(config),
         )
     });
     let engines = alas_struct::loads::engine_point_loads_n(
@@ -313,7 +315,7 @@ pub fn one_g_tip_rise_m(
         .find(|case| case.name == "level")
         .map(|case| case.tip_deflection_m)
         .filter(|rise| rise.is_finite())
-        .ok_or(fail)
+        .ok_or(Cause::LevelTipDeflection.into())
 }
 
 /// Scale a running-mass shape so that it integrates to `target_kg`.
@@ -354,4 +356,76 @@ mod tests {
         assert!(rescale(&shape, &y, f64::NAN).iter().all(|m| *m == 0.0));
         assert!(rescale(&shape, &y, -1.0).iter().all(|m| *m == 0.0));
     }
+}
+
+/// Bending and torsional stiffness of the sized primary wing box, and the mass
+/// it carries, for the static aeroelastic correction of the neutral point
+/// (`alas-stab`).
+#[derive(Debug, Clone, PartialEq)]
+pub struct WingBoxStiffness {
+    /// Stations from the box root to the tip, m.
+    pub y_m: Vec<f64>,
+    /// Spanwise-frame bending stiffness `EI_n cos^3 L`, N m^2.
+    pub ei_nm2: Vec<f64>,
+    /// Torsional rigidity `G J` of the section normal to the box axis, N m^2.
+    pub gj_nm2: Vec<f64>,
+    /// Chord fraction of the elastic axis: mean of the outermost spars.
+    pub box_axis_fraction: f64,
+    /// Running mass of one semi-wing carried on the elastic axis at `y_m`,
+    /// kg/m: the sized box plus the integral-tank fuel of the design case.
+    pub carried_kg_m: Vec<f64>,
+    /// `(spanwise station m, kg)` wing-mounted engines of one semi-wing.
+    pub point_masses_kg: Vec<(f64, f64)>,
+    /// The aircraft mass the inertia relief is referred to, kg: the structural
+    /// design mass, the mass the box is sized at.
+    pub aircraft_mass_kg: f64,
+}
+
+/// The sized box's stiffness of `plane`'s main wing and the mass it carries at
+/// the structural design mass, the same sizing [`wing_ground_deflection`]
+/// reads. The carried mass is the sized box, the wing fuel the loading
+/// envelope guarantees at that mass (none when the aircraft declares no wing
+/// tank: no fuel is invented) and the wing-mounted engines. The non-box wing
+/// structure (leading and trailing edges, flaps, fairings) is not included.
+///
+/// # Errors
+///
+/// [`WingReconciliationError::StructuralSizing`] when the box cannot be sized.
+pub fn wing_box_stiffness(
+    config: &AlasConfig,
+    design: &DesignVector,
+    plane: &Airplane,
+) -> Result<WingBoxStiffness, WingReconciliationError> {
+    let wing = main_wing(plane).ok_or(Cause::MissingMainWing)?;
+    let mut requirements = config.requirements.clone();
+    requirements.mtow_kg = structural_design_mass_kg(config);
+    let (_, sizing) = sized_primary_wing(config, design, plane, &requirements)?;
+    let geometry = primary_structure_geometry(config, design, wing)?;
+    let skin = material(&config.structures, Role::Skin)?;
+    let web = material(&config.structures, Role::SparWeb)?;
+    let cap = material(&config.structures, Role::SparCap)?;
+    let (front, rear) = alas_struct::sizing::box_chord_band(&geometry);
+    let y = sizing.y_stations.clone();
+    let box_running =
+        alas_struct::sizing::box_running_mass_kg_m(&sizing, skin, web, cap, front, rear);
+    let fuel_running =
+        declared_wing_fuel_case(config, design, &requirements, &geometry, &y, front, rear)
+            .map_or_else(|| vec![0.0; y.len()], |case| case.running_mass_kg_m);
+    let carried_kg_m = (0..y.len())
+        .map(|k| box_running[k] + fuel_running.get(k).copied().unwrap_or(0.0))
+        .collect();
+    let point_masses_kg = alas_struct::loads::engine_point_loads_n(
+        &config.geometry.engine,
+        &config.mass_model,
+        &requirements,
+    );
+    Ok(WingBoxStiffness {
+        ei_nm2: box_bending_stiffness_nm2(&sizing, skin, web, cap),
+        gj_nm2: alas_struct::ground_deflection::box_torsional_stiffness_nm2(&sizing, skin, web),
+        y_m: y,
+        box_axis_fraction: 0.5 * (front + rear),
+        carried_kg_m,
+        point_masses_kg,
+        aircraft_mass_kg: requirements.mtow_kg,
+    })
 }

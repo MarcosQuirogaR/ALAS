@@ -50,7 +50,10 @@ pub mod surface;
 /// pitch axis to `(0 0 -1)` so the reported `Cm` is positive nose-up, matching
 /// the recorded frame convention and the native surface integration; `v2`
 /// cases report `Cm` with the opposite sign.
-pub const TEMPLATE_VERSION: &str = "alas-airfoil-2d-openfoam-gmsh-v7";
+/// `v10` grows the boundary-layer stack until its outermost layer reaches the
+/// isotropic near-wall size (see the Gmsh template `v10`).
+/// `v11` defaults the first cell to y+ 0.1.
+pub const TEMPLATE_VERSION: &str = "alas-airfoil-2d-openfoam-gmsh-v11";
 /// Nominal span of the thin 2-D extrusion, relative to chord.
 pub const EXTRUSION_SPAN_TO_CHORD: f64 = 0.01;
 

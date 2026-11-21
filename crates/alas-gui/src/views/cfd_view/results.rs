@@ -197,7 +197,7 @@ fn show_coefficients(result: &alas_cfd::CfdResults, ui: &mut Ui) {
                 .num_columns(3)
                 .striped(true)
                 .min_col_width((ui.available_width() / 3.0 - 12.0).clamp(90.0, 460.0))
-                .spacing([12.0, 4.0])
+                .spacing(crate::theme::space::GRID_SPACING)
                 .show(ui, |ui| {
                     ui.label(RichText::new(tr("Coefficient")).strong());
                     ui.label(RichText::new(tr("Force history")).strong());
@@ -271,6 +271,71 @@ pub(super) fn show_line_plot_with(
             },
         );
         plot_footer(ui, x_label, y_label, points.len());
+    });
+}
+
+/// The same card with unconverged samples as open markers beside the
+/// converged curve. Both groups appear in the legend, in the plot data menu
+/// as separate series, and the footer counts both.
+fn show_sweep_plot(
+    ui: &mut Ui,
+    title: &str,
+    x_label: &str,
+    y_label: &str,
+    converged: &[(f64, f64)],
+    unconverged: &[(f64, f64)],
+) {
+    if unconverged.is_empty() {
+        show_line_plot(ui, title, x_label, y_label, converged);
+        return;
+    }
+    let series = [
+        super::drawing::PlotSeries {
+            name: "Converged".to_owned(),
+            points: converged.to_vec(),
+            color: ui.visuals().hyperlink_color,
+            dashed: false,
+            open_markers: false,
+        },
+        super::drawing::PlotSeries {
+            name: "Unconverged (not joined)".to_owned(),
+            points: unconverged.to_vec(),
+            color: ui.visuals().warn_fg_color,
+            dashed: false,
+            open_markers: true,
+        },
+    ];
+    crate::theme::card_frame(ui).show(ui, |ui| {
+        ui.set_min_width(ui.available_width());
+        ui.label(RichText::new(tr(title)).strong());
+        let width = ui.available_width().max(200.0);
+        let (rect, response) =
+            ui.allocate_exact_size(vec2(width, plot_height(width)), Sense::click());
+        super::drawing::paint_multi_line_plot_with(ui, rect, &series, false);
+        crate::views::plot_data_menu::attach_xy(
+            &response,
+            &format!(
+                "cfd_{}",
+                alas_report::plot_data::safe_file_stem(&title.to_lowercase())
+            ),
+            title,
+            x_label,
+            y_label,
+            || {
+                vec![
+                    (
+                        format!("{title} (converged)"),
+                        crate::views::plot_data_menu::pairs(converged),
+                    ),
+                    (
+                        format!("{title} (unconverged)"),
+                        crate::views::plot_data_menu::pairs(unconverged),
+                    ),
+                ]
+            },
+        );
+        super::drawing::plot_legend(ui, &series);
+        plot_footer(ui, x_label, y_label, converged.len() + unconverged.len());
     });
 }
 
@@ -370,8 +435,9 @@ fn show_quality_and_balance(result: &alas_cfd::CfdResults, ui: &mut Ui) {
             if result.mass_balance.is_empty() {
                 ui.colored_label(
                     ui.visuals().warn_fg_color,
-                    tr("Mass-balance evidence is unavailable; numerical convergence remains unconfirmed."),
-                );
+                    tr("Mass balance unavailable; convergence unconfirmed."),
+                )
+                .on_hover_text(tr("Mass-balance evidence is unavailable; numerical convergence remains unconfirmed."));
             }
         },
     );
@@ -424,11 +490,9 @@ fn show_field_inspection(
             });
             if result.surface.is_none() {
                 ui.label(
-                    RichText::new(tr(
-                        "Parsed Cp/Cf distributions are unavailable for this case.",
-                    ))
-                    .weak()
-                    .small(),
+                    RichText::new(tr("No Cp/Cf distributions for this case."))
+                        .weak()
+                        .small(),
                 );
                 if let Some(error) = result.surface_error.as_deref() {
                     ui.label(RichText::new(error).weak().small());
@@ -437,7 +501,7 @@ fn show_field_inspection(
             if result.fields.is_empty() {
                 ui.colored_label(
                     ui.visuals().warn_fg_color,
-                    tr("No native or sampled field artifacts were found in this case."),
+                    tr("No field artifacts found in this case."),
                 );
                 return;
             }
@@ -448,6 +512,7 @@ fn show_field_inspection(
                     .as_deref()
                     .map_or_else(|| tr("Select field artifact"), str::to_owned);
                 ComboBox::from_id_salt("airfoil_cfd_field_selector")
+                    .icon(crate::combo_icon::down_arrow)
                     .width(ui.available_width().min(420.0))
                     .selected_text(selected_text)
                     .show_ui(ui, |ui| {

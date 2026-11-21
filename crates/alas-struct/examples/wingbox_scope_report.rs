@@ -216,6 +216,7 @@ fn main() {
                 cap,
                 rib,
                 fuel,
+                alas_struct::tanks::JET_FUEL_DENSITY_KG_M3,
                 &relief,
             )
         };

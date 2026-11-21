@@ -24,7 +24,7 @@ fn cpacs_document_contains_computed_geometry_and_cpacs35_metadata() {
     assert!(xml.contains("<fuselage uID=\"alas-fuselage-0\""));
     assert!(xml.contains("<versionInfos>"));
     assert!(xml.contains("<cpacsVersion>3.5</cpacsVersion>"));
-    assert!(!xml.contains("<toolspecific>"));
+    assert!(!xml.contains("<propulsion"));
     assert!(xml.contains("<wingAirfoil uID=\"alas-wing-0-airfoil-0\""));
     assert!(xml.contains("<thrust00>467000</thrust00>"));
     assert!(xml.contains("<fpr00>1.45</fpr00>"));

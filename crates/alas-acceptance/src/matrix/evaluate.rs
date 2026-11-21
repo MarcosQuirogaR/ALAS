@@ -55,7 +55,7 @@ pub fn generate_scenes_for_preset(
             theme,
         ));
         scenes.push(figure_drag_breakdown(rep, theme));
-        scenes.push(figure_span_loading(rep, theme));
+        scenes.push(figure_span_loading(rep, config, theme));
         scenes.push(figure_mass_breakdown(rep, theme));
         scenes.push(figure_payload_range(rep, config, theme));
         scenes.push(figure_matching_chart(rep, config, theme));
@@ -244,10 +244,15 @@ pub(super) fn extract_summary(
             .contains(FindingCode::InvalidMissionFuelBurn);
     let mission_fuel_within_available =
         mission_converged && !res.feasibility.contains(FindingCode::MissionFuelShortfall);
-    let design_mission_evidence = presets::get(name)
-        .map(|preset| preset.reference.design_mission_evidence.clone())
-        .unwrap_or_default();
-    let design_mission_status = assess_design_mission_status(&design_mission_evidence);
+    // The design mission is flown on the delivered report, the one the design
+    // database's `characteristics.design_point_range` (the matrix range cell)
+    // is priced on; the interactive route plays no part.
+    let design_mission = super::design_mission::grade_design_mission(
+        name,
+        config,
+        res.optimized_report.as_ref(),
+        &res.feasibility,
+    );
     let fuel_loading = res.feasibility.fuel_loading;
     let wing_area_within_limit = !res.feasibility.contains(FindingCode::WingAreaLimit);
 
@@ -301,7 +306,8 @@ pub(super) fn extract_summary(
         mission_fuel_within_available,
         cruise_equilibrium: res.feasibility.cruise_equilibrium.clone(),
         fuel_capacity_evidence: fuel_loading.usable_capacity.evidence,
-        design_mission_status,
+        design_mission_status: design_mission.status,
+        design_mission: Some(design_mission),
         wing_area_within_limit,
         execution_passed,
         physical_passed,

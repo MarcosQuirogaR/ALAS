@@ -403,9 +403,9 @@ fn field_with_pressure_units(
     Ok((f, units))
 }
 
-// Retained as the documented single parser entry point for a field; the mesh
-// reader currently reaches the typed helpers below it directly.
-#[allow(dead_code)]
+// Single parser entry point for a field, used by the parser tests; the mesh
+// reader reaches the typed helpers below it directly.
+#[cfg(test)]
 pub(crate) fn field(text: &str, want_vector: bool, source: &str) -> Result<Field, SurfaceError> {
     field_with_pressure_units(text, want_vector, source, false).map(|(field, _)| field)
 }

@@ -67,7 +67,7 @@ pub fn figure_structures_sizing(
     }
 
     let pal = get_palette(theme);
-    let mut scene = Scene::new(1300.0, 520.0, Some(Color::from_hex(pal.bg)));
+    let mut scene = Scene::new(1300.0, 580.0, Some(Color::from_hex(pal.bg)));
     let title = format!(
         "Wingbox Sizing, governing load case: {}",
         sizing.sizing_load_case
@@ -88,8 +88,22 @@ pub fn figure_structures_sizing(
         x_hi = x_hi.max(root_spar_x);
     }
     let rib_count = sizing.num_ribs.max(0) as usize;
-    let plan_rect = (60.0, 60.0, 340.0, 400.0);
-    let axes = Axes2D::new(plan_rect, (0.0, y_max), (x_lo, x_hi));
+    // Equal aspect: one metre spanwise is one metre chordwise on screen. The
+    // frame is shortened to the planform instead of stretching the chord, and
+    // the annotations sit beneath it.
+    let plan_width = 340.0;
+    let plan_height = (plan_width * (x_hi - x_lo).abs().max(1e-6) / y_max).clamp(170.0, 400.0);
+    let plan_rect = (60.0, 60.0, plan_width, plan_height);
+    let (plan_x_range, plan_y_range) = crate::families::common::equal_aspect_ranges(
+        0.0,
+        y_max,
+        plan_width,
+        x_lo,
+        x_hi,
+        plan_height,
+        0.04,
+    );
+    let axes = Axes2D::new(plan_rect, plan_x_range, plan_y_range);
     axes.draw_frame_with_labels(
         &mut scene,
         pal,
@@ -117,7 +131,7 @@ pub fn figure_structures_sizing(
     };
     scene.add(SceneElement::Text {
         text: rib_layout,
-        pos: [plan_rect.0 + 4.0, plan_rect.1 + 5.0],
+        pos: [plan_rect.0, plan_rect.1 + plan_rect.3 + 50.0],
         font_size: 8.0,
         color: Color::from_hex(pal.tick),
         align: TextAlign::Left,
@@ -149,12 +163,12 @@ pub fn figure_structures_sizing(
         scene.add(SceneElement::Text {
             text: format!("Spar x/c={:.2}", spar.chord_fraction),
             pos: [
-                plan_rect.0 + plan_rect.2 - 4.0,
-                plan_rect.1 + 4.0 + 12.0 * i as f64,
+                plan_rect.0,
+                plan_rect.1 + plan_rect.3 + 78.0 + 12.0 * i as f64,
             ],
             font_size: 8.0,
             color,
-            align: TextAlign::Right,
+            align: TextAlign::Left,
             baseline: TextBaseline::Top,
             angle_deg: 0.0,
             bold: true,
@@ -162,8 +176,8 @@ pub fn figure_structures_sizing(
     }
 
     // middle: mass-breakdown pie chart
-    let pie_center = (620.0, 250.0);
-    let pie_radius = 140.0;
+    let pie_center = (620.0, 275.0);
+    let pie_radius = 120.0;
     let items = mass_breakdown_items(&sizing.mass_breakdown_kg);
     draw_pie(&mut scene, pal, pie_center, pie_radius, &items);
     scene.add(SceneElement::Text {
@@ -171,7 +185,7 @@ pub fn figure_structures_sizing(
             "Semi-wing structural mass\n{} kg",
             format_thousands(sizing.total_mass_kg)
         ),
-        pos: [pie_center.0, pie_center.1 - pie_radius - 58.0],
+        pos: [pie_center.0, 62.0],
         font_size: 11.0,
         color: Color::from_hex(pal.title),
         align: TextAlign::Center,
@@ -195,6 +209,20 @@ pub fn figure_structures_sizing(
             bold: true,
         }),
     }
+
+    scene.add(SceneElement::Text {
+        text: "Scope of each bar:
+FE/beam: primary wingbox (skin, spars, ribs).
+FLOPS: complete wing group, including secondary structure."
+            .to_owned(),
+        pos: [bar_rect.0 - 20.0, bar_rect.1 + bar_rect.3 + 50.0],
+        font_size: 8.0,
+        color: Color::from_hex(pal.tick),
+        align: TextAlign::Left,
+        baseline: TextBaseline::Top,
+        angle_deg: 0.0,
+        bold: false,
+    });
 
     scene
 }
@@ -408,7 +436,7 @@ mod tests {
             nastran: None,
             nastran95: None,
             patran: None,
-            torenbeek_wing_mass_kg: 15000.0,
+            ledger_complete_wing_mass_kg: 15000.0,
             wing_mass: Some(WingMassComparison::new(native_kg, Some(31_000.0), 15_000.0)),
             evaluation_inputs: None,
         }

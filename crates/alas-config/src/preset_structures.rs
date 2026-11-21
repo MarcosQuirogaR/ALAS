@@ -29,7 +29,7 @@ pub const TRANSPORT_CAP_SOURCE: &str =
 
 /// Source of the declared cap material for each composite transport preset.
 pub fn cap_material_source(preset_name: &str) -> Option<&'static str> {
-    matches!(preset_name, "B787-9" | "A220-300").then_some(TRANSPORT_CAP_SOURCE)
+    matches!(preset_name, "A350-900" | "B787-9" | "A220-300").then_some(TRANSPORT_CAP_SOURCE)
 }
 
 /// 1 g tensile stress limit of the lower cover of a metallic civil transport, Pa.
@@ -121,13 +121,20 @@ pub fn config_for(preset_name: &str) -> Option<StructuresConfig> {
             ..StructuresConfig::default()
         }),
 
+        // Declared class assumption: no source read states the C295 wing box material. Metallic is the
+        // conservative declared choice. Not a verified assignment.
+        "C295" => Some(StructuresConfig {
+            spar_cap_material: "Al 7075-T6".to_owned(),
+            ..StructuresConfig::default()
+        }),
+
         // Composite family: Boeing 787 ARFF composite-content diagram (2013,
         // current 2025 file), p. 3. Aircraft ply schedule remains unavailable.
         // Assigned as an effective isotropic proxy, not a verified material.
         // Caps are 0-dominated, covers and webs QI. CLT modulus and the 0.004
         // strain assumption are declared in cap_material_source(), not fitted
         // to the empirical wing weight. No separate stringers are declared.
-        "B787-9" => Some(StructuresConfig {
+        "A350-900" | "B787-9" => Some(StructuresConfig {
             skin_material: "CFRP QI".to_owned(),
             spar_web_material: "CFRP QI".to_owned(),
             spar_cap_material: "CFRP 60/30/10".to_owned(),

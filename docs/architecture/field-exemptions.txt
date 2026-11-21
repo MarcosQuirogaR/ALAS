@@ -1,0 +1,9 @@
+# Configuration fields that no computation reads, and why.
+# Format: <dotted path> | display_only | deprecated | <reason>
+# `cargo xtask checks` fails for any field read by no model or pipeline crate that is not
+# listed here, and for any entry here that is stale (the field is read now, or is gone).
+
+optimizer.solver.finite_difference_step | deprecated | Retired: the SQP driver was removed; kept so older saved configurations still load.
+optimizer.solver.constraint_tolerance | deprecated | Retired: the SQP driver was removed; kept so older saved configurations still load.
+performance.cl_max_to_source | display_only | Provenance label for CLmax_TO; shown in reports and the fleet-check example, never enters a calculation.
+performance.cl_max_land_source | display_only | Provenance label for CLmax_land; shown in reports and the fleet-check example, never enters a calculation.

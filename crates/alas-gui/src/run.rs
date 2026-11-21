@@ -38,11 +38,16 @@ impl AppState {
         if self.is_running {
             return;
         }
+        // The "Analyze reference" button is a quick look: weight and balance,
+        // stability and the report sheets need no external solver, so the
+        // worker copy of the configuration drops them. A "Run" keeps them.
+        let quick_look = baseline_only;
         // The baseline action is a fixed-aircraft sandbox by contract. Set the
         // typed design mode before decoding the worker config so the main
         // integrator receives the same mode the user just selected in the UI.
         if baseline_only {
-            self.set_design_mode(DesignMode::BaselineSandbox);
+            // The button implies the mode; it is not an edit of the case.
+            self.without_marking_edit(|state| state.set_design_mode(DesignMode::BaselineSandbox));
         }
         let baseline_only = baseline_only || self.design_mode() == DesignMode::BaselineSandbox;
         self.refresh_clean_sheet_brief();
@@ -77,11 +82,18 @@ impl AppState {
                 return;
             }
         };
+        let Some(live_dispatch) = self.live_dispatch_allowed(&config, baseline_only) else {
+            return;
+        };
         let form_config = config.clone();
         self.apply_preset_dispatch_policy(&mut config, &mut initial_design, &mut bounds);
+        if quick_look {
+            skip_external_solvers(&mut config);
+        }
 
         self.is_running = true;
-        self.run_log_open = true;
+        // The run log is not forced open: a failure opens it (see `log`), and
+        // the menu toggles it, so a routine run no longer covers the page.
         self.run_started = Some(Instant::now());
         self.run_identity = self.run_identity.wrapping_add(1);
         self.status_message = "Running...".to_owned();
@@ -90,10 +102,11 @@ impl AppState {
         self.pipeline_result_design_values = Some(self.design_values.clone());
         self.pipeline_result_form_config = Some(form_config);
         self.pipeline_result_complete = false;
-        self.result_figure_cache.clear();
+        self.clear_result_figures();
         self.patran_textures.clear();
         self.selected_solver_view = crate::views::results_view::SolverResultView::Vlm;
         self.cancel_flag.store(false, Ordering::Relaxed);
+        alas_exec::supervise::block_launches(false);
         self.cancellation_requested = false;
         self.run_events.clear();
         self.log(
@@ -104,12 +117,20 @@ impl AppState {
             },
             LogKind::Info,
         );
+        if quick_look {
+            self.log(
+                "Reference analysis skips the external solvers (OpenVSP, VSPAERO, AVL, FLOWUnsteady, NASTRAN, Patran, MSES); Run executes the full chain.",
+                LogKind::Info,
+            );
+        }
 
         let mut options = self.pipeline_options.clone();
         options.optimize = !baseline_only && self.run_options.optimize;
         options.compare_baseline = self.run_options.compare_baseline;
         options.parallel = self.run_options.parallel;
         options.save_plots = false;
+        // The results view draws the structural-modes figure from this run.
+        alas_struct::nastran95::request_modes_figure(true);
         if let Some(output_dir) = options.output_dir.take() {
             // The GUI can be launched from a read-only install directory.  A
             // relative path typed in Setup is resolved with the same policy as
@@ -167,7 +188,7 @@ impl AppState {
         );
 
         let spawned = crate::worker_stack::spawn_analysis_thread("alas-run", move || {
-            let pipeline = DesignPipeline::new(config);
+            let pipeline = DesignPipeline::new(config).with_live_dispatch_fetch(live_dispatch);
             if cancel.load(Ordering::Relaxed) {
                 let _ = tx.send(WorkerMessage::Finished(Box::new(Err(format!(
                     "{CANCELLED_SAFELY} before the run started"
@@ -241,13 +262,10 @@ impl AppState {
             self.update_result_scene();
         }
 
+        let had_events = !events.is_empty();
         for event in events {
-            if matches!(
-                event.kind,
-                RunEventKind::StageStarted | RunEventKind::Progress
-            ) {
+            if matches!(event.kind, RunEventKind::Progress) {
                 self.stage = event.message.clone();
-                self.status_message = event.message.clone();
             }
             let kind = match event.severity {
                 RunEventSeverity::Info => LogKind::Info,
@@ -260,8 +278,15 @@ impl AppState {
             }
             self.run_events.push(event);
         }
+        if had_events && !self.cancellation_requested {
+            if let Some(text) = active_stage_status(&self.run_events) {
+                self.stage = text.clone();
+                self.status_message = text;
+            }
+        }
 
         if let Some(res) = completed {
+            alas_exec::supervise::block_launches(false);
             self.worker_rx = None;
             self.is_running = false;
             self.stage.clear();
@@ -292,9 +317,12 @@ impl AppState {
                         );
                     }
                     self.pipeline_result = Some(result);
+                    // A new result opens on its summary, not on the tab the
+                    // previous run was left on.
+                    self.results_tab = "summary".to_owned();
                     self.pipeline_result_complete = true;
                     self.update_result_scene();
-                    self.verify_final_result_figures();
+                    self.begin_final_figure_check();
                     if self.sandbox.active() {
                         self.sandbox.results_window_open = true;
                     } else {
@@ -305,7 +333,9 @@ impl AppState {
                     // A snapshot may remain visible after cancellation or a
                     // downstream failure, but it is never a finalized report.
                     self.pipeline_result_complete = false;
-                    if is_safe_cancellation(&e) {
+                    // A solver killed by the cancel surfaces as a stage error;
+                    // once the user asked to cancel it is a cancellation.
+                    if is_safe_cancellation(&e) || self.cancellation_requested {
                         self.status_message = "Cancelled.".to_owned();
                         self.log("Run cancelled safely.", LogKind::Warn);
                     } else {
@@ -330,12 +360,67 @@ impl AppState {
         }
         self.cancellation_requested = true;
         self.cancel_flag.store(true, Ordering::Relaxed);
-        self.status_message = "Cancellation requested; finishing current safe unit...".to_owned();
+        alas_exec::supervise::block_launches(true);
+        self.status_message = "Cancelling: stopping external tools...".to_owned();
         self.log(
-            "Cancellation requested; the active stage or supervised external tool will finish first.",
+            "Cancellation requested; external tools are being stopped by PID and the run ends at the next safe point.",
             LogKind::Warn,
         );
+        // Kill the solver process trees off the UI thread (taskkill takes a
+        // moment per tree); each blocked stage then returns and sees the flag.
+        let since = std::time::SystemTime::now()
+            - self
+                .run_started
+                .map_or(std::time::Duration::ZERO, |t| t.elapsed());
+        let _ = std::thread::Builder::new()
+            .name("alas-cancel-kill".to_owned())
+            .spawn(move || {
+                let _ = alas_exec::supervise::terminate_launched_since(since);
+            });
     }
+}
+
+/// Turn off every stage that launches an external program, for the quick
+/// reference analysis. Sizing, weight and balance and stability are native.
+fn skip_external_solvers(config: &mut alas_config::AlasConfig) {
+    config.downstream.openvsp = false;
+    config.downstream.vspaero = false;
+    config.downstream.avl = false;
+    config.downstream.flowunsteady = false;
+    config.structures.run_nastran = false;
+    config.structures.run_patran_export = false;
+    config.mses.enabled = false;
+}
+
+/// The status text for the stages running right now, derived from the run
+/// events: a stage is active from its `StageStarted` until its
+/// `StageCompleted`, so a finished stage never leaves its name on screen while
+/// a later one works. Parallel stages are listed together.
+fn active_stage_status(events: &[RunEvent]) -> Option<String> {
+    let mut active: Vec<(&str, &str)> = Vec::new();
+    let mut last_progress: Option<&str> = None;
+    for event in events {
+        match event.kind {
+            RunEventKind::StageStarted => {
+                active.retain(|(stage, _)| *stage != event.stage);
+                active.push((&event.stage, &event.message));
+            }
+            RunEventKind::Progress => {
+                if let Some(entry) = active.iter_mut().find(|(stage, _)| *stage == event.stage) {
+                    entry.1 = &event.message;
+                } else {
+                    last_progress = Some(&event.message);
+                }
+            }
+            RunEventKind::StageCompleted => active.retain(|(stage, _)| *stage != event.stage),
+            RunEventKind::Diagnostic => {}
+        }
+    }
+    if active.is_empty() {
+        return last_progress.map(str::to_owned);
+    }
+    let shown: Vec<&str> = active.iter().rev().take(3).map(|(_, m)| *m).collect();
+    Some(shown.join(" + "))
 }
 
 /// One run-log line per task that launched solver processes before `event`:
@@ -343,10 +428,11 @@ impl AppState {
 fn launch_events(event: &RunEvent, launches: &[LaunchRecord]) -> Vec<RunEvent> {
     let mut groups: Vec<(&LaunchRecord, Vec<u32>)> = Vec::new();
     for launch in launches {
-        match groups
-            .iter_mut()
-            .find(|(first, _)| first.role == launch.role && first.supervised == launch.supervised)
-        {
+        match groups.iter_mut().find(|(first, _)| {
+            first.role == launch.role
+                && first.supervised == launch.supervised
+                && first.stage == launch.stage
+        }) {
             Some((_, pids)) => pids.push(launch.pid),
             None => groups.push((launch, vec![launch.pid])),
         }
@@ -369,7 +455,9 @@ fn launch_events(event: &RunEvent, launches: &[LaunchRecord]) -> Vec<RunEvent> {
                 "not supervised; outlives a forced ALAS exit"
             };
             RunEvent {
-                stage: event.stage.clone(),
+                // The stage the launching thread declared; the event that
+                // happens to follow the launch may belong to a parallel one.
+                stage: first.stage.clone().unwrap_or_else(|| event.stage.clone()),
                 message: format!("{} launched {program}, PID {pids} ({lifetime})", first.role),
                 fraction: None,
                 kind: RunEventKind::Diagnostic,
@@ -446,6 +534,7 @@ mod tests {
             program: format!("C:/tools/{}.exe", role.split(' ').next().unwrap_or("tool")),
             started: SystemTime::UNIX_EPOCH,
             supervised,
+            stage: None,
         }
     }
 
@@ -506,6 +595,88 @@ mod tests {
             "Cancelled safely: finalist replay interrupted"
         ));
         assert!(!is_safe_cancellation("Cancelled"));
+    }
+
+    fn stage_event(stage: &str, kind: RunEventKind, message: &str) -> RunEvent {
+        RunEvent {
+            stage: stage.to_owned(),
+            message: message.to_owned(),
+            kind,
+            ..stage_completed(stage)
+        }
+    }
+
+    #[test]
+    fn the_status_names_only_the_stages_that_are_still_running() {
+        use RunEventKind::{Progress, StageCompleted, StageStarted};
+        let events = vec![
+            stage_event(
+                "downstream/patran",
+                StageStarted,
+                "Patran deformation export",
+            ),
+            stage_event("downstream/vspaero", StageStarted, "VSPAERO analysis"),
+            stage_event("downstream/patran", StageCompleted, "Skipped"),
+        ];
+        assert_eq!(
+            active_stage_status(&events).as_deref(),
+            Some("VSPAERO analysis")
+        );
+        let mut events = events;
+        events.push(stage_event(
+            "downstream/vspaero",
+            Progress,
+            "VSPAERO case 2/4",
+        ));
+        assert_eq!(
+            active_stage_status(&events).as_deref(),
+            Some("VSPAERO case 2/4")
+        );
+        events.push(stage_event("downstream/vspaero", StageCompleted, "Done"));
+        assert_eq!(active_stage_status(&events), None);
+    }
+
+    #[test]
+    fn a_stage_error_after_a_cancel_request_is_a_cancellation() {
+        let (tx, rx) = channel();
+        let mut state = AppState {
+            is_running: true,
+            cancellation_requested: true,
+            worker_rx: Some(rx),
+            ..Default::default()
+        };
+        tx.send(WorkerMessage::Finished(Box::new(Err(
+            "Patran export failed: process killed".to_owned(),
+        ))))
+        .unwrap();
+        state.poll_worker();
+        assert!(!state.is_running);
+        assert_eq!(state.status_message, "Cancelled.");
+    }
+
+    #[test]
+    fn the_reference_quick_look_drops_every_external_solver() {
+        let mut config = alas_config::AlasConfig::default();
+        config.downstream.vspaero = true;
+        config.structures.run_nastran = true;
+        config.structures.run_patran_export = true;
+        skip_external_solvers(&mut config);
+        assert!(!config.downstream.openvsp && !config.downstream.vspaero);
+        assert!(!config.downstream.avl && !config.downstream.flowunsteady);
+        assert!(!config.structures.run_nastran && !config.structures.run_patran_export);
+        assert!(!config.mses.enabled);
+    }
+
+    #[test]
+    fn a_launch_is_logged_under_the_stage_that_made_it_not_the_next_event() {
+        let event = stage_completed("downstream/structural");
+        let mses = LaunchRecord {
+            stage: Some("downstream/mses".to_owned()),
+            ..launch(1, 100, "MSES mses", true)
+        };
+        let lines = launch_events(&event, &[mses, launch(2, 200, "NASTRAN solve", true)]);
+        let stages: Vec<&str> = lines.iter().map(|line| line.stage.as_str()).collect();
+        assert_eq!(stages, ["downstream/mses", "downstream/structural"]);
     }
 
     #[test]

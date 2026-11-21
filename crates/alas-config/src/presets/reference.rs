@@ -27,6 +27,7 @@ pub fn ave() -> AircraftPreset {
     AircraftPreset {
         name: "AVE",
         display_name: "AVE (Reference Twin)",
+        class: crate::presets::AircraftClass::Transport,
         description: "Long-range widebody twin reference aircraft based on 777X-class geometry.",
         identity: AircraftVariantIdentity {
             model: "AVE-v1",
@@ -52,23 +53,73 @@ pub fn ave() -> AircraftPreset {
             // Notional long-range widebody class default: the declared AVE
             // design range, flown at the planning cabin. Not a chart read.
             design_point: Some(crate::PayloadRangeDesignPoint {
+                long_range_cruise: None,
+                cruise: None,
                 range_nmi: 7_600.0,
                 payload_kg: None,
                 source: "AVE-v1 design requirements (notional); class default, no published payload/range chart",
+                reserve: None,
             }),
+            // The AVE is notional: its design requirement (the `requirements` block of
+            // this preset and the default fuel policy) is the registered source of each datum.
+            mission_provenance: crate::DesignMissionProvenanceSet {
+                range: Some(crate::MissionDatumProvenance {
+                    tier: crate::MissionEvidenceTier::DesignRequirement,
+                    stated_conditions: Some("7,600 nmi still-air design range flown with the planning cabin as payload"),
+                    relative_uncertainty: None,
+                    variant_match: crate::MissionEvidenceApplicability::ExactPreset,
+                    source: "AVE-v1 design requirements (notional), reference.design_point",
+                }),
+                payload: Some(crate::MissionDatumProvenance {
+                    tier: crate::MissionEvidenceTier::DesignRequirement,
+                    stated_conditions: Some("65,000 kg maximum structural payload requirement, notional, at the maximum payload of a 777-300ER; the cabin is the 777-9 standard two-class one"),
+                    relative_uncertainty: None,
+                    variant_match: crate::MissionEvidenceApplicability::ExactPreset,
+                    source: "AVE-v1 design requirements (notional), requirements.max_structural_payload_kg",
+                }),
+                profile: Some(crate::MissionDatumProvenance {
+                    tier: crate::MissionEvidenceTier::DesignRequirement,
+                    stated_conditions: Some("cruise Mach 0.84 at 11,887.2 m (FL390); the model's climb and descent schedules apply"),
+                    relative_uncertainty: None,
+                    variant_match: crate::MissionEvidenceApplicability::ExactPreset,
+                    source: "AVE-v1 design requirements (notional), requirements.cruise_mach and cruise_altitude_m",
+                }),
+                reserve_fuel: Some(crate::MissionDatumProvenance {
+                    tier: crate::MissionEvidenceTier::DesignRequirement,
+                    stated_conditions: Some("EASA basic reserve policy of the default fuel policy: 5 % contingency (5 min minimum), 200 nmi alternate, 30 min final reserve at 1,500 ft; the reserve mass follows from the modelled trip"),
+                    relative_uncertainty: None,
+                    variant_match: crate::MissionEvidenceApplicability::ExactPreset,
+                    source: "AVE-v1 design requirements (notional), default FuelPolicyConfig",
+                }),
+            },
             cg_evidence: CgEnvelopeEvidence::DesignRequirement,
             sources: vec!["notional design requirement; no published aircraft data"],
+            operating_speed_limits: Some(super::operating_limits::AVE_DESIGN_RULE),
             ..AircraftReferenceData::default()
         },
         engine_name: "GE9X",
         n_engines: 2,
+        // AVE is a notional twin with no real tyre: the generic tyre classes are its tyre.
         landing_gear: LandingGearConfig {
+            // The AVE is a notional twin inspired by the Boeing 777-9: same 6.20 m fuselage width and GE9X engine.
+            // Belly clearance 2.44 m from the 777-9 airport-planning ground clearances (D6-86073 Rev G, Sep 2025,
+            // Table 2-2 and Figure 2-2, read on the page). Each row is a min-max pair over the loading attitudes, so
+            // each row gives an interval for the belly clearance (model height of the row above the belly line,
+            // level): C fuselage bottom 2.13-2.59 m (the direct row: Figure 2-2 ends its arrow at the belly), A fuselage top
+            // 2.18-2.51 m (body 6.281 m high), F engine low point 2.43-2.45 m, K wing tip 2.41-2.67 m; these four intersect in
+            // 2.43-2.45 m, 2.44 m is the middle. P horizontal-tail tip (2.87-3.32
+            // m) and Q fin top (2.51-2.97 m) lie above it: the model's tail surfaces are lower than the 777-9's
+            // (a geometry card, not absorbed in the plane). The table prints no attitude; the 777-9 is within 0.5 deg
+            // of level, 0.1-0.2 m at the nacelle station. No scaling: width and engine are the 777-9's.
+            fuselage_ground_clearance_m: Some(2.44),
             // No published tail-strike attitude backs this preset's aft-fuselage
             // geometry, so its model tail-down angle is unvalidated (the generic
             // tailcone loft understates it): keep the Raymer/Roskam 15 deg floor on
             // top of the tail-down criterion.
             min_tip_back_deg: 15.0,
-            takeoff_stabilizer_nose_up_deg: Some(crate::landing_gear::TRANSPORT_THS_TAKEOFF_NOSE_UP_DEG),
+            // Tail-scrape requirement: no published tail-strike attitude found (a reference design: no aircraft
+            // publishes one), so the 10 deg default (an assumption) stands.
+            trimmable_stabilizer: true,
             ..LandingGearConfig::default()
         },
         design_vector: DesignVector {
@@ -102,6 +153,7 @@ pub fn ave() -> AircraftPreset {
             airfoil_camber_scale: 1.0,
             ..DesignVector::default()
         },
+        speed_schedule_source: crate::presets::SpeedScheduleSource::SourcedLadder,
         airfoil_class_source: "Clean-sheet default for a notional 777X-class transonic twin: current transonic transport wings carry supercritical sections. Drawn with NASA SC(2) sections, root SC2-0714 and tip SC(2)-0410 (C. D. Harris, NASA Supercritical Airfoils, NASA TP-2969, 1990).",
         geometry: GeometryConfig {
             wing: WingConfig {
@@ -116,16 +168,16 @@ pub fn ave() -> AircraftPreset {
                 outboard_sweep_decrement_deg: 2.0,
                 root_airfoil: "SC2-0714".to_owned(),
                 tip_airfoil: "sc20410".to_owned(),
-                airfoil_class: crate::AirfoilClass::Supercritical,
-                wing_profile_interpolation: crate::WingProfileInterpolation::C2Spline, // step B w2 (loft-wing report); was Linear
+                airfoil_class: crate::AirfoilClass::SupercriticalAdvanced,
+                wing_profile_interpolation: crate::WingProfileInterpolation::C2Spline,
                 ..WingConfig::default()
             },
             empennage: EmpennageConfig {
                 tail_airfoil: "naca0012".to_owned(),
-                // Step B w2 (measure/AVE, 777-9 ACAP Fig 2-1 tail, B): drawn centreline leading-edge apex 64.87 m, 1.13 m aft
+                // drawn centreline leading-edge apex 64.87 m, 1.13 m aft
                 // of the model, and leading-edge sweep 39.2 deg against 34.3 deg; the semispan (11.0 m), chords and
                 // dihedral (grade C: tip rounding of the low-resolution mask) stay. Was offset 10.7 m, tip x 7.5 m.
-                // geo/tailfit 2026-10-11: tailplane straight-edge fit to the drawing, centreline values; was off 11.85, chords 8.0/2.2, tip (8.96, 11.0, 1.0)
+                // Tail fit: tailplane straight-edge fit to the drawing, centreline values.
                 hstab_offset_from_tail_m: 11.76,
                 hstab_z_m: 1.2,
                 hstab_root_chord_m: 6.98,
@@ -133,12 +185,15 @@ pub fn ave() -> AircraftPreset {
                 hstab_root_twist_deg: -2.0,
                 hstab_tip_twist_deg: -2.0,
                 hstab_tip_le_m: (9.94, 12.19, 1.0), // tan(39.2 deg) x 11.0 m; was (7.5, 11.0, 1.0)
-                // Step B w2 (measure/AVE, DECISIONS: use the explicit fin datum): root line at the crown (3.3 m) with the
+                // root line at the crown (3.3 m) with the
                 // drawn crown leading edge 62.59 m (76.72 - 14.13); was root z 2.0 m and offset 12.2 m, which put the crown
-                // leading edge at 65.68 m. Root chord 9.5 m stays (drawn crown chord 9.35 m, C). Fin top at 14.40 m: the
-                // ACAP overall height 19.53 m above the model's ground plane (-5.13 m); 11.1 m above the crown, the
-                // side-view reading (front view 10.1 m, C). Sweep 44.3 deg as drawn (dx 10.81 m). Was tip (9.0, 0.0, 9.8).
-                // geo/tailfit 2026-10-11: fin straight-edge fit to the drawing at the root line (rms 0.008/0.011 m); was off 14.13, chords 9.5/3.2, tip (10.81, 0.0, 11.1)
+                // leading edge at 65.68 m. Root chord 9.5 m stays (drawn crown chord 9.35 m, C). The fin was
+                // set to the ACAP overall height 19.53 m above the ground plane of the time (-5.13 m), a fin top 14.40 m high and
+                // 11.1 m above the crown (side-view reading, front view 10.1 m, C). Sweep 44.3 deg as drawn (dx 10.81 m). Was tip (9.0, 0.0, 9.8).
+                // Tail fit: fin straight-edge fit to the drawing at the root line (rms 0.008/0.011 m).
+                // The fit put the fin top at 3.3 + 10.51 = 13.81 m: on the 2.44 m belly clearance
+                // the model stands 19.21 m high against the 777-9 overall height 19.53 m (D6-86073 Rev G Fig 2-1; Table 2-2 row Q 19.28-19.74 m),
+                // and the horizontal-tail tip sits 0.42-0.88 m below its row P: tail geometry is a card, not absorbed in the ground plane.
                 vstab_offset_from_tail_m: 13.63,
                 vstab_z_m: 3.3,
                 vstab_root_chord_m: 8.96,
@@ -179,13 +234,13 @@ pub fn ave() -> AircraftPreset {
                 ..FuselageConfig::default()
             },
             engine: EngineConfig {
-                // Step B w2, owner decision: the engines follow the 777-9 drawing (ACAP Fig 2-1: centreline 10.64 m, mask
+                // The engines follow the 777-9 drawing (ACAP Fig 2-1: centreline 10.64 m, mask
                 // 10.81 m, mean 10.7 m; inlet 25.96 m from the nose; nacelle height as drawn, 1.62 m above the old
                 // position). The 0.35 m clearance target is no longer a design rule. Was y 9.8 m, z -3.13 m, offset 4.2 m.
                 spanwise_positions_m: vec![10.7, -10.7],
                 // Measured down from the local wing surface: +1.479 m puts the nacelle centre at z -2.205 m (was -3.825 m at
                 // y 9.8 m), 1.62 m higher as drawn, allowing for the wing heights at the new station and the C2 profile.
-                // geo/close 2026-10-12: AVE side sheet best rigid shift dz -0.25 m (applied); dx +0.15 m side but 0.00 m top: offset kept. was z -1.651
+                // AVE side sheet best rigid shift dz -0.25 m (applied); dx +0.15 m side but 0.00 m top: offset kept. was z -1.651
                 z_m: -1.901,
                 inlet_x_offset_m: 6.9,
                 ..EngineConfig::default()

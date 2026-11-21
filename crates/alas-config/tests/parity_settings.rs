@@ -201,6 +201,21 @@ fn compare_values(
         );
         return;
     }
+    if let Some((frozen, declared)) = declared_control_surface_run(path) {
+        compare_correction_value(
+            comparison,
+            &format!("{path}: frozen class run"),
+            expected,
+            &frozen,
+        );
+        compare_correction_value(
+            comparison,
+            &format!("{path}: declared control-surface run"),
+            actual,
+            &declared,
+        );
+        return;
+    }
     if let Some((old, new)) = product_corrections::dimensions(path) {
         compare_correction_value(
             comparison,
@@ -216,8 +231,25 @@ fn compare_values(
         );
         return;
     }
-    if let Some(new) =
-        product_corrections::engine_copy(path).or_else(|| product_corrections::operational(path))
+    if let Some((frozen, product)) = product_corrections::cargo_deck_uld(path) {
+        corrections.remove(path);
+        compare_correction_value(
+            comparison,
+            &format!("{path}: frozen cargo deck ULD"),
+            expected,
+            &frozen,
+        );
+        compare_correction_value(
+            comparison,
+            &format!("{path}: product cargo deck ULD"),
+            actual,
+            &product,
+        );
+        return;
+    }
+    if let Some(new) = product_corrections::engine_copy(path)
+        .or_else(|| product_corrections::operational(path))
+        .or_else(|| product_corrections::design_dive_speed(path))
     {
         corrections.remove(path);
         compare_correction_value(
@@ -397,6 +429,12 @@ fn compare_values(
 /// Every loaded preset inherits the analysis defaults, so the three mesh
 /// fields appear here once per registered aircraft. Both sides stay pinned,
 /// exactly as they are for a directly constructed configuration.
+///
+/// Each tail surface is meshed with 24 spanwise panels instead of 6:
+/// on the conventional-tail presets Cn_beta falls 8-9 % and
+/// Cy_beta 5-6 % from 6 to 48 panels, and 24 is within 3 % of 96 (A320
+/// Cn_beta 0.1976 at 6, 0.1830 at 24, 0.1789 at 96 per rad). The
+/// reference-compatibility mesh keeps 6.
 fn vibration_performance_default_correction(path: &str) -> Option<(Value, Value)> {
     if path.ends_with(".structures.freq_sweep_max_hz") {
         Some((serde_json::json!(500.0), serde_json::json!(60.0)))
@@ -410,6 +448,8 @@ fn vibration_performance_default_correction(path: &str) -> Option<(Value, Value)
         Some((serde_json::json!(2), serde_json::json!(1)))
     } else if path.ends_with(".geometry.wing.n_subdivisions") {
         Some((serde_json::json!(8), serde_json::json!(24)))
+    } else if path.ends_with(".geometry.empennage.n_subdivisions") {
+        Some((serde_json::json!(6), serde_json::json!(24)))
     } else {
         None
     }
@@ -623,10 +663,22 @@ fn preset_source_corrections() -> BTreeMap<String, SourceCorrection> {
         correction(
             "DC-10.requirements.max_structural_payload_kg",
             48_000.0,
-            56_441.0,
+            46_008.0,
         ),
         correction("DC-10.requirements.max_wing_area_m2", 338.8, 338.84),
         correction("DC-10.requirements.mtow_kg", 259_450.0, 259_454.0),
+        // A220-300.requirements.dive_speed_m_s is deliberately not pinned: the
+        // preset's 212.208 m/s is VD = 1.25 x VMO 330 KIAS (EASA
+        // TCDS IM.A.570 Issue 25, Section 2 item 10), a model convention, since
+        // VD is not published. The check stays failing.
+        //
+        // A220 ACP Issue 013 Tables 6 and 7 (ACN at the most forward CG):
+        // 13,923 lb on the nose gear at 157,000 lb gross.
+        correction(
+            "A220-300.landing_gear.nose_gear_max_static_load_kg",
+            "absent upstream",
+            13_923.0 * 0.453_592_37,
+        ),
     ]
     .into_iter()
     .collect::<BTreeMap<_, _>>();
@@ -636,17 +688,34 @@ fn preset_source_corrections() -> BTreeMap<String, SourceCorrection> {
             "A220-300", "A320-200", "A340-300", "A380-800", "AVE", "B787-9", "DC-10",
         ],
     );
+    // DAC-67803A Rev A Figure 2.2: fuselage half width 3.01 m over the
+    // 25.195 m semispan; the class 0.10 sat inside the body.
+    corrections.insert(
+        "DC-10.geometry.wing.side_of_body_span_fraction".to_owned(),
+        SourceCorrection {
+            upstream: Value::String("absent upstream".to_owned()),
+            corrected: Value::from(0.1195),
+        },
+    );
+    add_declared_flap_setting_corrections(
+        &mut corrections,
+        &["A320-200", "A340-300", "B787-9", "DC-10"],
+    );
     add_planning_cabin_corrections(&mut corrections, &["A220-300", "A320-200", "A340-300"]);
     add_b787_9_typical_cabin_corrections(&mut corrections, &["B787-9"]);
     add_ave_777_9_cabin_corrections(&mut corrections);
+    // A340-200/-300 AC 2-2-0 plan view: trailing-edge kink at 9.25 m of the
+    // 28.95 m semispan. A220 ACP Issue 013 Figure 1 plan view:
+    // drawn trailing-edge corner at y 6.32 m. DAC-67803A Rev A
+    // Figure 2.2: Yehudi trailing-edge kink at y 9.55 m.
     for (case, kink_fraction) in [
-        ("A340-300", 0.275_290_215_588_723_1),
+        ("A340-300", 9.25 / 28.95),
         ("A380-800", 0.359_236_516_064_625_5),
         ("AVE", 0.35),
         ("B787-9", 0.3696),
         ("A320-200", 0.377_380_002_280_241_9),
-        ("A220-300", 0.34),
-        ("DC-10", 0.3747),
+        ("A220-300", 0.36),
+        ("DC-10", 0.379),
     ] {
         corrections.insert(
             format!("{case}.geometry.wing.kink_span_fraction"),
@@ -784,13 +853,15 @@ fn saved_file_source_corrections() -> BTreeMap<String, SourceCorrection> {
             0.92,
             192_776.0 / 254_692.0,
         ),
-        // Wing roots re-anchored to the manufacturer quarter-MAC point
-        // (see support/product_corrections.rs).
-        correction("preset_only.geometry.wing.root_datum_x_m", 13.3, 12.7791),
+        // Wing roots on the manufacturer plan views: the A220 leading-edge
+        // line of ACP Issue 013 Figure 1 and the straight leading
+        // edge of the 787 ACAP D6-58333 Rev Q 2.2.2; see
+        // support/drawing_fit_2026_11.rs.
+        correction("preset_only.geometry.wing.root_datum_x_m", 13.3, 12.775),
         correction(
             "preset_then_field.geometry.wing.root_datum_x_m",
             21.0,
-            21.5737,
+            21.314,
         ),
         // B787-9 root section matched to the CRM thickness distribution
         // (see support/product_corrections.rs).
@@ -814,7 +885,7 @@ fn saved_file_source_corrections() -> BTreeMap<String, SourceCorrection> {
         correction(
             "preset_then_field.geometry.engine.inlet_x_offset_m",
             3.5,
-            6.1466,
+            5.888,
         ),
         correction("preset_only.landing_gear.n_mlg_struts", 0, 2),
         correction("preset_only.landing_gear.n_nlg_wheels", 0, 2),
@@ -848,6 +919,13 @@ fn saved_file_source_corrections() -> BTreeMap<String, SourceCorrection> {
             254_000.0,
             254_692.0,
         ),
+        // The A220-300 published nose-gear load; see the preset table (its dive
+        // speed is not pinned there).
+        correction(
+            "preset_only.landing_gear.nose_gear_max_static_load_kg",
+            "absent upstream",
+            13_923.0 * 0.453_592_37,
+        ),
     ]
     .into_iter()
     .collect::<BTreeMap<_, _>>();
@@ -865,6 +943,7 @@ fn saved_file_source_corrections() -> BTreeMap<String, SourceCorrection> {
     );
     add_planning_cabin_corrections(&mut corrections, &["preset_only"]);
     add_b787_9_typical_cabin_corrections(&mut corrections, &["preset_then_field"]);
+    add_declared_flap_setting_corrections(&mut corrections, &["preset_then_field"]);
     corrections.insert(
         "preset_then_field.geometry.wing.kink_span_fraction".to_owned(),
         SourceCorrection {
@@ -876,7 +955,7 @@ fn saved_file_source_corrections() -> BTreeMap<String, SourceCorrection> {
         "preset_only.geometry.wing.kink_span_fraction".to_owned(),
         SourceCorrection {
             upstream: Value::String("absent upstream".to_owned()),
-            corrected: Value::from(0.34),
+            corrected: Value::from(0.36),
         },
     );
     add_transport_objective_weight_corrections(
@@ -973,6 +1052,169 @@ fn add_default_landing_ratio_corrections(
             },
         );
     }
+}
+
+/// Take-off and landing flap settings a preset documents, a field the frozen
+/// schema has no counterpart for: the sourced literals of
+/// `product_corrections::declared_flap_setting_deg` (A320 15 / 35, A340 22 /
+/// 32, B787 15 / 30, DC-10 15 / 50 deg, each with its document there).
+fn add_declared_flap_setting_corrections(
+    corrections: &mut BTreeMap<String, SourceCorrection>,
+    cases: &[&str],
+) {
+    for case in cases {
+        let (takeoff_deg, landing_deg) = product_corrections::declared_flap_setting_deg(case)
+            .unwrap_or_else(|| panic!("{case} documents its flap settings"));
+        for (field, deg) in [
+            ("takeoff_flap_deflection_deg", takeoff_deg),
+            ("landing_flap_deflection_deg", landing_deg),
+        ] {
+            corrections.insert(
+                format!("{case}.performance.{field}"),
+                SourceCorrection {
+                    upstream: Value::String("absent upstream".to_owned()),
+                    corrected: Value::from(deg),
+                },
+            );
+        }
+    }
+}
+
+/// The frozen class runs every reference file carries
+/// (`ControlSurfacesConfig::default`): chord fraction, span start, span end.
+const FROZEN_CLASS_RUNS: [(&str, (f64, f64, f64)); 6] = [
+    ("slat", (0.15, 0.08, 0.95)),
+    ("flap", (0.25, 0.10, 0.62)),
+    ("aileron", (0.20, 0.66, 0.95)),
+    ("spoiler", (0.10, 0.10, 0.64)),
+    ("elevator", (0.35, 0.05, 0.95)),
+    ("rudder", (0.35, 0.10, 0.90)),
+];
+
+/// One preset's six declared control-surface runs, as `DECLARED_RUNS` lists them.
+type DeclaredRuns = (&'static str, [(f64, f64, f64); 6]);
+
+/// The control-surface runs each registered aircraft declares
+/// (`alas_config::preset_control_surfaces`), in the order of [`FROZEN_CLASS_RUNS`]. Chords: S1, a printed
+/// area over the chord integral of the band (Jane's All the World's Aircraft
+/// 2008-09 AREAS blocks; DC-10 flaps from Jenkinson, Simpkin and Rhodes, Civil
+/// Jet Aircraft Design, 1999, Data A, Table 6, its spoilers from a grade-C
+/// secondary listing and held, see [`AWAITING_SOURCE`]); S2, a printed
+/// chord ratio (Sadraey, Aircraft Design: A Systems Engineering Approach,
+/// Tables 12.17, 12.18, 12.20, the type's or the family's row); E, the S1
+/// chord of the class's printed aircraft (A320: slat 0.1452, flap 0.2504,
+/// spoiler 0.1096; 747-400: slat 0.1177, flap 0.2602, spoiler 0.1039).
+/// Stations from the manufacturer drawings (Airbus AC section 2-3-0 ground
+/// clearance figures; NASA CR-4746 Fig. 2.16 DC-10-30 butt lines; A220 ACP
+/// general dimensions). The B787-9 stations are estimated (grade E): the 787
+/// ACAP D6-58333 Rev Q plan on file draws no surface lines, so each run's ends
+/// are placed at the flap-track fairings the plan does draw
+/// (`preset_control_surfaces` module notes); they are pinned as those
+/// estimates, not as printed values. The AVE declares none and keeps the class
+/// runs.
+const DECLARED_RUNS: [DeclaredRuns; 6] = [
+    (
+        "A220-300",
+        [
+            (0.1452, 0.11, 0.92),
+            (0.2504, 0.105, 0.70),
+            (0.24, 0.70, 0.877),
+            (0.1096, 0.14, 0.69),
+            (0.32, 0.07, 0.95),
+            (0.28, 0.05, 0.95),
+        ],
+    ),
+    (
+        "A320-200",
+        [
+            (0.1452, 0.169, 0.959),
+            (0.2504, 0.115, 0.767),
+            (0.2659, 0.810, 0.963),
+            (0.1096, 0.154, 0.797),
+            (0.32, 0.03, 0.97),
+            (0.32, 0.05, 0.97),
+        ],
+    ),
+    (
+        "A340-300",
+        [
+            (0.1177, 0.110, 0.952),
+            (0.2602, 0.104, 0.647),
+            (0.275, 0.660, 0.942),
+            (0.1039, 0.134, 0.646),
+            (0.31, 0.10, 0.87),
+            (0.32, 0.03, 0.97),
+        ],
+    ),
+    (
+        "A380-800",
+        [
+            (0.1177, 0.214, 0.980),
+            (0.2602, 0.113, 0.640),
+            (0.275, 0.653, 0.884),
+            (0.1039, 0.106, 0.805),
+            (0.31, 0.08, 0.93),
+            (0.32, 0.05, 0.95),
+        ],
+    ),
+    (
+        "B787-9",
+        [
+            (0.1177, 0.12, 0.93),
+            (0.2602, 0.12, 0.73),
+            (0.22, 0.75, 0.93),
+            (0.1039, 0.20, 0.70),
+            (0.32, 0.08, 0.93),
+            (0.28, 0.05, 0.95),
+        ],
+    ),
+    (
+        "DC-10",
+        [
+            (0.1177, 0.119, 0.95),
+            (0.3153, 0.119, 0.703),
+            (0.22, 0.718, 0.902),
+            (0.1341, 0.403, 0.703),
+            (0.25, 0.05, 0.95),
+            (0.38, 0.05, 0.95),
+        ],
+    ),
+];
+
+/// Declared run leaves left left unpinned: the DC-10 spoiler
+/// chord 0.1341 is the S1 chord of a 12.7 m^2 spoiler area from a secondary
+/// listing (grade C, `preset_control_surfaces::DC10_SPOILER`), not a primary
+/// source. Its check stays failing until a primary source replaces it.
+const AWAITING_SOURCE: [&str; 1] = ["DC-10.control_surfaces.spoiler_chord_fraction"];
+
+/// `(frozen class value, declared value)` of one control-surface run leaf of
+/// a case that loads a registered aircraft.
+fn declared_control_surface_run(path: &str) -> Option<(Value, Value)> {
+    if AWAITING_SOURCE.contains(&path) {
+        return None;
+    }
+    let (case, field) = path.split_once(".control_surfaces.")?;
+    let preset = match case {
+        "preset_only" => "A220-300",
+        "preset_then_field" => "B787-9",
+        name => name,
+    };
+    let (_, runs) = DECLARED_RUNS.iter().find(|(name, _)| *name == preset)?;
+    let (surface, part) = if let Some(surface) = field.strip_suffix("_chord_fraction") {
+        (surface, 0)
+    } else if let Some(surface) = field.strip_suffix("_span_start_frac") {
+        (surface, 1)
+    } else {
+        (field.strip_suffix("_span_end_frac")?, 2)
+    };
+    let index = FROZEN_CLASS_RUNS
+        .iter()
+        .position(|(name, _)| *name == surface)?;
+    let pick = |(chord, start, end): (f64, f64, f64)| [chord, start, end][part];
+    Some((
+        Value::from(pick(FROZEN_CLASS_RUNS[index].1)),
+        Value::from(pick(runs[index])),
+    ))
 }
 
 /// The product presets now load an explicit, physically representable generic
@@ -1089,7 +1331,7 @@ fn add_native_worker_corrections(
                 corrected: Value::from(0.0),
             },
         );
-        // Audit SIZ-06 (decision D6): a file that does not state a seed
+        // A file that does not state a seed
         // gets the fixed default seed; the frozen default is the clock.
         corrections.insert(
             format!("{case}.optimizer.solver.seed"),

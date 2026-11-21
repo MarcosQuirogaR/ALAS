@@ -25,16 +25,17 @@
 //!
 //! The selection returns the lowest `V2 / VSR` at or above the schedule value
 //! at which the required sea-level-static `T/W` does not exceed the installed
-//! one, searched up to [`MAX_IMPROVED_V2_OVER_VSR`]. When even the best-climb
-//! speed misses, it returns that best speed with `meets = false`, so the
-//! shortfall finding stays. The take-off field length is charged through the
+//! one, searched up to the type's overspeed limit `V2max / VS1g` (Airbus,
+//! *Getting to Grips with Aircraft Performance*, Jan 2002, App. 2 sec.
+//! 2.3.1.2, p. 194, "V2/VS maxi": 1.35 for the A320 family, 1.40 A330, 1.50
+//! A340; `alas_config::presets::v2_max_over_vs1g`). The manufacturer computes
+//! no take-off above it, so when no speed up to the limit meets the gradient
+//! the take-off is climb-limited at that mass and configuration
+//! (`meets = false`): the best-climb speed within the limit is returned so the
+//! shortfall is reported there, and the field length at it is not a
+//! scheduled field length. The take-off field length is charged through the
 //! lift-off speed: the distance scales with the square of `V2 / V2_schedule`
 //! (the Raymer correlation's lift-off speed enters through `CLmax_TO`).
-
-/// Highest `V2 / VSR` the search considers. Beyond roughly 1.5 the induced-
-/// drag gain is exhausted for every transport polar here (best-climb speeds
-/// 1.3 to 1.54 VSR) and the field-length charge grows with the square.
-pub const MAX_IMPROVED_V2_OVER_VSR: f64 = 1.50;
 
 /// The outcome of one selection.
 #[derive(Debug, Clone, Copy, PartialEq)]
@@ -51,6 +52,8 @@ pub struct ImprovedClimbSelection {
     pub improved: bool,
     /// Whether the installed `T/W` meets the requirement at the selected speed.
     pub meets: bool,
+    /// Overspeed limit `V2max / VSR` the search was bounded by.
+    pub v2_max_over_vsr: f64,
 }
 
 impl ImprovedClimbSelection {
@@ -59,21 +62,31 @@ impl ImprovedClimbSelection {
         let ratio = self.v2_over_vsr / self.schedule_v2_over_vsr;
         ratio * ratio
     }
+
+    /// Whether no `V2` between the schedule and the overspeed limit meets the
+    /// CS 25.121(b) gradient: the take-off is climb-limited at this mass and
+    /// configuration, and no scheduled field length exists.
+    pub fn climb_limited(&self) -> bool {
+        !self.meets
+    }
 }
 
 /// Select the improved-climb `V2 / VSR`.
 ///
 /// `required(x)` is the required installed SLS `T/W` at `V2 / VSR = x` (thrust
 /// ratio, drag and lift coefficient all re-evaluated at that speed); `None`
-/// when it cannot be evaluated. `None` is returned when the schedule point
-/// itself cannot be evaluated or the inputs are non-physical.
+/// when it cannot be evaluated. `v2_max_over_vsr` is the overspeed limit the
+/// search stops at. `None` is returned when the schedule point itself cannot
+/// be evaluated or the inputs are non-physical.
 pub fn select_improved_v2(
     schedule_v2_over_vsr: f64,
     installed_tw: f64,
+    v2_max_over_vsr: f64,
     required: &dyn Fn(f64) -> Option<f64>,
 ) -> Option<ImprovedClimbSelection> {
     if !(schedule_v2_over_vsr.is_finite() && schedule_v2_over_vsr > 1.0)
         || !(installed_tw.is_finite() && installed_tw > 0.0)
+        || !(v2_max_over_vsr.is_finite() && v2_max_over_vsr > 1.0)
     {
         return None;
     }
@@ -85,8 +98,9 @@ pub fn select_improved_v2(
         required,
         improved,
         meets: required <= installed_tw,
+        v2_max_over_vsr,
     };
-    if at_schedule <= installed_tw || schedule_v2_over_vsr >= MAX_IMPROVED_V2_OVER_VSR {
+    if at_schedule <= installed_tw || schedule_v2_over_vsr >= v2_max_over_vsr {
         return Some(selection(schedule_v2_over_vsr, at_schedule, false));
     }
     let eval = |x: f64| {
@@ -96,7 +110,7 @@ pub fn select_improved_v2(
     };
     // Coarse scan for the best-climb speed, then golden-section refinement.
     const STEPS: usize = 28;
-    let width = MAX_IMPROVED_V2_OVER_VSR - schedule_v2_over_vsr;
+    let width = v2_max_over_vsr - schedule_v2_over_vsr;
     let grid = |i: usize| schedule_v2_over_vsr + width * i as f64 / STEPS as f64;
     let (mut best_i, mut best) = (0, at_schedule);
     for i in 1..=STEPS {
@@ -162,7 +176,7 @@ mod tests {
 
     #[test]
     fn a_schedule_that_meets_is_kept() {
-        let s = select_improved_v2(1.20, 0.35, &required_twin).unwrap();
+        let s = select_improved_v2(1.20, 0.35, 1.50, &required_twin).unwrap();
         assert!(!s.improved && s.meets && s.v2_over_vsr == 1.20);
         assert_eq!(s.field_length_factor(), 1.0);
     }
@@ -175,7 +189,7 @@ mod tests {
     fn the_lowest_meeting_speed_solves_the_requirement_and_charges_the_field() {
         let installed = 0.2800;
         assert!((required_twin(1.20).unwrap() - 0.2849).abs() < 1e-3);
-        let s = select_improved_v2(1.20, installed, &required_twin).unwrap();
+        let s = select_improved_v2(1.20, installed, 1.50, &required_twin).unwrap();
         assert!(s.improved && s.meets);
         assert!(s.v2_over_vsr > 1.20 && s.v2_over_vsr < 1.3868, "{s:?}");
         assert!((required_twin(s.v2_over_vsr).unwrap() - installed).abs() < 1e-9);
@@ -188,18 +202,40 @@ mod tests {
 
     #[test]
     fn when_even_the_best_climb_speed_misses_it_is_reported_as_not_meeting() {
-        let s = select_improved_v2(1.20, 0.2700, &required_twin).unwrap();
-        assert!(s.improved && !s.meets);
+        let s = select_improved_v2(1.20, 0.2700, 1.50, &required_twin).unwrap();
+        assert!(s.improved && !s.meets && s.climb_limited());
         let cl_opt = (0.0428_f64 / 0.0359).sqrt();
         let x_opt = (2.10 / cl_opt).sqrt();
         assert!((s.v2_over_vsr - x_opt).abs() < 2e-3, "{s:?} vs {x_opt}");
         assert!((s.required - 0.2760).abs() < 1e-3, "{s:?}");
     }
 
+    /// The speed that would meet (between 1.25 and 1.30 VSR at T/W 0.2800: required
+    /// 0.2806 at 1.25, 0.2778 at 1.30) lies beyond a 1.25 limit: the take-off
+    /// is climb-limited there, the search does not pass the limit, and the best
+    /// speed within it is reported.
+    #[test]
+    fn a_speed_beyond_the_overspeed_limit_is_a_climb_limit_not_a_field_length() {
+        let free = select_improved_v2(1.20, 0.2800, 1.50, &required_twin).unwrap();
+        assert!(
+            free.meets && free.v2_over_vsr > 1.25 && free.v2_over_vsr < 1.30,
+            "{free:?}"
+        );
+        let capped = select_improved_v2(1.20, 0.2800, 1.25, &required_twin).unwrap();
+        assert!(capped.climb_limited() && capped.improved, "{capped:?}");
+        assert!(capped.v2_over_vsr <= 1.25 + 1e-12);
+        assert!((capped.v2_over_vsr - 1.25).abs() < 2e-3, "{capped:?}");
+        assert_eq!(capped.v2_max_over_vsr, 1.25);
+        // A schedule at the limit is not raised.
+        let at_limit = select_improved_v2(1.25, 0.2800, 1.25, &required_twin).unwrap();
+        assert!(!at_limit.improved && at_limit.climb_limited());
+    }
+
     #[test]
     fn unevaluable_or_non_physical_inputs_give_no_selection() {
-        assert!(select_improved_v2(1.20, 0.3, &|_| None).is_none());
-        assert!(select_improved_v2(f64::NAN, 0.3, &required_twin).is_none());
-        assert!(select_improved_v2(1.20, 0.0, &required_twin).is_none());
+        assert!(select_improved_v2(1.20, 0.3, 1.50, &|_| None).is_none());
+        assert!(select_improved_v2(f64::NAN, 0.3, 1.50, &required_twin).is_none());
+        assert!(select_improved_v2(1.20, 0.0, 1.50, &required_twin).is_none());
+        assert!(select_improved_v2(1.20, 0.3, f64::NAN, &required_twin).is_none());
     }
 }

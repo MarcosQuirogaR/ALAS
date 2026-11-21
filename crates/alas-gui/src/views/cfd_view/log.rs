@@ -94,7 +94,7 @@ fn show_events(state: &AppState, ui: &mut Ui) {
     Grid::new("airfoil_cfd_log_grid")
         .num_columns(3)
         .striped(true)
-        .spacing([10.0, 3.0])
+        .spacing(crate::theme::space::GRID_SPACING)
         .max_col_width((ui.available_width() - 200.0).max(160.0))
         .show(ui, |ui| {
             for event in &state.cfd.events {

@@ -5,7 +5,7 @@
 // evidence, not a panic escaping from library code.
 #![allow(clippy::unwrap_used, clippy::expect_used)]
 
-//! Bottom-up mass, CG and inertia (UAV-PLAN 3.7).  Verification cases are the
+//! Bottom-up mass, CG and inertia.  Verification cases are the
 //! worked examples of Sadraey, Aircraft Design: A Systems Engineering Approach:
 //! Example 11.2 (CG of 13 components, p. 601-603), Example 11.3 (thin-shell
 //! fuselage inertia and parallel axis, p. 617-618) and Example 11.4 (wing as a

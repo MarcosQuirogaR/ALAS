@@ -112,7 +112,11 @@ fn a_span_edit_changes_the_drawn_size_and_only_fit_or_focus_reframe() {
     let whole = framing(&state).reference();
     state.set_sandbox_focus(Some(alas_gui::sandbox::fields::Discipline::Wing));
     let wing = framing(&state).reference();
-    assert!(wing.extent < whole.extent);
+    // The fit is tight to the top view and the span limits both the wing and
+    // the whole aircraft, so the scale is equal; the focus must still
+    // recentre on the wing and never zoom out.
+    assert!(wing.extent <= whole.extent);
+    assert_ne!(wing.center, whole.center, "focus reframes to the component");
     state.set_sandbox_focus(None);
     assert_eq!(framing(&state).reference(), whole);
     // A resized viewport keeps the reference in metres; the canvas follows.
@@ -287,15 +291,14 @@ fn actions_float_centred_at_the_bottom_and_the_stack_with_summary_is_centred_on_
         }
         let search = overlay_rect_tagged(&ctx, "search").expect("search");
         assert!(stack.contains_rect(search), "{size:?}");
-        // The Summary button is the last of the stack, below Propulsion, and
-        // its card is closed until pressed.
-        let summary = overlay_rect_tagged(&ctx, "summary").expect("summary");
-        let propulsion = overlay_rect_tagged(&ctx, "category:propulsion").expect("propulsion");
-        assert!(stack.contains_rect(summary), "{size:?}");
-        assert!(summary.top() >= propulsion.bottom(), "{size:?}");
+        // The summary is plain text above the action block, left-aligned,
+        // clear of the stack.
+        let summary = overlay_rect_tagged(&ctx, "summary_text").expect("summary");
+        assert!(viewport.contains_rect(summary), "{size:?}");
+        assert!(summary.bottom() <= block.top() + 1.0, "{size:?}");
         assert!(
-            overlay_rect_tagged(&ctx, "summary_card").is_none(),
-            "{size:?}"
+            summary.top() >= stack.bottom() - 1.0 || summary.left() >= stack.right(),
+            "{size:?}: {summary:?} vs {stack:?}"
         );
     }
 }
@@ -314,15 +317,16 @@ fn gestures_on_the_action_boxes_never_orbit_and_actions_still_act() {
         );
         assert!(state.sandbox.drag.is_none());
     }
-    // Run log is the fifth action while nothing runs; its click toggles
-    // the log window, and a disabled Undo does nothing.
-    let run_log = actions[4];
+    // Quick, Full, Cancel (greyed while nothing runs), Undo, Redo, Run log,
+    // Results: Run log is the sixth action; its click toggles the log
+    // window, and a disabled Undo does nothing.
+    let run_log = actions[5];
     let open = state.sandbox.layout.log_window_open;
     click_on(&ctx, &mut state, WIDE, run_log.center());
     assert_ne!(state.sandbox.layout.log_window_open, open);
     assert!(!state.sandbox.undo.can_undo());
     let revision = state.sandbox.revision;
-    click_on(&ctx, &mut state, WIDE, actions[2].center());
+    click_on(&ctx, &mut state, WIDE, actions[3].center());
     assert_eq!(state.sandbox.revision, revision);
     // Closing the log again leaves the design space beside the block
     // empty, and a drag there still orbits.
@@ -341,36 +345,23 @@ fn gestures_on_the_action_boxes_never_orbit_and_actions_still_act() {
 }
 
 #[test]
-fn the_summary_button_toggles_the_metric_card_beside_the_stack_without_orbiting() {
+fn the_summary_is_always_present_text_that_never_orbits() {
     let (ctx, mut state) = settled(AppTheme::Dark, WIDE);
-    assert!(!state.sandbox.layout.summary_open);
-    let summary = overlay_rect_tagged(&ctx, "summary").expect("summary");
-    click_on(&ctx, &mut state, WIDE, summary.center());
-    assert!(state.sandbox.layout.summary_open);
-    frame_on(&ctx, &mut state, WIDE, vec![]);
+    let summary = overlay_rect_tagged(&ctx, "summary_text").expect("summary");
+    assert!(
+        overlay_rect_tagged(&ctx, "summary").is_none(),
+        "no Summary button"
+    );
+    assert!(
+        overlay_rect_tagged(&ctx, "summary_card").is_none(),
+        "no card"
+    );
     let viewport = viewport_rect(&ctx).expect("viewport");
-    let stack = overlay_rect_tagged(&ctx, "stack").expect("stack");
-    let card = overlay_rect_tagged(&ctx, "summary_card").expect("card");
-    let metrics = overlay_rects_tagged(&ctx, "metric");
-    assert_eq!(metrics.len(), 8);
-    assert!(card.left() >= stack.right(), "{card:?} vs {stack:?}");
-    assert!(viewport.contains_rect(card), "{card:?} in {viewport:?}");
-    let block = action_block_rect(&ctx, viewport);
-    assert!(card.bottom() <= block.top() + 1.0, "{card:?} vs {block:?}");
-    for rect in &metrics {
-        assert!(card.contains_rect(*rect), "{rect:?} in {card:?}");
-    }
+    assert!(summary.left() <= viewport.left() + 16.0);
     let texts = metric_chips(&state);
     assert_eq!(texts.len(), 8);
-    assert!(texts[0].starts_with("S_ref ") && texts[2].starts_with("MAC "));
-    // A drag on a metric row never orbits.
+    assert!(texts[0].0 == "S_ref" && texts[2].0 == "MAC");
     let before = *state.preview_camera_mut(SANDBOX_CAMERA_ID);
-    drag_on(&ctx, &mut state, WIDE, metrics[3].center());
+    drag_on(&ctx, &mut state, WIDE, summary.center());
     assert_eq!(before, *state.preview_camera_mut(SANDBOX_CAMERA_ID));
-    // Pressing Summary again hides the card and its rows.
-    click_on(&ctx, &mut state, WIDE, summary.center());
-    assert!(!state.sandbox.layout.summary_open);
-    frame_on(&ctx, &mut state, WIDE, vec![]);
-    assert!(overlay_rect_tagged(&ctx, "summary_card").is_none());
-    assert!(overlay_rects_tagged(&ctx, "metric").is_empty());
 }

@@ -132,3 +132,170 @@ mod tests {
         assert_eq!(scene.elements.len(), 1);
     }
 }
+
+/// Map from the geometric angle a lattice solve was flown at to the reporting
+/// angle of the polar sweep.
+///
+/// On the compressible lattice (A1) the polar is solved at the true angle, so
+/// the map is the identity. With the lattice off, the sweep pairs an
+/// incompressible lattice CL with the whole-wing Prandtl-Glauert angle
+/// `alpha_0 + beta (alpha - alpha_0)`, so that the curve plotted against the
+/// reporting angle has the compressible slope `CL_alpha / beta`; an external
+/// compressible solver (VSPAERO, flown at the reporting angles) is compared
+/// on that same axis. Every figure that draws the sweep uses this one axis,
+/// and incompressible analytical references (lifting line, Helmbold) are
+/// carried onto it with the same affine map, so no curve sits on a different
+/// angle basis from the lattice it is compared with.
+#[derive(Debug, Clone, Copy, PartialEq)]
+pub(super) struct ReportingAxis {
+    scale: f64,
+    offset: f64,
+}
+
+impl ReportingAxis {
+    /// Least-squares affine fit through the sweep's (geometric, reporting)
+    /// angle pairs; the identity when the sweep carries no usable pairs.
+    pub(super) fn of(polar: &alas_aero::analysis::PolarSweep) -> Self {
+        let pairs: Vec<(f64, f64)> = polar
+            .geometric_alpha_deg
+            .iter()
+            .copied()
+            .zip(polar.alpha_deg.iter().copied())
+            .filter(|(g, r)| g.is_finite() && r.is_finite())
+            .collect();
+        let n = pairs.len() as f64;
+        if pairs.len() < 2 {
+            return Self::identity();
+        }
+        let (sx, sy) = pairs.iter().fold((0.0, 0.0), |a, p| (a.0 + p.0, a.1 + p.1));
+        let (mx, my) = (sx / n, sy / n);
+        let sxx: f64 = pairs.iter().map(|p| (p.0 - mx).powi(2)).sum();
+        if sxx < 1e-12 {
+            return Self::identity();
+        }
+        let sxy: f64 = pairs.iter().map(|p| (p.0 - mx) * (p.1 - my)).sum();
+        let scale = sxy / sxx;
+        Self {
+            scale,
+            offset: my - scale * mx,
+        }
+    }
+
+    /// The affine map `reporting = scale * geometric + offset`, degrees.
+    pub(super) const fn affine(scale: f64, offset: f64) -> Self {
+        Self { scale, offset }
+    }
+
+    const fn identity() -> Self {
+        Self {
+            scale: 1.0,
+            offset: 0.0,
+        }
+    }
+
+    /// The reporting angle of a geometric angle, degrees.
+    pub(super) fn map(&self, geometric_deg: f64) -> f64 {
+        self.scale * geometric_deg + self.offset
+    }
+}
+
+#[cfg(test)]
+mod reporting_axis_tests {
+    use super::*;
+    use alas_aero::analysis::PolarSweep;
+
+    fn polar(geometric: Vec<f64>, reporting: Vec<f64>) -> PolarSweep {
+        let n = geometric.len();
+        PolarSweep {
+            alpha_deg: reporting,
+            geometric_alpha_deg: geometric,
+            compressible_mach: None,
+            cl: vec![0.0; n],
+            cd: vec![0.0; n],
+            cd_induced: vec![0.0; n],
+            cd_wave: vec![0.0; n],
+            cd_parasite: vec![0.0; n],
+            cm: vec![0.0; n],
+            l_over_d: vec![0.0; n],
+        }
+    }
+
+    #[test]
+    fn the_axis_recovers_the_affine_relabel_and_carries_a_reference_onto_it() {
+        // alpha_0 = -1.5 deg, beta = 0.626: reporting = alpha_0 + beta (g - alpha_0).
+        let beta = 0.626;
+        let geometric = vec![-4.0, 0.0, 4.0, 8.0];
+        let reporting: Vec<f64> = geometric.iter().map(|g| -1.5 + beta * (g + 1.5)).collect();
+        let axis = ReportingAxis::of(&polar(geometric, reporting));
+        assert!((axis.map(2.0) - (-1.5 + beta * 3.5)).abs() < 1e-12);
+        assert!((axis.map(-1.5) + 1.5).abs() < 1e-12);
+    }
+
+    #[test]
+    fn a_sweep_without_pairs_is_left_on_the_geometric_angle() {
+        let axis = ReportingAxis::of(&polar(vec![1.0], vec![0.5]));
+        assert_eq!(axis.map(3.0), 3.0);
+    }
+}
+
+/// Static note stating the basis of the angle axis (translated by the display
+/// catalog).
+pub(super) const ALPHA_AXIS_NOTE: &str =
+    "Angle axis: compressibility-corrected angle at the lift of the incompressible lattice sweep";
+
+/// Draw [`ALPHA_AXIS_NOTE`] centred at `x`, `y`.
+pub(super) fn draw_alpha_axis_note(scene: &mut Scene, x: f64, y: f64, pal: &crate::theme::Palette) {
+    scene.add(SceneElement::Text {
+        text: ALPHA_AXIS_NOTE.to_owned(),
+        pos: [x, y],
+        font_size: 8.0,
+        color: crate::scene::Color::from_hex(pal.tick),
+        align: crate::scene::TextAlign::Center,
+        baseline: crate::scene::TextBaseline::Middle,
+        angle_deg: 0.0,
+        bold: false,
+    });
+}
+
+/// Static note for the AVL cross-check rows, which are solved and drawn at the
+/// geometric angle (the shared condition of the external incompressible solve).
+pub(super) const CROSS_CHECK_AXIS_NOTE: &str =
+    "Cross-check rows: geometric angle of the incompressible solves";
+
+/// Draw [`CROSS_CHECK_AXIS_NOTE`] centred at `x`, `y`.
+pub(super) fn draw_cross_check_axis_note(
+    scene: &mut Scene,
+    x: f64,
+    y: f64,
+    pal: &crate::theme::Palette,
+) {
+    scene.add(SceneElement::Text {
+        text: CROSS_CHECK_AXIS_NOTE.to_owned(),
+        pos: [x, y],
+        font_size: 8.0,
+        color: crate::scene::Color::from_hex(pal.tick),
+        align: crate::scene::TextAlign::Center,
+        baseline: crate::scene::TextBaseline::Middle,
+        angle_deg: 0.0,
+        bold: false,
+    });
+}
+
+/// The final path component, for messages that are drawn into a figure and
+/// exported: the full case path stays in the run log.
+pub(super) fn file_name_of(path: &std::path::Path) -> String {
+    path.file_name().map_or_else(
+        || "file".to_owned(),
+        |name| name.to_string_lossy().into_owned(),
+    )
+}
+
+/// The reason a file could not be read, in words a figure can carry without
+/// the operating system's own message or code.
+pub(super) fn file_failure_reason(error: &std::io::Error) -> &'static str {
+    match error.kind() {
+        std::io::ErrorKind::NotFound => "file not found",
+        std::io::ErrorKind::PermissionDenied => "permission denied",
+        _ => "could not be read",
+    }
+}

@@ -219,6 +219,7 @@ def _component_stations(turbofan) -> dict:
 
 def _stage_solve() -> None:
     _framework.add_suave_to_path()
+    _framework.use_suave_geopotential_altitude()
 
     import vehicle_builder
     import SUAVE

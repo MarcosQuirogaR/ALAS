@@ -13,10 +13,12 @@ path = "src/main.rs"
 
 [dependencies]
 alas-config = { path = "../alas-config" }
+alas-mission = { path = "../alas-mission" }
 alas-gui = { path = "../alas-gui" }
 alas-report = { path = "../alas-report" }
 alas-pipeline = { path = "../alas-pipeline" }
 alas-exec = { path = "../alas-exec" }
+alas-struct = { path = "../alas-struct" }
 alas-route = { path = "../alas-route" }
 tracing = { workspace = true }
 serde = { workspace = true }

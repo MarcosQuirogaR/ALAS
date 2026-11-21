@@ -196,6 +196,13 @@ impl Camera3D {
         ]
     }
 
+    /// The camera's screen axes in model coordinates: the unit vectors that
+    /// point to the right and up on the screen.
+    pub fn screen_axes(&self) -> (Point3D, Point3D) {
+        let (right, up, _) = self.basis();
+        (right, up)
+    }
+
     /// Orthonormal camera basis in world coordinates: right, up, view.
     ///
     /// [`Self::project`] is the right/up pair of dot products and

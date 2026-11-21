@@ -230,7 +230,11 @@ pub(super) fn variants(
         let ult_n = 2.0 * ultimate;
         let lift: Vec<f64> = (0..n)
             .map(|j| {
-                if eta[j] >= flap.eta.0 && eta[j] <= flap.eta.1 {
+                // An inboard aileron between two flaps carries no flap load.
+                let in_gap = flap
+                    .gap
+                    .is_some_and(|(start, end)| eta[j] > start && eta[j] < end);
+                if eta[j] >= flap.eta.0 && eta[j] <= flap.eta.1 && !in_gap {
                     let dcl = ts::slotted_flap_delta_cl(
                         table.cl_alpha[j],
                         flap.chord_fraction,
@@ -334,10 +338,7 @@ pub(super) fn variants(
         .engines
         .iter()
         .filter(|e| e.thrust_n > 0.0)
-        .map(|e| {
-            let arm = wsg.z_le(e.y_m / wsg.semi_span) - e.z_m;
-            (e.y_m, ultimate * e.thrust_n * arm)
-        })
+        .map(|e| (e.y_m, ultimate * e.thrust_n * e.thrust_arm_m()))
         .collect();
     if !couples.is_empty() {
         let mut v = Variant::plain(LoadCase {

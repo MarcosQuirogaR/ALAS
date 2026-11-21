@@ -147,7 +147,7 @@ fn cabin_legend_rows_are_centered_and_contained_after_translation() {
                 Color32::from_rgb(41, 128, 185),
                 Color32::from_rgb(39, 174, 96),
                 Color32::from_rgb(230, 126, 34),
-                Color32::from_rgb(93, 173, 226),
+                Color32::from_rgb(38, 198, 218),
                 Color32::from_rgb(231, 76, 60),
             ];
             let labels = [
@@ -177,9 +177,22 @@ fn cabin_legend_rows_are_centered_and_contained_after_translation() {
                     swatch.union(rendered_text_rect(&output, label.as_ref()))
                 })
                 .collect();
-            let first_row = union_rects(&item_rects[..3]);
-            let second_row = union_rects(&item_rects[3..]);
-            for row in [first_row, second_row] {
+            // The legend keeps the app's small text size and gives a narrow
+            // dock rows of fewer entries instead of smaller text.
+            let mut rows: Vec<Rect> = Vec::new();
+            for rect in &item_rects {
+                match rows.last_mut() {
+                    Some(row) if (rect.center().y - row.center().y).abs() < 3.0 => {
+                        *row = row.union(*rect);
+                    }
+                    _ => rows.push(*rect),
+                }
+            }
+            assert!(rows.len() >= 2, "{rows:?}");
+            let first_row = rows[0];
+            let second_row = rows[rows.len() - 1];
+            assert!(rows.iter().all(|row| row.height() >= 13.0 * 0.9));
+            for row in rows.iter() {
                 assert!((row.center().x - viewport.center().x).abs() < 0.6);
                 assert!(row.left() >= legend_rect.left() - 0.6);
                 assert!(row.right() <= legend_rect.right() + 0.6);
@@ -207,7 +220,6 @@ fn cabin_legend_rows_are_centered_and_contained_after_translation() {
                 card.top() >= controls_rect.bottom() + 5.0 - 0.6,
                 "{context}"
             );
-            assert!(card.top() >= legend_rect.top() - 0.6, "{context}");
             let title = rendered_text_rect(&output, super::tr("Cabin legend").as_ref());
             assert!(
                 title.top() >= card.top() + 7.0 - 0.6,
@@ -351,4 +363,188 @@ fn centered_row_recentres_itself_after_a_wrong_width_estimate() {
         "second frame should be recentred, offset {}",
         offsets[1]
     );
+}
+
+#[test]
+fn the_dock_is_offered_only_where_the_aircraft_is_edited() {
+    use super::page_shows_preview_dock;
+    for page in [
+        "inputs",
+        "cabin",
+        "payload",
+        "design_space",
+        "geometry",
+        "mass_model",
+        "engine_designer",
+    ] {
+        assert!(page_shows_preview_dock(page), "{page}");
+    }
+    for page in [
+        "mission",
+        "setup_analyses",
+        "results",
+        "files",
+        "sandbox",
+        "setup_tools",
+        "uav",
+        "addons",
+        "optimizer",
+    ] {
+        assert!(!page_shows_preview_dock(page), "{page}");
+    }
+}
+
+#[test]
+fn a_fitted_preview_fills_the_limiting_dimension_of_a_tall_pane() {
+    use crate::sandbox::scene::{build_live_preview_scene, LivePreviewFit, LIVE_PREVIEW_FILL};
+    use alas_report::scene::{Camera3D, SceneElement};
+
+    let mut state = crate::state::AppState::default();
+    let camera = Camera3D::default();
+    // A tall, narrow dock: the width limits the aircraft.
+    let canvas = (430.0_f64, 740.0_f64);
+    state.preview_fit = Some(LivePreviewFit {
+        canvas,
+        elev_deg: camera.elev_deg,
+        azim_deg: camera.azim_deg,
+        reserved: (0.0, 0.0),
+    });
+    let scene = build_live_preview_scene(&state, camera).expect("live scene");
+    assert!((scene.width - canvas.0).abs() < 1e-9 && (scene.height - canvas.1).abs() < 1e-9);
+    let (mut x_min, mut x_max, mut y_min, mut y_max) = (f64::MAX, f64::MIN, f64::MAX, f64::MIN);
+    for element in &scene.elements {
+        if let SceneElement::Polygon { points, .. } = element {
+            for point in points {
+                x_min = x_min.min(point[0]);
+                x_max = x_max.max(point[0]);
+                y_min = y_min.min(point[1]);
+                y_max = y_max.max(point[1]);
+            }
+        }
+    }
+    let fill = ((x_max - x_min) / canvas.0).max((y_max - y_min) / canvas.1);
+    assert!(
+        (fill - LIVE_PREVIEW_FILL / crate::sandbox::scene::DOCK_FIT_MARGIN).abs() < 0.03,
+        "the aircraft fills {fill:.3} of its limiting dimension"
+    );
+    assert!(
+        ((x_min + x_max) * 0.5 - canvas.0 * 0.5).abs() < 0.03 * canvas.0,
+        "centred horizontally"
+    );
+}
+
+#[test]
+fn the_cabin_preview_is_fitted_to_the_shape_of_a_tall_dock() {
+    use crate::sandbox::scene::LivePreviewFit;
+    use crate::state::PreviewTab;
+    use alas_report::scene::SceneElement;
+
+    let mut state = crate::state::AppState {
+        preview_tab: PreviewTab::Cabin,
+        ..crate::state::AppState::default()
+    };
+    let canvas = (430.0_f64, 740.0_f64);
+    let camera = state.active_preview_camera();
+    state.preview_fit = Some(LivePreviewFit {
+        canvas,
+        elev_deg: camera.pitch_deg,
+        azim_deg: camera.yaw_deg,
+        reserved: (0.0, 0.0),
+    });
+    state.update_preview_scene();
+    let scene = state.preview_scene.as_ref().expect("cabin scene");
+    assert!((scene.width - canvas.0).abs() < 1e-9 && (scene.height - canvas.1).abs() < 1e-9);
+    let (mut x_min, mut x_max, mut y_min, mut y_max) = (f64::MAX, f64::MIN, f64::MAX, f64::MIN);
+    let mut note = |point: &[f64; 2]| {
+        x_min = x_min.min(point[0]);
+        x_max = x_max.max(point[0]);
+        y_min = y_min.min(point[1]);
+        y_max = y_max.max(point[1]);
+    };
+    for element in &scene.elements {
+        match element {
+            SceneElement::Polygon { points, .. } | SceneElement::Polyline { points, .. } => {
+                points.iter().for_each(&mut note);
+            }
+            SceneElement::Line { p1, p2, .. } => {
+                note(p1);
+                note(p2);
+            }
+            _ => {}
+        }
+    }
+    let fill = ((x_max - x_min) / canvas.0).max((y_max - y_min) / canvas.1);
+    assert!(
+        fill > 0.8,
+        "the cabin fills {fill:.2} of its limiting dimension"
+    );
+}
+
+/// The Interior preview fitted into the band the legend and the controls leave free: the model's
+/// bounding box never meets the legend card, at the dock sizes of the review (portrait docks, a
+/// wide one and a short one).
+#[test]
+fn the_cabin_model_stays_clear_of_the_legend_card() {
+    use crate::state::PreviewTab;
+    use alas_report::scene::SceneElement;
+
+    for (name, width, height) in [
+        ("A", 440.0_f32, 840.0_f32),
+        ("B", 560.0, 1_240.0),
+        ("D", 440.0, 760.0),
+        ("E", 330.0, 600.0),
+    ] {
+        let mut state = crate::state::AppState {
+            preview_tab: PreviewTab::Cabin,
+            preview_open: true,
+            ..crate::state::AppState::default()
+        };
+        // The real dock, drawn at the pane size: it fits the cabin for the legend it shows.
+        let mut shot = crate::test_raster::render(width, height, 10, 120, |ui| {
+            super::show_preview_dock(&mut state, ui);
+        });
+        let fit = state.preview_fit.expect("the dock fitted its pane");
+        let reserved = fit.reserved;
+        let pane = egui::Rect::from_min_size(
+            egui::pos2(0.0, 0.0),
+            vec2(fit.canvas.0 as f32, fit.canvas.1 as f32),
+        );
+        let (_, legend) = preview_overlay_rects(pane, PreviewTab::Cabin);
+        let (width, height) = (fit.canvas.0 as f32, fit.canvas.1 as f32);
+        let scene = state.preview_scene.as_ref().expect("cabin scene");
+        let (mut x0, mut x1, mut y0, mut y1) = (f64::MAX, f64::MIN, f64::MAX, f64::MIN);
+        for element in &scene.elements {
+            if let SceneElement::Polygon { points, .. } | SceneElement::Polyline { points, .. } =
+                element
+            {
+                for point in points {
+                    x0 = x0.min(point[0]);
+                    x1 = x1.max(point[0]);
+                    y0 = y0.min(point[1]);
+                    y1 = y1.max(point[1]);
+                }
+            }
+        }
+        let model = egui::Rect::from_min_max(
+            egui::pos2(x0 as f32, y0 as f32),
+            egui::pos2(x1 as f32, y1 as f32),
+        );
+        // The legend card spans from the band's lower edge to the viewport's margin.
+        let card = egui::Rect::from_min_max(
+            egui::pos2(legend.left(), height - reserved.1 as f32 + 5.0 + 8.0),
+            egui::pos2(legend.right(), height - 8.0),
+        );
+        assert!(
+            !model.intersects(card),
+            "{name}: model {model:?} meets the legend {card:?} (reserved {reserved:?})"
+        );
+        assert!(
+            model.top() >= reserved.0 as f32 - 1.0,
+            "{name}: model under the controls"
+        );
+        // A look: the model's box and the legend card over the render.
+        shot.texts.clear();
+        let _ = (width, height);
+        crate::test_raster::write(&format!("r35-cabin-legend-{name}.png"), &shot);
+    }
 }

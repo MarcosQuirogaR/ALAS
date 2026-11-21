@@ -255,6 +255,9 @@ pub struct DeliveredAcceptanceManifest {
     /// native-mission trip-fuel delta against it.
     #[serde(default, skip_serializing_if = "Option::is_none")]
     pub baseline: Option<alas_opt::ReportingBaseline>,
+    /// The ladder's phases and their wall times, in run order.
+    #[serde(default, skip_serializing_if = "Vec::is_empty")]
+    pub phases: Vec<alas_opt::LadderPhase>,
 }
 
 /// Everything a completed run can say about its own cost and dispatch.
@@ -353,6 +356,7 @@ impl RunManifest {
                             .and_then(|summary| summary.verification)
                             .map_or(0, |counts| counts.reserved),
                         baseline: acceptance.baseline.clone(),
+                        phases: acceptance.phases.clone(),
                     },
                 ),
                 diagnostics: optimization
@@ -444,6 +448,8 @@ mod tests {
 
     fn reported() -> alas_opt::SearchDiagnostics {
         alas_opt::SearchDiagnostics {
+            engine_start: None,
+            engine_slope: None,
             converged: true,
             analysis_evaluations: 225,
             cache_hits: 17,
@@ -467,6 +473,8 @@ mod tests {
             baseline: None,
             winner_history_row: None,
             evaluation_trace: Default::default(),
+            plan_completed: false,
+            convergence: None,
             baseline_clamped: false,
         }
     }

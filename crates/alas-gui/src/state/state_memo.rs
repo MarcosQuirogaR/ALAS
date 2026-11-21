@@ -33,8 +33,18 @@ pub(crate) fn config_fingerprint(value: &serde_json::Value) -> u64 {
                 b.hash(hasher);
             }
             serde_json::Value::Number(n) => {
-                2_u8.hash(hasher);
-                n.to_string().hash(hasher);
+                // Hash the numeric payload directly; formatting every number
+                // to a string allocated once per leaf per call.
+                if let Some(i) = n.as_i64() {
+                    2_u8.hash(hasher);
+                    i.hash(hasher);
+                } else if let Some(u) = n.as_u64() {
+                    6_u8.hash(hasher);
+                    u.hash(hasher);
+                } else {
+                    7_u8.hash(hasher);
+                    n.as_f64().unwrap_or(f64::NAN).to_bits().hash(hasher);
+                }
             }
             serde_json::Value::String(s) => {
                 3_u8.hash(hasher);
@@ -77,7 +87,53 @@ pub(crate) fn design_values_fingerprint(
     hasher.finish()
 }
 
+/// Per-frame memo of [`config_fingerprint`] for `config_values`.
+///
+/// The fingerprint is a walk over the whole configuration and was recomputed
+/// by every typed-config read (about ten per frame). It is now computed at
+/// most once per `(frame, revision)`: `frame` advances once per rendered frame
+/// ([`AppState::begin_frame`]) and `revision` on every
+/// [`AppState::on_config_modified`]. `config_values` is still mutated directly
+/// from many sites, so an edit that skips `on_config_modified` is picked up on
+/// the next frame at the latest. Outside a frame (`frame == 0`, as in unit
+/// tests) nothing is memoized.
+#[derive(Debug, Default)]
+pub(crate) struct FingerprintMemo {
+    frame: std::cell::Cell<u64>,
+    revision: std::cell::Cell<u64>,
+    cached: std::cell::Cell<Option<(u64, u64, u64)>>,
+}
+
 impl AppState {
+    /// Start a new frame: memoized fingerprints from earlier frames expire.
+    pub fn begin_frame(&self) {
+        let memo = &self.fingerprint_memo;
+        memo.frame.set(memo.frame.get().wrapping_add(1).max(1));
+    }
+
+    /// Record that `config_values` was edited, expiring the fingerprint memo.
+    pub fn bump_config_revision(&self) {
+        let memo = &self.fingerprint_memo;
+        memo.revision.set(memo.revision.get().wrapping_add(1));
+    }
+
+    /// The fingerprint of the current `config_values`, computed at most once
+    /// per frame and edit revision.
+    pub(crate) fn config_fingerprint_now(&self) -> u64 {
+        let memo = &self.fingerprint_memo;
+        let (frame, revision) = (memo.frame.get(), memo.revision.get());
+        if frame != 0 {
+            if let Some((f, r, fingerprint)) = memo.cached.get() {
+                if f == frame && r == revision {
+                    return fingerprint;
+                }
+            }
+        }
+        let fingerprint = config_fingerprint(&self.config_values);
+        memo.cached.set(Some((frame, revision, fingerprint)));
+        fingerprint
+    }
+
     /// The typed configuration the JSON edit buffer currently represents.
     ///
     /// Returns `None` while the buffer is transiently unreadable (a numeric
@@ -98,7 +154,7 @@ impl AppState {
     /// [`Self::typed_config`]); a cache hit is a refcount bump rather than a deep
     /// clone. Per-frame read-only callers should prefer this over `typed_config`.
     pub fn typed_config_arc(&self) -> Option<Arc<AlasConfig>> {
-        let fingerprint = config_fingerprint(&self.config_values);
+        let fingerprint = self.config_fingerprint_now();
         if let Some((cached_fingerprint, cached)) = self.typed_config_memo.borrow().as_ref() {
             if *cached_fingerprint == fingerprint {
                 return Some(Arc::clone(cached));
@@ -127,9 +183,67 @@ impl AppState {
     /// fingerprinted inputs, so equal fingerprints are equal scenes and a
     /// changed fingerprint is always a genuinely different scene.
     pub fn cached_page_preview(&self, id: &str) -> Option<(Arc<Scene>, u64)> {
+        self.cached_page_preview_sized(id, None)
+    }
+
+    /// [`Self::cached_page_preview`] for a figure laid out on `canvas` points
+    /// (the charts and the three-view); the canvas is part of the key.
+    pub fn cached_page_preview_sized(
+        &self,
+        id: &str,
+        canvas: Option<(f64, f64)>,
+    ) -> Option<(Arc<Scene>, u64)> {
+        let key = self.page_preview_key(id, canvas);
+
+        // One entry per preview id: a flow page embeds several form pages, each
+        // with its own preview, and one shared slot rebuilt them all every frame.
+        if let Some((cached_key, cached)) = self.page_preview_cache.borrow().get(id) {
+            if *cached_key == key {
+                return Some((Arc::clone(cached), key));
+            }
+        }
+        let scene = Arc::new(crate::scene::build_page_preview_sized(self, id, canvas)?);
+        self.page_preview_cache
+            .borrow_mut()
+            .insert(id.to_owned(), (key, Arc::clone(&scene)));
+        Some((scene, key))
+    }
+
+    /// The page preview `id` built on a worker thread: the scene for the
+    /// current inputs when it is built, else `Pending` with the card's
+    /// previous scene. Without workers (unit tests, headless callers) and for
+    /// the cabin preview (its own airframe cache) it is built in the frame.
+    pub(crate) fn page_preview_background(
+        &self,
+        id: &str,
+        canvas: Option<(f64, f64)>,
+    ) -> crate::preview_jobs::PreviewLookup {
+        use crate::preview_jobs::PreviewLookup;
+        if id == "cabin_3d" || !self.preview_jobs.borrow().enabled() {
+            return PreviewLookup::Ready(
+                self.cached_page_preview_sized(id, canvas)
+                    .map(|(scene, _)| scene),
+            );
+        }
+        let key = self.page_preview_key(id, canvas);
+        let slot = format!("page_preview::{id}");
+        if let Some(found) = self.preview_jobs.borrow().peek(&slot, key) {
+            return found;
+        }
+        // Snapshot the inputs only when a build is due: the configuration
+        // clone and the completed report are not taken on every frame.
+        let inputs = crate::scene::preview_inputs(self, id);
+        let id_owned = id.to_owned();
+        self.preview_jobs.borrow_mut().lookup(&slot, key, move || {
+            crate::scene::build_page_preview_detached(inputs?, &id_owned, canvas)
+        })
+    }
+
+    /// The cache key of page preview `id` at `canvas`: everything its build reads.
+    pub(crate) fn page_preview_key(&self, id: &str, canvas: Option<(f64, f64)>) -> u64 {
         let camera = self.preview_cameras.get(id).copied().unwrap_or_default();
         let mut hasher = std::collections::hash_map::DefaultHasher::new();
-        config_fingerprint(&self.config_values).hash(&mut hasher);
+        self.config_fingerprint_now().hash(&mut hasher);
         design_values_fingerprint(&self.design_values).hash(&mut hasher);
         // Airfoil names resolve through the runtime registry, which a custom
         // import can change without touching `config_values`.
@@ -139,21 +253,39 @@ impl AppState {
         self.run_identity.hash(&mut hasher);
         self.pipeline_result_complete.hash(&mut hasher);
         id.hash(&mut hasher);
+        canvas
+            .map(|(w, h)| (w.to_bits(), h.to_bits()))
+            .hash(&mut hasher);
         self.theme.figure_theme_name().hash(&mut hasher);
         alas_i18n::get_language().hash(&mut hasher);
         camera.pitch_deg.to_bits().hash(&mut hasher);
         camera.yaw_deg.to_bits().hash(&mut hasher);
         camera.zoom.to_bits().hash(&mut hasher);
-        let key = hasher.finish();
+        hasher.finish()
+    }
 
-        if let Some((cached_key, cached)) = self.page_preview_cache.borrow().as_ref() {
-            if *cached_key == key {
-                return Some((Arc::clone(cached), key));
-            }
+    /// The cache key of a Results gallery figure: run, solver view, theme,
+    /// language and figure id.
+    pub fn gallery_figure_key(&self, id: &str) -> String {
+        format!(
+            "run={};solver={:?};theme={};language={};figure={id}",
+            self.run_identity,
+            self.selected_solver_view,
+            self.theme.figure_theme_name(),
+            alas_i18n::get_language()
+        )
+    }
+
+    /// The figure the gallery already built for `id`, when it is a figure with
+    /// no orbit camera (those depend on the camera in view): `Some(None)` is a
+    /// figure the run has no data for. `None` when the gallery has not built it.
+    pub fn gallery_cached_figure(&self, id: &str) -> Option<Option<Arc<Scene>>> {
+        if crate::views::result_3d::is_orbitable_result(id) {
+            return None;
         }
-        let scene = Arc::new(crate::scene::build_page_preview(self, id)?);
-        *self.page_preview_cache.borrow_mut() = Some((key, Arc::clone(&scene)));
-        Some((scene, key))
+        self.result_figure_cache
+            .get(&self.gallery_figure_key(id))
+            .map(|(scene, _)| scene.clone())
     }
 
     /// Build a result figure once per run/theme/id and reuse it between repaints.
@@ -206,7 +338,7 @@ impl AppState {
     /// Store a freshly built (or unavailable) result figure under a fresh
     /// revision. The counter never resets, so a revision is never reused for
     /// two different scene contents at the same cache key.
-    fn insert_result_figure(&mut self, key: &str, scene: Option<Arc<Scene>>) {
+    pub(crate) fn insert_result_figure(&mut self, key: &str, scene: Option<Arc<Scene>>) {
         self.result_figure_revision_counter = self.result_figure_revision_counter.wrapping_add(1);
         self.result_figure_cache
             .insert(key.to_owned(), (scene, self.result_figure_revision_counter));

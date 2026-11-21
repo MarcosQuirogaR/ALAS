@@ -95,6 +95,17 @@ impl Ord for OrderedF64 {
 /// implementation's business; the scores it returns may not depend on it.
 pub(crate) type EvaluateBatch<'a> = dyn FnMut(&[Vec<f64>]) -> Vec<ScoredPoint> + 'a;
 
+/// Trial pre-selection: the index of the alternative trial to analyse.
+pub(crate) type Guide<'a> = dyn FnMut(&[Vec<f64>]) -> usize + 'a;
+
+/// How a guide takes part in a kernel run (`lshade_de::run_guided`).
+pub(crate) struct Guidance<'g, 'a> {
+    /// Alternative operator trials built per target.
+    pub(crate) alternatives: usize,
+    /// Names the alternative to analyse.
+    pub(crate) choose: &'g mut Guide<'a>,
+}
+
 /// Cheap design-vector admission check, without any coupled analysis.
 pub(crate) type Admission<'a> = dyn Fn(&[f64]) -> bool + 'a;
 

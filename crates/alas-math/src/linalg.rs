@@ -62,6 +62,13 @@ use std::sync::OnceLock;
 use faer::linalg::solvers::{PartialPivLu, Solve};
 use faer::{Mat, Par};
 
+mod columns;
+pub use columns::SolvedColumns;
+
+/// Iteration cap of [`LuFactorization::condition_estimate`]: the five
+/// iterations LAPACK `xLACON` allows.
+const CONDITION_ITERATIONS: usize = 5;
+
 /// Pin faer to its sequential kernels; see the module doc for the measurement.
 pub(crate) fn sequential_kernels() {
     static PINNED: OnceLock<()> = OnceLock::new();
@@ -83,6 +90,42 @@ pub struct SolveDiagnostics {
     pub pivot_ratio: f64,
     /// Smallest absolute pivot encountered after partial pivoting.
     pub minimum_pivot: f64,
+}
+
+/// Largest normalized residual of a dense solve that still counts as a
+/// solution of the system: the square root of the unit roundoff spacing,
+/// `sqrt(f64::EPSILON)` ~ `1.5e-8`.
+///
+/// A backward-stable elimination leaves a normalized residual of a small
+/// multiple of `n * f64::EPSILON` (Higham, *Accuracy and Stability of
+/// Numerical Algorithms*, 2nd ed., theorem 9.4), about `1e-13` for the
+/// 800-row lattice systems. A residual above `sqrt(f64::EPSILON)` means half
+/// of the significant digits of the right-hand side are not reproduced, which
+/// is a failed solve rather than rounding.
+pub const MAX_NORMALIZED_RESIDUAL: f64 = 1.490_116_119_384_765_6e-8;
+
+impl SolveDiagnostics {
+    /// Whether the solve produced finite values and reproduces its right-hand
+    /// side to within [`MAX_NORMALIZED_RESIDUAL`].
+    ///
+    /// A solution holding a `NaN` or an infinity carries a non-finite
+    /// residual and is rejected here.
+    pub fn residual_is_bounded(&self) -> bool {
+        self.residual_norm.is_finite()
+            && self.normalized_residual.is_finite()
+            && self.normalized_residual <= MAX_NORMALIZED_RESIDUAL
+    }
+}
+
+/// The larger of two values, `NaN` when either is `NaN`, so that a `NaN`
+/// entry of a solution or residual is not discarded by the fold that reports
+/// it. For two numbers the result is that of `f64::max`.
+pub(crate) fn max_or_nan(a: f64, b: f64) -> f64 {
+    if a.is_nan() || b.is_nan() {
+        f64::NAN
+    } else {
+        a.max(b)
+    }
 }
 
 /// A dense square matrix in contiguous column-major storage, the input to
@@ -109,9 +152,26 @@ impl DenseMatrix {
 
     /// A matrix from a row-major slice of `n * n` entries.
     pub fn from_row_major(n: usize, data: &[f64]) -> Self {
-        Self {
-            inner: Mat::from_fn(n, n, |i, j| data[i * n + j]),
+        // faer stores columns contiguously, so an entry-by-entry copy reads the
+        // row-major source with stride `n`: a cache miss per entry once the
+        // matrix is larger than the cache. Copying square tiles keeps both
+        // sides in cache; every entry is moved unchanged.
+        const TILE: usize = 64;
+        assert!(data.len() >= n * n, "row-major data shorter than n * n");
+        let mut inner = Mat::<f64>::zeros(n, n);
+        for column_start in (0..n).step_by(TILE) {
+            let column_end = (column_start + TILE).min(n);
+            for row_start in (0..n).step_by(TILE) {
+                let row_end = (row_start + TILE).min(n);
+                for j in column_start..column_end {
+                    let column = &mut inner.col_as_slice_mut(j)[row_start..row_end];
+                    for (offset, entry) in column.iter_mut().enumerate() {
+                        *entry = data[(row_start + offset) * n + j];
+                    }
+                }
+            }
         }
+        Self { inner }
     }
 
     /// The number of rows (and columns).
@@ -121,9 +181,9 @@ impl DenseMatrix {
 
     /// Factor the matrix as `P A = L U` with partial pivoting.
     ///
-    /// The error is the first diagonal position of `U` that is exactly zero:
-    /// the elimination step that found no usable pivot, in the same terms
-    /// a textbook elimination reports.
+    /// The error is the first diagonal position of `U` that is exactly zero
+    /// or not finite: the elimination step that found no usable pivot, in the
+    /// same terms a textbook elimination reports.
     pub fn factor(self) -> Result<LuFactorization, usize> {
         let n = self.inner.nrows();
         if n == 0 {
@@ -133,6 +193,7 @@ impl DenseMatrix {
                 minimum_pivot: 0.0,
                 pivot_ratio: 1.0,
                 norm_inf: 0.0,
+                condition: OnceLock::new(),
             });
         }
         sequential_kernels();
@@ -143,7 +204,7 @@ impl DenseMatrix {
             let u = lu.U();
             for i in 0..n {
                 let pivot = u[(i, i)].abs();
-                if pivot == 0.0 {
+                if pivot == 0.0 || !pivot.is_finite() {
                     return Err(i);
                 }
                 max_pivot = max_pivot.max(pivot);
@@ -162,6 +223,7 @@ impl DenseMatrix {
             minimum_pivot,
             pivot_ratio,
             norm_inf,
+            condition: OnceLock::new(),
         })
     }
 }
@@ -194,6 +256,8 @@ pub struct LuFactorization {
     /// `||A||_infinity`, fixed by the matrix and so computed once rather
     /// than on every solve's diagnostics.
     norm_inf: f64,
+    /// [`Self::condition_estimate`], computed on first use.
+    condition: OnceLock<f64>,
 }
 
 impl LuFactorization {
@@ -205,6 +269,66 @@ impl LuFactorization {
     /// `max |pivot| / min |pivot|`, the conditioning proxy.
     pub fn pivot_ratio(&self) -> f64 {
         self.pivot_ratio
+    }
+
+    /// An estimate of the 1-norm condition number `||A||_1 ||A^-1||_1`.
+    ///
+    /// The `||A^-1||_1` factor is the Hager (1984) estimator with Higham's
+    /// (1988) alternating-sign safeguard, the algorithm of LAPACK `xGECON` /
+    /// `xLACON`: at most [`CONDITION_ITERATIONS`] solves with `A` and with
+    /// `A^T`, `O(n^2)` each, against the `O(n^3)` factorization. It is a
+    /// lower bound that is within a small factor of the true value in practice
+    /// (Higham, *Accuracy and Stability of Numerical Algorithms*, 2nd ed.,
+    /// sec. 15.3). Unlike [`Self::pivot_ratio`], which a large pivot of a
+    /// well-conditioned matrix can inflate, it measures how far the solve can
+    /// amplify an error: the relative error of a solution is bounded by about
+    /// this number times the unit round-off. Computed on first use, then kept.
+    pub fn condition_estimate(&self) -> f64 {
+        *self.condition.get_or_init(|| self.estimate_condition())
+    }
+
+    fn estimate_condition(&self) -> f64 {
+        let n = self.dimension();
+        let Some(lu) = &self.lu else {
+            return 1.0;
+        };
+        let norm_one = (0..n)
+            .map(|j| self.a.col_as_slice(j).iter().map(|v| v.abs()).sum::<f64>())
+            .fold(0.0_f64, f64::max);
+        let one_norm = |v: &Mat<f64>| (0..n).map(|i| v[(i, 0)].abs()).sum::<f64>();
+        let mut x = Mat::from_fn(n, 1, |_, _| 1.0 / n as f64);
+        let mut inverse_norm = 0.0_f64;
+        let mut previous = usize::MAX;
+        for _ in 0..CONDITION_ITERATIONS {
+            let mut y = x.clone();
+            lu.solve_in_place(y.as_mut());
+            inverse_norm = one_norm(&y);
+            let mut z = Mat::from_fn(n, 1, |i, _| if y[(i, 0)] >= 0.0 { 1.0 } else { -1.0 });
+            lu.solve_transpose_in_place(z.as_mut());
+            let (index, largest) = (0..n).fold((0, 0.0_f64), |best, i| {
+                let value = z[(i, 0)].abs();
+                if value > best.1 {
+                    (i, value)
+                } else {
+                    best
+                }
+            });
+            let along: f64 = (0..n).map(|i| z[(i, 0)] * x[(i, 0)]).sum();
+            if largest <= along || index == previous {
+                break;
+            }
+            previous = index;
+            x = Mat::from_fn(n, 1, |i, _| if i == index { 1.0 } else { 0.0 });
+        }
+        if n > 1 {
+            let mut b = Mat::from_fn(n, 1, |i, _| {
+                let sign = if i % 2 == 0 { 1.0 } else { -1.0 };
+                sign * (1.0 + i as f64 / (n - 1) as f64)
+            });
+            lu.solve_in_place(b.as_mut());
+            inverse_norm = inverse_norm.max(2.0 * one_norm(&b) / (3.0 * n as f64));
+        }
+        norm_one * inverse_norm
     }
 
     /// Solve `A x = b` for one right-hand side vector.
@@ -245,6 +369,9 @@ impl LuFactorization {
     /// once per row, which at the 800-row VLM system misses cache on nearly
     /// every element. Each entry of `A x` still sums its terms in ascending
     /// column order, so the residual is the one a row-wise sum produces.
+    ///
+    /// A `NaN` in the solution or in the residual makes the reported residual
+    /// `NaN`: it is never folded away into a zero residual.
     fn diagnostics(&self, x: &Mat<f64>, b: &Mat<f64>) -> SolveDiagnostics {
         let n = self.dimension();
         let k = b.ncols();
@@ -258,14 +385,17 @@ impl LuFactorization {
             predicted.fill(0.0);
             for j in 0..n {
                 let x_j = x[(j, column)];
-                max_x = max_x.max(x_j.abs());
+                max_x = max_or_nan(max_x, x_j.abs());
                 for (value, a_ij) in predicted.iter_mut().zip(self.a.col_as_slice(j)) {
                     *value += a_ij * x_j;
                 }
             }
             for (i, value) in predicted.iter().enumerate() {
-                residual_norm = residual_norm.max((value - b[(i, column)]).abs());
+                residual_norm = max_or_nan(residual_norm, (value - b[(i, column)]).abs());
             }
+        }
+        if max_x.is_nan() {
+            residual_norm = f64::NAN;
         }
         let scale = (self.norm_inf * max_x).max(max_b).max(1.0);
         SolveDiagnostics {
@@ -438,6 +568,42 @@ mod tests {
     }
 
     #[test]
+    fn a_nan_solution_reports_a_nan_residual_and_is_not_bounded() {
+        let lu = DenseMatrix::from_rows(&[vec![2.0, 0.0], vec![0.0, 4.0]])
+            .factor()
+            .expect("nonsingular");
+        let (x, diagnostics) = lu.solve_columns(&[vec![f64::NAN], vec![1.0]]);
+        assert!(x[0][0].is_nan());
+        assert!(diagnostics.residual_norm.is_nan());
+        assert!(diagnostics.normalized_residual.is_nan());
+        assert!(!diagnostics.residual_is_bounded());
+
+        let (_, diagnostics) = lu.solve_columns(&[vec![1.0], vec![f64::INFINITY]]);
+        assert!(!diagnostics.residual_is_bounded());
+
+        let (_, diagnostics) = lu.solve_columns(&[vec![1.0], vec![1.0]]);
+        assert!(diagnostics.residual_is_bounded());
+    }
+
+    #[test]
+    fn a_nan_matrix_entry_is_not_factored() {
+        let nan_pivot = DenseMatrix::from_rows(&[vec![f64::NAN, 0.0], vec![0.0, 1.0]]).factor();
+        assert!(nan_pivot.is_err());
+    }
+
+    #[test]
+    fn a_residual_above_the_limit_is_not_bounded() {
+        let diagnostics = SolveDiagnostics {
+            residual_norm: 1.0e-6,
+            normalized_residual: 1.0e-6,
+            pivot_ratio: 1.0,
+            minimum_pivot: 1.0,
+        };
+        assert!(!diagnostics.residual_is_bounded());
+        assert!((MAX_NORMALIZED_RESIDUAL - f64::EPSILON.sqrt()).abs() < 1.0e-22);
+    }
+
+    #[test]
     fn diagnostics_report_a_small_residual_and_pivot_condition_proxy() {
         let a = vec![vec![2.0, 1.0], vec![1.0, -1.0]];
         let b = vec![vec![5.0], vec![1.0]];
@@ -491,6 +657,33 @@ mod tests {
     }
 
     #[test]
+    fn a_combination_of_solved_columns_reports_its_own_residual() {
+        let (a, b) = random_system(50, 3, 17);
+        let factorization = DenseMatrix::from_rows(&a).factor().expect("nonsingular");
+        let columns: Vec<Vec<f64>> = (0..3)
+            .map(|k| b.iter().map(|row| row[k]).collect())
+            .collect();
+        let solved = factorization.solve_with_residuals(&columns);
+        let weights = [0.7, -2.0, 1.25];
+        let combine = |vectors: &[Vec<f64>]| -> Vec<f64> {
+            (0..50)
+                .map(|i| (0..3).map(|k| weights[k] * vectors[k][i]).sum())
+                .collect()
+        };
+        let rhs = combine(&columns);
+        let x = combine(&solved.solutions);
+        let residual = combine(&solved.residuals);
+        let (direct, direct_diagnostics) = factorization.solve_vector(&rhs);
+        for (value, expected) in x.iter().zip(&direct) {
+            assert!((value - expected).abs() <= 1e-13 * (1.0 + expected.abs()));
+        }
+        let diagnostics = solved.diagnostics(&residual, &x, &rhs);
+        assert!(diagnostics.normalized_residual < 1e-14, "{diagnostics:?}");
+        assert_eq!(diagnostics.pivot_ratio, direct_diagnostics.pivot_ratio);
+        assert_eq!(diagnostics.minimum_pivot, direct_diagnostics.minimum_pivot);
+    }
+
+    #[test]
     fn row_major_and_nested_row_construction_factor_identically() {
         let (a, b) = random_system(12, 1, 99);
         let flat: Vec<f64> = a.iter().flatten().copied().collect();
@@ -504,6 +697,24 @@ mod tests {
             from_flat.solve_vector(&rhs).0
         );
         assert_eq!(from_rows.pivot_ratio(), from_flat.pivot_ratio());
+    }
+
+    #[test]
+    fn tiled_row_major_copy_matches_nested_rows_across_tile_edges() {
+        // Sizes below, at and above the 64-entry tile, with ragged edge tiles.
+        for n in [1_usize, 63, 64, 65, 130] {
+            let (a, b) = random_system(n, 1, 7 + n as u64);
+            let flat: Vec<f64> = a.iter().flatten().copied().collect();
+            let from_rows = DenseMatrix::from_rows(&a).factor().expect("nonsingular");
+            let from_flat = DenseMatrix::from_row_major(n, &flat)
+                .factor()
+                .expect("nonsingular");
+            let rhs: Vec<f64> = b.iter().map(|row| row[0]).collect();
+            let (x_rows, d_rows) = from_rows.solve_vector(&rhs);
+            let (x_flat, d_flat) = from_flat.solve_vector(&rhs);
+            assert_eq!(x_rows, x_flat, "n = {n}");
+            assert_eq!(d_rows, d_flat, "n = {n}");
+        }
     }
 
     /// The residual diagnostics as a row-wise pass computes them, the
@@ -547,5 +758,39 @@ mod tests {
                 "n={n}"
             );
         }
+    }
+
+    /// The Hilbert matrix of order 5 has `||H||_1 ||H^-1||_1 = 943656`
+    /// (Higham, *Accuracy and Stability of Numerical Algorithms*, 2nd ed.,
+    /// table 28.1 family); a diagonal matrix has its exact ratio. The
+    /// estimate is a lower bound, within a factor of three here, and a large
+    /// pivot ratio alone does not raise it.
+    #[test]
+    fn the_condition_estimate_tracks_the_one_norm_condition_number() {
+        let hilbert: Vec<Vec<f64>> = (0..5)
+            .map(|i| (0..5).map(|j| 1.0 / (i + j + 1) as f64).collect())
+            .collect();
+        let estimate = DenseMatrix::from_rows(&hilbert)
+            .factor()
+            .expect("nonsingular")
+            .condition_estimate();
+        assert!(
+            (943_656.0 / 3.0..=943_656.0 * 1.0001).contains(&estimate),
+            "{estimate}"
+        );
+
+        let diagonal = vec![vec![1.0e3, 0.0], vec![0.0, 1.0e-3]];
+        let estimate = DenseMatrix::from_rows(&diagonal)
+            .factor()
+            .expect("nonsingular")
+            .condition_estimate();
+        assert!((estimate / 1.0e6 - 1.0).abs() < 1e-9, "{estimate}");
+
+        // An orthogonal-like matrix with a large pivot: still well conditioned.
+        let rotation = vec![vec![1.0e4, 1.0e4], vec![1.0e4, -1.0e4]];
+        let factorization = DenseMatrix::from_rows(&rotation)
+            .factor()
+            .expect("nonsingular");
+        assert!(factorization.condition_estimate() < 3.0);
     }
 }

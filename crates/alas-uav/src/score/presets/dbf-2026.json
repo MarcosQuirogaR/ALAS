@@ -4,35 +4,35 @@
   "family": "aiaa_dbf",
   "name": "AIAA Design/Build/Fly 2025-26, Banner Towing Bush Plane",
   "status": "official",
-  "citation": "AIAA DBF 2025-26 Rules (2026-DBF-Rules.pdf), s3.1 requirements, s3.3.3 missions (printed p.19-20), s3.3.4 ground mission (p.21), s6.3 total score; local copy refs/competitions/AIAA_DBF2026_rules.pdf. The lap length of the course is not transcribed (ASSUMPTION in the segment template).",
+  "citation": "AIAA DBF 2025-26 Rules, s3.1 requirements, s3.3.3 missions (printed p.19-20), s3.3.4 ground mission (p.21), s6.3 total score. The lap length of the course is not transcribed (ASSUMPTION in the segment template).",
   "gates": [
     {
       "id": "span",
       "description": "Wingspan <= 5 ft",
       "margin_expr": "(5 ft - span) / (5 ft)",
       "hard": true,
-      "citation": "AIAA DBF 2025-26 Rules (2026-DBF-Rules.pdf) s3.1"
+      "citation": "AIAA DBF 2025-26 Rules s3.1"
     },
     {
       "id": "mtow",
       "description": "Take-off gross weight < 55 lb",
       "margin_expr": "(55 lb - mtow) / (55 lb)",
       "hard": true,
-      "citation": "AIAA DBF 2025-26 Rules (2026-DBF-Rules.pdf) s3.1 and tech inspection"
+      "citation": "AIAA DBF 2025-26 Rules s3.1 and tech inspection"
     },
     {
       "id": "pack_energy",
       "description": "Energy per pack <= 100 Wh",
       "margin_expr": "(100 Wh - pack_energy_max) / (100 Wh)",
       "hard": true,
-      "citation": "AIAA DBF 2025-26 Rules (2026-DBF-Rules.pdf) s3.1 battery rules"
+      "citation": "AIAA DBF 2025-26 Rules s3.1 battery rules"
     },
     {
       "id": "fuse",
       "description": "Arming fuse <= 100 A",
       "margin_expr": "(100 A - fuse_rating) / (100 A)",
       "hard": true,
-      "citation": "AIAA DBF 2025-26 Rules (2026-DBF-Rules.pdf) s3.1 arming fuse"
+      "citation": "AIAA DBF 2025-26 Rules s3.1 arming fuse"
     }
   ],
   "parameters": [

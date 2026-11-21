@@ -10,25 +10,20 @@
 //! (Search box and buttons) is centred about the viewport's horizontal
 //! centreline, within the space left free between the camera row and the
 //! bottom action block, so it never overlaps either. Above the buttons
-//! sits the Search box; while it holds text, the matching fields are listed
-//! in a transient results card with the shared editors, so a parameter can
-//! be edited from a search hit without a permanent duplicate of every
-//! editor. Clearing the search removes the card. Below the category buttons
+//! sits the Search button: it opens the global Ctrl+K palette scoped to the
+//! Sandbox parameters (see `sandbox::search`). Below the category buttons
 //! sits the Summary button: it toggles a card beside the stack listing the
 //! derived geometry metrics (`S_ref`, `b`, `MAC`, `AR`, sweeps, taper and
 //! fuselage length), so they no longer clutter the action block.
 
-use egui::{pos2, vec2, Rect, RichText, ScrollArea, TextEdit, Ui};
+use egui::{pos2, vec2, Rect, Ui};
 
 use crate::state::AppState;
 use crate::views::tr;
 
-use super::editors::show_field;
-use super::fields::{grouped, Discipline, SandboxField};
+use super::fields::Discipline;
 use super::overlays::{metric_chips, CONVENTIONS};
-use super::viewport::{
-    floating_control, register_overlay_rect, was_lit, OVERLAY_INSET, REST_OPACITY,
-};
+use super::viewport::{floating_control, register_overlay_rect, OVERLAY_INSET};
 
 /// Width of the floating column of category buttons, in points.
 pub const CATEGORY_COLUMN_WIDTH: f32 = 168.0;
@@ -39,33 +34,12 @@ pub const CATEGORY_SPACING: f32 = 10.0;
 /// height (a short window). Below `CATEGORY_SPACING` the buttons keep their
 /// own size; only the air between them gives way.
 const CATEGORY_SPACING_MIN: f32 = 3.0;
-/// Automatic gaps inside the stack: one between each of the seven rows
-/// (Search, the five category buttons and Summary).
-const STACK_GAP_COUNT: f32 = 6.0;
-/// Width of the search results card, in points.
-const RESULTS_WIDTH: f32 = 400.0;
-/// Width of the Summary card, in points.
-const SUMMARY_WIDTH: f32 = 220.0;
-/// Nominal height of the Summary card, used to keep it inside the free band.
-const SUMMARY_HEIGHT: f32 = 210.0;
-
-/// The matching fields of a search, grouped by discipline and group.
-type Hits = Vec<(Discipline, Vec<(&'static str, Vec<SandboxField>)>)>;
-
-/// Whether a field matches the search text by label, identifier, group or
-/// discipline, in the current language.
-pub fn matches(field: &SandboxField, needle: &str) -> bool {
-    if needle.is_empty() {
-        return true;
-    }
-    let needle = needle.to_ascii_lowercase();
-    tr(&field.label).to_ascii_lowercase().contains(&needle)
-        || field.id.to_ascii_lowercase().contains(&needle)
-        || tr(field.group).to_ascii_lowercase().contains(&needle)
-        || tr(field.discipline.title())
-            .to_ascii_lowercase()
-            .contains(&needle)
-}
+/// Automatic gaps inside the stack: one between each of the six rows
+/// (Search and the five category buttons).
+const STACK_GAP_COUNT: f32 = 5.0;
+/// Share of the viewport width the whole-aircraft summary may take before it
+/// lays two metrics a row instead of three: it stays in the left corner.
+const SUMMARY_WIDTH_SHARE: f32 = 0.25;
 
 /// Open a discipline window and focus its component.
 pub fn open_discipline_window(state: &mut AppState, discipline: Discipline) {
@@ -73,6 +47,8 @@ pub fn open_discipline_window(state: &mut AppState, discipline: Discipline) {
     if !state.sandbox.layout.open_disciplines.contains(&id) {
         state.sandbox.layout.open_disciplines.push(id);
     }
+    // A window that is already open may be minimised or behind the main one.
+    state.sandbox.raise_discipline = Some(discipline.id().to_owned());
     state.set_sandbox_focus(Some(discipline));
 }
 
@@ -125,9 +101,8 @@ fn category_stack_spacing(natural: f32, available: f32) -> f32 {
     (CATEGORY_SPACING - overflow / STACK_GAP_COUNT).max(CATEGORY_SPACING_MIN)
 }
 
-/// Render the Search box, the category buttons and, while a search is
-/// active, the results card, all floating over `viewport` within the
-/// vertical band `free_top..free_bottom` the other overlays leave free.
+/// Render the Search button and the category buttons, all floating over
+/// `viewport` within the vertical band `free_top..free_bottom` the other overlays leave free.
 pub fn show_parameter_access(
     state: &mut AppState,
     ui: &mut Ui,
@@ -157,12 +132,9 @@ pub fn show_parameter_access(
             viewport.bottom() - OVERLAY_INSET,
         ),
     );
-    let mut results_top = free_top;
-    let mut summary_top = free_top;
     let stack = ui.allocate_new_ui(egui::UiBuilder::new().max_rect(column), |ui| {
         ui.spacing_mut().item_spacing.y = spacing;
         show_search_box(state, ui, width);
-        results_top = results_top.min(ui.cursor().top());
         // The selected component is `SandboxSession::focus` and nothing else.
         // The category stack, the camera row's context label and the isolated
         // scene all render from this one read, so they cannot disagree.
@@ -179,24 +151,13 @@ pub fn show_parameter_access(
             .on_hover_text(tr("Open this discipline in its own window."))
             .clicked()
             {
-                open_discipline_window(state, discipline);
+                if focus == Some(discipline) {
+                    // Clicking the isolated component again shows the whole aircraft.
+                    state.show_whole_aircraft();
+                } else {
+                    open_discipline_window(state, discipline);
+                }
             }
-        }
-        // The Summary card is a whole-aircraft readout, not a sixth
-        // component, but it shares the stack's own uniform row spacing
-        // (rather than a second, independently-sized gap) so the stack's
-        // total height stays the exact `STACK_GAP_COUNT`-gap quantity
-        // `category_stack_spacing` shrinks.
-        summary_top = ui.cursor().top();
-        let summary_open = state.sandbox.layout.summary_open;
-        let summary = egui::Button::new(tr("Summary")).min_size(vec2(width, 0.0));
-        if floating_control(ui, "summary", true, summary_open, summary)
-            .on_hover_text(tr(
-                "Show or hide the derived geometry metrics of the whole aircraft; the selected component is unchanged.",
-            ))
-            .clicked()
-        {
-            state.sandbox.layout.summary_open = !summary_open;
         }
     });
     let used = stack.response.rect;
@@ -215,203 +176,98 @@ pub fn show_parameter_access(
         ctx.data_mut(|d| d.insert_temp(stack_natural_height_id(), height));
         ctx.request_repaint();
     }
-    let search_active = !state.sandbox.search.trim().is_empty();
-    let mut summary_left = column.right() + OVERLAY_INSET;
-    if search_active {
-        show_search_results(state, ui, viewport, summary_left, results_top, free_bottom);
-        summary_left += RESULTS_WIDTH
-            .min((viewport.right() - OVERLAY_INSET - summary_left).max(1.0))
-            + OVERLAY_INSET;
+}
+
+/// The whole-aircraft summary in the bottom-left corner of the viewport,
+/// always present, with no box and no button chrome: "Sandbox from AVE" on
+/// its own line over a small table of the derived geometry metrics, a symbol
+/// and its right-aligned value per pair, three pairs a row when they fit in
+/// the left quarter of the viewport, else two. It never widens toward the
+/// viewport's centre: more metrics add rows. Its bottom edge sits at
+/// `bottom`; returns its top edge (or `bottom` when there is no aircraft to
+/// describe). The rectangle registers as `summary_text` so a gesture on it
+/// never orbits.
+pub fn show_summary_text(state: &AppState, ui: &mut Ui, viewport: Rect, bottom: f32) -> f32 {
+    let metrics = metric_chips(state);
+    if metrics.is_empty() {
+        return bottom;
     }
-    if state.sandbox.layout.summary_open {
-        // The card's own last measured height, not the `SUMMARY_HEIGHT`
-        // nominal guess: the guess undercounted the frame margin and row
-        // spacing of eight metric rows, so a card placed against it grew
-        // past `free_bottom` and into the action block below.
-        let card_height = ctx
-            .data(|d| d.get_temp::<f32>(summary_card_height_id()))
-            .unwrap_or(SUMMARY_HEIGHT);
-        let top = summary_top.min(free_bottom - card_height).max(free_top);
-        show_summary_card(state, ui, viewport, summary_left, top, free_bottom);
-    }
-}
-
-fn summary_card_height_id() -> egui::Id {
-    egui::Id::new("sandbox_summary_card_height")
-}
-
-/// The Summary card: the derived geometry metrics of the drawn aircraft,
-/// one monospace row each with the conventions as hover text, in a card
-/// beside the category stack (beside the search results while a search is
-/// active). Each row registers as a `metric` overlay and the card as
-/// `summary_card`, so a gesture on it never orbits.
-fn show_summary_card(
-    state: &AppState,
-    ui: &mut Ui,
-    viewport: Rect,
-    left: f32,
-    top: f32,
-    bottom: f32,
-) {
-    let width = SUMMARY_WIDTH.min((viewport.right() - OVERLAY_INSET - left).max(1.0));
-    let card = Rect::from_min_max(pos2(left, top), pos2(left + width, bottom.max(top + 40.0)));
-    let chips = metric_chips(state);
-    let response = ui.allocate_new_ui(egui::UiBuilder::new().max_rect(card), |ui| {
-        egui::Frame::popup(ui.style()).show(ui, |ui| {
-            ui.set_width(width - 2.0 * ui.spacing().window_margin.left);
-            ui.label(RichText::new(tr("Whole-aircraft summary")).strong())
-                .on_hover_text(tr(
-                    "These metrics describe the whole drawn aircraft, not the selected component.",
-                ));
-            for text in &chips {
-                let row = ui.label(RichText::new(text).monospace());
-                register_overlay_rect(ui.ctx(), "metric", row.rect);
-                row.on_hover_text(tr(CONVENTIONS));
-            }
-        });
-    });
-    register_overlay_rect(ui.ctx(), "summary_card", response.response.rect);
-    let ctx = ui.ctx().clone();
-    let height = response.response.rect.height().max(1.0);
-    let stored = ctx
-        .data(|d| d.get_temp::<f32>(summary_card_height_id()))
-        .unwrap_or(SUMMARY_HEIGHT);
-    if (height - stored).abs() > 0.5 {
-        ctx.data_mut(|d| d.insert_temp(summary_card_height_id(), height));
-        ctx.request_repaint();
-    }
-}
-
-/// The Search box: its own box only, dimmed like the buttons until it is
-/// hovered, focused or holds text.
-fn show_search_box(state: &mut AppState, ui: &mut Ui, width: f32) {
-    let id = egui::Id::new("sandbox_parameter_search");
-    let lit = was_lit(ui.ctx(), id) || !state.sandbox.search.is_empty();
-    let previous = ui.opacity();
-    ui.set_opacity(if lit { 1.0 } else { REST_OPACITY });
-    let response = ui.add(
-        TextEdit::singleline(&mut state.sandbox.search)
-            .id(id)
-            .hint_text(tr("Search"))
-            .desired_width(width - 8.0),
-    );
-    ui.set_opacity(previous);
-    register_overlay_rect(ui.ctx(), "search", response.rect);
-}
-
-/// The matching fields, grouped by discipline and group, with the shared
-/// editors, in a transient card beside the category buttons that spans the
-/// free band, so the buttons stay usable while a search is active.
-fn show_search_results(
-    state: &mut AppState,
-    ui: &mut Ui,
-    viewport: Rect,
-    left: f32,
-    top: f32,
-    bottom: f32,
-) {
-    let needle = state.sandbox.search.trim().to_owned();
-    let fields = state.sandbox.fields.clone();
-    let width = RESULTS_WIDTH.min((viewport.right() - OVERLAY_INSET - left).max(1.0));
-    let card = Rect::from_min_max(pos2(left, top), pos2(left + width, bottom.max(top + 40.0)));
-    let hits: Hits = Discipline::ALL
-        .into_iter()
-        .map(|discipline| {
-            let groups: Vec<(&'static str, Vec<SandboxField>)> = grouped(&fields, discipline)
-                .into_iter()
-                .map(|(title, members)| {
-                    (
-                        title,
-                        members
-                            .into_iter()
-                            .filter(|f| matches(f, &needle))
-                            .cloned()
-                            .collect::<Vec<_>>(),
-                    )
-                })
-                .filter(|(_, members)| !members.is_empty())
-                .collect();
-            (discipline, groups)
-        })
-        .filter(|(_, groups)| !groups.is_empty())
+    let font = egui::TextStyle::Small.resolve(ui.style());
+    let color = ui.visuals().weak_text_color();
+    let layout = |text: &str| {
+        let mut job = crate::notation::job(text, &font, color);
+        job.wrap.max_width = f32::INFINITY;
+        ui.fonts(|fonts| fonts.layout_job(job))
+    };
+    let title = layout(&tr("Sandbox from AVE"));
+    let cells: Vec<_> = metrics
+        .iter()
+        .map(|(symbol, value)| (layout(symbol), layout(value)))
         .collect();
-    let response = ui.allocate_new_ui(egui::UiBuilder::new().max_rect(card), |ui| {
-        egui::Frame::popup(ui.style()).show(ui, |ui| {
-            ui.set_width(width - 2.0 * ui.spacing().window_margin.left);
-            ui.horizontal(|ui| {
-                ui.label(RichText::new(tr("Matching parameters")).strong());
-                ui.with_layout(egui::Layout::right_to_left(egui::Align::Center), |ui| {
-                    if ui
-                        .add(egui::Button::new(tr("Clear")).small())
-                        .on_hover_text(tr("Clear the search and hide the matches."))
-                        .clicked()
-                    {
-                        state.sandbox.search.clear();
-                    }
-                });
-            });
-            if hits.is_empty() {
-                ui.label(RichText::new(tr("No parameter matches the search.")).weak());
-                return;
-            }
-            ScrollArea::vertical()
-                .id_salt("sandbox_search_results")
-                .auto_shrink([false, true])
-                .show(ui, |ui| {
-                    for (discipline, groups) in &hits {
-                        ui.horizontal(|ui| {
-                            ui.label(
-                                RichText::new(tr(discipline.title()))
-                                    .strong()
-                                    .color(ui.visuals().hyperlink_color),
-                            );
-                            if ui
-                                .add(egui::Button::new(tr("Open editor")).small())
-                                .on_hover_text(tr("Open this discipline in its own window."))
-                                .clicked()
-                            {
-                                open_discipline_window(state, *discipline);
-                            }
-                        });
-                        for (title, members) in groups {
-                            ui.label(RichText::new(tr(title)).weak().small());
-                            for field in members {
-                                show_field(state, ui, field);
-                                ui.add_space(3.0);
-                            }
-                        }
-                        ui.add_space(4.0);
-                    }
-                });
-        });
-    });
-    register_overlay_rect(ui.ctx(), "results", response.response.rect);
+    let symbol_width = cells
+        .iter()
+        .map(|cell| cell.0.size().x)
+        .fold(0.0_f32, f32::max);
+    let value_width = cells
+        .iter()
+        .map(|cell| cell.1.size().x)
+        .fold(0.0_f32, f32::max);
+    let line = cells
+        .iter()
+        .map(|cell| cell.0.size().y.max(cell.1.size().y))
+        .fold(title.size().y, f32::max);
+    let pair = symbol_width + ui.spacing().item_spacing.x + value_width;
+    let gutter = crate::theme::space::COLUMN_GUTTER;
+    let three = 3.0 * pair + 2.0 * gutter;
+    let per_row = if three <= viewport.width() * SUMMARY_WIDTH_SHARE {
+        3
+    } else {
+        2
+    };
+    let rows = cells.len().div_ceil(per_row);
+    let table_width = per_row as f32 * pair + (per_row - 1) as f32 * gutter;
+    let height = line * (rows + 1) as f32;
+    let rect = Rect::from_min_size(
+        pos2(viewport.left() + OVERLAY_INSET, bottom - height),
+        vec2(table_width.max(title.size().x), height),
+    );
+    let painter = ui.painter();
+    painter.galley(rect.left_top(), title, color);
+    for (index, (symbol, value)) in cells.into_iter().enumerate() {
+        let x = rect.left() + (index % per_row) as f32 * (pair + gutter);
+        let y = rect.top() + line * (1 + index / per_row) as f32;
+        let value_x = x + pair - value.size().x;
+        painter.galley(pos2(x, y), symbol, color);
+        painter.galley(pos2(value_x, y), value, color);
+    }
+    register_overlay_rect(ui.ctx(), "summary_text", rect);
+    let hover = ui.interact(
+        rect,
+        egui::Id::new("sandbox_summary_text"),
+        egui::Sense::hover(),
+    );
+    crate::notation::hover(hover, tr(CONVENTIONS));
+    rect.top()
+}
+
+/// The Search button: opens the global Ctrl+K palette, scoped to the Sandbox
+/// parameters while the Sandbox is open. Dimmed like the other floating
+/// buttons until it is hovered or the palette is open.
+fn show_search_box(state: &mut AppState, ui: &mut Ui, width: f32) {
+    let open = state.shell.search.open;
+    let label = format!("{}   Ctrl+K", tr("Search"));
+    let button = egui::Button::new(label).min_size(vec2(width, 0.0));
+    if floating_control(ui, "search", true, open, button)
+        .on_hover_text(tr("Search the Sandbox parameters (Ctrl+K)."))
+        .clicked()
+    {
+        crate::views::search_overlay::set_open(state, !open);
+    }
 }
 
 #[cfg(test)]
 mod tests {
     use super::*;
-
-    #[test]
-    fn search_matches_label_identifier_group_and_discipline_case_insensitively() {
-        let state = {
-            let mut state = AppState::default();
-            assert!(state.enter_sandbox(true));
-            state
-        };
-        let span = state
-            .sandbox
-            .fields
-            .iter()
-            .find(|f| f.id == "design.span_m")
-            .expect("span field");
-        assert!(matches(span, ""));
-        assert!(matches(span, "SPAN"));
-        assert!(matches(span, "span_m"));
-        assert!(matches(span, "planform"));
-        assert!(matches(span, "wing"));
-        assert!(!matches(span, "nacelle"));
-    }
 
     #[test]
     fn the_stack_centres_on_the_viewport_and_stays_inside_the_free_band() {
@@ -453,28 +309,8 @@ mod tests {
             );
         }
 
-        state.set_sandbox_focus(None);
+        state.show_whole_aircraft();
         assert_eq!(state.sandbox.focus(), None, "Overview clears the selection");
-    }
-
-    #[test]
-    fn the_summary_toggle_never_changes_the_selected_component() {
-        let mut state = sandbox_state();
-        open_discipline_window(&mut state, Discipline::Wing);
-        assert_eq!(state.sandbox.focus(), Some(Discipline::Wing));
-
-        state.sandbox.layout.summary_open = !state.sandbox.layout.summary_open;
-        assert!(state.sandbox.layout.summary_open);
-        assert_eq!(
-            state.sandbox.focus(),
-            Some(Discipline::Wing),
-            "the whole-aircraft summary is not a component selection"
-        );
-
-        // And the reverse: selecting a component leaves the summary alone.
-        open_discipline_window(&mut state, Discipline::Propulsion);
-        assert_eq!(state.sandbox.focus(), Some(Discipline::Propulsion));
-        assert!(state.sandbox.layout.summary_open);
     }
 
     #[test]

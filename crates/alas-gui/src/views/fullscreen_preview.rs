@@ -5,7 +5,7 @@
 
 use super::{
     close_fullscreen_preview, fullscreen_camera_key, fullscreen_view_key, handle_camera_response,
-    preview_scene_for_tab, show_aircraft_viewer_controls, show_cabin_legend,
+    preview_scene_for_tab, show_aircraft_viewer_controls,
 };
 use alas_report::scene::{Camera3D, Scene};
 use alas_viz::SceneView;
@@ -156,7 +156,7 @@ pub(super) fn show_fullscreen_preview(
                             .cache_revision(scene_revision),
                     );
                     let response =
-                        response.on_hover_text(tr("Drag to orbit the camera; scroll to zoom"));
+                        response.on_hover_text_at_pointer(tr("Left drag: orbit; right, middle or Shift + left drag: pan; wheel: zoom; middle or double click: pivot"));
                     let changed = handle_camera_response(state, &response, &fullscreen_camera)
                         || show_aircraft_viewer_controls(
                             state,
@@ -166,7 +166,12 @@ pub(super) fn show_fullscreen_preview(
                             &fullscreen_view,
                         );
                     if state.preview_tab == PreviewTab::Cabin {
-                        show_cabin_legend(ui, response.rect);
+                        let entries = super::preview_dock_legend::cabin_entries(state, child_ctx);
+                        super::preview_dock_legend::show_cabin_legend_for(
+                            ui,
+                            response.rect,
+                            &entries,
+                        );
                     }
                     if changed {
                         state.update_preview_scene();

@@ -14,10 +14,20 @@ pub struct FuelMassError;
 ///
 /// SI: stations m, running mass kg/m. Trapezoidal nodal weights match the
 /// sizing grid's integral exactly. Each station's mass is shared equally
-/// between the upper/lower nodes of the front/rear full-span spars. CONM2
-/// offsets preserve the requested spanwise station on the mesh's different
-/// rib grid, conserving mass and spanwise first moment. Chordwise/vertical
-/// fuel location is the box midpoint approximation, not a resolved cell mesh.
+/// between the upper/lower nodes of the front/rear full-span spars, then split
+/// linearly between the two spar grids that bracket the station (a station
+/// beyond either end of the line goes to that end grid). The split conserves
+/// mass and spanwise first moment exactly and every CONM2 sits on its grid with
+/// no offset.
+///
+/// No offset is used because a CONM2 offset along the span gives its grid the
+/// rotary inertia `m * offset^2` about the chordwise and vertical axes. The
+/// shell elements carry no drilling stiffness, so the web-plane rotation of a
+/// spar-cap grid is restrained only by the 2-6 mm plate bending of the skin and
+/// ribs; with 10^2 kg of fuel offset by up to half a rib bay on one grid, that
+/// rotation became a local outer-wing mode at 3-5 Hz below the second global
+/// bending mode. Chordwise/vertical fuel location is the box midpoint
+/// approximation, not a resolved cell mesh.
 /// Existing signed GRAV cards then generate n*g relief for every load case;
 /// the same fuel mass participates in modal inertia.
 ///
@@ -88,25 +98,47 @@ pub fn add_distributed_fuel_mass(
             continue;
         }
         for line in &lines {
-            let nid = *line
-                .iter()
-                .min_by(|a, b| {
-                    (deck.node_y(**a) - station)
-                        .abs()
-                        .total_cmp(&(deck.node_y(**b) - station).abs())
-                })
-                .ok_or(FuelMassError)?;
-            added.push(Conm2 {
-                eid: last_eid + added.len() as i64 + 1,
-                nid,
-                cid: 0,
-                mass: mass_each,
-                offset: [0.0, station - deck.node_y(nid), 0.0],
-            });
+            let (low, high, share_high) = bracket(deck, line, station).ok_or(FuelMassError)?;
+            for (nid, share) in [(low, 1.0 - share_high), (high, share_high)] {
+                if share > 0.0 {
+                    added.push(Conm2 {
+                        eid: last_eid + added.len() as i64 + 1,
+                        nid,
+                        cid: 0,
+                        mass: mass_each * share,
+                        offset: [0.0; 3],
+                    });
+                }
+            }
         }
     }
     deck.masses.extend(added);
     Ok(())
+}
+
+/// The two grids of `line` that bracket spanwise `station` and the fraction of
+/// the station's mass that goes to the outboard one (linear in y). A station
+/// outside the line's span goes entirely to the nearest end grid.
+fn bracket(deck: &Deck, line: &[i64], station: f64) -> Option<(i64, i64, f64)> {
+    let mut by_y: Vec<(f64, i64)> = line.iter().map(|&nid| (deck.node_y(nid), nid)).collect();
+    by_y.sort_by(|a, b| a.0.total_cmp(&b.0));
+    let (&(y_first, first), &(y_last, last)) = (by_y.first()?, by_y.last()?);
+    if station <= y_first {
+        return Some((first, first, 0.0));
+    }
+    if station >= y_last {
+        return Some((last, last, 0.0));
+    }
+    let upper = by_y
+        .partition_point(|(y, _)| *y <= station)
+        .min(by_y.len() - 1);
+    let ((y_low, low), (y_high, high)) = (by_y[upper - 1], by_y[upper]);
+    let share = if y_high > y_low {
+        (station - y_low) / (y_high - y_low)
+    } else {
+        0.0
+    };
+    Some((low, high, share))
 }
 
 #[cfg(test)]
@@ -148,16 +180,15 @@ mod tests {
             (deck
                 .masses
                 .iter()
-                .map(|m| m.mass * (deck.node_y(m.nid) + m.offset[1]))
+                .map(|m| m.mass * deck.node_y(m.nid))
                 .sum::<f64>()
                 - 300.0)
                 .abs()
                 < 1.0e-12
         );
-        assert_eq!(
-            deck.masses.iter().map(|m| m.eid).collect::<Vec<_>>(),
-            (1..=8).collect::<Vec<_>>()
-        );
+        assert!(deck.masses.iter().all(|m| m.offset == [0.0; 3]));
+        let ids: Vec<i64> = deck.masses.iter().map(|m| m.eid).collect();
+        assert_eq!(ids, (1..=ids.len() as i64).collect::<Vec<_>>());
         let before = deck.clone();
         assert!(add_distributed_fuel_mass(&mut deck, &index, &y, &[10.0, f64::NAN, 0.0]).is_err());
         assert_eq!(deck, before);

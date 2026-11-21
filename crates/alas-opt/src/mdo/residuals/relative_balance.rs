@@ -2,7 +2,10 @@
 // Copyright (C) 2026 Marcos Quiroga Rodriguez
 
 //! Balance and ground-clearance residuals measured against the registered
-//! aircraft a reference adaptation redesigns.
+//! aircraft a reference adaptation redesigns, or a clean sheet designs from
+//! a registered preset, on its own mission or a new one ([`AlasConfig::holds_to_registered_aircraft`]): the search
+//! cannot move either quantity (the gear and upsweep are not sized), so a
+//! new mission keeps the registered reference on them too.
 //!
 //! The absolute usable-CG-range requirement and tail-scrape limit stay
 //! diagnostic because the model's own preset aircraft do not all meet them.
@@ -28,7 +31,9 @@
 
 use crate::mdo::ResidualRole;
 
-use alas_config::{AlasConfig, DesignMode};
+use std::sync::Arc;
+
+use alas_config::AlasConfig;
 
 use crate::envelope::{
     assess_model_cg_envelope_with_ledger, ModelCgConstraint, ModelCgEnvelopeAssessment,
@@ -48,6 +53,8 @@ pub(super) struct NominalBalance {
     pub usable_cg_range_pct_mac: f64,
     /// Tail-scrape angle, degrees.
     pub tail_scrape_deg: f64,
+    /// The mean aerodynamic chord the range is a percentage of, m.
+    pub mac_m: f64,
 }
 
 /// The envelope assessment of one sized candidate at the critical
@@ -92,44 +99,134 @@ pub(super) fn assess_states_for(
             low_speed_altitude_m: 0.0,
             cruise_mach: config.requirements.cruise_mach,
             cruise_altitude_m: config.requirements.cruise_altitude_m,
+            max_operating: config.max_operating_condition(),
+            high_lift: alas_stab::neutral_point::HighLiftDevices::declared(
+                config.performance.high_lift_chord_extension,
+                &config.control_surfaces,
+            ),
+            jet_inlets: {
+                // The candidate cruise polar as a parabola through CL 0 and 0.5.
+                let drag = &outcome.sized.fuel_artifacts.drag;
+                let (mach, altitude_m) = (
+                    config.requirements.cruise_mach,
+                    config.requirements.cruise_altitude_m,
+                );
+                let cd0 = drag.cd(0.0, mach, altitude_m);
+                let k = (drag.cd(0.5, mach, altitude_m) - cd0) / 0.25;
+                crate::envelope::jet_inlet_spec(
+                    config,
+                    crate::envelope::InletDragPolar { cd0, k },
+                    outcome.plane.s_ref,
+                )
+            },
+            propeller: config.geometry.engine.turboprop.as_ref().and_then(|spec| {
+                Some(alas_stab::neutral_point::PropellerSpec {
+                    blades: spec.propeller_blade_count?,
+                    diameter_m: spec.propeller_diameter_m,
+                })
+            }),
+            wing_stiffness: alas_mass::wing_reconciliation::wing_box_stiffness(
+                config,
+                &outcome.history.dv,
+                &outcome.plane,
+            )
+            .ok()
+            .map(|table| alas_stab::neutral_point::WingStiffness {
+                y_m: table.y_m,
+                ei_nm2: table.ei_nm2,
+                gj_nm2: table.gj_nm2,
+                box_axis_fraction: table.box_axis_fraction,
+                inertia_relief: Some(alas_stab::neutral_point::InertiaRelief {
+                    carried_kg_m: table.carried_kg_m,
+                    point_masses_kg: table.point_masses_kg,
+                    aircraft_mass_kg: table.aircraft_mass_kg,
+                }),
+            }),
+            tail_flexibility: alas_mass::wing_reconciliation::tail_flexibility(
+                config,
+                &outcome.history.dv,
+                &outcome.plane,
+            )
+            .ok()
+            .map(|t| alas_stab::neutral_point::TailFlexibility {
+                fuselage_x_m: t.fuselage_x_m,
+                fuselage_ei_nm2: t.fuselage_ei_nm2,
+                stabilizer: alas_stab::neutral_point::WingStiffness {
+                    y_m: t.stabilizer_y_m,
+                    ei_nm2: t.stabilizer_ei_nm2,
+                    gj_nm2: t.stabilizer_gj_nm2,
+                    box_axis_fraction: t.stabilizer_axis_fraction,
+                    inertia_relief: None,
+                },
+            }),
             ..Default::default()
         },
     )
     .map_err(|error| format!("critical neutral-point conditions: {error:?}"))?;
-    let design = assess_model_cg_envelope_with_ledger(
-        &outcome.plane,
-        ledger,
-        outcome.x_np,
-        conditions.critical,
-        outcome.mac,
-        config,
-    )
-    .map_err(|error| format!("{error}"))?;
-    let flown = flown
-        .map(|(basis, landing)| {
-            crate::envelope::assess_model_cg_envelope_with_ledger_and_landing(
-                &outcome.plane,
-                basis,
-                Some(landing),
-                outcome.x_np,
-                conditions.critical,
-                outcome.mac,
-                config,
-            )
-            .map_err(|error| format!("flown loading: {error}"))
-        })
-        .transpose()?;
-    Ok((design, flown))
+    // The envelopes of one pair of loading bases. The neutral-point
+    // conditions do not depend on where the payload sits, so a load plan
+    // re-assesses with the same ones.
+    let assess = |(ledger, flown): balance_ledger::LoadingBases| -> Result<States, String> {
+        let design = assess_model_cg_envelope_with_ledger(
+            &outcome.plane,
+            ledger,
+            outcome.x_np,
+            conditions.critical,
+            outcome.mac,
+            config,
+        )
+        .map_err(|error| format!("{error}"))?;
+        let flown = flown
+            .map(|(basis, landing)| {
+                crate::envelope::assess_model_cg_envelope_with_ledger_and_landing(
+                    &outcome.plane,
+                    basis,
+                    Some(landing),
+                    outcome.x_np,
+                    conditions.critical,
+                    outcome.mac,
+                    config,
+                )
+                .map_err(|error| format!("flown loading: {error}"))
+            })
+            .transpose()?;
+        Ok((design, flown))
+    };
+    let nominal = assess((ledger, flown))?;
+    // The report judges the loading its load plan places
+    // (`alas_pipeline::full_analysis::load_plan`); the search judges the same.
+    Ok(super::load_plan::planned(
+        nominal,
+        outcome.plane.mac_frame(),
+        |steer_x_m| {
+            let mut steered = config.clone();
+            steered.cabin.cargo.plan_payload_cg_x_m = Some(steer_x_m);
+            assess(balance_ledger::loading_bases_for(
+                outcome, &steered, fuel_load,
+            )?)
+        },
+    ))
 }
 
+/// The design-loading envelope and, when the dispatch fuel loads, the flown
+/// one.
+pub(super) type States = (ModelCgEnvelopeAssessment, Option<ModelCgEnvelopeAssessment>);
+
 fn measure(assessment: &ModelCgEnvelopeAssessment) -> Option<NominalBalance> {
-    let range = worst_by_constraint(
-        &assessment.loading_states,
-        ModelCgConstraint::MinimumUsableCgRange,
-    )?;
+    // The narrowest usable range of any state: with a mass-indexed requirement
+    // the state furthest short of its own requirement need not be the narrowest.
+    let range = assessment
+        .loading_states
+        .iter()
+        .flat_map(|state| state.constraints.iter())
+        .filter(|state| state.constraint == ModelCgConstraint::MinimumUsableCgRange)
+        .map(|state| state.actual)
+        .filter(|actual| actual.is_finite())
+        .reduce(f64::min)?;
     let scrape = worst_by_constraint(&assessment.loading_states, ModelCgConstraint::TailScrape)?;
     let nominal = NominalBalance {
-        usable_cg_range_pct_mac: range.actual,
+        usable_cg_range_pct_mac: range,
+        mac_m: assessment.mac_m,
         tail_scrape_deg: scrape.actual,
     };
     (nominal.usable_cg_range_pct_mac.is_finite() && nominal.tail_scrape_deg.is_finite())
@@ -137,7 +234,7 @@ fn measure(assessment: &ModelCgEnvelopeAssessment) -> Option<NominalBalance> {
 }
 
 /// Size the preset design vector under `config` and measure its balance.
-fn resolve(config: &AlasConfig) -> Result<NominalBalance, String> {
+pub(super) fn resolve(config: &AlasConfig) -> Result<NominalBalance, String> {
     let design = alas_config::presets::get(&config.preset)
         .map_err(|error| format!("preset: {error}"))?
         .design_vector;
@@ -149,26 +246,35 @@ fn resolve(config: &AlasConfig) -> Result<NominalBalance, String> {
     measure(&assessment).ok_or_else(|| "non-finite nominal balance".to_owned())
 }
 
-/// The in-loop nominals, keyed on the complete configuration.
-pub(super) static NOMINAL: NominalCache<NominalBalance> = NominalCache::new();
+/// The in-loop nominals, keyed on the complete configuration, each with the
+/// reason it could not be resolved.
+pub(super) static NOMINAL: NominalCache<Result<NominalBalance, Arc<str>>> = NominalCache::new();
 
-/// The registered aircraft's modelled balance for a reference adaptation;
-/// `None` in any other mode or when it cannot be resolved.
-pub(super) fn nominal_balance(config: &AlasConfig) -> Option<NominalBalance> {
-    if config.optimizer.design_space.mode != DesignMode::ReferenceAdaptation {
+/// The registered aircraft's modelled balance for a run held to it
+/// ([`AlasConfig::holds_to_registered_aircraft`]: a reference adaptation, or a
+/// clean sheet from a registered preset), or why it could not be resolved;
+/// `None` otherwise.
+fn nominal_resolution(config: &AlasConfig) -> Option<Result<NominalBalance, Arc<str>>> {
+    if !config.holds_to_registered_aircraft() {
         return None;
     }
     NOMINAL.get_or_resolve(config, |config| {
-        resolve(config)
-            .map_err(|reason| {
-                tracing::warn!(
-                    %reason,
-                    preset = %config.preset,
-                    "nominal balance unavailable; every candidate violates relative_balance_nominal_unavailable"
-                );
-            })
-            .ok()
+        Some(resolve(config).map_err(|reason| {
+            tracing::warn!(
+                %reason,
+                preset = %config.preset,
+                "nominal balance unavailable; every candidate violates relative_balance_nominal_unavailable"
+            );
+            Arc::from(reason)
+        }))
     })
+}
+
+/// The registered aircraft's modelled balance for a reference adaptation;
+/// `None` in any other mode or when it cannot be resolved.
+#[cfg(test)]
+pub(super) fn nominal_balance(config: &AlasConfig) -> Option<NominalBalance> {
+    nominal_resolution(config)?.ok()
 }
 
 /// The relative residuals of one assessed candidate: none without a
@@ -178,24 +284,29 @@ pub(super) fn residuals(
     config: &AlasConfig,
     role: ResidualRole,
 ) -> Vec<ConstraintResidual> {
-    if config.optimizer.design_space.mode != DesignMode::ReferenceAdaptation {
-        return Vec::new();
+    match nominal_resolution(config) {
+        Some(nominal) => residuals_against(
+            assessment,
+            nominal.as_ref().map_err(|r| &**r).copied(),
+            role,
+        ),
+        None => Vec::new(),
     }
-    residuals_against(assessment, nominal_balance(config), role)
 }
 
 /// The two relative residuals against `nominal`, or, when the nominal could
 /// not be resolved, one `relative_balance_nominal_unavailable` violation
-/// under the requested `role`: a failed reference cannot switch a hard
-/// guard off, and the flag is diagnostic only under a diagnostic role.
+/// under the requested `role`, carrying the reason as its detail: a failed
+/// reference cannot switch a hard guard off, and the flag is diagnostic only
+/// under a diagnostic role.
 pub(super) fn residuals_against(
     assessment: &ModelCgEnvelopeAssessment,
-    nominal: Option<NominalBalance>,
+    nominal: Result<NominalBalance, &str>,
     role: ResidualRole,
 ) -> Vec<ConstraintResidual> {
     match nominal {
-        Some(nominal) => relative_residuals(assessment, nominal, role),
-        None => vec![ConstraintResidual::direct(
+        Ok(nominal) => relative_residuals(assessment, nominal, role),
+        Err(reason) => vec![ConstraintResidual::direct(
             "relative_balance_nominal_unavailable",
             Balance,
             1.0,
@@ -204,24 +315,31 @@ pub(super) fn residuals_against(
             1.0,
             1.0,
             role,
-        )],
+        )
+        .with_detail(format!(
+            "registered aircraft's nominal balance unavailable: {reason}"
+        ))],
     }
 }
 
 /// The relative balance residuals of a reported analysis's assessment
 /// `candidate` against `nominal`, the registered aircraft's assessment at the
 /// same reporting fidelity (`None` when it could not be evaluated), under the
-/// hard Balance requirements. Empty outside a reference adaptation.
+/// hard Balance requirements. Empty unless the run is held to the registered
+/// aircraft ([`AlasConfig::holds_to_registered_aircraft`]).
 pub fn reporting_relative_balance(
     candidate: &ModelCgEnvelopeAssessment,
     nominal: Option<&ModelCgEnvelopeAssessment>,
     config: &AlasConfig,
 ) -> Vec<ConstraintResidual> {
     let role = ResidualRole::Constraint;
-    if config.optimizer.design_space.mode != DesignMode::ReferenceAdaptation {
+    if !config.holds_to_registered_aircraft() {
         return Vec::new();
     }
-    residuals_against(candidate, nominal.and_then(measure), role)
+    let nominal = nominal
+        .ok_or("registered aircraft not assessed at reporting fidelity")
+        .and_then(|nominal| measure(nominal).ok_or("non-finite nominal balance"));
+    residuals_against(candidate, nominal, role)
 }
 
 /// Each quantity of `assessment` held to `min(requirement, nominal)`.
@@ -246,15 +364,42 @@ pub(super) fn relative_residuals(
     ]
     .into_iter()
     .filter_map(|(id, constraint, nominal_value, unit)| {
-        let worst = worst_by_constraint(&assessment.loading_states, constraint)?;
-        let limit = worst.limit.min(nominal_value);
+        // The centre-of-gravity travel the registered aircraft offers is a
+        // length: its cabin, holds and tanks are loaded along the same
+        // fuselage whatever the candidate's chord. A candidate with a shorter
+        // mean aerodynamic chord must therefore offer the same metres, which
+        // are more of its own chord (the B747-400 search shrank the chord
+        // 10 % and the row asked 10 % less travel of it). Exactly one at the
+        // registered design.
+        let chord_ratio = if constraint == ModelCgConstraint::MinimumUsableCgRange
+            && nominal.mac_m.is_finite()
+            && assessment.mac_m.is_finite()
+            && nominal.mac_m > 0.0
+            && assessment.mac_m > 0.0
+        {
+            nominal.mac_m / assessment.mac_m
+        } else {
+            1.0
+        };
+        // Each state's own requirement is already on the candidate's chord (a
+        // published envelope width is converted from metres at its mass; the
+        // configured value is a percentage of whatever chord the design has),
+        // so only the nominal is rescaled. The row reports the state that falls
+        // furthest short of min(its requirement, nominal).
+        let (actual, limit) = assessment
+            .loading_states
+            .iter()
+            .flat_map(|state| state.constraints.iter())
+            .filter(|candidate| candidate.constraint == constraint)
+            .map(|state| (state.actual, state.limit.min(nominal_value * chord_ratio)))
+            .max_by(|a, b| (a.1 - a.0).total_cmp(&(b.1 - b.0)))?;
         Some(ConstraintResidual::scaled(
             id,
             Balance,
-            worst.actual,
+            actual,
             limit,
             unit,
-            limit - worst.actual,
+            limit - actual,
             role,
         ))
     })

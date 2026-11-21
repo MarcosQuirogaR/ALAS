@@ -183,11 +183,125 @@ pub struct PartialDesignMissionEvidence {
 /// which is a mass-equation parameter and may differ from the charted range.
 #[derive(Debug, Clone, Copy, PartialEq)]
 pub struct PayloadRangeDesignPoint {
-    /// Still-air range at the design payload, nautical miles (1 nmi = 1,852 m).
+    /// Still-air range at the design payload, nautical miles (1 nmi = 1,852 m),
+    /// or [`Self::MODEL_DEFINED_RANGE_NMI`] (zero) for a payload-defined
+    /// mission: the source fixes the payload and the certified takeoff mass
+    /// and the range is the model's output at them (the largest range whose
+    /// full reserve fuel plan fits the fuel the certified mass leaves after
+    /// the model's own empty mass and that payload). A payload-defined point
+    /// must carry `payload_kg`.
     pub range_nmi: f64,
     /// Payload carried at that range, kg, or `None` when the source selects
     /// no payload and the planning cabin is the design payload.
     pub payload_kg: Option<f64>,
+    /// Document, page and wording where the source quotes the range at
+    /// long-range cruise without giving a speed; `None` when it states a
+    /// speed or a Mach (flown as stated, `cruise`) or no speed at all. The
+    /// point is then flown at the long-range cruise speed of its own state
+    /// (99 % of the maximum specific range, high-speed side:
+    /// `alas_opt::SegmentMissionModel::long_range_cruise`), not at the
+    /// configured cruise speed. A rule, applied to every preset whose source
+    /// says so: never a number typed in per aircraft.
+    pub long_range_cruise: Option<&'static str>,
     /// Document, revision, figure and read uncertainty of the point.
     pub source: &'static str,
+    /// The reserve rule the range is quoted under, when the source states
+    /// one; `None` flies the configured fuel policy (`fuel_policy`).
+    pub reserve: Option<DesignPointReserve>,
+    /// The cruise conditions the range is quoted at, when the source states
+    /// them (or a source-typical level when the chart states none); `None`
+    /// flies the configured cruise schedule.
+    pub cruise: Option<DesignPointCruise>,
+}
+
+/// The cruise conditions a design point's range is quoted at.
+///
+/// Priced on the stated-rule design point and its corners only
+/// (`characteristics.design_point_range`); the sizing mission and the route
+/// keep the configured cruise altitude and speed.
+#[derive(Debug, Clone, Copy, PartialEq)]
+pub struct DesignPointCruise {
+    /// Cruise level, m (geopotential, ISA). Flown as the ceiling of the
+    /// range search's optimum-step ladder, as the design cruise altitude is.
+    pub altitude_m: f64,
+    /// Cruise Mach, when the source states one; `None` keeps the configured
+    /// cruise speed (a turboprop's true airspeed, a turbofan's Mach).
+    pub mach: Option<f64>,
+    /// Document, page and wording of the stated (or source-typical) level.
+    pub source: &'static str,
+}
+
+impl PayloadRangeDesignPoint {
+    /// The `range_nmi` of a payload-defined point: no range is declared.
+    pub const MODEL_DEFINED_RANGE_NMI: f64 = 0.0;
+
+    /// Whether this is a payload-defined point: a payload and no declared
+    /// range, so the design range is the model's output at the certified
+    /// takeoff mass.
+    pub fn is_payload_defined(&self) -> bool {
+        self.range_nmi == Self::MODEL_DEFINED_RANGE_NMI
+            && self.payload_kg.is_some_and(|kg| kg.is_finite() && kg > 0.0)
+    }
+}
+
+/// The reserve terms a design point's range is quoted under, as its source
+/// states them. A stated term replaces the configured fuel policy's on the
+/// design mission only (the route keeps the configured policy); a term the
+/// source leaves unstated (`None`) keeps the configured value, so nothing
+/// here is an invented per-type number.
+#[derive(Debug, Clone, Copy, PartialEq)]
+pub struct DesignPointReserve {
+    /// The scheme whose structure the stated terms fill.
+    pub scheme: Option<crate::FuelScheme>,
+    /// Contingency as a share of trip fuel.
+    pub contingency_trip_fraction: Option<f64>,
+    /// Contingency floor as holding time, min (zero: no floor).
+    pub contingency_minimum_hold_min: Option<f64>,
+    /// Destination-to-alternate still-air distance, nmi (zero: no alternate).
+    pub alternate_distance_nmi: Option<f64>,
+    /// Final reserve holding time, min.
+    pub final_reserve_hold_min: Option<f64>,
+    /// Share of the flight time carried under the FAA flag rule.
+    pub flag_flight_time_fraction: Option<f64>,
+    /// Holding height above the aerodrome, ft.
+    pub holding_altitude_ft: Option<f64>,
+    /// Document, page and the wording of the stated rule.
+    pub source: &'static str,
+}
+
+impl DesignPointReserve {
+    /// The configured policy with the stated terms in place of its own.
+    pub fn applied_to(&self, configured: &crate::FuelPolicyConfig) -> crate::FuelPolicyConfig {
+        let mut policy = configured.clone();
+        let set = |slot: &mut f64, stated: Option<f64>| {
+            if let Some(value) = stated {
+                *slot = value;
+            }
+        };
+        if let Some(scheme) = self.scheme {
+            policy.scheme = scheme;
+        }
+        set(
+            &mut policy.contingency_trip_fraction,
+            self.contingency_trip_fraction,
+        );
+        set(
+            &mut policy.contingency_minimum_hold_min,
+            self.contingency_minimum_hold_min,
+        );
+        set(
+            &mut policy.alternate_distance_nmi,
+            self.alternate_distance_nmi,
+        );
+        set(
+            &mut policy.final_reserve_hold_min,
+            self.final_reserve_hold_min,
+        );
+        set(
+            &mut policy.flag_flight_time_fraction,
+            self.flag_flight_time_fraction,
+        );
+        set(&mut policy.holding_altitude_ft, self.holding_altitude_ft);
+        policy
+    }
 }

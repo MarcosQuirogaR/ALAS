@@ -13,7 +13,7 @@ use alas_payload::layout::ItemKind;
 use alas_pipeline::{DesignPipeline, PipelineOptions, PipelineResult, RunEnvironment};
 use alas_report::families::mass_balance::load_trim::data::load_trim_data_from_pipeline;
 use alas_report::families::mass_balance::load_trim::{
-    figure_load_trim_sheet, loading_envelope_polygon, LoadTrimSheetData,
+    figure_load_trim_sheet, loading_envelope_polygon, LoadTrimSheetData, Mechanism,
 };
 use alas_report::scene::SceneElement;
 use alas_report::theme::PALETTE_LIGHT;
@@ -55,17 +55,6 @@ fn potato_at(data: &LoadTrimSheetData, mass_kg: f64) -> Option<(f64, f64)> {
             )
         })
     })
-}
-
-fn dashed(scene: &alas_report::scene::Scene, dash: &[f64]) -> usize {
-    scene
-        .elements
-        .iter()
-        .filter(|e| {
-            matches!(e, SceneElement::Polyline { stroke, .. }
-                if stroke.dash_array.as_deref() == Some(dash) && stroke.width > 1.5)
-        })
-        .count()
 }
 
 #[test]
@@ -143,7 +132,8 @@ fn the_a320_potato_holds_the_worked_case_lies_inside_the_reorder_polygon_and_rep
 
 #[test]
 fn separate_ground_takeoff_flight_and_landing_sets_are_present_and_drawn() {
-    let data = load_trim_data_from_pipeline(&run("A320-200")).expect("load and trim data");
+    let result = run("A320-200");
+    let data = load_trim_data_from_pipeline(&result).expect("load and trim data");
     for (name, set) in [
         ("ground", &data.ground_limits),
         ("takeoff", &data.takeoff_limits),
@@ -164,11 +154,65 @@ fn separate_ground_takeoff_flight_and_landing_sets_are_present_and_drawn() {
         .weight(alas_report::families::mass_balance::load_trim::MassRole::DesignLanding)
         .unwrap();
     assert!((data.landing_limits.last().unwrap().mass_kg - landing_mass).abs() < 1.5);
+    // One MLW: the sheet's design landing weight is the one the gate scoped
+    // every state and evaluated landing trim at, the A320-200's declared
+    // 66,000 kg (not the landing fraction of the analysed take-off mass), and
+    // the flight (landing-trim) set ends there.
+    let gate = result
+        .feasibility
+        .design_model_cg
+        .as_ref()
+        .or(result.feasibility.model_cg.as_ref())
+        .unwrap();
+    assert_eq!(gate.design_landing_mass_kg, 66_000.0);
+    assert!((landing_mass - gate.design_landing_mass_kg).abs() < 1.5);
+    assert!(data.flight_limits.last().unwrap().mass_kg <= landing_mass + 1.5);
+    // The en-route states the gate scoped above that MLW are the fifth set,
+    // from the MLW to the heaviest of them, keyed by the forward limit the
+    // gate reported for the heaviest; with none, there is no such set.
+    let heaviest_above = gate
+        .loading_states
+        .iter()
+        .filter(|s| s.scope == alas_opt::envelope::PhaseLimits::EN_ROUTE_ABOVE_MLW)
+        .max_by(|a, b| a.mass_kg.total_cmp(&b.mass_kg));
+    match (heaviest_above, &data.en_route_above_mlw) {
+        (None, set) => assert!(set.is_none()),
+        (Some(heaviest), Some(set)) => {
+            let first = set.vertices.first().unwrap();
+            let last = set.vertices.last().unwrap();
+            assert!((first.mass_kg - gate.design_landing_mass_kg).abs() < 1.5);
+            assert!((last.mass_kg - heaviest.mass_kg).abs() < 1.5);
+            assert_eq!(
+                set.forward_bound,
+                Mechanism::of_forward_governance(heaviest.physical_limits.fwd_limit_governance)
+            );
+        }
+        (Some(_), None) => panic!("states gated above the MLW but no set"),
+    }
 
+    // The sheet draws the takeoff, landing and zero-fuel envelopes as filled
+    // polygons with thin edges, and the loading curves of the potato.
+    let envelopes = data.envelopes();
+    assert_eq!(
+        envelopes.len(),
+        3,
+        "takeoff, landing and zero-fuel envelopes"
+    );
+    assert!(
+        data.loading_curves.len() >= 4,
+        "{}",
+        data.loading_curves.len()
+    );
     let scene = figure_load_trim_sheet(&data, &PALETTE_LIGHT);
-    assert_eq!(dashed(&scene, &[7.0, 4.0]), 2, "ground line dashed");
-    assert_eq!(dashed(&scene, &[1.5, 3.5]), 2, "flight line dotted");
-    assert_eq!(dashed(&scene, &[8.0, 3.0, 1.5, 3.0]), 2, "landing dash-dot");
+    let filled_edged = scene
+        .elements
+        .iter()
+        .filter(|e| {
+            matches!(e, SceneElement::Polygon { stroke: Some(stroke), points, .. }
+                if stroke.width <= 1.5 && points.len() >= 4)
+        })
+        .count();
+    assert!(filled_edged >= 3, "{filled_edged}");
 }
 
 #[test]

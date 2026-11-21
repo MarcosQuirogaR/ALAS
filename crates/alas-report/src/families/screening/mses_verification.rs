@@ -3,10 +3,13 @@
 
 // Ported from alas/reporting/airfoil_sweep_figures.py (`fig_mses_verification`)
 
-//! Stage-3 MSES verification: VLM+Korn (Stage 2) vs MSES (Stage 3) cruise
-//! L/D per verified candidate, with wave drag annotated next to each MSES
-//! bar. Neither the 2-D NeuralFoil proxy nor VLM+Korn model shocks, so this
-//! is the only figure that can show whether a candidate actually handles
+//! Stage-3 MSES check: 2-D section L/D (cl/cd at the screening cl) from the
+//! Stage-1 NeuralFoil polar against the MSES section polar at the swept-section
+//! Mach (M cos(sweep)), per verified candidate, with wave drag annotated next to each MSES
+//! bar. Both bars are section quantities at the same cl, with no induced or
+//! non-wing drag and no section-lift conversion by 1/cos^2(sweep), so they are
+//! not the aircraft L/D. NeuralFoil does not model shocks, so this
+//! shows whether a candidate handles
 //! this cruise Mach well.
 
 use crate::chart_kit::{draw_legend, LegendMarker};
@@ -16,7 +19,7 @@ use alas_screen::AirfoilScreeningResult;
 
 use super::mses_verified_candidates;
 
-/// Bar colour for the Stage 2 (VLM + Korn wave-drag correlation) estimate.
+/// Bar colour for the Stage 1 NeuralFoil section estimate.
 const VLM_COLOR: &str = "#7aa2ff";
 /// Bar colour for the Stage 3 (real MSES viscous/shock) result.
 const MSES_COLOR: &str = "#ff8a5c";
@@ -32,7 +35,7 @@ pub fn fig_mses_verification(
         return None;
     }
 
-    let ld_vlm: Vec<f64> = cands.iter().map(|c| c.l_over_d_3d.unwrap_or(0.0)).collect();
+    let ld_vlm: Vec<f64> = cands.iter().map(|c| c.l_over_d.unwrap_or(0.0)).collect();
     let ld_mses: Vec<f64> = cands
         .iter()
         .map(|c| c.l_over_d_mses.unwrap_or(0.0))
@@ -43,8 +46,7 @@ pub fn fig_mses_verification(
     let pal = get_palette(theme);
     let canvas_h = ((0.6 * n as f64 + 1.2).max(3.2)) * 100.0;
     let mut scene = Scene::new(650.0, canvas_h, Some(Color::from_hex(pal.bg)));
-    scene.title =
-        Some("MSES verification: real shock/viscous effects vs the VLM+Korn estimate".to_owned());
+    scene.title = Some("MSES section check: 2-D section L/D (cl/cd), not aircraft L/D".to_owned());
 
     let max_ld = ld_vlm
         .iter()
@@ -57,7 +59,7 @@ pub fn fig_mses_verification(
         (0.0, max_ld * 1.25),
         (-0.6, n as f64 - 0.4),
     );
-    axes.draw_frame_with_labels(&mut scene, pal, "Cruise L/D", "");
+    axes.draw_frame_with_labels(&mut scene, pal, "Section L/D (cl/cd, 2-D)", "");
 
     // The vertical coordinate is categorical. Mask the generated numeric
     // ticks before placing candidate names so the two label systems cannot
@@ -130,11 +132,11 @@ pub fn fig_mses_verification(
         [axes.left + 8.0, axes.top + 8.0],
         &[
             (
-                "VLM + Korn (Stage 2)".to_owned(),
+                "NeuralFoil section (Stage 1)".to_owned(),
                 LegendMarker::Patch(Color::from_hex(VLM_COLOR)),
             ),
             (
-                "MSES (Stage 3, real shock/viscous)".to_owned(),
+                "MSES section at M cos(sweep) (Stage 3)".to_owned(),
                 LegendMarker::Patch(Color::from_hex(MSES_COLOR)),
             ),
         ],
@@ -163,7 +165,7 @@ mod tests {
         AirfoilCandidateResult {
             name: name.to_owned(),
             status: "ok".to_owned(),
-            l_over_d_3d: Some(ld_3d),
+            l_over_d: Some(ld_3d),
             l_over_d_mses: Some(ld_mses),
             cdw_mses: Some(cdw),
             mses_verified: verified,

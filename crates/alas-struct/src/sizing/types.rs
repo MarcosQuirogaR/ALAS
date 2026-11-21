@@ -21,7 +21,7 @@ pub struct CompositeProxyDeclaration {
     pub applicability: &'static str,
     /// Calibrated relative uncertainty if known/calibrated, or `None` if uncalibrated.
     ///
-    /// Per strict audit override, uncalibrated uncertainty must be represented
+    /// Uncalibrated uncertainty must be represented
     /// explicitly as unknown (`None`), not as zero or a fabricated numeric figure.
     pub relative_uncertainty: Option<f64>,
 }
@@ -80,6 +80,18 @@ pub struct WingboxSizing {
     /// Cosine of the box-axis sweep at each station (see [`super::swept`]); empty means an
     /// unswept beam, as in the frozen reference law.
     pub axis_cos: Vec<f64>,
+    /// Per station, cover inertia along the airfoil contour over the straight-panel
+    /// inertia ([`cover_shape`](super::cover_shape)); empty (read as 1) for the frozen laws.
+    pub cover_shape: Vec<f64>,
+    /// Per station, the largest airfoil depth between the outer active spars, m
+    /// ([`cover_depth_m`](super::cover_shape::cover_depth_m)): twice the cover's
+    /// extreme-fibre distance from the mid-depth bending axis. Empty for the frozen laws,
+    /// which keep the spar-height fibre.
+    pub cover_depth_m: Vec<f64>,
+    /// Per station, the design torsional shear flow the cover skins carry, N/m
+    /// (the envelope of the Bredt-Batho flow over the strength cases). Empty for
+    /// the frozen laws, which do not check the covers in shear.
+    pub cover_shear_flow_n_per_m: Vec<f64>,
     /// Normalized spanwise stations, `y / semi_span`.
     pub eta_stations: Vec<f64>,
     /// Local chord at each station, m.
@@ -88,8 +100,14 @@ pub struct WingboxSizing {
     pub spar_fracs: Vec<f64>,
     /// Per-spar sizing.
     pub spars: Vec<SparSizing>,
-    /// Skin thickness, m.
+    /// Skin thickness, m: the manufacturing minimum gauge of the covers, and
+    /// the gauge everywhere [`Self::skin_gauge_m`] records none.
     pub t_skin: f64,
+    /// Per station, the sized cover skin gauge, m (both covers), never below
+    /// [`Self::t_skin`]. The product law sizes it for the skin's combined
+    /// direct and shear stress (`product_strength`); empty for the frozen
+    /// laws, whose skin is the uniform `t_skin`.
+    pub skin_gauge_m: Vec<f64>,
     /// Number of ribs.
     pub num_ribs: i64,
     /// Panel-buckling allowable rib spacing, m.
@@ -106,6 +124,41 @@ pub struct WingboxSizing {
 }
 
 impl WingboxSizing {
+    /// Contour-over-straight cover inertia factor at `station`, 1 where none is recorded.
+    pub fn cover_shape_at(&self, station: usize) -> f64 {
+        self.cover_shape.get(station).copied().unwrap_or(1.0)
+    }
+
+    /// Design cover-skin shear flow at `station`, N/m; 0 where none is recorded.
+    pub fn cover_shear_flow_at(&self, station: usize) -> f64 {
+        self.cover_shear_flow_n_per_m
+            .get(station)
+            .copied()
+            .unwrap_or(0.0)
+    }
+
+    /// Cover skin gauge at `station`, m: the sized gauge, else [`Self::t_skin`].
+    pub fn skin_at(&self, station: usize) -> f64 {
+        self.skin_gauge_m
+            .get(station)
+            .copied()
+            .unwrap_or(self.t_skin)
+    }
+
+    /// Thickest cover skin gauge over the span, m: the sized gauges' maximum,
+    /// else [`Self::t_skin`].
+    pub fn max_skin_gauge_m(&self) -> f64 {
+        self.skin_gauge_m
+            .iter()
+            .copied()
+            .fold(self.t_skin, f64::max)
+    }
+
+    /// Contour cover depth at `station`, m; 0 where none is recorded.
+    pub fn cover_depth_at(&self, station: usize) -> f64 {
+        self.cover_depth_m.get(station).copied().unwrap_or(0.0)
+    }
+
     /// Cosine of the box-axis sweep at `station`, 1 where none is recorded.
     pub fn axis_cos_at(&self, station: usize) -> f64 {
         self.axis_cos.get(station).copied().unwrap_or(1.0)

@@ -14,7 +14,12 @@ impl OptimizerRunSummary {
     pub fn label_lines(&self) -> Vec<(&'static str, String)> {
         let mut lines = vec![
             ("Outcome", self.status.label().to_owned()),
-            ("Termination", self.termination_text().to_owned()),
+            (
+                "Termination",
+                self.infeasibility
+                    .clone()
+                    .unwrap_or_else(|| self.termination_text().to_owned()),
+            ),
         ];
         for stage in &self.stages {
             let Some([used, wall, stopped]) = stage_labels(&stage.stage, stage.time_limited) else {
@@ -70,6 +75,36 @@ impl OptimizerRunSummary {
                 format!("{} / {}", rejects("screening"), rejects("refinement")),
             ));
         }
+        if let Some(indicator) = &self.convergence {
+            let percent = |gain: Option<f64>| {
+                gain.map_or_else(|| "-".to_owned(), |gain| format!("{:.2} %", 100.0 * gain))
+            };
+            lines.push((
+                "Convergence indicator",
+                if indicator.settled {
+                    "Settled"
+                } else {
+                    "Still improving when the candidate plan ended"
+                }
+                .to_owned(),
+            ));
+            lines.push((
+                "Best-design gain, last exploration generations / whole exploration",
+                format!(
+                    "{} / {}",
+                    percent(indicator.exploration_window_gain),
+                    percent(indicator.exploration_gain)
+                ),
+            ));
+            lines.push((
+                "Best-design gain in refinement",
+                percent(indicator.refinement_gain),
+            ));
+            lines.push((
+                "Final population spread, share of the search box",
+                format!("{:.1} %", 100.0 * indicator.population_spread),
+            ));
+        }
         lines.push(("Aeroelastic caveat", AEROELASTIC_CAVEAT_TEXT.to_owned()));
         lines.push(("Buffet margin basis", BUFFET_BASIS_TEXT.to_owned()));
         lines.push(("Wall time", format!("{:.1} s", self.wall_time_s)));
@@ -84,20 +119,24 @@ impl OptimizerRunSummary {
                 format!("{} / {}", verification.analyses, verification.reserved),
             ));
         }
-        let start = |preset, constrained| {
-            if self.baseline_constrained {
+        let start = |preset, constrained, clean_sheet| {
+            if self.clean_sheet {
+                clean_sheet
+            } else if self.baseline_constrained {
                 constrained
             } else {
                 preset
             }
         };
+        let start_role = if self.clean_sheet {
+            3
+        } else {
+            usize::from(self.baseline_constrained)
+        };
         match self.baseline {
             Some(delta) => {
                 lines.push((
-                    objective::comparison_label(
-                        self.objective_kind,
-                        usize::from(self.baseline_constrained),
-                    ),
+                    objective::comparison_label(self.objective_kind, start_role),
                     format!("{:.4}", delta.baseline_objective),
                 ));
                 let change = delta
@@ -111,7 +150,11 @@ impl OptimizerRunSummary {
                     (delta.baseline_block_fuel_kg, delta.winner_block_fuel_kg)
                 {
                     lines.push((
-                        start("Block fuel, preset", "Block fuel, constrained start"),
+                        start(
+                            "Block fuel, preset",
+                            "Block fuel, constrained start",
+                            "Block fuel, clean-sheet start",
+                        ),
                         format!("{baseline:.0} kg"),
                     ));
                     lines.push(("Block fuel, result", format!("{winner:.0} kg")));
@@ -134,6 +177,7 @@ impl OptimizerRunSummary {
                     start(
                         "Trip fuel at reporting fidelity, preset",
                         "Trip fuel at reporting fidelity, constrained start",
+                        "Trip fuel at reporting fidelity, clean-sheet start",
                     ),
                     format!("{baseline:.0} kg"),
                 ));

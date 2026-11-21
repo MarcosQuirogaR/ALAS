@@ -203,8 +203,8 @@ fn geometry_figures_keep_reference_titles_axes_units_and_legends() {
     ));
     for text in [
         "Planform Comparison",
-        "span Y [m]",
-        "longitudinal X [m]",
+        "Span Y [m]",
+        "Longitudinal X [m]",
         "Baseline",
         "Optimized",
     ] {

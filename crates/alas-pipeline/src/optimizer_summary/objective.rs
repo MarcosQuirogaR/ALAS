@@ -52,23 +52,31 @@ pub const RANKING_LABEL: &str = "Normalized ranking cost [dimensionless]";
 /// Definition of the native scalar ranking cost and its reference scales.
 pub const RANKING_HELP: &str = "J = Q/Qref + w*P [dimensionless]. P is the sum of normalized preference violations and w the dimensionless preference weight; an infeasible candidate adds 1 + H, where H is the sum of normalized hard-constraint violations. Qref = 0.3*M for block fuel, M for takeoff or empty mass, or 0.001 kg/(seat km) for fuel per seat-kilometre. M [kg] is the MTOW plan reference mass. Feasibility is ranked before J. External evaluators supply their own ranking cost.";
 
-/// Physical objective label with its comparison role for summary tables.
+/// Physical objective label with its comparison role for summary tables:
+/// 0 the preset, 1 a constrained start, 3 a clean sheet's sized start, any
+/// other role the result.
 pub const fn comparison_label(kind: ObjectiveKind, role: usize) -> &'static str {
     match (kind, role) {
         (ObjectiveKind::BlockFuel, 0) => "Block fuel [kg], preset",
         (ObjectiveKind::BlockFuel, 1) => "Block fuel [kg], constrained start",
+        (ObjectiveKind::BlockFuel, 3) => "Block fuel [kg], clean-sheet start",
         (ObjectiveKind::BlockFuel, _) => "Block fuel [kg], result",
         (ObjectiveKind::TakeoffMass, 0) => "Takeoff mass [kg], preset",
         (ObjectiveKind::TakeoffMass, 1) => "Takeoff mass [kg], constrained start",
+        (ObjectiveKind::TakeoffMass, 3) => "Takeoff mass [kg], clean-sheet start",
         (ObjectiveKind::TakeoffMass, _) => "Takeoff mass [kg], result",
         (ObjectiveKind::OperatingEmptyMass, 0) => "Operating empty mass [kg], preset",
         (ObjectiveKind::OperatingEmptyMass, 1) => "Operating empty mass [kg], constrained start",
+        (ObjectiveKind::OperatingEmptyMass, 3) => "Operating empty mass [kg], clean-sheet start",
         (ObjectiveKind::OperatingEmptyMass, _) => "Operating empty mass [kg], result",
         (ObjectiveKind::FuelPerSeatKilometre, 0) => {
             "Fuel per seat-kilometre [kg/(seat km)], preset"
         }
         (ObjectiveKind::FuelPerSeatKilometre, 1) => {
             "Fuel per seat-kilometre [kg/(seat km)], constrained start"
+        }
+        (ObjectiveKind::FuelPerSeatKilometre, 3) => {
+            "Fuel per seat-kilometre [kg/(seat km)], clean-sheet start"
         }
         (ObjectiveKind::FuelPerSeatKilometre, _) => {
             "Fuel per seat-kilometre [kg/(seat km)], result"

@@ -425,3 +425,52 @@ fn every_wing_analysis_string_has_spanish_catalog_provenance() {
     }
     assert!(checked > 60, "only {checked} literals were checked");
 }
+
+/// The live preview is centred in its card: the drawn surface's extent is
+/// centred on the canvas the card reported, in both axes, and inside it.
+#[test]
+fn the_wing_preview_is_centred_in_its_card() {
+    let ctx = Context::default();
+    let _state = opened_window(&ctx);
+    with_window(|window| {
+        let (w, h) = (1000.0, 260.0);
+        window.preview_canvas = (w, h);
+        window.rebuild_preview("Dark");
+        let scene = window.preview.as_ref().expect("preview");
+        let (mut x0, mut y0, mut x1, mut y1) = (f64::MAX, f64::MAX, f64::MIN, f64::MIN);
+        for element in &scene.elements {
+            if let alas_report::scene::SceneElement::Polygon { points, .. } = element {
+                for p in points {
+                    x0 = x0.min(p[0]);
+                    x1 = x1.max(p[0]);
+                    y0 = y0.min(p[1]);
+                    y1 = y1.max(p[1]);
+                }
+            }
+        }
+        assert!(
+            x0 >= 0.0 && x1 <= w && y0 >= 0.0 && y1 <= h,
+            "inside: {x0}..{x1} x {y0}..{y1}"
+        );
+        assert!(
+            ((x0 + x1) * 0.5 - w * 0.5).abs() < 0.02 * w,
+            "centred across: {x0}..{x1}"
+        );
+        assert!(
+            ((y0 + y1) * 0.5 - h * 0.5).abs() < 0.04 * h,
+            "centred down: {y0}..{y1}"
+        );
+    });
+}
+
+/// The reference card writes S_ref and m^2 in the notation the app renders as
+/// a subscript and a superscript, never a raw "m2".
+#[test]
+fn the_reference_labels_use_the_app_notation() {
+    for label in ["Reference area S_ref (m^2)", "Aspect ratio b^2/S_ref"] {
+        assert!(alas_units::notation::has_notation(label), "{label}");
+    }
+    let source = include_str!("wing_analysis_view_setup.rs");
+    assert!(source.contains("Reference area S_ref (m^2)"));
+    assert!(!source.contains("(m2)"));
+}

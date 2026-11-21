@@ -96,8 +96,14 @@ struct Replay {
 fn replay(config: &AlasConfig, design: &DesignVector) -> Replay {
     let assessment = alas_opt::assess_product_candidate(config, design)
         .expect("finalist re-evaluates under the same mission-sized objective");
-    let report = FullAnalysis::new(config.clone())
-        .run_sized_candidate(&assessment.resolved.design, &assessment.sized)
+    // The assessed aircraft is the vector it evaluated with the engine, tail
+    // and gear the search sized for it (a clean-sheet engine is scaled to the
+    // closed design's thrust requirements), written back as the pipeline does.
+    let mut assessed = config.clone();
+    let assessed_design =
+        alas_pipeline::acceptance::apply_assessed_aircraft(&assessment.resolved, &mut assessed);
+    let report = FullAnalysis::new(assessed)
+        .run_sized_candidate(&assessed_design, &assessment.sized)
         .expect("finalist report binds to the same closed takeoff mass");
     Replay { assessment, report }
 }
@@ -283,8 +289,8 @@ fn the_neutral_point_resolution_difference_is_pinned_and_purely_aerodynamic() {
     let Replay { assessment, report } = replay(&config, &design);
 
     // Like with like: the search trims at the cruise Mach on the
-    // Goethert/Prandtl-Glauert stretched lattice (`alas_stab::trim::compressible`,
-    // decision D1), so it is compared with the report's clean cruise-condition
+    // Goethert/Prandtl-Glauert stretched lattice (`alas_stab::trim::compressible`),
+    // so it is compared with the report's clean cruise-condition
     // neutral point (`neutral_point_conditions.cruise`), not with the report's
     // fixed low-speed `x_neutral_point`, which the report publishes next to it.
     // The two reported values differ by the compressibility shift, which is a

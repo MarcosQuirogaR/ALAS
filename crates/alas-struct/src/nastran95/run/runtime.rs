@@ -125,3 +125,68 @@ fn contains_ascii_case_insensitive(bytes: &[u8], needle: &[u8]) -> bool {
         .windows(needle.len())
         .any(|window| window.eq_ignore_ascii_case(needle))
 }
+
+/// The environment variable the platform's loader searches for the solver's
+/// runtime libraries: `PATH` on Windows, `LD_LIBRARY_PATH` on Linux. macOS
+/// (`DYLD_LIBRARY_PATH`) is not a supported host for the bundled solver.
+pub(super) const RUNTIME_SEARCH_VARIABLE: &str = if cfg!(windows) {
+    "PATH"
+} else {
+    "LD_LIBRARY_PATH"
+};
+
+/// The loader search variable and value that put `runtime` first, ahead of
+/// whatever the parent already had (`existing`).
+pub(super) fn runtime_search_env(
+    runtime: &Path,
+    existing: Option<std::ffi::OsString>,
+) -> (&'static str, std::ffi::OsString) {
+    let mut entries = vec![runtime.to_path_buf()];
+    if let Some(existing) = existing {
+        entries.extend(std::env::split_paths(&existing));
+    }
+    let value = std::env::join_paths(&entries).unwrap_or_else(|_| runtime.as_os_str().to_owned());
+    (RUNTIME_SEARCH_VARIABLE, value)
+}
+
+#[cfg(test)]
+mod search_env_tests {
+    use super::*;
+    use std::ffi::OsString;
+    use std::path::PathBuf;
+
+    #[test]
+    fn the_runtime_directory_leads_the_loader_search_path() {
+        let runtime = PathBuf::from("solver").join("runtime");
+        let existing = std::env::join_paths(["first", "second"]).expect("joinable");
+        let (variable, value) = runtime_search_env(&runtime, Some(existing));
+        assert_eq!(variable, RUNTIME_SEARCH_VARIABLE);
+        assert_eq!(
+            std::env::split_paths(&value).collect::<Vec<_>>(),
+            [runtime, PathBuf::from("first"), PathBuf::from("second")]
+        );
+    }
+
+    #[test]
+    fn an_unset_search_path_yields_only_the_runtime_directory() {
+        let runtime = PathBuf::from("solver").join("runtime");
+        let (_, value) = runtime_search_env(&runtime, None);
+        assert_eq!(value, OsString::from(&runtime));
+    }
+
+    #[test]
+    fn the_loader_variable_follows_the_platform() {
+        assert_eq!(
+            RUNTIME_SEARCH_VARIABLE,
+            if cfg!(windows) {
+                "PATH"
+            } else {
+                "LD_LIBRARY_PATH"
+            }
+        );
+        assert_eq!(
+            Nastran95Solver::EXECUTABLE_RELATIVE,
+            format!("build/bin/{}", Nastran95Solver::EXECUTABLE_NAME)
+        );
+    }
+}

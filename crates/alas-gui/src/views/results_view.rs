@@ -86,6 +86,13 @@ const TABS: &[Tab] = &[
     },
 ];
 
+/// The ids of the result tabs in display order, Summary first.
+pub(crate) fn result_tab_ids() -> Vec<&'static str> {
+    std::iter::once("summary")
+        .chain(TABS.iter().map(|tab| tab.id))
+        .collect()
+}
+
 /// Equal side margins around the result gallery content.
 const RESULTS_SIDE_MARGIN: f32 = 20.0;
 /// Result tabs are intentionally capped at five per row so their labels stay
@@ -135,6 +142,17 @@ pub fn show_results_view(state: &mut AppState, ui: &mut Ui) {
         return;
     }
 
+    // The way back to the inputs is a visible button: the navigation hover rail
+    // at the window edge is not discoverable once a result replaces the form.
+    ui.horizontal(|ui| {
+        if ui
+            .add(egui::Button::new(tr("Edit inputs")).min_size(egui::vec2(110.0, 28.0)))
+            .clicked()
+        {
+            crate::app::go_to_page(state, "inputs");
+        }
+    });
+    ui.add_space(4.0);
     show_result_tabs(state, ui);
     ui.separator();
 
@@ -162,7 +180,13 @@ pub fn show_results_view(state: &mut AppState, ui: &mut Ui) {
     };
     let result_config = result.config.clone();
     let category = tab.category;
-    let full_width_figures = state.results_tab == "model";
+    // Dense multi-panel figures (the model comparison, mission profile, field
+    // charts, structural and propulsion panels) get the whole row: in a third
+    // of it their axes and legends were drawn at 6 to 7 px.
+    let full_width_figures = matches!(
+        state.results_tab.as_str(),
+        "model" | "mission" | "field" | "structures" | "propulsion"
+    );
     let gallery_height = ui.available_height();
     ScrollArea::vertical()
         .auto_shrink([false, false])
@@ -236,10 +260,34 @@ fn figure_tile(
     tile_width: f32,
     canvas_height: f32,
 ) {
-    let (id, title, description) = (descriptor.id, descriptor.title, descriptor.description);
+    let (id, mut title, mut description) =
+        (descriptor.id, descriptor.title, descriptor.description);
+    // A turboprop's panels hold shaft-rating and propeller content, not the
+    // turbofan bypass-ratio and cycle-efficiency ones their registry titles name.
+    if matches!(
+        config.geometry.engine.propulsion_technology,
+        alas_config::PropulsionTechnology::Turboprop
+    ) {
+        match id {
+            "propulsion_bpr_sensitivity" => {
+                title = "Shaft Power Rating";
+                description = "Certified shaft power rating of the engine and its sea-level and cruise lapse.";
+            }
+            "propulsion_carpet_plot" => {
+                title = "Power-Speed Envelope";
+                description = "Turboprop force and fuel flow versus airspeed and shaft power at sea level.";
+            }
+            "propulsion_efficiency_decomposition" => {
+                title = "Propeller Efficiency";
+                description = "Propeller and overall efficiency of the turboprop.";
+            }
+            _ => {}
+        }
+    }
     let theme = state.theme.figure_theme_name().to_owned();
     let TileScene {
         scene,
+        pending,
         view_key,
         camera_key,
         orbitable,
@@ -302,6 +350,10 @@ fn figure_tile(
                         // the entry's own revision is a cheap, exact stand-in
                         // for hashing the whole scene graph every frame.
                         let revision = state.result_figure_revision(&view_key);
+                        let background = state
+                            .figure_jobs
+                            .enabled()
+                            .then(|| tr("Rendering figure..."));
                         let response = ui.add(
                             alas_viz::SceneView::new(scene, state.view_state_mut(view_key.clone()))
                                 .static_view()
@@ -313,7 +365,12 @@ fn figure_tile(
                                 .wheel_zoom(false)
                                 .cache_key(&view_key)
                                 .cache_revision(revision)
+                                .background_raster(background)
                                 .desired_size(vec2(canvas_width, canvas_height)),
+                        );
+                        crate::perf_tour::note_figure_rect(
+                            id,
+                            response.rect.intersect(ui.clip_rect()),
                         );
                         super::plot_data_menu::attach_scene(
                             &response,
@@ -334,6 +391,13 @@ fn figure_tile(
                     if id == "openvsp_cad_preview" {
                         openvsp::show_launch_button(state, ui);
                     }
+                }
+                None if pending => {
+                    let canvas_width = ui.available_width().max(1.0);
+                    ui.add_sized(
+                        [canvas_width, 132.0],
+                        egui::Label::new(RichText::new(tr("Rendering figure...")).weak()),
+                    );
                 }
                 None => {
                     let canvas_width = ui.available_width().max(1.0);
@@ -434,6 +498,13 @@ fn open_fullscreen_result(
             .result_cameras
             .insert(fullscreen_camera_key(camera_key), camera);
     }
+    // A figure whose window is already open comes to the front again.
+    if fullscreen_open(ctx, view_key) {
+        ctx.send_viewport_cmd_to(
+            crate::native_viewport::viewport_id(fullscreen_result::fullscreen_area_id(view_key)),
+            egui::ViewportCommand::Focus,
+        );
+    }
     set_fullscreen(ctx, view_key, true);
 }
 
@@ -506,6 +577,10 @@ fn unavailable_reason(state: &AppState, id: &str) -> String {
         tr_fields("Not available: {detail}", &[("detail", tr(detail))])
     } else if id == "optimization_history" && result.optimization_result.is_none() {
         tr("Not available: optimization was disabled for this run.")
+    } else if result.optimization_result.is_none()
+        && alas_report::find_figure(id).is_some_and(|figure| figure.category == "Optimization")
+    {
+        tr("Reference run: no optimization.")
     } else {
         tr("Not available: the required analysis stage produced no data.")
     }
@@ -520,7 +595,11 @@ fn format_pct_mac(percent: f64) -> String {
 /// A CG position in the report convention: percent of the mean aerodynamic
 /// chord of the registered reference wing, measured from its leading edge.
 fn format_cg_pct_mac(percent: f64) -> String {
-    format!("{}, {}", format_pct_mac(percent), tr("reference wing"))
+    format!(
+        "{}, {}",
+        format_pct_mac(percent),
+        alas_i18n::t(Some("reference wing"), None)
+    )
 }
 
 #[cfg(test)]

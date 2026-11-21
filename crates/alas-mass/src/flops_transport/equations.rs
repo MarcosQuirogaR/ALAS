@@ -5,12 +5,16 @@
 
 use alas_units::{FOOT, POUND_FORCE, POUND_MASS, PSI};
 
+mod electrical;
 mod lth_cabin;
-mod regional_cabin;
+mod military_avionics;
+pub(super) mod regional_cabin;
+mod turboprop_anti_ice;
 
 use self::lth_cabin::{lth_furnishings_kg, lth_operating_items_kg};
 use super::propulsion::{scaled_engine_count, scaled_nacelle_diameter_m};
 
+use super::executive_cabin;
 use super::military_cargo::military_cargo_equipment;
 use super::units::kg;
 use super::{
@@ -107,10 +111,8 @@ pub(super) fn furnishings_kg(
     fuselage_depth_m: f64,
     fuselage_count: usize,
 ) -> f64 {
-    kg(127.0 * flight_crew as f64
-        + 112.0 * first as f64
-        + 78.0 * business as f64
-        + 44.0 * tourist as f64
+    kg(super::seats::FLIGHT_DECK_SEAT_LB * flight_crew as f64
+        + super::seats::passenger_seats_lb([first, business, tourist])
         + 2.6
             * (passenger_compartment_length_m / FOOT)
             * ((fuselage_width_m + fuselage_depth_m) / FOOT)
@@ -136,6 +138,29 @@ pub(super) fn air_conditioning_kg(
 
 /// Equation 115 (eq. 113 is air conditioning). `nacelle_diameter_m` is the scaled `FNAC` of
 /// equation 85 and `engine_count` the scaled count `FNENG`.
+/// Pneumatic system (engine bleed-air heat exchangers, valves, controls and
+/// ducting), kg, for an aircraft with a bleed-air architecture.
+///
+/// FLOPS (NASA/TM-2017-219627 Vol. I, section 5.4) lists no pneumatic group,
+/// and its air-conditioning equation 113 reproduces the air-conditioning
+/// system alone: against Beltramo, Trapp, Kimoto and Marsh, *Parametric Study
+/// of Transport Aircraft Systems Cost and Weight*, NASA CR-151970 (1977),
+/// p. 5-88, `W11 = 0.710 x 13.6 N_p` lb, equation 113 gives 3,192 against
+/// 3,186 lb on the DC-10, 1,625 against 1,584 lb on the A320 and 4,753
+/// against 4,731 lb on the 747. The same page prices the pneumatic system as
+/// `W10 = 0.290 (W10 + W11)`, the mean share over its commercial and military
+/// transports (Tables 5.16 and 5.17), so `W10 = (0.290 / 0.710) W11`.
+/// Published: A320 bleed air 249 kg (Obert, *Aerodynamic Design of Transport
+/// Aircraft*, 2009, Fig. 42.25, p. 581; this gives 301), 747 2,287 lb (Table
+/// 5.16; 1,940), DC-10-40 1,957 lb (1,303). A bleedless architecture has none.
+pub(super) fn pneumatic_kg(air_conditioning_kg: f64, bleed_air_system: bool) -> f64 {
+    if bleed_air_system {
+        0.290 / 0.710 * air_conditioning_kg
+    } else {
+        0.0
+    }
+}
+
 pub(super) fn anti_ice_kg(
     span_m: f64,
     sweep_deg: f64,
@@ -315,6 +340,7 @@ pub fn estimate_flops_transport(
     let fuselage_planform_area_m2 =
         inputs.fuselage_count as f64 * inputs.fuselage_length_m * inputs.fuselage_width_m;
     let passengers = inputs.passenger_count();
+    let systems_passengers = inputs.systems_passenger_count.unwrap_or(passengers);
     // Equations 81-85. The inputs record the installed architecture; every
     // equation below that reads an engine count, a per-engine thrust or a
     // nacelle diameter reads the distributed-propulsion-scaled variable, which
@@ -332,7 +358,7 @@ pub fn estimate_flops_transport(
         inputs.design_gross_mass_kg,
     );
     let apu = if inputs.apu_installed {
-        apu_kg(fuselage_planform_area_m2, passengers)
+        apu_kg(fuselage_planform_area_m2, systems_passengers)
     } else {
         0.0
     };
@@ -352,26 +378,14 @@ pub fn estimate_flops_transport(
         inputs.variable_sweep_penalty,
         inputs.maximum_mach,
     );
-    let electrical = electrical_kg(
-        inputs.fuselage_length_m,
-        inputs.fuselage_width_m,
-        inputs.fuselage_count,
-        scaled_engines,
-        inputs.flight_crew_count,
-        passengers,
-    );
-    let avionics = avionics_kg(
-        inputs.design_range_nmi,
-        inputs.flight_crew_count,
-        fuselage_planform_area_m2,
-    );
-    // Equation 110, or the LTH civil-transport relation that replaces it and
-    // the three occupant-driven operating items together, or the regional
-    // turboprop remainder that keeps the FLOPS operating items. The LTH method
-    // puts the passenger seats on the other side of the furnishings/operating
-    // item boundary, so neither half may be taken on its own. The container
-    // tare is hold architecture, not cabin equipment, and it is evaluated the
-    // same way under every method below.
+    // NASA CR-151970 on a built turbofan cabin, else equation 106 (electrical.rs).
+    let electrical = electrical::electrical_group_kg(inputs, scaled_engines, systems_passengers);
+    // NASA CR-151970 on a military hold, else the FLOPS equation (military_avionics.rs).
+    let avionics = military_avionics::avionics_group_kg(inputs, fuselage_planform_area_m2);
+    // Equation 110, or the LTH relation that replaces it and the three
+    // occupant-driven operating items together (LTH puts the seats on the
+    // operating-item side, so neither half may be taken alone), or the
+    // regional turboprop remainder, or Torenbeek's executive cabin.
     let lth_cabin_equipment = matches!(
         inputs.cabin_equipment_method,
         alas_config::CabinEquipmentMethod::LthCivilTransportV1
@@ -379,17 +393,14 @@ pub fn estimate_flops_transport(
     let air_conditioning = air_conditioning_kg(
         fuselage_planform_area_m2,
         inputs.fuselage_depth_m,
-        passengers,
+        systems_passengers,
         inputs.maximum_mach,
         avionics,
     );
-    let anti_ice = anti_ice_kg(
-        inputs.wing_span_m,
-        inputs.quarter_chord_sweep_deg,
-        scaled_nacelle_diameter,
-        scaled_engines,
-        inputs.fuselage_width_m,
-    );
+    // NASA CR-151970 on wing-mounted turboprops, else equation 115 (turboprop_anti_ice.rs).
+    let anti_ice =
+        turboprop_anti_ice::anti_ice_group_kg(inputs, scaled_nacelle_diameter, scaled_engines);
+    let pneumatic = pneumatic_kg(air_conditioning, inputs.bleed_air_system);
     let furnishings = match inputs.cabin_equipment_method {
         alas_config::CabinEquipmentMethod::LthCivilTransportV1 => lth_furnishings_kg(
             inputs.fuselage_length_m,
@@ -406,8 +417,14 @@ pub fn estimate_flops_transport(
                     + electrical
                     + avionics
                     + air_conditioning
-                    + anti_ice,
+                    + anti_ice
+                    // The Torenbeek group total holds the pneumatic system.
+                    + pneumatic,
             )?
+        }
+        // Torenbeek (1982) Table 8-12 for an executive cabin: eq. 110's scope.
+        alas_config::CabinEquipmentMethod::ExecutiveJetV1 => {
+            executive_cabin::furnishings_kg(inputs)?
         }
         alas_config::CabinEquipmentMethod::FlopsTransportV1 => furnishings_kg(
             inputs.flight_crew_count,
@@ -443,6 +460,7 @@ pub fn estimate_flops_transport(
         furnishings_kg: furnishings,
         air_conditioning_kg: air_conditioning,
         anti_ice_kg: anti_ice,
+        pneumatic_kg: pneumatic,
         military_cargo_equipment_kg: military_cargo_equipment,
         total_kg: surface_controls
             + apu
@@ -453,6 +471,7 @@ pub fn estimate_flops_transport(
             + furnishings
             + air_conditioning
             + anti_ice
+            + pneumatic
             + military_cargo_equipment,
     };
 
@@ -499,6 +518,8 @@ pub fn estimate_flops_transport(
             });
         }
         remainder
+    } else if inputs.cabin_equipment_method == alas_config::CabinEquipmentMethod::ExecutiveJetV1 {
+        executive_cabin::passenger_service_kg(inputs)?
     } else {
         passenger_service_kg(
             inputs.first_class_passenger_count,
@@ -508,14 +529,8 @@ pub fn estimate_flops_transport(
             inputs.maximum_mach,
         )
     };
-    // The unit-load-device tare is decided by the aircraft's hold architecture
-    // and by nothing else, so it is evaluated identically under both cabin
-    // methods. Zeroing it inside the LTH branch would make the
-    // container accounting a silent side effect of a method selection: the
-    // delivered default excluded the tare from every preset by accident, and
-    // reverting the cabin method to the published FLOPS equations would have
-    // put 794-1,588 kg of it back into five operating empty masses without
-    // anybody deciding to.
+    // The unit-load-device tare is hold architecture, evaluated identically
+    // under every cabin method so it never moves as a side effect of one.
     let cargo_containers =
         cargo_containers_kg(inputs.containerized_cargo_kg + inputs.containerized_baggage_kg);
     // The operating-empty boundary the references are stated on excludes the
@@ -542,16 +557,55 @@ pub fn estimate_flops_transport(
 
     Ok(FlopsTransportBreakdown {
         systems,
+        seats: super::seats::seat_masses(
+            inputs.cabin_equipment_method,
+            [
+                inputs.first_class_passenger_count,
+                inputs.business_class_passenger_count,
+                inputs.tourist_class_passenger_count,
+            ],
+            inputs.flight_crew_count,
+            lth_cabin_equipment.then_some(passenger_service),
+            inputs.haul_class == alas_config::OperatingHaulClass::LongHaul,
+        ),
         operating_items,
         cabin_equipment_method: inputs.cabin_equipment_method,
         propulsion_sizing: inputs.propulsion_sizing,
         apu_installed: inputs.apu_installed,
+        bleed_air_system: inputs.bleed_air_system,
+        main_deck_freight: None,
     })
 }
 
 #[cfg(test)]
 mod tests {
     use super::*;
+
+    #[test]
+    fn a_systems_passenger_count_sizes_only_the_apu_air_conditioning_and_electrics() {
+        let mut freighter = representative_inputs();
+        freighter.first_class_passenger_count = 0;
+        freighter.business_class_passenger_count = 0;
+        freighter.tourist_class_passenger_count = 0;
+        let production = estimate_flops_transport(&freighter).expect("production freighter");
+        freighter.systems_passenger_count = Some(290);
+        let converted = estimate_flops_transport(&freighter).expect("converted freighter");
+        let seated = estimate_flops_transport(&representative_inputs()).expect("airliner");
+        assert!(converted.systems.apu_kg > production.systems.apu_kg);
+        assert_eq!(converted.systems.apu_kg, seated.systems.apu_kg);
+        assert_eq!(
+            converted.systems.electrical_kg,
+            seated.systems.electrical_kg
+        );
+        assert_eq!(
+            converted.systems.air_conditioning_kg,
+            seated.systems.air_conditioning_kg
+        );
+        assert_eq!(
+            converted.systems.furnishings_kg,
+            production.systems.furnishings_kg
+        );
+    }
 
     fn representative_inputs() -> FlopsTransportInputs {
         FlopsTransportInputs {
@@ -570,6 +624,8 @@ mod tests {
             first_class_passenger_count: 0,
             business_class_passenger_count: 30,
             tourist_class_passenger_count: 260,
+            systems_passenger_count: None,
+            all_coach_passenger_count: None,
             flight_crew_count: 2,
             flight_attendant_count: 8,
             galley_crew_count: 1,
@@ -582,6 +638,7 @@ mod tests {
             variable_sweep_penalty: 0.0,
             maximum_fuel_capacity_kg: 100_000.0,
             apu_installed: true,
+            bleed_air_system: true,
             fuel_tank_count: 4,
             containerized_cargo_kg: 0.0,
             containerized_baggage_kg: 0.0,
@@ -590,7 +647,34 @@ mod tests {
             haul_class: alas_config::OperatingHaulClass::ShortMediumHaul,
             propulsion_sizing: PropulsionSizing::RatedThrust,
             military_cargo: None,
+            executive_cabin: None,
         }
+    }
+
+    #[test]
+    fn a_built_turbofan_cabin_prices_only_the_electrical_group_by_its_all_coach_capacity() {
+        let flops = estimate_flops_transport(&representative_inputs()).expect("equation 106");
+        let mut cabin = representative_inputs();
+        cabin.all_coach_passenger_count = Some(330);
+        let built = estimate_flops_transport(&cabin).expect("NASA CR-151970 relation");
+        // Fig. 5.29, p. 5-74: W9 = 16.2 Np + 110 lb.
+        let wer_kg = (16.2 * 330.0 + 110.0) * POUND_MASS;
+        assert!((built.systems.electrical_kg - wer_kg).abs() < 1e-9);
+        let moved = built.systems.electrical_kg - flops.systems.electrical_kg;
+        assert!((built.systems.total_kg - flops.systems.total_kg - moved).abs() < 1e-9);
+        assert_eq!(built.operating_items, flops.operating_items);
+        // Outside the relation's population equation 106 stays: a cabin below
+        // the smallest transport in the regression, and a propeller transport.
+        let mut business_jet = cabin;
+        business_jet.all_coach_passenger_count = Some(8);
+        let business_jet = estimate_flops_transport(&business_jet).expect("equation 106");
+        assert_eq!(business_jet.systems.electrical_kg, flops.systems.electrical_kg);
+        let mut turboprop = cabin;
+        turboprop.propulsion_sizing = PropulsionSizing::ShaftPower { engine_oil_kg: 10.0 };
+        let with_cabin = estimate_flops_transport(&turboprop).expect("propeller transport");
+        turboprop.all_coach_passenger_count = None;
+        let without_cabin = estimate_flops_transport(&turboprop).expect("propeller transport");
+        assert_eq!(with_cabin.systems.electrical_kg, without_cabin.systems.electrical_kg);
     }
 
     #[test]
@@ -637,9 +721,11 @@ mod tests {
         );
     }
 
-    /// A propeller installation substitutes for equations 121 and 122 and for
-    /// nothing else: every other systems and operating-item mass is identical
-    /// to the thrust-based case at the same geometry, counts and cabin.
+    /// A propeller installation substitutes for equations 121 and 122, and,
+    /// with every engine on the wing, prices anti-icing on the NASA CR-151970
+    /// turboprop line (turboprop_anti_ice.rs); every other systems and
+    /// operating-item mass is identical to the thrust-based case at the same
+    /// geometry, counts and cabin.
     #[test]
     fn a_shaft_power_installation_substitutes_only_the_two_thrust_terms() {
         let thrust_based = representative_inputs();
@@ -653,8 +739,18 @@ mod tests {
         let propeller =
             estimate_flops_transport(&shaft_power).expect("a zero thrust is valid for a propeller");
 
-        // Every systems equation is untouched: none of them reads a thrust.
-        assert_eq!(jet.systems, propeller.systems);
+        // Anti-icing takes the turboprop line, W12 = 0.520 Sw lb (p. 5-96).
+        let turboprop_line_kg = 0.520 * shaft_power.wing_area_m2 / (FOOT * FOOT) * POUND_MASS;
+        assert!((propeller.systems.anti_ice_kg - turboprop_line_kg).abs() < 1e-9);
+        let anti_ice_change = propeller.systems.anti_ice_kg - jet.systems.anti_ice_kg;
+        assert!((propeller.systems.total_kg - jet.systems.total_kg - anti_ice_change).abs() < 1e-9);
+        // Every other systems equation is untouched: none of them reads a thrust.
+        let jet_with_turboprop_anti_ice = FlopsSystemsBreakdown {
+            anti_ice_kg: propeller.systems.anti_ice_kg,
+            total_kg: propeller.systems.total_kg,
+            ..jet.systems
+        };
+        assert_eq!(jet_with_turboprop_anti_ice, propeller.systems);
         // So are the four operating items that read counts, cabin and range.
         assert_eq!(
             jet.operating_items.passenger_service_kg,

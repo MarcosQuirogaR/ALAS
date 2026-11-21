@@ -227,7 +227,16 @@ pub struct MeshSettings {
     /// different y+ at every Reynolds number.  It is kept as an explicit
     /// override for a user who has a reason to pin the first cell.
     pub first_layer_height_m: f64,
-    /// Desired y+ for the selected wall treatment.
+    /// Desired first-cell-centre y+ for the selected wall treatment.
+    ///
+    /// The default 0.1 is the near-wall resolution at which the SST skin
+    /// friction stops depending on the first cell.  NACA 0012 at alpha 0 deg,
+    /// Re 6e6, medium preset: mean y+ 1.0 / 0.32 / 0.11 gives CDv 0.00634 /
+    /// 0.00657 / 0.00671 against 0.00675 from the NASA TMR CFL3D SST
+    /// skin-friction file (897x257 grid, 2 * integral of Cf dx), with Cp
+    /// unchanged; the wall-function type (Spalding/blended omega against
+    /// low-Re k = 0, nutLowRe) makes no difference at y+ 1, so the deficit
+    /// is resolution, not the boundary condition.
     pub target_y_plus: f64,
     /// Size the first cell from [`Self::target_y_plus`] and the flow state
     /// instead of taking [`Self::first_layer_height_m`] literally.
@@ -256,11 +265,16 @@ impl Default for MeshSettings {
     fn default() -> Self {
         Self {
             preset: MeshPreset::Medium,
-            upstream_chords: 10.0,
-            downstream_chords: 20.0,
-            half_height_chords: 10.0,
+            // 100 chords each way: a fixed-velocity boundary 10 chords away
+            // carried the section's circulation back onto it and raised the
+            // NACA 0012 drag at 10 deg by a quarter over the NASA Turbulence
+            // Modeling Resource values; beyond 10 chords the cells grow
+            // (template v8), so the far boundary costs a few cells.
+            upstream_chords: 100.0,
+            downstream_chords: 100.0,
+            half_height_chords: 100.0,
             first_layer_height_m: 1.0e-5,
-            target_y_plus: 1.0,
+            target_y_plus: 0.1,
             derive_first_layer_from_target_y_plus: default_derive_first_layer(),
             boundary_layers: true,
             n_layers: 25,
@@ -948,9 +962,9 @@ impl MeshSettings {
         if !self.first_layer_height_m.is_finite() || self.first_layer_height_m <= 0.0 {
             errors.push("First-layer height must be greater than zero.".to_owned());
         }
-        if !(1.0..=300.0).contains(&self.target_y_plus) {
+        if !(0.05..=300.0).contains(&self.target_y_plus) {
             errors.push(
-                "The initial SST wall treatment accepts a target y+ from 1 to 300.".to_owned(),
+                "The initial SST wall treatment accepts a target y+ from 0.05 to 300.".to_owned(),
             );
         }
         if self.boundary_layers && !(1..=30).contains(&self.n_layers) {

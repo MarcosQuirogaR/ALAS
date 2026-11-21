@@ -64,6 +64,8 @@ fn moved_wing_result(limited: bool) -> OptimizationResult {
         winner_block_fuel_kg: Some(8_600.0),
     };
     let diagnostics = SearchDiagnostics {
+        engine_start: None,
+        engine_slope: None,
         restoration: None,
         converged: false,
         analysis_evaluations: 2,
@@ -93,6 +95,8 @@ fn moved_wing_result(limited: bool) -> OptimizationResult {
         baseline: Some(comparison),
         winner_history_row: Some(1),
         evaluation_trace: Default::default(),
+        plan_completed: false,
+        convergence: None,
         baseline_clamped: false,
     };
     let mut result = OptimizationResult {
@@ -123,6 +127,8 @@ fn moved_wing_result(limited: bool) -> OptimizationResult {
             Some(5_000.0),
             Some(4_900.0),
         )),
+        worst_violation: None,
+        phases: Vec::new(),
     });
     result
 }
@@ -208,7 +214,7 @@ fn every_stage_states_its_own_budget_and_never_appears_over_it() {
 #[test]
 fn the_seed_shown_is_the_one_the_run_used_even_unseeded() {
     let config = AlasConfig::default();
-    // Decision D6 (SIZ-06/07): an unconfigured run is reproducible, the default is the fixed seed.
+    // An unconfigured run is reproducible, the default is the fixed seed.
     assert_eq!(
         config.optimizer.solver.seed,
         Some(alas_config::DEFAULT_SEED)
@@ -331,7 +337,19 @@ fn geometry(
         winner_aspect_ratio,
         baseline_sweep_deg,
         winner_sweep_deg,
+        wing_x_shift_m: (-7.5, -7.5),
     }
+}
+
+#[test]
+fn a_moved_wing_is_reported_against_the_reference_and_an_unmoved_one_is_not() {
+    let mut moved = geometry((10.0, 10.0), (27.0, 27.0));
+    assert!(value(&moved.flag_lines(), WING_POSITION_LABEL).is_none());
+    moved.wing_x_shift_m = (-7.5, -6.197);
+    assert_eq!(
+        value(&moved.flag_lines(), WING_POSITION_LABEL),
+        Some("-6.197 m / -7.500 m (+1.303 m)")
+    );
 }
 
 #[test]
@@ -368,8 +386,10 @@ fn the_plausibility_lines_show_both_values_and_are_absent_when_neither_fires() {
 
 #[test]
 fn a_constrained_start_is_labelled_as_such_and_a_preset_is_not() {
+    let mut adaptation = AlasConfig::default();
+    adaptation.optimizer.design_space.mode = alas_config::DesignMode::ReferenceAdaptation;
     let mut summary =
-        OptimizerRunSummary::from_result(&moved_wing_result(false), &AlasConfig::default(), None);
+        OptimizerRunSummary::from_result(&moved_wing_result(false), &adaptation, None);
     let preset = summary.label_lines();
     for label in [
         "Block fuel [kg], preset",
@@ -397,4 +417,30 @@ fn a_constrained_start_is_labelled_as_such_and_a_preset_is_not() {
         );
         assert!(value(&constrained, label).is_some(), "{label}");
     }
+}
+
+#[test]
+fn a_clean_sheet_compares_with_its_sized_start_not_the_preset() {
+    let summary =
+        OptimizerRunSummary::from_result(&moved_wing_result(false), &AlasConfig::default(), None);
+    assert!(summary.clean_sheet);
+    let lines = summary.label_lines();
+    for (preset_label, label) in [
+        (
+            "Block fuel [kg], preset",
+            "Block fuel [kg], clean-sheet start",
+        ),
+        ("Block fuel, preset", "Block fuel, clean-sheet start"),
+        (
+            "Trip fuel at reporting fidelity, preset",
+            "Trip fuel at reporting fidelity, clean-sheet start",
+        ),
+    ] {
+        assert!(value(&lines, preset_label).is_none(), "{preset_label}");
+        assert!(value(&lines, label).is_some(), "{label}");
+    }
+    assert_eq!(
+        termination_text("start_design_retained"),
+        "No candidate beat the clean-sheet start; it is delivered"
+    );
 }

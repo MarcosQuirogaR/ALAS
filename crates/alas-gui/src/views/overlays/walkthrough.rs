@@ -29,7 +29,9 @@ pub fn show_walkthrough(state: &mut AppState, ctx: &Context) {
         state.finish_walkthrough();
         return;
     }
-    if step_index > 0 && ctx.input(|input| input.key_pressed(egui::Key::ArrowLeft)) {
+    // Keys typed into a text box or the search palette never drive the tour.
+    let typing = ctx.wants_keyboard_input() || state.shell.search.open;
+    if step_index > 0 && !typing && ctx.input(|input| input.key_pressed(egui::Key::ArrowLeft)) {
         state.walkthrough_step -= 1;
         state.prepare_walkthrough_step();
         ctx.request_repaint();
@@ -52,12 +54,13 @@ pub fn show_walkthrough(state: &mut AppState, ctx: &Context) {
         });
 
     let is_last = step_index + 1 == TOUR_STEPS.len();
-    let advance_pressed = ctx.input(|input| {
-        input.key_pressed(egui::Key::Enter)
-            || input.key_pressed(egui::Key::ArrowRight)
-            || input.key_pressed(egui::Key::Space)
-    });
-    let panel_pos = walkthrough_panel_position(target, screen, vec2(420.0, 150.0));
+    let advance_pressed = !typing
+        && ctx.input(|input| {
+            input.key_pressed(egui::Key::Enter)
+                || input.key_pressed(egui::Key::ArrowRight)
+                || input.key_pressed(egui::Key::Space)
+        });
+    let panel_pos = walkthrough_panel_position(target, screen, vec2(420.0, 260.0));
     let window = Window::new(tr("Walkthrough"))
         .title_bar(false)
         .order(WALKTHROUGH_ORDER)
@@ -82,8 +85,9 @@ pub fn show_walkthrough(state: &mut AppState, ctx: &Context) {
                 .weak()
                 .small(),
             );
-            ui.label(RichText::new(tr(step.title)).strong().size(17.0))
-                .on_hover_text(tr(step.body));
+            ui.label(RichText::new(tr(step.title)).strong().size(17.0));
+            ui.add_space(4.0);
+            ui.add(egui::Label::new(tr(step.body)).wrap());
             ui.add_space(12.0);
             ui.horizontal(|ui| {
                 if ui.button(tr("Skip")).clicked() {
@@ -180,10 +184,28 @@ pub(super) fn walkthrough_panel_position(
         return centered;
     };
     let below = target.max.y + 14.0;
-    let y = if below + panel_size.y <= screen.max.y - margin {
+    let above = target.min.y - panel_size.y - 14.0;
+    let fits_below = below + panel_size.y <= screen.max.y - margin;
+    let fits_above = above >= screen.min.y + margin;
+    if !fits_below && !fits_above {
+        // A tall target (rail, preview dock): sit beside it, never on top of it.
+        let right = target.max.x + 14.0;
+        let left = target.min.x - panel_size.x - 14.0;
+        let x = if right + panel_size.x <= screen.max.x - margin {
+            Some(right)
+        } else if left >= screen.min.x + margin {
+            Some(left)
+        } else {
+            None
+        };
+        if let Some(x) = x {
+            return clamp_to_screen(pos2(x, target.center().y - panel_size.y * 0.5));
+        }
+    }
+    let y = if fits_below {
         below
     } else {
-        (target.min.y - panel_size.y - 14.0).max(screen.min.y + margin)
+        above.max(screen.min.y + margin)
     };
     clamp_to_screen(pos2(
         target

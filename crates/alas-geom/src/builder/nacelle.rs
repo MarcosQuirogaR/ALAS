@@ -22,6 +22,8 @@ use super::{AircraftBuilder, BuildError, BuildReport, GeometryContract};
 use crate::aircraft::fuselage::{Fuselage, FuselageXSec, DEFAULT_SHAPE};
 use crate::loft::{NacelleError, NacelleLoft, Section};
 
+mod drawn_outline;
+
 /// Stations per piece at density one (see [`NacelleLoft::polyline_sections`]).
 const V2_DENSITY: usize = 1;
 
@@ -55,11 +57,19 @@ fn engine_v2(g: &EngineConfig) -> NacelleV2 {
     let Some(shape) = spec.nacelle_shape_v2.as_ref() else {
         return NacelleV2::Unavailable;
     };
-    if g.nacelle_profile != spec.nacelle_profile() || g.radius_scale_m != spec.nacelle_max_radius_m
-    {
+    // The catalogue outline, at the catalogue size or rubber-scaled to
+    // another rating (`EngineConfig::scaled_by`); any other edit keeps the
+    // legacy polyline.
+    let Some(scale) = g.catalogue_outline_scale() else {
         return NacelleV2::Unavailable;
-    }
-    revolve(shape, g.nacelle_length_m(), g.radius_scale_m)
+    };
+    // The catalogue shape carries absolute lengths (cowl lengths, plug and
+    // trailing-edge sizes): scale them with the same laws as the outline.
+    let shape = shape.scaled(
+        scale.powf(alas_config::ENGINE_LENGTH_EXPONENT),
+        scale.powf(alas_config::ENGINE_DIAMETER_EXPONENT),
+    );
+    revolve(&shape, g.nacelle_length_m(), g.radius_scale_m)
 }
 
 /// The V2 nacelle of an engine installation, if it opts in and the revolve is
@@ -185,7 +195,12 @@ fn engine_xsecs_from(
 ) -> Result<Vec<FuselageXSec>, BuildError> {
     let what = format!("engine {}", g.engine_name);
     if let Some(loft) = accept(outcome, &what, report) {
-        return xsecs_from_sections(&loft.polyline_sections(V2_DENSITY), |_| 0.0);
+        // The inclined engine axis, about the inlet-face centre.
+        let drop_per_metre = loft
+            .shape()
+            .axis_pitch_deg
+            .map_or(0.0, |deg| deg.to_radians().tan());
+        return xsecs_from_sections(&loft.polyline_sections(V2_DENSITY), |x| -x * drop_per_metre);
     }
     let mut xsecs = Vec::with_capacity(g.nacelle_profile.len());
     for &(x, r) in &g.nacelle_profile {
@@ -201,6 +216,28 @@ fn engine_xsecs_from(
 }
 
 impl AircraftBuilder {
+    /// A podded engine's nacelle in its own frame, with the drawn outline and
+    /// inlet scarf of its catalogue entry, if it has one. The
+    /// reference-compatibility contract keeps the plain sections.
+    fn engine_nacelle(
+        &self,
+        name: String,
+        report: &mut BuildReport,
+    ) -> Result<Fuselage, BuildError> {
+        let g = &self.geometry.engine;
+        let xsecs = engine_xsecs(g, self.nacelle_v2_active(), report)?;
+        let outline = (self.geometry_contract == GeometryContract::Product)
+            .then(|| drawn_outline::engine_outline(g))
+            .flatten();
+        let Some(outline) = outline else {
+            return Ok(Fuselage::new(name, xsecs));
+        };
+        let lip_scarf = drawn_outline::lip_scarf(&xsecs, &outline);
+        let mut nacelle = Fuselage::new(name, drawn_outline::apply_outline(xsecs, &outline));
+        nacelle.lip_scarf = lip_scarf;
+        Ok(nacelle)
+    }
+
     /// The podded engines, one small [`Fuselage`] per spanwise position:
     /// `_build_engines`. See the module doc for the two placement branches.
     pub(super) fn build_engines(
@@ -220,7 +257,8 @@ impl AircraftBuilder {
         let g = &self.geometry.engine;
         let x_wing_global = self.geometry.wing.root_datum_x_m + dv.wing_x_shift_m;
         let wing = &self.geometry.wing;
-        let planform = wing.transport_planform(dv)?;
+        // The nacelles hang on the wing, not on its blends.
+        let planform = wing.transport_planform(dv)?.without_blends();
         // Drawings and clearance tables show the nacelles at their static height; a wing
         // that declares so keeps them there in the flight shape.
         let heights = wing.heights(
@@ -232,6 +270,11 @@ impl AircraftBuilder {
             &planform,
         )?;
 
+        // Refused here rather than fall back to the generic nacelle below.
+        let pod_issue = g.centre_engine.as_ref().and_then(|pod| pod.surface_issue());
+        if let Some(issue) = pod_issue.filter(|_| g.spanwise_positions_m.contains(&0.0)) {
+            return Err(BuildError::TailPlacement(format!("centre engine {issue}")));
+        }
         let mut nacelles = Vec::with_capacity(g.spanwise_positions_m.len());
         for (engine_index, &y_pos) in g.spanwise_positions_m.iter().enumerate() {
             if let Some(pod) = g
@@ -240,14 +283,14 @@ impl AircraftBuilder {
                 .filter(|pod| y_pos == 0.0 && pod.is_valid())
             {
                 // The drawn tail-engine pod: its own axis height, a
-                // width/height pair and an outline ending at the tail end.
+                // width/height pair and an outline stated from the fuselage end.
                 let xsecs = centre_pod_xsecs(pod, self.nacelle_v2_active(), report)?;
-                let x_inlet = dv.fuselage_length_m - pod.length_m();
-                nacelles.push(Fuselage::new("Nacelle Center", xsecs).translate([
-                    x_inlet,
-                    0.0,
-                    pod.axis_z_m,
-                ]));
+                let x_inlet = pod.inlet_x_m(dv.fuselage_length_m);
+                nacelles.push(
+                    Fuselage::new("Nacelle Center", xsecs)
+                        .translate([x_inlet, 0.0, pod.axis_z_m])
+                        .mounted_on_fuselage(),
+                );
                 continue;
             }
             let (name, x_inlet, z_nacelle) = if y_pos == 0.0 {
@@ -264,13 +307,32 @@ impl AircraftBuilder {
                     "Nacelle L"
                 }
                 .to_owned();
+                if let Some(mount) = g.rear_fuselage_mount() {
+                    // Hung from the fuselage: neither the wing station nor the wing
+                    // height enters, in the ground or the flight shape.
+                    if !mount.fits_fuselage(dv.fuselage_length_m) {
+                        return Err(BuildError::TailPlacement(format!(
+                            "rear-fuselage engine inlet {:.2} m ahead of the tail end lies ahead of the nose of a {:.2} m fuselage",
+                            mount.inlet_ahead_of_tail_m, dv.fuselage_length_m
+                        )));
+                    }
+                    let x_inlet = dv.fuselage_length_m - mount.inlet_ahead_of_tail_m;
+                    let nacelle = self.engine_nacelle(name, report)?;
+                    nacelles.push(
+                        nacelle
+                            .translate([x_inlet, y_pos, mount.axis_z_m])
+                            .mounted_on_fuselage(),
+                    );
+                    continue;
+                }
                 let leading_edge_offset = match self.geometry_contract {
                     GeometryContract::Product => planform.leading_edge_x_at(y_pos.abs())?,
                     GeometryContract::ReferenceCompatibility => {
                         y_pos.abs() * dv.sweep_deg.to_radians().tan()
                     }
                 };
-                let x_inlet = x_wing_global + leading_edge_offset - g.inlet_x_offset_m;
+                let x_inlet = x_wing_global + leading_edge_offset
+                    - g.inlet_x_offset_for_engine_m(engine_index);
 
                 // The local leading-edge height of the wing shape being
                 // built, so the nacelle hangs under the wing its pylon is
@@ -279,8 +341,15 @@ impl AircraftBuilder {
                 (name, x_inlet, z_wing + g.z_for_engine_m(engine_index))
             };
 
-            let xsecs = engine_xsecs(g, self.nacelle_v2_active(), report)?;
-            nacelles.push(Fuselage::new(name, xsecs).translate([x_inlet, y_pos, z_nacelle]));
+            let nacelle = self
+                .engine_nacelle(name, report)?
+                .translate([x_inlet, y_pos, z_nacelle]);
+            // The centreline tail engine is on the fuselage; a lateral one here is a wing pod.
+            nacelles.push(if y_pos == 0.0 {
+                nacelle.mounted_on_fuselage()
+            } else {
+                nacelle
+            });
         }
         Ok(nacelles)
     }
@@ -303,6 +372,40 @@ impl AircraftBuilder {
 mod tests {
     use super::*;
     use alas_config::GeometryConfig;
+
+    #[test]
+    fn a_rear_fuselage_engine_does_not_follow_the_wing() {
+        let mut geometry = GeometryConfig::default();
+        geometry.engine.spanwise_positions_m = vec![1.3, -1.3];
+        geometry.engine.aft_fuselage = Some(alas_config::AftFuselageEngineInstallation {
+            inlet_ahead_of_tail_m: 6.4,
+            axis_z_m: 0.7,
+        });
+        let dv = DesignVector::default();
+        let inlet = |g: &GeometryConfig, dv: &DesignVector, shape| {
+            let nacelles = AircraftBuilder::new(Some(g.clone()))
+                .build_engines(dv, shape)
+                .unwrap();
+            nacelles[0].xsecs[0].xyz_c
+        };
+        let base = inlet(&geometry, &dv, WingShape::Ground);
+        assert_eq!(base, [dv.fuselage_length_m - 6.4, 1.3, 0.7]);
+        let mut moved = dv;
+        moved.wing_x_shift_m += 1.0;
+        moved.sweep_deg += 3.0;
+        assert_eq!(inlet(&geometry, &moved, WingShape::Ground), base);
+        assert_eq!(inlet(&geometry, &dv, WingShape::Flight), base);
+        let nacelles = AircraftBuilder::new(Some(geometry.clone()))
+            .build_engines(&dv, WingShape::Ground)
+            .unwrap();
+        assert!(nacelles.iter().all(|n| n.fuselage_mounted));
+        let mut on_wing = geometry;
+        on_wing.engine.aft_fuselage = None;
+        let nacelles = AircraftBuilder::new(Some(on_wing))
+            .build_engines(&dv, WingShape::Ground)
+            .unwrap();
+        assert!(nacelles.iter().all(|n| !n.fuselage_mounted));
+    }
 
     fn a320_engine() -> EngineConfig {
         let mut g = GeometryConfig::default().engine;
@@ -336,6 +439,51 @@ mod tests {
             engine_xsecs(&g, true, &mut BuildReport::default()).unwrap(),
             engine_xsecs(&g, false, &mut BuildReport::default()).unwrap()
         );
+    }
+
+    #[test]
+    fn a_rubber_scaled_installation_keeps_the_g2_revolve_at_its_own_size() {
+        let g = a320_engine().scaled_by(1.12).unwrap();
+        let loft = engine_nacelle_loft(&g).expect("scaled catalogue outline keeps V2");
+        let v2 = engine_xsecs(&g, true, &mut BuildReport::default()).unwrap();
+        let widest = v2.iter().map(|x| x.width).fold(0.0, f64::max);
+        assert!((widest - 2.0 * g.radius_scale_m).abs() < 1e-9);
+        assert!((v2.last().unwrap().xyz_c[0] - g.nacelle_length_m()).abs() < 1e-9);
+        assert_eq!(loft.body_count(), 2);
+        // A smaller engine builds as well: the cowl stations scale with it.
+        let small = a320_engine().scaled_by(0.85).unwrap();
+        let mut report = BuildReport::default();
+        let xsecs = engine_xsecs(&small, true, &mut report).unwrap();
+        assert!(report.warnings.is_empty(), "{:?}", report.warnings);
+        assert!((xsecs.last().unwrap().xyz_c[0] - small.nacelle_length_m()).abs() < 1e-9);
+        let base = alas_config::engines::get(&small.engine_name).unwrap();
+        let shape = base.nacelle_shape_v2.as_ref().unwrap();
+        let scaled = shape.scaled(0.85f64.powf(0.4), 0.85f64.sqrt());
+        assert!(
+            (scaled.fan_cowl_length_m / shape.fan_cowl_length_m - 0.85f64.powf(0.4)).abs() < 1e-12
+        );
+        // The built loft carries the scaled fan-cowl end as a station (x measured from the
+        // inlet face); the unscaled end is a different length.
+        let fan_end = scaled.fan_cowl_length_m;
+        let station = xsecs
+            .iter()
+            .min_by(|a, b| {
+                (a.xyz_c[0] - fan_end)
+                    .abs()
+                    .total_cmp(&(b.xyz_c[0] - fan_end).abs())
+            })
+            .unwrap();
+        assert!(
+            (station.xyz_c[0] - fan_end).abs() < 1.0e-6,
+            "no station at the scaled fan cowl end {fan_end}: nearest {}",
+            station.xyz_c[0]
+        );
+        assert_eq!(shape.scaled(1.0, 1.0), *shape);
+        // Only the thrust-scale pair of length and radius is the catalogue
+        // outline: a radius edited on its own is not.
+        let mut skewed = g.clone();
+        skewed.radius_scale_m *= 1.02;
+        assert!(engine_nacelle_loft(&skewed).is_none());
     }
 
     #[test]

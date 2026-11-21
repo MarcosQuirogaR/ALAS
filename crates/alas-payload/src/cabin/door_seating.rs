@@ -25,7 +25,7 @@ use alas_config::{PassengerCabinConfig, SeatClassConfig};
 use super::fittings::{monuments_per_bay, provisioned_monuments};
 use super::seating::{seat_row_item, CabinClass};
 use super::stations::{clear_of, obstacle_length_within, seat_obstacles, MONUMENT_BAY_LENGTH_M};
-use super::{abreast_and_aisles, ceil_div, Bay, MIN_PITCH};
+use super::{abreast_and_aisles, abreast_and_aisles_in, cabin_aisles, ceil_div, Bay, MIN_PITCH};
 use crate::geometry::{CabinGeometry, DeckSpec};
 use crate::layout::DeckItem;
 use crate::numeric::round_half_even;
@@ -103,7 +103,9 @@ impl<'a> DeclaredDeck<'a> {
         aisle_w: f64,
         cap: i64,
     ) -> Self {
-        let (obstacles, door_bays) = seat_obstacles(&g.door_stations, extra_bays);
+        let (mut obstacles, door_bays) = seat_obstacles(&g.door_stations, extra_bays);
+        obstacles.extend(g.reserved_spans(deck.name));
+        obstacles.sort_by(|a, b| a.0.total_cmp(&b.0));
         Self {
             g,
             deck,
@@ -157,8 +159,22 @@ impl<'a> DeclaredDeck<'a> {
                     walk.complete = matches!(class.demand, Demand::Fill);
                     break 'classes;
                 }
-                let (abreast, aisles) =
-                    abreast_and_aisles(class.config, self.deck, self.g, self.aisle_w, x);
+                let cabin = cabin_aisles(
+                    classes.iter().map(|c| c.config),
+                    self.deck,
+                    self.g,
+                    self.aisle_w,
+                    x,
+                );
+                let (abreast, aisles) = abreast_and_aisles_in(
+                    class.config,
+                    self.deck,
+                    self.g,
+                    self.aisle_w,
+                    x,
+                    pitch,
+                    cabin,
+                );
                 let seats = abreast.min(seats_left).min(self.cap - walk.seated);
                 walk.rows.push(WalkRow {
                     class: index,
@@ -238,7 +254,7 @@ fn deck_aisles(
 ) -> i64 {
     classes
         .iter()
-        .map(|class| abreast_and_aisles(class.config, deck, g, aisle_w, x).1)
+        .map(|class| abreast_and_aisles(class.config, deck, g, aisle_w, x, class.config.pitch_m).1)
         .max()
         .unwrap_or(1)
 }

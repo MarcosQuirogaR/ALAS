@@ -21,21 +21,27 @@ use crate::full_analysis::AnalysisReport;
 
 /// The mass level cruise is checked at, kg.
 ///
-/// The mean of the analysed take-off mass and the dispatch's landing mass when
-/// the run flew a route. Without a settled dispatch (a run with the mission
-/// disabled) a report bound to a sized candidate takes the candidate's own
-/// mid-cruise mass, the mass the optimizer's `cruise_thrust` row used to
-/// accept it, so the search and the reporting verdict judge the same flight
-/// state; only a report with neither falls back to the take-off mass.
+/// The mid-cruise mass of the mission the report's cruise point belongs to
+/// (`AnalysisReport::cruise_point_mass_of_loading`: the analysed loading
+/// flown on its own fuel down to reserves, or the sized candidate's own mass)
+/// when the check analyses that loading, so the check and the reported cruise
+/// lift coefficient describe one flight state. A load case flown from another
+/// take-off mass takes the mean of its own take-off and landing masses.
+/// Without either, a report bound to a sized candidate takes the candidate's
+/// mid-cruise mass; only a report with none falls back to the take-off mass.
 pub(super) fn level_mass_kg(
     loading: &super::FuelLoadingAssessment,
     report: &AnalysisReport,
 ) -> f64 {
     let takeoff_mass_kg = loading.analyzed_takeoff_mass_kg;
-    loading
-        .analyzed_landing_mass_kg
-        .filter(|landing_kg| landing_kg.is_finite() && *landing_kg > 0.0)
-        .map(|landing_kg| 0.5 * (takeoff_mass_kg + landing_kg.min(takeoff_mass_kg)))
+    report
+        .cruise_point_mass_of_loading(takeoff_mass_kg)
+        .or_else(|| {
+            loading
+                .analyzed_landing_mass_kg
+                .filter(|landing_kg| landing_kg.is_finite() && *landing_kg > 0.0)
+                .map(|landing_kg| 0.5 * (takeoff_mass_kg + landing_kg.min(takeoff_mass_kg)))
+        })
         .or_else(|| {
             report
                 .fuel
@@ -162,6 +168,59 @@ pub(super) fn jet_level_check(
             })
         }
     }
+}
+
+/// The cruise levels the level-cruise check of the report evaluates, each with
+/// its mass, Mach and required installed sea-level-static `T/W` over the
+/// take-off weight `takeoff_mass_kg` on `wing_area_m2` of wing: the levels of
+/// the mission plan, or the single design level when no plan is carried
+/// (its mass the mid-cruise mass of the report's cruise-point mission, else
+/// the sized candidate's mid-cruise mass, else the take-off mass).
+///
+/// `None` when the deck basis is off (`performance.cruise_thrust_from_deck`)
+/// or the deck or the carried drag cannot be evaluated: the flat thrust-lapse
+/// form is then the active check. The matching chart draws its cruise line
+/// from these levels so that it passes through the requirement the check
+/// applies at the design wing loading.
+pub fn planned_levels(
+    config: &AlasConfig,
+    report: &AnalysisReport,
+    takeoff_mass_kg: f64,
+    wing_area_m2: f64,
+) -> Option<Vec<PlannedCruiseLevel>> {
+    if !config.performance.cruise_thrust_from_deck {
+        return None;
+    }
+    let req = &config.requirements;
+    let weight_n = takeoff_mass_kg * req.gravity_m_s2;
+    let level_mass_kg = report
+        .cruise_point_mass_of_loading(takeoff_mass_kg)
+        .or_else(|| {
+            report
+                .fuel
+                .sized_fuel()
+                .map(|sized| sized.mid_cruise_mass_kg)
+                .filter(|mid_kg| mid_kg.is_finite() && *mid_kg > 0.0)
+                .map(|mid_kg| mid_kg.min(takeoff_mass_kg))
+        })
+        .unwrap_or(takeoff_mass_kg);
+    let check = jet_level_check(
+        config,
+        report,
+        weight_n / wing_area_m2,
+        weight_n,
+        level_mass_kg,
+    )?;
+    Some(match check.plan {
+        Some(plan) => plan.levels,
+        None => vec![PlannedCruiseLevel {
+            altitude_m: req.cruise_altitude_m,
+            mach: req.cruise_mach,
+            isa_deviation_c: 0.0,
+            mass_kg: level_mass_kg,
+            required_tw: check.deck.level_tw,
+        }],
+    })
 }
 
 /// The level-cruise and top-of-climb thrust checks of a reported design with

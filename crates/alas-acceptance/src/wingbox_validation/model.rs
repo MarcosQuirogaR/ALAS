@@ -74,6 +74,7 @@ pub(super) fn build(name: &str) -> io::Result<Model> {
     req.mtow_kg = alas_mass::wing_reconciliation::structural_design_mass_kg(&config);
     let stations = sizing::sizing_stations(&geometry, cfg);
     let (front, rear) = sizing::box_chord_band(&geometry);
+    let fuel_density_kg_m3 = alas_mass::tanks::inventory_density_kg_m3(&config);
     let declared = alas_mass::wing_reconciliation::declared_wing_fuel_case(
         &config, design, &req, &geometry, &stations, front, rear,
     );
@@ -81,7 +82,13 @@ pub(super) fn build(name: &str) -> io::Result<Model> {
         .as_ref()
         .map(|case| case.running_mass_kg_m.clone())
         .unwrap_or_else(|| {
-            tanks::integral_fuel_running_mass_kg_m(&geometry, &stations, front, rear)
+            tanks::integral_fuel_running_mass_kg_m(
+                &geometry,
+                &stations,
+                front,
+                rear,
+                fuel_density_kg_m3,
+            )
         });
     let fuel_scope = declared
         .as_ref()
@@ -112,6 +119,7 @@ pub(super) fn build(name: &str) -> io::Result<Model> {
         cap,
         rib,
         &fuel_scope,
+        fuel_density_kg_m3,
         &mounted,
     );
     if !scoped.scope.relief_convergence.is_settled() {
@@ -205,13 +213,13 @@ fn section(
         let x1 = pair[0].chord_fraction * sizing.chord[station];
         let x2 = pair[1].chord_fraction * sizing.chord[station];
         let width = x2 - x1;
-        let cover_area = 2.0 * skin.e_pa / cap.e_pa * sizing.t_skin * width;
+        let cover_area = 2.0 * skin.e_pa / cap.e_pa * sizing.skin_at(station) * width;
         area += cover_area;
         first += cover_area * (x1 + x2) / 2.0;
         second += cover_area * (x1 * x1 + x1 * x2 + x2 * x2) / 3.0;
         enclosed += width * (pair[0].h[station] + pair[1].h[station]) / 2.0;
         torsion_compliance += 2.0 * width.hypot((pair[1].h[station] - pair[0].h[station]) / 2.0)
-            / sizing.t_skin
+            / sizing.skin_at(station)
             * cap.g_pa()
             / skin.g_pa();
     }
@@ -232,6 +240,6 @@ fn section(
 
 impl Model {
     pub(super) fn evidence(&self) -> Value {
-        json!({ "preset": self.name, "sizing_converged": self.converged, "fuel_scope": self.fuel_description, "frame": "y=span from centerline, z=up; straight unswept Euler-Bernoulli beam", "load_case": self.case.name, "load_factor": self.case.load_factor, "span_m": self.case.y, "q_net_n_m": self.case.q_net, "point_forces_n": self.point_forces, "moment_nm": self.case.moment_nm, "shear_n": self.case.shear_n, "ei_nm2": self.ei, "deflection_m": self.case.deflection_m, "sections_mks": self.sections, "cap_stress_pa": self.case.spar_stress.iter().map(|spar| &spar.stress_pa).collect::<Vec<_>>(), "E_pa": self.e, "nu": self.nu, "J_scope": "Bredt outer-cell transformed proxy; torsion is unloaded and unvalidated", "chord_m": self.sizing.chord, "t_skin_m": self.sizing.t_skin, "spars": self.sizing.spars.iter().map(|spar| json!({"chord_fraction": spar.chord_fraction, "h_m": spar.h, "w_cap_m": spar.w_cap, "t_cap_m": spar.t_cap, "t_web_m": spar.t_web})).collect::<Vec<_>>(), "materials": [self.skin, self.web, self.cap] })
+        json!({ "preset": self.name, "sizing_converged": self.converged, "fuel_scope": self.fuel_description, "frame": "y=span from centerline, z=up; straight unswept Euler-Bernoulli beam", "load_case": self.case.name, "load_factor": self.case.load_factor, "span_m": self.case.y, "q_net_n_m": self.case.q_net, "point_forces_n": self.point_forces, "moment_nm": self.case.moment_nm, "shear_n": self.case.shear_n, "ei_nm2": self.ei, "deflection_m": self.case.deflection_m, "sections_mks": self.sections, "cap_stress_pa": self.case.spar_stress.iter().map(|spar| &spar.stress_pa).collect::<Vec<_>>(), "E_pa": self.e, "nu": self.nu, "J_scope": "Bredt outer-cell transformed proxy; torsion is unloaded and unvalidated", "chord_m": self.sizing.chord, "t_skin_m": self.sizing.t_skin, "skin_gauge_m": self.sizing.skin_gauge_m, "spars": self.sizing.spars.iter().map(|spar| json!({"chord_fraction": spar.chord_fraction, "h_m": spar.h, "w_cap_m": spar.w_cap, "t_cap_m": spar.t_cap, "t_web_m": spar.t_web})).collect::<Vec<_>>(), "materials": [self.skin, self.web, self.cap] })
     }
 }

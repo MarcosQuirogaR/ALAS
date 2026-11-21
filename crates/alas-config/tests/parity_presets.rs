@@ -26,7 +26,7 @@
 //! edges (where it is zero) so every section is a flat plate, and it
 //! spends its high-fidelity budget spanwise, where the builder has already
 //! converged the discretisation. Measured in an internal VLM
-//! resolution-sensitivity study (2026-09-11) and cross-checked against
+//! resolution-sensitivity study and cross-checked against
 //! AeroSandbox on identical geometry. The frozen
 //! values stay pinned by `mesh_resolution_correction`; the product values
 //! are pinned by property in `fidelity_presets`' own unit tests.
@@ -249,6 +249,20 @@ fn compare_settings(
             continue;
         }
         let actual_value = actual.get(key).unwrap_or(&Value::Null);
+        if key == "tail_efficiency" && path.starts_with("fidelity.") {
+            // Unset in the product (the geometry's wing wake); the frozen 0.90 stays pinned.
+            comparison.exact(
+                &format!("{path}.{key}: frozen Python value"),
+                expected_value,
+                &serde_json::json!(0.90),
+            );
+            comparison.exact(
+                &format!("{path}.{key}: product value"),
+                actual_value,
+                &Value::Null,
+            );
+            continue;
+        }
         if key == "k_land" && path.starts_with("performance.") {
             // One calibrated coefficient replaces the frozen class values
             // 0.58 / 0.60 / 0.63; the frozen value stays pinned.
@@ -275,7 +289,7 @@ fn compare_settings(
                 "oei_climb_delta_cd" | "vapp_vstall_land_factor"
             )
         {
-            // Fix lane A1: handbook take-off flap increment and the
+            // Fix A1: handbook take-off flap increment and the
             // CS 25.125 VREF floor replace the frozen class values; the
             // frozen value stays pinned.
             let (frozen, product) = if key == "oei_climb_delta_cd" {
@@ -297,6 +311,24 @@ fn compare_settings(
                 &format!("{path}.{key}: product value"),
                 actual_value,
                 &serde_json::json!(product),
+            );
+            continue;
+        }
+        if key == "seed" && path.starts_with("solver.") {
+            // The frozen presets leave the seed unset (a clock seed, a
+            // different search each run). The product presets are seeded
+            // candidate plans that inherit `SolverSettings::default()`'s fixed
+            // `DEFAULT_SEED`, so a run that names no seed is reproducible.
+            // Both sides stay pinned.
+            comparison.exact(
+                &format!("{path}.{key}: frozen Python value"),
+                expected_value,
+                &Value::Null,
+            );
+            comparison.exact(
+                &format!("{path}.{key}: product value"),
+                actual_value,
+                &serde_json::json!(alas_config::DEFAULT_SEED),
             );
             continue;
         }
@@ -339,13 +371,14 @@ fn compare_settings(
             );
             continue;
         }
-        // The solver presets are wall-clock presets; the library default is
-        // the evaluation-budget stop (audit SIZ-06), so they state it off.
+        // The solver presets are seeded candidate plans that stop on their
+        // evaluation budgets, the library default, which is not
+        // serialized; the key appears only if a preset turned it off.
         if key == "stop_on_evaluations_only" && path.starts_with("solver.") {
             comparison.exact(
-                &format!("{path}.{key}: wall-clock preset"),
+                &format!("{path}.{key}: evaluation-budget preset"),
                 &actual[key],
-                &false.into(),
+                &true.into(),
             );
             continue;
         }

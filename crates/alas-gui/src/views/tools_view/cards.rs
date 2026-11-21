@@ -5,24 +5,15 @@
 
 use super::*;
 
+mod groups;
 mod openfoam;
+mod openvsp_runtime;
 
+pub(super) use groups::{aero_card, cfd_card, flight_card, structural_card};
 pub(super) use openfoam::openfoam_card;
-
-pub(super) fn routing_card(state: &mut AppState, ui: &mut Ui) {
-    card(
-        ui,
-        "Mission routing",
-        "https://www.simbrief.com/",
-        &[],
-        |ui| split_body(ui, state, simbrief_rows, local_route_rows),
-    );
-}
+use openvsp_runtime::openvsp_preview_runtime_row;
 
 fn simbrief_rows(state: &mut AppState, ui: &mut Ui) {
-    sub_heading(ui, "SimBrief flight plan").on_hover_text(tr(
-        "Optionally use your most recent filed plan before ALAS falls back to local navigation data or a great-circle route.",
-    ));
     let mut user = str_field(&state.config_values, "mission", "simbrief_username");
     if text_row(state, ui, "SimBrief username", &mut user, false, None) {
         set_str(
@@ -40,16 +31,28 @@ fn simbrief_rows(state: &mut AppState, ui: &mut Ui) {
         .and_then(|m| m.get("simbrief_timeout_s"))
         .and_then(Value::as_f64)
         .unwrap_or(15.0);
-    ui.label(RichText::new(tr("Fetch timeout")).weak());
-    if ui
-        .add_sized(
-            [ui.available_width(), ui.spacing().interact_size.y],
-            egui::DragValue::new(&mut timeout)
-                .range(1.0..=120.0)
-                .suffix(" s"),
+    let edited = field_row::grid_row(ui, "Fetch timeout", None, |ui| {
+        // The box has the width of the username field above it.
+        let spacing = ui.spacing().item_spacing.x;
+        let buttons = 2.0 * layout::picker_button_width(ui) + 2.0 * spacing;
+        let width = field_row::field_width(ui, buttons, 8.0) + 8.0;
+        ui.allocate_ui_with_layout(
+            egui::vec2(width, crate::theme::control_height(ui)),
+            egui::Layout::top_down_justified(egui::Align::Min),
+            |ui| {
+                ui.set_max_width(width);
+                ui.add(
+                    egui::DragValue::new(&mut timeout)
+                        .range(1.0..=120.0)
+                        .fixed_decimals(0)
+                        .suffix(" s"),
+                )
+            },
         )
+        .inner
         .changed()
-    {
+    });
+    if edited {
         if let Some(obj) = state
             .config_values
             .get_mut("mission")
@@ -62,11 +65,6 @@ fn simbrief_rows(state: &mut AppState, ui: &mut Ui) {
 }
 
 fn local_route_rows(state: &mut AppState, ui: &mut Ui) {
-    sub_heading(ui, "Local route data").on_hover_text(format!(
-        "{}\n\n{}",
-        tr("Navigation data and imported route files are kept in locations you choose. They are saved per user and never copied beside the application executable."),
-        tr("The Earth texture is optional: set ALAS_EARTH_TEXTURE to a local equirectangular PNG, for example a copy of the NASA Blue Marble. Without it, route figures use a plain globe."),
-    ));
     let mut navdata = str_field(&state.config_values, "mission", "navdata_dir");
     if text_row(
         state,
@@ -136,9 +134,10 @@ fn local_route_rows(state: &mut AppState, ui: &mut Ui) {
 }
 
 pub(super) fn nastran_card(state: &mut AppState, ui: &mut Ui) {
-    card(
+    tool_block(
         ui,
-        "NASTRAN",
+        Some("nastran"),
+        "MSC Nastran",
         "https://nexus.hexagon.com/home/product/msc-nastran/",
         &[],
         |ui| {
@@ -151,13 +150,24 @@ pub(super) fn nastran_card(state: &mut AppState, ui: &mut Ui) {
                 "Run NASTRAN solve",
                 "Otherwise the analytical wingbox is used.",
             );
-            split_body(ui, state, msc_nastran_rows, nastran95_rows);
+            msc_nastran_rows(state, ui);
         },
     );
 }
 
+/// The NASA NASTRAN-95 comparison solver.
+pub(super) fn nastran95_card(state: &mut AppState, ui: &mut Ui) {
+    tool_block(
+        ui,
+        Some("nastran95"),
+        "Local NASA NASTRAN-95 comparison",
+        "https://github.com/nasa/NASTRAN-95",
+        &[],
+        |ui| nastran95_rows(state, ui),
+    );
+}
+
 fn msc_nastran_rows(state: &mut AppState, ui: &mut Ui) {
-    sub_heading(ui, "MSC Nastran");
     let mut path = str_field(&state.config_values, "structures", "nastran_exe_path");
     if text_row(
         state,
@@ -199,7 +209,6 @@ fn msc_nastran_rows(state: &mut AppState, ui: &mut Ui) {
 }
 
 fn nastran95_rows(state: &mut AppState, ui: &mut Ui) {
-    sub_heading(ui, "Local NASA NASTRAN-95 comparison");
     let mut local_dir = str_field(&state.config_values, "structures", "nastran95_dir_path");
     if text_row(
         state,
@@ -302,8 +311,7 @@ fn run_toggle(
         .and_then(|g| g.get(name))
         .and_then(Value::as_bool)
         .unwrap_or(default);
-    if ui
-        .checkbox(&mut run, tr(label))
+    if crate::checkbox::checkbox(ui, &mut run, tr(label))
         .on_hover_text(tr(help))
         .changed()
     {
@@ -314,8 +322,9 @@ fn run_toggle(
 }
 
 pub(super) fn patran_card(state: &mut AppState, ui: &mut Ui) {
-    card(
+    tool_block(
         ui,
+        Some("patran"),
         "Patran",
         "https://nexus.hexagon.com/home/product/patran/",
         &[],
@@ -353,8 +362,9 @@ pub(super) fn patran_card(state: &mut AppState, ui: &mut Ui) {
 }
 
 pub(super) fn mses_card(state: &mut AppState, ui: &mut Ui) {
-    card(
+    tool_block(
         ui,
+        Some("mses"),
         "MSES",
         "https://web.mit.edu/drela/Public/web/mses/",
         &[],
@@ -387,8 +397,9 @@ pub(super) fn mses_card(state: &mut AppState, ui: &mut Ui) {
 }
 
 pub(super) fn avl_card(state: &mut AppState, ui: &mut Ui) {
-    card(
+    tool_block(
         ui,
+        Some("avl"),
         "Athena AVL",
         "https://web.mit.edu/drela/Public/web/avl/",
         &[
@@ -414,7 +425,7 @@ pub(super) fn avl_card(state: &mut AppState, ui: &mut Ui) {
 }
 
 pub(super) fn openvsp_card(state: &mut AppState, ui: &mut Ui) {
-    card(ui, "OpenVSP / VSPAERO", "https://openvsp.org/", &[
+    tool_block(ui, Some("openvsp"), "OpenVSP / VSPAERO", "https://openvsp.org/", &[
         "Native geometry export uses vspscript; VSPAERO uses its separate solver in the same installation. Both must be ready for an independent 3-D comparison.",
     ], |ui| {
         let mut path = state
@@ -439,80 +450,10 @@ pub(super) fn openvsp_card(state: &mut AppState, ui: &mut Ui) {
     });
 }
 
-/// The optional, app-local Python runtime used only for native OpenVSP
-/// screenshots after export (see `docs/openvsp-preview.md`). Separate from
-/// the install-directory row above: this never affects `vspscript` or
-/// VSPAERO analysis, and staying user-initiated keeps a fresh install from
-/// silently starting a multi-megabyte download.
-fn openvsp_preview_runtime_row(state: &mut AppState, ui: &mut Ui) {
-    sub_heading(ui, "Optional native-preview runtime")
-        .on_hover_text(tr(
-            "A separate, app-local Python runtime used only for native OpenVSP screenshots after export; it never affects vspscript or VSPAERO analysis. Setup downloads hash-pinned Python, OpenVSP Python bindings, and NumPy from their official sources and verifies each archive before extracting it. See docs/openvsp-preview.md for the exact pinned versions and licenses.",
-        ));
-    if !crate::openvsp_runtime_setup::install_supported() {
-        ui.label(
-            RichText::new(tr(
-                "Not available: the preview runtime only supports 64-bit Windows.",
-            ))
-            .weak()
-            .small(),
-        );
-        return;
-    }
-    let destination = crate::openvsp_runtime_setup::resolve_destination(
-        state.tool_preferences.openvsp_dir.as_deref(),
-    );
-    let status = crate::openvsp_runtime_setup::runtime_status(destination.as_deref());
-    ui.label(format!("{}: {}", tr("Preview runtime"), status.label()));
-    let running = state.openvsp_runtime_setup.running;
-    let installed = matches!(
-        status,
-        crate::openvsp_runtime_setup::PreviewRuntimeStatus::Installed { .. }
-    );
-    ui.horizontal(|ui| {
-        let button_label = if running {
-            tr("Setting up...")
-        } else if installed {
-            tr("Reinstall preview runtime")
-        } else {
-            tr("Install preview runtime")
-        };
-        if ui
-            .add_enabled(!running, egui::Button::new(button_label))
-            .on_hover_text(tr(
-                "Downloads and verifies the pinned archives, then atomically replaces the runtime. Cancel any time before it finishes; nothing already installed is touched until the very last step.",
-            ))
-            .clicked()
-        {
-            state.start_openvsp_runtime_setup();
-        }
-        if running {
-            let cancelling = state.openvsp_runtime_setup.is_cancelling();
-            if ui
-                .add_enabled(!cancelling, egui::Button::new(tr("Cancel")))
-                .clicked()
-            {
-                state.cancel_openvsp_runtime_setup();
-            }
-            ui.label(
-                RichText::new(state.openvsp_runtime_setup.stage.clone())
-                    .weak()
-                    .small(),
-            );
-        }
-    });
-    if let Some(error) = state.openvsp_runtime_setup.error.clone() {
-        ui.label(
-            RichText::new(error)
-                .color(ui.visuals().error_fg_color)
-                .small(),
-        );
-    }
-}
-
 pub(super) fn flowunsteady_card(state: &mut AppState, ui: &mut Ui) {
-    card(
+    tool_block(
         ui,
+        Some("flowunsteady"),
         "FLOWUnsteady / Julia",
         "https://github.com/byuflowlab/FLOWUnsteady",
         &[
@@ -540,4 +481,48 @@ pub(super) fn flowunsteady_card(state: &mut AppState, ui: &mut Ui) {
             }
         },
     );
+}
+
+#[cfg(test)]
+mod width_tests {
+    use super::*;
+
+    /// A lone value (the fetch timeout) is no wider than the grid's field
+    /// box (the username field above it), whatever the card's width.
+    #[test]
+    fn the_fetch_timeout_is_no_wider_than_a_value_box() {
+        let ctx = egui::Context::default();
+        let mut state = AppState::default();
+        let mut widest = 0.0_f32;
+        for _ in 0..2 {
+            let output = ctx.run(
+                egui::RawInput {
+                    screen_rect: Some(egui::Rect::from_min_size(
+                        egui::Pos2::ZERO,
+                        egui::vec2(1800.0, 900.0),
+                    )),
+                    ..egui::RawInput::default()
+                },
+                |ctx| {
+                    egui::CentralPanel::default().show(ctx, |ui| {
+                        simbrief_rows(&mut state, ui);
+                    });
+                },
+            );
+            widest = output
+                .shapes
+                .iter()
+                .filter_map(|clipped| match &clipped.shape {
+                    // Value boxes only, not the panel behind them.
+                    egui::Shape::Rect(rect) if rect.rect.height() < 60.0 => Some(rect.rect.width()),
+                    _ => None,
+                })
+                .fold(0.0_f32, f32::max);
+        }
+        assert!(widest > 100.0, "the boxes were drawn: {widest}");
+        assert!(
+            widest <= super::field_row::MAX_FIELD_WIDTH + 24.0,
+            "{widest}"
+        );
+    }
 }

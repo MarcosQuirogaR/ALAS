@@ -1,7 +1,7 @@
 // SPDX-License-Identifier: AGPL-3.0-or-later
 // Copyright (C) 2026 Marcos Quiroga Rodriguez
 
-//! Classical laminate theory for composite spar caps and skins (UAV-PLAN M4).
+//! Classical laminate theory for composite spar caps and skins.
 //!
 //! Standard CLT (Jones, *Mechanics of Composite Materials*, ch. 2-4):
 //! lamina stiffness `Q` in material axes, transformed to `Qbar(theta)`, summed

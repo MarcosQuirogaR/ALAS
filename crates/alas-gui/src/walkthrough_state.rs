@@ -19,6 +19,7 @@ impl AppState {
                 nav_pinned: self.nav_pinned,
                 nav_hover_open: self.nav_hover_open,
                 preview_open: self.preview_open,
+                run_log_open: self.run_log_open,
             });
         }
         self.walkthrough_step = 0;
@@ -44,6 +45,7 @@ impl AppState {
                 self.nav_hover_open = false;
             }
             Some(TourTarget::PreviewDock) => self.preview_open = true,
+            Some(TourTarget::RunLog) => self.run_log_open = true,
             _ => {}
         }
     }
@@ -57,6 +59,7 @@ impl AppState {
             self.nav_pinned = restore.nav_pinned;
             self.nav_hover_open = restore.nav_hover_open;
             self.preview_open = restore.preview_open;
+            self.run_log_open = restore.run_log_open;
         }
     }
 

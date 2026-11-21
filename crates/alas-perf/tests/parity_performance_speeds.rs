@@ -199,7 +199,21 @@ fn build_vn_diagram_matches_the_fixture() {
         );
         c.scalar(&format!("{name}: v_s_kt"), got.v_s_kt, case.expected.v_s_kt);
         c.scalar(&format!("{name}: v_a_kt"), got.v_a_kt, case.expected.v_a_kt);
-        c.scalar(&format!("{name}: v_c_kt"), got.v_c_kt, case.expected.v_c_kt);
+        // Documented divergence: the frozen fixture derives VC as VD / 1.25; the product
+        // takes the CS 25.335(b) VC of VD (`alas_config::design_speeds`), the larger of
+        // 0.8 VD and the upset-criterion inverse. The frozen relation stays pinned, and the
+        // product value is the frozen one scaled by the product's VC / (0.8 VD).
+        assert!(
+            (case.expected.v_c_kt - 0.8 * case.expected.v_d_kt).abs()
+                <= 1.0e-9 * case.expected.v_d_kt,
+            "{name}: the frozen fixture is VC = VD / 1.25"
+        );
+        let product_over_frozen = req.design_cruise_speed_eas_m_s() / (0.8 * req.dive_speed_m_s);
+        c.scalar(
+            &format!("{name}: v_c_kt"),
+            got.v_c_kt,
+            case.expected.v_c_kt * product_over_frozen,
+        );
         c.scalar(&format!("{name}: v_d_kt"), got.v_d_kt, case.expected.v_d_kt);
         c.scalar(
             &format!("{name}: v_cruise_op_kt"),

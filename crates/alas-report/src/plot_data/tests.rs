@@ -200,6 +200,31 @@ fn same_bits(a: &[f64], b: &[f64]) -> bool {
 }
 
 #[test]
+fn a_missing_value_is_empty_in_csv_and_null_in_json() {
+    let mut data = PlotData::new("masked", "Masked", None);
+    let mut panel = PlotPanel::new("x [m]", "y [m]");
+    let mut series = PlotSeries::from_xy("h", SeriesKind::Heatmap, vec![1.0, 2.0], vec![3.0, 4.0]);
+    series.z = vec![f64::NAN, 5.0];
+    panel.series.push(series);
+    data.panels.push(panel);
+    let csv = data.to_csv();
+    assert!(
+        csv.lines()
+            .filter(|l| !l.starts_with('#'))
+            .all(|l| !l.contains("NaN")),
+        "{csv}"
+    );
+    assert!(csv.contains("heatmap,0,1.0,3.0,,,,m,m,1.0,3.0,"), "{csv}");
+    let json = data.to_json();
+    assert!(!json.contains("NaN") && json.contains("null"), "{json}");
+    let from_csv = PlotData::from_csv(&csv).unwrap();
+    assert!(from_csv.panels[0].series[0].z[0].is_nan());
+    assert_eq!(from_csv.panels[0].series[0].z[1], 5.0);
+    let from_json = PlotData::from_json(&json).unwrap();
+    assert!(from_json.panels[0].series[0].z[0].is_nan());
+}
+
+#[test]
 fn json_round_trip_is_lossless() {
     let data = awkward_plot();
     let back = PlotData::from_json(&data.to_json()).unwrap();

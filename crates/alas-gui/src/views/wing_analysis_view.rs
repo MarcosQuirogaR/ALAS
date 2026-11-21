@@ -19,7 +19,7 @@ mod draw;
 #[path = "wing_analysis_view_results.rs"]
 mod results;
 #[path = "wing_analysis_view_setup.rs"]
-mod setup;
+pub(super) mod setup;
 
 #[cfg(test)]
 #[path = "wing_analysis_view_tests.rs"]
@@ -35,6 +35,11 @@ use wing_analysis::{with_window, RunPhase, WingAnalysisState, WingAnalysisTab};
 
 /// The key both the viewport and its focus command are built from.
 const WING_ANALYSIS_VIEWPORT_KEY: &str = "wing_analysis";
+
+/// Close the Wing Analysis window (the performance tour opens it per step).
+pub(crate) fn close_wing_analysis() {
+    with_window(|window| window.window_open = false);
+}
 
 /// Open the Wing Analysis window, raising it when it is already open.
 pub fn open_wing_analysis(ctx: &egui::Context) {
@@ -107,6 +112,11 @@ fn show_window_contents(state: &mut AppState, ui: &mut Ui, log: &mut Vec<(String
         ui.separator();
         show_tabs(window, ui);
         ui.add_space(6.0);
+        if window.preview_pending() {
+            // Wake up to start or collect the debounced background rebuild.
+            ui.ctx()
+                .request_repaint_after(std::time::Duration::from_millis(40));
+        }
     });
     match with_window(|window| window.tab) {
         WingAnalysisTab::Setup => setup::show_setup_tab(state, ui),

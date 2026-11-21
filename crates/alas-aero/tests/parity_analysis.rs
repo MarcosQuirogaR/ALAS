@@ -51,17 +51,46 @@
 //! corrected law, so every other digit of the closed-form arithmetic stays
 //! pinned at `Tier::Closed`.
 
+//! # The ambient state of the fixture
+//!
+//! The fixture was generated with the reference's fitted atmosphere, which
+//! differs from the U.S. Standard Atmosphere, 1976 the product evaluates by up
+//! to 1.9 % in temperature and 1.7 % in density near 11 km. The empirical
+//! buildup reads the ambient state only through the Reynolds number
+//! (`rho a / mu` per unit Mach number), and the vortex lattice through
+//! coefficients that carry no atmosphere. The tests therefore split the
+//! comparison along that line:
+//!
+//! - `parasite_drag` and `drag_components` take an explicit atmosphere, and
+//!   are driven with `support::reference_reynolds_atmosphere`, which restores
+//!   the Reynolds number the reference had at the case altitude (read from
+//!   `golden/atmo/differentiable.json`) through a pressure level and a
+//!   temperature deviation. Those comparisons are against the fixture's
+//!   parasite drag at `Tier::Closed`, with no residual.
+//! - `quick_performance`, `trimmed_performance` and `run_sweep` build their
+//!   own standard atmosphere from the altitude. Their angle, lift, induced
+//!   drag and moment are ambient-free and are compared with the fixture as
+//!   before. Their total drag and lift-to-drag ratio contain the parasite
+//!   term, so the expectation takes the fixture's value, removes the parasite
+//!   drag the buildup gives at the reference's Reynolds number, and adds the
+//!   one it gives at the standard atmosphere of the altitude: what is
+//!   compared is the induced, wave and assembly part of the sum, and the
+//!   parasite term itself is compared in the empirical test above.
+
 // This file is itself a test binary, so an unwrap or expect that fails is
 // the assertion failing.
 #![cfg_attr(test, allow(clippy::unwrap_used, clippy::expect_used))]
 
 mod support;
 
-use alas_aero::analysis::TrimPoint;
+use alas_aero::analysis::{AeroAnalysis, TrimPoint};
 use alas_config::analysis::AnalysisConfig;
 use alas_testkit::{Comparison, Tier};
 
-use support::{aero, analysis_config, build, names, or_nan, reference_mesh, Fixture};
+use support::{
+    aero, analysis_config, build, names, or_nan, reference_mesh, reference_reynolds_atmosphere,
+    Fixture,
+};
 
 /// The corrected Lock/Korn law's expectation, for a fixture generated
 /// against the superseded `20 (M - M_dd)^4` form. See the module-level "wave
@@ -92,6 +121,25 @@ fn superseded_wave_drag(kappa: f64, sweep_deg: f64, thickness: f64, mach: f64, c
     } else {
         0.0
     }
+}
+
+/// The parasite drag the buildup gives at the Reynolds number the reference's
+/// fitted atmosphere had at `altitude_m`.
+fn reference_parasite(analysis: &AeroAnalysis, mach: f64, altitude_m: f64) -> f64 {
+    analysis.parasite_drag(
+        mach,
+        altitude_m,
+        0.0,
+        Some(&reference_reynolds_atmosphere(altitude_m)),
+        None,
+    )
+}
+
+/// The parasite drag the buildup gives in the standard atmosphere of
+/// `altitude_m`, the state `quick_performance`, `trimmed_performance` and
+/// `run_sweep` evaluate.
+fn standard_parasite(analysis: &AeroAnalysis, mach: f64, altitude_m: f64) -> f64 {
+    analysis.parasite_drag(mach, altitude_m, 0.0, None, None)
 }
 
 #[test]
@@ -179,7 +227,7 @@ fn the_empirical_drag_buildup_matches_python() {
                 case.inputs.mach,
                 case.inputs.altitude,
                 case.inputs.cl,
-                None,
+                Some(&reference_reynolds_atmosphere(case.inputs.altitude)),
                 None,
             ),
             case.cd_parasite,
@@ -211,7 +259,7 @@ fn the_empirical_drag_buildup_matches_python() {
             case.inputs.altitude,
             case.inputs.cl,
             case.inputs.cd_induced,
-            None,
+            Some(&reference_reynolds_atmosphere(case.inputs.altitude)),
         );
         comparison.scalar(
             &format!("components.{name}.cd_parasite"),
@@ -278,7 +326,13 @@ fn an_aircraft_with_no_wing_falls_back_to_pythons_own_section_thickness() {
     );
     comparison.scalar(
         "cd_parasite",
-        analysis.parasite_drag(0.82, 11000.0, 0.5, None, None),
+        analysis.parasite_drag(
+            0.82,
+            11000.0,
+            0.5,
+            Some(&reference_reynolds_atmosphere(11000.0)),
+            None,
+        ),
         fixture.no_wings.cd_parasite,
     );
     comparison.finish();
@@ -324,7 +378,9 @@ fn the_vortex_lattice_fed_estimates_match_python() {
             case.inputs.mach,
             case.inputs.cl_target,
         );
-        let expected_cd = case.cd - old_wave + new_wave;
+        let expected_cd = case.cd - old_wave + new_wave
+            - reference_parasite(&analysis, case.inputs.mach, case.inputs.altitude)
+            + standard_parasite(&analysis, case.inputs.mach, case.inputs.altitude);
         comparison.scalar(
             &format!("quick.{name}.l_over_d"),
             quick.l_over_d,
@@ -366,7 +422,9 @@ fn the_vortex_lattice_fed_estimates_match_python() {
             case.inputs.mach,
             trimmed.cl,
         );
-        let expected_cd = case.cd - old_wave + new_wave;
+        let expected_cd = case.cd - old_wave + new_wave
+            - reference_parasite(&analysis, case.inputs.mach, case.inputs.altitude)
+            + standard_parasite(&analysis, case.inputs.mach, case.inputs.altitude);
         comparison.scalar(
             &format!("trimmed.{name}.l_over_d"),
             trimmed.l_over_d,
@@ -425,12 +483,24 @@ fn the_vortex_lattice_fed_estimates_match_python() {
                 corrected_wave_drag(kappa, fixture.sweep_deg, thickness, case.inputs.mach, cl)
             })
             .collect();
+        // The fixture's parasite term is the reference's own; the buildup at
+        // the reference's Reynolds number must reproduce it, and the sum is
+        // then restated with the parasite term of the standard atmosphere.
+        let standard = standard_parasite(&sweep_analysis, case.inputs.mach, case.inputs.altitude);
+        comparison.scalar(
+            &format!("sweep.{name}.cd_parasite_at_the_reference_state"),
+            reference_parasite(&sweep_analysis, case.inputs.mach, case.inputs.altitude),
+            case.cd_parasite[0],
+        );
         let corrected_cd: Vec<f64> = case
             .cd
             .iter()
             .zip(case.cd_wave.iter())
             .zip(corrected_wave.iter())
-            .map(|((total, old_wave), new_wave)| total - old_wave + new_wave)
+            .zip(case.cd_parasite.iter())
+            .map(|(((total, old_wave), new_wave), parasite)| {
+                total - old_wave + new_wave - parasite + standard
+            })
             .collect();
         let corrected_l_over_d: Vec<f64> = case
             .cl
@@ -452,7 +522,7 @@ fn the_vortex_lattice_fed_estimates_match_python() {
         comparison.slice(
             &format!("sweep.{name}.cd_parasite"),
             &polar.cd_parasite,
-            &case.cd_parasite,
+            &vec![standard; case.cd_parasite.len()],
         );
         comparison.slice(&format!("sweep.{name}.cm"), &polar.cm, &case.cm);
         comparison.slice(

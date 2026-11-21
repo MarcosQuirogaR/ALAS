@@ -1,15 +1,16 @@
 // SPDX-License-Identifier: AGPL-3.0-or-later
 // Copyright (C) 2026 Marcos Quiroga Rodriguez
 
-//! Field placement between the Modeling pages and the Advanced Settings tabs.
+//! Field placement between the Modeling pages and the Advanced sections.
 //!
 //! The schema stays authoritative for values, bounds and help; this module
 //! decides which surface of a configuration group a page renders, which
 //! fields are shown by another discipline instead (gear load limits under
 //! Structures, airfoil sections under Aerodynamics, propulsion mass factors
-//! under Advanced Settings > Propulsion, structural solver cases on Analyses)
+//! under Aircraft > Advanced > Propulsion, structural solver cases on Analyses)
 //! and which fields stay loadable but hidden.
 
+pub(super) use super::field_cache::cached_section_fields;
 use std::cell::RefCell;
 use std::collections::HashMap;
 use std::rc::Rc;
@@ -18,49 +19,11 @@ use alas_config::{Entry, Field, Node};
 use egui::{RichText, Ui};
 use serde_json::Value;
 
+use super::installation_card::render_installation_card;
 use crate::nav::{Page, PageKind, Surface};
 use crate::state::{AppState, PreviewTab};
-use crate::views::form::{dynamic_form, FormEdit};
-use crate::views::tr;
-
-/// Dotted field paths a group's Advanced Settings tab renders; the Modeling
-/// page renders the rest.
-pub(super) fn advanced_paths(group: &str) -> &'static [&'static str] {
-    match group {
-        "mass_model" => &[
-            "flops_transport",
-            "flops_structure",
-            "flops_turboprop",
-            "suspended_mass_fraction",
-            "max_airspeed_for_flaps_ms",
-            "flap_deflection_angle_deg",
-        ],
-        "structures" => &[
-            "rib_buckling_coeff",
-            "rib_radius_of_gyration_m",
-            "num_ribs_override",
-            "spanwise_stations",
-            "mesh_chordwise_points",
-            "timeout_s",
-            "n_modes",
-            "freq_sweep_max_hz",
-            "freq_step_hz",
-            "modal_damping_ratio",
-            "random_force_psd_n2_per_hz",
-        ],
-        "mission" => &[
-            "enabled",
-            "timeout_s",
-            "great_circle_points",
-            "max_airway_stretch",
-            "use_airway_endpoint_coordinates",
-            "simbrief_username",
-            "simbrief_timeout_s",
-            "simbrief_overrides_airports",
-        ],
-        _ => &[],
-    }
-}
+use crate::views::form::FormEdit;
+use crate::views::tr_label;
 
 /// Dotted field paths another page renders (or that stay hidden),
 /// so neither surface of the owning group shows them.
@@ -88,8 +51,15 @@ pub(super) fn relocated_paths(group: &str) -> &'static [&'static str] {
             "wing.root_airfoil",
             "wing.tip_airfoil",
             "empennage.tail_airfoil",
+            "empennage.vstab_airfoil",
+            // Mesh resolution: rendered with the Analyses settings.
+            "wing.n_subdivisions",
+            "empennage.n_subdivisions",
         ],
+        "analysis" => &["spanwise_resolution"],
         "mission" => &["navdata_dir", "texture_path", "routes_dir"],
+        // Stays in the JSON and the CLI; the reference text is not a GUI row.
+        "performance" => &["cl_max_to_source"],
         "optimizer" => crate::views::inputs_mtow::RELOCATED_OBJECTIVE_PATHS,
         _ => &[],
     }
@@ -120,7 +90,7 @@ thread_local! {
 /// re-cloning and re-pruning it every frame was pure overhead. The cache entry
 /// also records the schema slice's address and length, so a different schema
 /// (a new state) rebuilds instead of reusing a stale tree.
-pub(super) fn cached_visible_fields(
+pub(crate) fn cached_visible_fields(
     state: &AppState,
     page: &Page,
     group: &str,
@@ -144,27 +114,20 @@ pub(super) fn cached_visible_fields(
 }
 
 /// The fields a page shows for its group.
-pub(super) fn visible_fields(page: &Page, group: &str, fields: &[Field]) -> Vec<Field> {
+pub(crate) fn visible_fields(page: &Page, group: &str, fields: &[Field]) -> Vec<Field> {
     let fields: Vec<Field> = if group == "optimizer" {
         optimizer_ui_fields(fields)
     } else {
         fields.to_vec()
     };
     let relocated = relocated_paths(group);
-    let advanced = advanced_paths(group);
     fields
         .into_iter()
-        .filter_map(|field| prune(field, "", page.surface, relocated, advanced))
+        .filter_map(|field| prune(field, "", page.surface, relocated))
         .collect()
 }
 
-fn prune(
-    mut field: Field,
-    prefix: &str,
-    surface: Surface,
-    relocated: &[&str],
-    advanced: &[&str],
-) -> Option<Field> {
+fn prune(mut field: Field, prefix: &str, surface: Surface, relocated: &[&str]) -> Option<Field> {
     let path = if prefix.is_empty() {
         field.name.to_owned()
     } else {
@@ -173,7 +136,12 @@ fn prune(
     if relocated.contains(&path.as_str()) {
         return None;
     }
-    let is_advanced = advanced.contains(&path.as_str());
+    // Which surface a field belongs to is its schema level, not a list here.
+    let is_advanced = field.advanced;
+    if surface == Surface::Advanced {
+        // On the Advanced surface every kept row is shown, not folded away again.
+        field.advanced = false;
+    }
     let child_surface = match surface {
         Surface::All => Surface::All,
         Surface::Modeling if is_advanced => return None,
@@ -185,7 +153,7 @@ fn prune(
         let children = std::mem::take(&mut node.fields);
         node.fields = children
             .into_iter()
-            .filter_map(|child| prune(child, &path, child_surface, relocated, advanced))
+            .filter_map(|child| prune(child, &path, child_surface, relocated))
             .collect();
         if node.fields.is_empty() {
             return None;
@@ -229,6 +197,7 @@ pub(super) fn optimizer_ui_fields(fields: &[Field]) -> Vec<Field> {
                     if child.name == "seed" {
                         child.label = "Random seed";
                         child.help = "Optional integer seed for reproducible candidate generation.";
+                        child.long_help = "";
                     }
                     child
                 })
@@ -240,7 +209,7 @@ pub(super) fn optimizer_ui_fields(fields: &[Field]) -> Vec<Field> {
 }
 
 /// The schema fields of the node at a JSON pointer such as `/geometry/wing`.
-pub(super) fn node_fields_at(schema: &Node, path: &str) -> Option<Vec<Field>> {
+pub(crate) fn node_fields_at(schema: &Node, path: &str) -> Option<Vec<Field>> {
     let mut fields = &schema.fields;
     for segment in path.split('/').filter(|segment| !segment.is_empty()) {
         let field = fields.iter().find(|field| field.name == segment)?;
@@ -261,33 +230,74 @@ pub(super) fn render_extra_sections(
     lang: Option<&str>,
 ) {
     for section in page.extra {
-        let Some(fields) = node_fields_at(&state.schema, section.path) else {
-            continue;
-        };
-        let fields: Vec<Field> = fields
-            .into_iter()
-            .filter(|field| section.names.contains(&field.name))
-            .collect();
+        let identity = (
+            state.schema.fields.as_ptr() as usize,
+            state.schema.fields.len(),
+        );
+        let fields = cached_section_fields(page.id, section.title, identity, || {
+            node_fields_at(&state.schema, section.path)
+                .unwrap_or_default()
+                .into_iter()
+                .filter(|field| section.names.contains(&field.name))
+                .collect()
+        });
         if fields.is_empty() {
             continue;
         }
         let locked = section.path.starts_with("/geometry") && state.manual_geometry_locked();
         let mut edits = Vec::new();
+        // A search jump to a field of this card opens it.
+        let dotted = section
+            .path
+            .split('/')
+            .filter(|segment| !segment.is_empty())
+            .collect::<Vec<_>>()
+            .join(".");
+        let forced = section
+            .names
+            .iter()
+            .any(|name| crate::search::focus_wants(ui.ctx(), &format!("{dotted}.{name}")));
         crate::theme::card_frame(ui).show(ui, |ui| {
             ui.set_min_width(ui.available_width());
-            egui::CollapsingHeader::new(RichText::new(tr(section.title)).strong())
-                .id_salt(format!("{}::{}", page.id, section.title))
-                .default_open(true)
-                .show(ui, |ui| {
-                    if locked {
-                        preset_lock_note(ui);
+            let mut header =
+                egui::CollapsingHeader::new(crate::theme::card_title(ui, tr_label(section.title)))
+                    .id_salt(format!("{}::{}", page.id, section.title))
+                    .default_open(true)
+                    .open(crate::perf_tour::force_open());
+            if forced {
+                header = header.open(Some(true));
+            }
+            crate::theme::show_header(ui, header, |ui| {
+                if locked {
+                    super::preset_lock_row(ui);
+                }
+                crate::views::form::with_locked_editors(ui, locked, |ui| {
+                    if let Some(values) = state.config_values.pointer_mut(section.path) {
+                        let prefix: String = section
+                            .path
+                            .split('/')
+                            .filter(|segment| !segment.is_empty())
+                            .skip(1)
+                            .map(|segment| format!("::{segment}"))
+                            .collect();
+                        let root = section
+                            .path
+                            .split('/')
+                            .find(|s| !s.is_empty())
+                            .unwrap_or("");
+                        edits = crate::views::form::with_baseline_group(root, || {
+                            crate::views::form::dynamic_form_at(
+                                ui,
+                                &fields,
+                                values,
+                                error_fields,
+                                lang,
+                                &prefix,
+                            )
+                        });
                     }
-                    ui.add_enabled_ui(!locked, |ui| {
-                        if let Some(values) = state.config_values.pointer_mut(section.path) {
-                            edits = dynamic_form(ui, &fields, values, error_fields, lang, false);
-                        }
-                    });
                 });
+            });
         });
         ui.add_space(6.0);
         commit_edits(state, edits);
@@ -302,16 +312,6 @@ fn commit_edits(state: &mut AppState, edits: Vec<FormEdit>) {
     for edit in edits {
         state.note_parameter_modified(edit.label, edit.value);
     }
-}
-
-fn preset_lock_note(ui: &mut Ui) {
-    ui.label(
-        RichText::new(tr(
-            "Preset geometry is protected from manual edits here as well; open the sandbox for geometry experiments.",
-        ))
-        .color(ui.visuals().warn_fg_color)
-        .small(),
-    );
 }
 
 /// Keep the Live Preview on the discipline being edited: entering Cabin &
@@ -339,7 +339,7 @@ pub(crate) fn toggle_bool(values: &mut Value, name: &str, enabled: bool) {
 }
 
 /// The propulsion editor split by surface: Modeling shows the engine
-/// selector and the cycle assumptions; Advanced Settings shows the rating
+/// selector and the cycle assumptions; the Advanced level shows the rating
 /// and cycle anchors, installation and nacelle placement.
 pub(super) fn render_propulsion_editor(
     state: &mut AppState,
@@ -387,21 +387,25 @@ pub(super) fn render_propulsion_editor(
     edits
 }
 
-fn propulsion_cycle_fields(fields: &[Field], turboprop: bool) -> Vec<Field> {
+/// Whether the engine designer draws the cycle field `name` for a turboprop
+/// (`true`) or for a jet engine.
+pub(crate) fn propulsion_cycle_field_applies(name: &str, turboprop: bool) -> bool {
     const FAN_ONLY: &[&str] = &[
         "fan_polytropic_efficiency",
         "fan_nozzle_pressure_ratio",
         "fan_nozzle_efficiency",
     ];
+    if turboprop {
+        !FAN_ONLY.contains(&name)
+    } else {
+        !name.starts_with("turboprop_")
+    }
+}
+
+fn propulsion_cycle_fields(fields: &[Field], turboprop: bool) -> Vec<Field> {
     fields
         .iter()
-        .filter(|field| {
-            if turboprop {
-                !FAN_ONLY.contains(&field.name)
-            } else {
-                !field.name.starts_with("turboprop_")
-            }
-        })
+        .filter(|field| propulsion_cycle_field_applies(field.name, turboprop))
         .cloned()
         .map(|mut field| {
             if turboprop {
@@ -409,10 +413,12 @@ fn propulsion_cycle_fields(fields: &[Field], turboprop: bool) -> Vec<Field> {
                     "hpt_polytropic_efficiency" => {
                         field.label = "Gas-generator turbine polytropic efficiency";
                         field.help = "Aggregate turbine efficiency for work supplied to the core compressors.";
+                        field.long_help = "";
                     }
                     "lpt_polytropic_efficiency" => {
                         field.label = "Power turbine polytropic efficiency";
                         field.help = "Free-turbine efficiency for the selected engine's cruise shaft-power output.";
+                        field.long_help = "";
                     }
                     _ => {}
                 }
@@ -429,75 +435,31 @@ fn render_engine_selector(state: &mut AppState, ui: &mut Ui) {
         .and_then(Value::as_str)
         .unwrap_or("")
         .to_owned();
-    let mut chosen = None;
-    ui.horizontal_wrapped(|ui| {
-        ui.label(RichText::new(tr("Engine model")).strong());
-        chosen = crate::selector_search::named_list_combo(
-            ui,
-            "engine_designer_engine",
-            None,
-            &current_name,
-            &state.engine_names,
-            &current_name,
-        );
+    // One selector only: the Aircraft page owns the choice, so neither
+    // control can override the other. This row shows the result.
+    let mut open_aircraft = false;
+    ui.horizontal(|ui| {
+        ui.label(RichText::new(tr_label("Engine model")).strong());
+        // The engine as a value chip, the action a link at the row's far end.
+        egui::Frame::none()
+            .fill(ui.visuals().widgets.inactive.weak_bg_fill)
+            .rounding(crate::theme::SELECTABLE_CONTROL_RADIUS)
+            .inner_margin(egui::Margin::symmetric(8.0, 2.0))
+            .show(ui, |ui| ui.label(RichText::new(&current_name).monospace()));
+        ui.with_layout(egui::Layout::right_to_left(egui::Align::Center), |ui| {
+            let hint = "The engine is chosen once, on the Aircraft page; this page edits the chosen engine's parameters.";
+            let link = ui.link(tr_label("Change on the Aircraft page"));
+            open_aircraft = link.on_hover_text(tr_label(hint)).clicked();
+        });
     });
-    if let Some(name) = chosen {
-        state.set_engine(&name);
+    if open_aircraft {
+        crate::app::go_to_page(state, "inputs");
     }
-}
-
-fn render_installation_card(
-    state: &mut AppState,
-    ui: &mut Ui,
-    edits: &mut Vec<FormEdit>,
-    error_fields: &std::collections::HashSet<String>,
-    lang: Option<&str>,
-    show_help: bool,
-) {
-    let installation_names = [
-        "nacelle_profile",
-        "radius_scale_m",
-        "spanwise_positions_m",
-        "z_m",
-        "inlet_x_offset_m",
-    ];
-    let fields: Vec<Field> = alas_config::ConfigNode::schema(&alas_config::EngineConfig::default())
-        .fields
-        .into_iter()
-        .filter(|field| installation_names.contains(&field.name))
-        .collect();
-    let locked = state.manual_geometry_locked();
-    crate::theme::card_frame(ui).show(ui, |ui| {
-        ui.set_min_width(ui.available_width());
-        egui::CollapsingHeader::new(RichText::new(tr("Installation & nacelle")).strong())
-            .id_salt("propulsion::installation")
-            .default_open(true)
-            .show(ui, |ui| {
-                if locked {
-                    preset_lock_note(ui);
-                }
-                ui.add_enabled_ui(!locked, |ui| {
-                    if let Some(values) = state.config_values.pointer_mut("/geometry/engine") {
-                        edits.extend(dynamic_form(
-                            ui,
-                            &fields,
-                            values,
-                            error_fields,
-                            lang,
-                            show_help,
-                        ));
-                    }
-                });
-            });
-    });
 }
 
 #[cfg(test)]
 mod tests {
-    use super::{
-        advanced_paths, node_fields_at, relocated_paths, toggle_bool, visible_fields,
-        STRUCTURES_CASES,
-    };
+    use super::{node_fields_at, relocated_paths, toggle_bool, visible_fields, STRUCTURES_CASES};
     use crate::nav::{all_pages, page, ADVANCED_SETTINGS_PAGES, NAV};
     use alas_config::{AlasConfig, ConfigNode, Entry, Field};
 
@@ -626,7 +588,11 @@ mod tests {
                     })
             })
         });
-        hidden || case || extra
+        // The Mesh resolution card of the Analysis fidelity page.
+        let mesh = super::super::mesh_resolution::MESH_FIELDS
+            .iter()
+            .any(|(_, prefix, name)| format!("{prefix}.{name}") == format!("{group}.{leaf}"));
+        hidden || case || extra || mesh
     }
 
     #[test]
@@ -673,13 +639,16 @@ mod tests {
             }
         }
         assert!(wing.iter().any(|field| field.name == "tip_airfoil"));
-        assert!(advanced_paths("geometry").is_empty());
     }
 
     #[test]
-    fn the_advanced_window_offers_external_tools_but_not_airfoil_screening() {
+    fn the_advanced_window_leaves_external_tools_to_the_workspace_and_omits_airfoil_screening() {
         let ids: Vec<&str> = ADVANCED_SETTINGS_PAGES.iter().map(|page| page.id).collect();
-        assert!(ids.contains(&"setup_tools"));
+        assert!(!ids.contains(&"setup_tools"));
+        assert_eq!(
+            page("setup_tools").map(|p| p.kind),
+            Some(crate::nav::PageKind::Setup)
+        );
         // Airfoil Screening opens only from the top bar's Analysis menu; the
         // page stays resolvable for the guided tour.
         assert!(!ids.contains(&"airfoil_screening"));

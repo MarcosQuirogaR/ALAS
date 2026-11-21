@@ -18,23 +18,11 @@
 //! settings window or a hidden path cannot bypass it. Manual geometry
 //! experimentation belongs in the sandbox.
 
-use alas_config::{presets, GeometryConfig, DESIGN_VARIABLE_SPECS};
+use alas_config::preset_policy::protected_geometry;
+use alas_config::{presets, DESIGN_VARIABLE_SPECS};
 
 use crate::state::{AppState, LogKind};
 use crate::views::tr;
-
-/// The protected geometry: `reference` with `current`'s unprotected engine
-/// model fields carried over.
-pub fn protected_geometry(reference: &GeometryConfig, current: &GeometryConfig) -> GeometryConfig {
-    let mut protected = reference.clone();
-    let mut engine = current.engine.clone();
-    engine.spanwise_positions_m = reference.engine.spanwise_positions_m.clone();
-    engine.z_m = reference.engine.z_m;
-    engine.z_per_engine_m = reference.engine.z_per_engine_m.clone();
-    engine.inlet_x_offset_m = reference.engine.inlet_x_offset_m;
-    protected.engine = engine;
-    protected
-}
 
 impl AppState {
     /// Whether manual geometry edits are locked for the active case: a
@@ -67,6 +55,7 @@ impl AppState {
         if config.geometry != protected {
             config.geometry = protected;
             self.config_values = crate::config_edit::full_config_values(&config);
+            self.bump_config_revision();
             restored = true;
         }
         if let Ok(design) = serde_json::to_value(preset.design_vector) {
@@ -115,6 +104,21 @@ mod tests {
             .logs
             .iter()
             .any(|line| line.kind == LogKind::Warn && line.text.contains("protected")));
+    }
+
+    #[test]
+    fn a_protected_installation_keeps_every_field_that_places_the_engines() {
+        let reference = presets::get("LJ60").expect("LJ60").geometry.clone();
+        let mut current = presets::get("A320-200").expect("A320").geometry.clone();
+        current.engine.inlet_x_per_engine_m = vec![1.0, 2.0];
+        let protected = protected_geometry(&reference, &current);
+        assert_eq!(protected.engine.aft_fuselage, reference.engine.aft_fuselage);
+        assert!(protected.engine.aft_fuselage.is_some());
+        assert_eq!(
+            protected.engine.inlet_x_per_engine_m,
+            reference.engine.inlet_x_per_engine_m
+        );
+        assert_eq!(protected.engine.engine_name, current.engine.engine_name);
     }
 
     #[test]

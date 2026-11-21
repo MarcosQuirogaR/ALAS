@@ -1,7 +1,7 @@
 // SPDX-License-Identifier: AGPL-3.0-or-later
 // Copyright (C) 2026 Marcos Quiroga Rodriguez
 
-//! Who owns which cargo mass (clarified ledger App Features 2, decision D10).
+//! Who owns which cargo mass.
 //!
 //! Three different quantities share the word "cargo" in a freighter study and
 //! the requirement is that they stay three:

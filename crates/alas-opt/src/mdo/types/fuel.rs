@@ -15,7 +15,7 @@ use crate::mdo::mission_model::{CruiseDrag, FrozenMissionPlan, ParabolicPolar, S
 ///
 /// Coefficients are dimensionless on the candidate's `Airplane::s_ref`;
 /// altitudes m (ISA geometric).
-#[derive(Debug, Clone, PartialEq)]
+#[derive(serde::Serialize, serde::Deserialize, Debug, Clone, PartialEq)]
 pub enum CandidateDrag {
     /// The trimmed `CD(CL, M, h)` table of a natively trimmed candidate.
     Table(Arc<TrimmedDragTable>),
@@ -45,14 +45,16 @@ impl CandidateDrag {
     /// Drag at the actual US1976 atmosphere of an airport (take-off or
     /// landing) condition before the configuration increment: as
     /// [`Self::cd_at_atmosphere`] without the lift-dependent viscous term,
-    /// which belongs to the clean polar only (Torenbeek 2013, p. 96). At
-    /// `cl = 0` the two are equal.
+    /// which belongs to the clean polar only (Torenbeek 2013, p. 96), and with
+    /// the upsweep at the attitude of a configuration whose devices add
+    /// `flap_lift_cl` at constant angle of attack (zero for a clean one).
     pub fn cd_airport_base_at_atmosphere(
         &self,
         cl: f64,
         mach: f64,
         altitude_m: f64,
         isa_deviation_c: f64,
+        flap_lift_cl: f64,
     ) -> f64 {
         match self {
             Self::Table(table) => {
@@ -60,7 +62,12 @@ impl CandidateDrag {
                 let reynolds_per_m =
                     atmosphere.density_kg_m3 * mach * atmosphere.speed_of_sound_m_s
                         / atmosphere.dynamic_viscosity_pa_s;
-                table.cd_without_lift_viscous_at_reynolds_per_m(cl, mach, reynolds_per_m)
+                table.cd_without_lift_viscous_at_reynolds_per_m(
+                    cl,
+                    mach,
+                    reynolds_per_m,
+                    flap_lift_cl,
+                )
             }
             Self::External(polar) => polar.cd(cl, mach, altitude_m),
         }
@@ -120,7 +127,7 @@ impl CandidateDrag {
 /// What rebuilds a candidate's propulsion deck:
 /// `mdo::propulsion::PropulsionDeck::from_engine` on the candidate's
 /// `geometry.engine` at this reference point.
-#[derive(Debug, Clone, PartialEq)]
+#[derive(serde::Serialize, serde::Deserialize, Debug, Clone, PartialEq)]
 pub struct DeckKey {
     /// Engine name and model identity (`PropulsionDeck::identity`).
     pub identity: String,
@@ -135,7 +142,7 @@ pub struct DeckKey {
 /// Everything a downstream consumer needs to fly the candidate's missions
 /// on the same aircraft the sizing closure flew, without re-trimming or
 /// re-sizing it.
-#[derive(Debug, Clone, PartialEq)]
+#[derive(serde::Serialize, serde::Deserialize, Debug, Clone, PartialEq)]
 pub struct CandidateFuelArtifacts {
     /// The cruise drag of the converged trim.
     pub drag: CandidateDrag,
@@ -149,12 +156,25 @@ pub struct CandidateFuelArtifacts {
     pub frozen_plan: Option<FrozenMissionPlan>,
     /// The empennage scales the geometry was built with.
     pub tail_sizing: TailSizing,
+    /// The station of the centre of gravity, m (geometry axes), `drag` was
+    /// trimmed at: where the tail load, and with it the trimmed induced drag,
+    /// is the table's own. A leg flown with the centre of gravity elsewhere
+    /// pays the difference ([`crate::mdo::CgTrimDrag`]).
+    pub trim_cg_x_m: f64,
     /// The geometry-scaled maximum lift coefficients the closure flew with,
     /// None when the candidate keeps the configuration's declared values
     /// (the registered geometry, or the model switched off). Every consumer
     /// that re-flies or reports the candidate reads its coefficients through
     /// [Self::config_with_clmax] so the report and the sizing agree (AERL-01).
     pub clmax: Option<alas_perf::performance::clmax::ClmaxSet>,
+    /// The jump of the takeoff-mass map the closure met, and whether the
+    /// held mission plan settled it, for the report to state.
+    pub sizing_map_jump: Option<crate::mdo::SizingMapJump>,
+    /// The wing's buffet-onset lift coefficient at the cruise Mach the
+    /// closure's level selection was bounded by
+    /// ([`crate::mdo::SegmentMissionModel::with_buffet_onset_cl`]); `None`
+    /// for no buffet bound.
+    pub buffet_onset_cl: Option<f64>,
 }
 
 impl CandidateFuelArtifacts {
@@ -205,4 +225,32 @@ pub struct SizingControls {
     /// clean-CL endpoints and cruise check before refining failed cells.
     /// Reported candidates use the full set of independent interior checks.
     pub screening_drag_table: bool,
+    /// Factor on the selected engine a clean-sheet engine sizing starts
+    /// from instead of one: the search's deterministic start, the median
+    /// required factor of its first calibration (`SearchDiagnostics::
+    /// engine_start`), which its later analyses and the replays of its
+    /// finalists take (`engine::sizing`). `None` starts from the selected
+    /// engine, as the delivery guard's replay does.
+    pub initial_engine_factor: Option<f64>,
+    /// Relative distance from its aim within which a clean-sheet engine
+    /// sizing stops (`engine::sizing`); `None`, as on every replayed and
+    /// reported analysis, keeps the tight default that makes the sized
+    /// engine independent of the start. A search model may stop wider.
+    pub engine_aim_band: Option<f64>,
+    /// Slope of a clean-sheet engine sizing's map from the installed to the
+    /// aimed factor (`engine::sizing`) that its first update takes as known:
+    /// a Newton step on a measured slope in place of the plain fixed-point
+    /// update. The search's start, the median of the slopes its first
+    /// calibration measured (`SearchDiagnostics::engine_slope`). It moves no
+    /// root: the sizing still stops only inside its aim band. `None` takes
+    /// the plain update.
+    pub initial_engine_slope: Option<f64>,
+    /// A search model holds an engine its run sizes (the exploration
+    /// model's held engine, `ScreeningFidelity::held_engine`): its closure
+    /// reports `engine_scale_validity` as a hard row on the scale the sizing
+    /// would aim at on this airframe (the held catalogue scale times the
+    /// requirement ratio, raised by half the match tolerance), so a candidate
+    /// whose sized engine falls outside the rating window is refused by the
+    /// model that ranks it, not first by the refinement model.
+    pub predicts_engine_scale: bool,
 }

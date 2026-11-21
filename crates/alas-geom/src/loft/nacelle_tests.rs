@@ -9,7 +9,7 @@ use std::sync::OnceLock;
 
 use alas_config::engines::NacelleShapeV2;
 
-use super::nacelle::{Body, NacelleBodyKind, NacelleError, NacelleLoft};
+use super::nacelle::{Body, NacelleError, NacelleLoft};
 use super::nacelle_pieces::Piece;
 use super::Section;
 
@@ -28,6 +28,9 @@ fn a320() -> NacelleShapeV2 {
         plug_tip_radius_m: 0.0408,
         ellipticity: 1.0,
         droop_m: 0.0,
+        core_start_radius_ratio: None,
+        plug_start_radius_ratio: None,
+        axis_pitch_deg: None,
         provenance: Vec::new(),
     }
 }
@@ -41,11 +44,7 @@ fn custom(pieces: Vec<Piece>, ellipticity: f64) -> NacelleLoft {
     let mut shape = a320();
     shape.ellipticity = ellipticity;
     let mut loft = NacelleLoft::new(&shape, 5.05, 1.02).unwrap();
-    loft.bodies = vec![Body {
-        kind: NacelleBodyKind::FanCowl,
-        pieces,
-        rising: 0,
-    }];
+    loft.bodies = vec![Body { pieces, rising: 0 }];
     loft.integrals = OnceLock::new();
     loft
 }
@@ -262,6 +261,9 @@ fn the_dc10_pod_is_a_single_body_of_the_stated_size_in_the_same_family() {
             (11.9, 1.0),
             (14.15, 0.25),
         ],
+        nozzle_aft_of_fuselage_m: 0.0,
+        struts: Vec::new(),
+        fin_aft_fairing: None,
     };
     let loft = crate::builder::centre_pod_nacelle_loft(&pod).expect("pod in the family");
     assert_eq!(loft.body_count(), 1);

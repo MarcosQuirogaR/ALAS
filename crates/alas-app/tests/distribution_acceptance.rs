@@ -150,6 +150,12 @@ fn run(package: &IsolatedPackage, args: &[&str]) -> Output {
         .expect("packaged executable starts")
 }
 
+/// A run that finished: exit 0 (accepted design) or 3 (completed, no accepted
+/// design). Any other code is a crash or a usage error.
+fn completed(output: &Output) -> bool {
+    matches!(output.status.code(), Some(0 | 3))
+}
+
 fn output_text(output: &Output) -> String {
     format!(
         "{}\n{}",
@@ -376,7 +382,7 @@ fn packaged_no_mission_runs_every_shipped_aircraft_preset() {
             ],
         );
         assert!(
-            output.status.success(),
+            completed(&output),
             "packaged no-mission run failed for {preset}: {}",
             output_text(&output)
         );
@@ -422,7 +428,7 @@ fn packaged_plot_manifest_covers_every_registered_result_figure() {
     );
 
     assert!(
-        output.status.success(),
+        completed(&output),
         "packaged plot export failed: {}",
         output_text(&output)
     );
@@ -501,7 +507,7 @@ fn packaged_mission_enabled_path_completes_for_every_shipped_preset() {
         );
 
         assert!(
-            output.status.success(),
+            completed(&output),
             "packaged mission-enabled run failed for {preset}: {}",
             output_text(&output)
         );
@@ -540,7 +546,7 @@ fn packaged_missing_tool_path_reports_unavailability_without_aborting_the_run() 
         ],
     );
 
-    assert!(output.status.success(), "{}", output_text(&output));
+    assert!(completed(&output), "{}", output_text(&output));
     let text = output_text(&output);
     assert!(text.contains("MSES analysis: absent"), "{text}");
     assert!(text.contains("not configured"), "{text}");
@@ -574,7 +580,7 @@ fn packaged_adjacent_and_configured_tool_paths_are_resolved_from_the_install() {
         ],
     );
     assert!(
-        adjacent_output.status.success(),
+        completed(&adjacent_output),
         "{}",
         output_text(&adjacent_output)
     );
@@ -603,6 +609,9 @@ fn packaged_adjacent_and_configured_tool_paths_are_resolved_from_the_install() {
             configured_config
                 .to_str()
                 .expect("config path is valid UTF-8"),
+            // A config file's program locations run only on this opt-in;
+            // without it they are ignored and the tool preferences apply.
+            "--trust-config-tool-paths",
             "--no-optimize",
             "--no-baseline",
             "--no-parallel",
@@ -614,7 +623,7 @@ fn packaged_adjacent_and_configured_tool_paths_are_resolved_from_the_install() {
         ],
     );
     assert!(
-        configured_output.status.success(),
+        completed(&configured_output),
         "{}",
         output_text(&configured_output)
     );

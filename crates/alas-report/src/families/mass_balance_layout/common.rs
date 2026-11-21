@@ -55,7 +55,23 @@ pub(super) fn draw_hbar(
     });
 }
 
-/// Two centered, stacked text lines (name + value) inside a bar segment.
+/// Label ink for a bar segment: white or near-black, whichever contrasts more
+/// with the segment `fill`, so a light neutral bar is as legible as a
+/// saturated one.
+pub(super) fn bar_label_ink(fill: Color) -> Color {
+    let white = Color::rgb(255, 255, 255);
+    let dark = Color::rgb(24, 24, 24);
+    if white.contrast_against(fill) >= dark.contrast_against(fill) {
+        white
+    } else {
+        dark
+    }
+}
+
+/// Two centered, stacked text lines (name + value) inside a bar segment
+/// filled with `fill`.
+// Bar geometry, two text lines, font and fill are all independent inputs.
+#[allow(clippy::too_many_arguments)]
 pub(super) fn bar_label(
     scene: &mut Scene,
     axes: &Axes2D,
@@ -64,13 +80,18 @@ pub(super) fn bar_label(
     line1: &str,
     line2: &str,
     font: f64,
+    fill: Color,
 ) {
     let center = axes.map_point(cx, row);
+    let ink = bar_label_ink(fill);
+    // Font sizes are points, the scene is in pixels: the two lines are one rendered line height
+    // apart, centered on the bar, so they cannot touch at any font size.
+    let pitch = font * crate::scene::CSS_PIXELS_PER_POINT * 1.2;
     scene.add(SceneElement::Text {
         text: line1.to_owned(),
-        pos: [center[0], center[1] - font * 0.55],
+        pos: [center[0], center[1] - pitch * 0.5],
         font_size: font,
-        color: Color::rgb(255, 255, 255),
+        color: ink,
         align: TextAlign::Center,
         baseline: TextBaseline::Middle,
         angle_deg: 0.0,
@@ -78,9 +99,9 @@ pub(super) fn bar_label(
     });
     scene.add(SceneElement::Text {
         text: line2.to_owned(),
-        pos: [center[0], center[1] + font * 0.65],
+        pos: [center[0], center[1] + pitch * 0.5],
         font_size: font,
-        color: Color::rgb(255, 255, 255),
+        color: ink,
         align: TextAlign::Center,
         baseline: TextBaseline::Middle,
         angle_deg: 0.0,

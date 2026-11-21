@@ -1,7 +1,7 @@
 // SPDX-License-Identifier: AGPL-3.0-or-later
 // Copyright (C) 2026 Marcos Quiroga Rodriguez
 
-//! The cruise-altitude thrust residuals from the engine deck (FLD-11, SIZ-08).
+//! The cruise-altitude thrust residuals from the engine deck.
 //!
 //! The flat `performance.thrust_lapse` ratio (0.235 by default, one constant
 //! for every engine and cruise point) is replaced by the ratio the deck
@@ -34,7 +34,7 @@
 //! (Torenbeek 2013, Eq. 9.3) paired with an altitude that is not the initial
 //! level: a conservative choice that failed the long-range aircraft by the
 //! burned fuel (3-12 % of the take-off mass) rather than by a thrust deficit
-//! (fix-deck-altitude-2026-10-12). The top-of-climb row stays at the
+//! (deck-altitude). The top-of-climb row stays at the
 //! top-of-climb mass at maximum climb. A deck that cannot be evaluated is an
 //! evidence gap, never a silent return to the flat lapse.
 
@@ -296,32 +296,74 @@ pub fn deck_cruise_requirements(
         drag,
         req.gravity_m_s2,
         (req.cruise_altitude_m, req.cruise_mach, 0.0),
+        CruiseDay::design(req.cruise_altitude_m, req.gravity_m_s2),
         (takeoff_mass_kg, level_mass_kg),
         s_ref_m2,
     )
 }
 
-/// Density and speed of sound at `altitude_m` on a day `isa_deviation_c` from
-/// ISA (the plain ISA atmosphere at zero deviation).
-pub(super) fn ambient(altitude_m: f64, isa_deviation_c: f64) -> (f64, f64) {
-    if isa_deviation_c == 0.0 {
+/// The air and the gravity one cruise point is evaluated in: the density and
+/// speed of sound behind the lift coefficient and the Mach, and the gravity
+/// that weighs the aircraft in level flight (`L = m g`).
+#[derive(Debug, Clone, Copy, PartialEq)]
+pub(super) struct CruiseDay {
+    density_kg_m3: f64,
+    speed_of_sound_m_s: f64,
+    lift_gravity_m_s2: f64,
+}
+
+impl CruiseDay {
+    /// The design-level point of the requirements: the standard atmosphere
+    /// on a standard day and the surface gravity `gravity_m_s2`.
+    pub(super) fn design(altitude_m: f64, gravity_m_s2: f64) -> Self {
         let atmosphere = alas_atmo::Atmosphere::new(altitude_m);
-        (atmosphere.density(), atmosphere.speed_of_sound())
-    } else {
+        Self {
+            density_kg_m3: atmosphere.density(),
+            speed_of_sound_m_s: atmosphere.speed_of_sound(),
+            lift_gravity_m_s2: gravity_m_s2,
+        }
+    }
+
+    /// A state the mission flies: the US Standard Atmosphere 1976 plus the
+    /// mission's temperature deviation and the gravity at the altitude, the
+    /// air and weight the mission integrator and its max-cruise-thrust
+    /// ceiling evaluate (`PropulsionDeck::flight_condition`,
+    /// `SegmentMissionModel::gravity_at`). It differs from [`Self::design`]
+    /// by the temperature deviation and the gravity only: both read the
+    /// same atmosphere model, so a true airspeed is the same Mach in both.
+    pub(super) fn mission(altitude_m: f64, isa_deviation_c: f64, gravity_m_s2: f64) -> Self {
         let day = alas_atmo::us1976_compute_values(altitude_m, isa_deviation_c);
-        (day.density_kg_m3, day.speed_of_sound_m_s)
+        Self {
+            density_kg_m3: day.density_kg_m3,
+            speed_of_sound_m_s: day.speed_of_sound_m_s,
+            lift_gravity_m_s2: crate::mdo::mission_model::gravity_at_altitude(
+                gravity_m_s2,
+                altitude_m,
+            ),
+        }
+    }
+
+    /// Speed of sound, m/s.
+    pub(super) fn speed_of_sound_m_s(&self) -> f64 {
+        self.speed_of_sound_m_s
     }
 }
 
 /// [`deck_cruise_requirements`] at the cruise point `(altitude_m, mach,
-/// isa_deviation_c)`: the day the mission flies (ISA plus the departure
-/// airport's deviation), for the density and speed of sound behind the lift
-/// coefficient, the Mach of the drag and the deck's thrust.
+/// isa_deviation_c)` in the air and gravity of `day`: the day the mission
+/// flies (ISA plus the departure airport's deviation) for the density and
+/// speed of sound behind the lift coefficient, the Mach of the drag and the
+/// deck's thrust. The requirement stays on the installed sea-level-static
+/// `T/W` axis, `W = m_TO g0` with `g0 = gravity_m_s2`: the level-flight thrust
+/// is `D = (CD / CL) m g_day`, so its share of that weight carries
+/// `g_day / g0` (exactly 1 on the design day).
+#[allow(clippy::too_many_arguments)] // one cruise point, read once
 pub(super) fn deck_cruise_at(
     model: &EngineOutModel,
     drag: &CandidateDrag,
     gravity_m_s2: f64,
     (altitude_m, mach, isa_deviation_c): (f64, f64, f64),
+    day: CruiseDay,
     (takeoff_mass_kg, level_mass_kg): (f64, f64),
     s_ref_m2: f64,
 ) -> Result<DeckCruiseRequirements, String> {
@@ -332,10 +374,10 @@ pub(super) fn deck_cruise_at(
     } else {
         takeoff_mass_kg
     };
-    let (density_kg_m3, speed_of_sound_m_s) = ambient(altitude_m, isa_deviation_c);
-    let tas_m_s = mach * speed_of_sound_m_s;
-    let q_pa = 0.5 * density_kg_m3 * tas_m_s * tas_m_s;
-    let weight_n = takeoff_mass_kg * gravity_m_s2;
+    let tas_m_s = mach * day.speed_of_sound_m_s;
+    let q_pa = 0.5 * day.density_kg_m3 * tas_m_s * tas_m_s;
+    let weight_n = takeoff_mass_kg * day.lift_gravity_m_s2;
+    let gravity_ratio = day.lift_gravity_m_s2 / gravity_m_s2;
     let cl = weight_n / (s_ref_m2 * q_pa);
     if !(cl.is_finite() && cl > 0.0) {
         return Err("cruise lift coefficient is not usable".to_owned());
@@ -356,7 +398,7 @@ pub(super) fn deck_cruise_at(
     let drag_over_weight_toc = drag.cd(cl_toc, mach, altitude_m) / cl_toc;
     let level_tw = required_sls_tw_level(
         drag_over_weight,
-        level_mass_kg / takeoff_mass_kg,
+        level_mass_kg / takeoff_mass_kg * gravity_ratio,
         cruise_thrust_ratio,
     )
     .ok_or_else(|| "level-flight requirement is not usable".to_owned())?;
@@ -364,7 +406,7 @@ pub(super) fn deck_cruise_at(
         drag_over_weight_toc,
         TOC_RESIDUAL_CLIMB_M_S,
         tas_m_s,
-        TOC_MASS_FRACTION,
+        TOC_MASS_FRACTION * gravity_ratio,
         thrust_ratio,
     )
     .ok_or_else(|| "top-of-climb requirement is not usable".to_owned())?;

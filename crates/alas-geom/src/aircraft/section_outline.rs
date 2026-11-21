@@ -33,44 +33,69 @@ impl Wing {
     /// Returns an empty vector when the wing has fewer than two
     /// cross-sections, which is not a loftable wing.
     pub fn section_outline(&self, index: usize, max_points: Option<usize>) -> Vec<[f64; 3]> {
+        self.outline_and_leading_edge(index, max_points).0
+    }
+
+    /// [`Self::section_outline`] and the position of the leading edge in it.
+    fn outline_and_leading_edge(
+        &self,
+        index: usize,
+        max_points: Option<usize>,
+    ) -> (Vec<[f64; 3]>, usize) {
         if self.xsecs.len() < 2 || index >= self.xsecs.len() {
-            return Vec::new();
+            return (Vec::new(), 0);
         }
         let airfoil = &self.xsecs[index].airfoil;
         let coordinates = &airfoil.coordinates;
         if coordinates.is_empty() {
-            return Vec::new();
+            return (Vec::new(), 0);
         }
         let le = airfoil.le_index();
         let keep = decimation_indices(coordinates.len(), le, max_points);
-        keep.into_iter()
+        let le_position = keep.iter().position(|&i| i == le).unwrap_or(0);
+        let outline = keep
+            .into_iter()
             .map(|i| {
                 let (x_over_c, z_over_c) = coordinates[i];
                 self.xyz_of_xsec(index, x_over_c, z_over_c)
             })
-            .collect()
+            .collect();
+        (outline, le_position)
     }
 
     /// Every cross-section outline, root to tip, with the same point count
     /// per section so consecutive outlines can be joined into a surface.
     ///
-    /// The per-section count is the smallest decimated count over all
-    /// sections, which keeps neighbouring sections index-aligned even when
-    /// their stored airfoils have different resolutions.
+    /// Each surface takes the smallest decimated count over all sections, so
+    /// neighbouring sections stay index-aligned even when their stored
+    /// airfoils have different resolutions, and the leading edge of every
+    /// section survives at one index.
     pub fn section_outlines(&self, max_points: Option<usize>) -> Vec<Vec<[f64; 3]>> {
         if self.xsecs.len() < 2 {
             return Vec::new();
         }
-        let per_section: Vec<Vec<[f64; 3]>> = (0..self.xsecs.len())
-            .map(|index| self.section_outline(index, max_points))
+        let per_section: Vec<(Vec<[f64; 3]>, usize)> = (0..self.xsecs.len())
+            .map(|index| self.outline_and_leading_edge(index, max_points))
             .collect();
-        let count = per_section.iter().map(Vec::len).min().unwrap_or(0);
-        if count < 3 {
-            return per_section;
+        let upper = per_section.iter().map(|(_, le)| le + 1).min().unwrap_or(0);
+        let lower = per_section
+            .iter()
+            .map(|(outline, le)| outline.len().saturating_sub(*le))
+            .min()
+            .unwrap_or(0);
+        if upper < 2 || lower < 2 {
+            return per_section
+                .into_iter()
+                .map(|(outline, _)| outline)
+                .collect();
         }
         per_section
             .into_iter()
-            .map(|outline| resample_by_index(&outline, count))
+            .map(|(outline, le)| {
+                let mut aligned = resample_by_index(&outline[..=le], upper);
+                aligned.extend(resample_by_index(&outline[le..], lower).into_iter().skip(1));
+                aligned
+            })
             .collect()
     }
 }
@@ -211,6 +236,49 @@ mod tests {
         let outlines = wing.section_outlines(Some(30));
         assert_eq!(outlines.len(), 2);
         assert_eq!(outlines[0].len(), outlines[1].len());
+    }
+
+    #[test]
+    fn aligned_outlines_of_unequal_airfoils_keep_every_leading_edge_at_one_index() {
+        let fine = Airfoil::from_name("naca2418").expect("closed-form NACA section");
+        // Every second point of the same section, leading edge included.
+        let le = fine.le_index();
+        let coarse = Airfoil::from_coordinates(
+            "coarse",
+            fine.coordinates
+                .iter()
+                .enumerate()
+                .filter(|(i, _)| (*i as i64 - le as i64) % 2 == 0)
+                .map(|(_, &point)| point)
+                .collect(),
+        );
+        let wing = Wing::new(
+            "Test",
+            vec![
+                WingXSec::new([0.0, 0.0, 0.0], 3.0, 0.0, fine),
+                WingXSec::new([1.0, 10.0, 0.0], 1.0, 0.0, coarse),
+            ],
+            true,
+        );
+        let outlines = wing.section_outlines(Some(80));
+        assert_eq!(outlines[0].len(), outlines[1].len());
+        let forward = |outline: &[[f64; 3]]| {
+            outline
+                .iter()
+                .enumerate()
+                .fold((0, f64::INFINITY), |best, (i, p)| {
+                    if p[0] < best.1 {
+                        (i, p[0])
+                    } else {
+                        best
+                    }
+                })
+        };
+        let (root_index, root_x) = forward(&outlines[0]);
+        let (tip_index, tip_x) = forward(&outlines[1]);
+        assert_eq!(root_index, tip_index);
+        assert!(root_x.abs() < 1e-3, "root leading edge at {root_x}");
+        assert!((tip_x - 1.0).abs() < 1e-3, "tip leading edge at {tip_x}");
     }
 
     #[test]

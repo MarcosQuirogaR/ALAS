@@ -36,10 +36,10 @@ const CRUISE_BLUE: &str = "tab:blue";
 pub fn figure_vn_diagram(vn: &VnDiagramData, theme: Option<&str>) -> Scene {
     let pal = get_palette(theme);
     let mut scene = Scene::new(640.0, 460.0, Some(Color::from_hex(pal.bg)));
-    scene.title = Some("V-n Flight Envelope (EAS [kt] vs Load Factor)".to_owned());
+    scene.title = Some("Manoeuvre envelope (EAS [kt] vs load factor)".to_owned());
     draw_title(
         &mut scene,
-        "V-n Flight Envelope (EAS [kt] vs Load Factor)",
+        "Manoeuvre envelope (EAS [kt] vs load factor)",
         pal,
     );
     scene.suppress_derived_title();
@@ -198,6 +198,20 @@ pub fn figure_vn_diagram(vn: &VnDiagramData, theme: Option<&str>) -> Scene {
 
     draw_markers(&mut scene, &axes, vn, pal.title);
 
+    // An invalid speed ordering is flagged over the plot, never hidden.
+    if vn.validate_speed_order().is_err() {
+        scene.add(SceneElement::Text {
+            text: "INVALID".to_owned(),
+            pos: [axes.left + 0.5 * axes.width, axes.top + 0.80 * axes.height],
+            font_size: 56.0,
+            color: Color::rgba(RED.0, RED.1, RED.2, 90),
+            align: TextAlign::Center,
+            baseline: TextBaseline::Middle,
+            angle_deg: -20.0,
+            bold: true,
+        });
+    }
+
     scene
 }
 
@@ -293,14 +307,21 @@ fn draw_markers(scene: &mut Scene, axes: &Axes2D, vn: &VnDiagramData, label_fg: 
 
     let va = axes.map_point(vn.v_a_kt, vn.n_lim_pos);
     scene.add(dot(va, black));
-    two_line_label(
+    // The label sits above the ultimate-load line, clear of the filled bands.
+    let va_label = axes.map_point(vn.v_a_kt, vn.n_ult_pos);
+    let vd_px = axes.map_point(vn.v_d_kt, vn.n_ult_pos);
+    // VA and VD stand on the same ultimate-load line: stagger VA when close.
+    let va_label = if (vd_px[0] - va_label[0]).abs() < 110.0 {
+        [va_label[0], va_label[1] - 13.0]
+    } else {
+        va_label
+    };
+    label_above(
         scene,
-        va,
-        (0.0, 10.0),
+        va_label,
         TextAlign::Center,
         fg,
-        "VA",
-        &format!("{:.0} kt", vn.v_a_kt),
+        &format!("VA {:.0} kt", vn.v_a_kt),
     );
 
     let vs = axes.map_point(vn.v_s_kt, 1.0);
@@ -316,16 +337,29 @@ fn draw_markers(scene: &mut Scene, axes: &Axes2D, vn: &VnDiagramData, label_fg: 
     );
 
     let vd = axes.map_point(vn.v_d_kt, vn.n_ult_pos);
-    let vd_color = Color::rgb(192, 57, 43);
-    two_line_label(
+    // Light red: the deep red this label used sinks into the never-exceed
+    // band it overlaps on the dark theme.
+    let vd_color = Color::rgb(255, 150, 130);
+    label_above(
         scene,
         vd,
-        (-6.0, 6.0),
         TextAlign::Right,
         vd_color,
-        "VD",
-        &format!("{:.0} kt", vn.v_d_kt),
+        &format!("VD {:.0} kt", vn.v_d_kt),
     );
+
+    // VC bounds the normal/caution bands; its line was drawn but not named.
+    let vc = axes.map_point(vn.v_c_kt, vn.n_lim_neg);
+    scene.add(SceneElement::Text {
+        text: format!("VC {:.0} kt", vn.v_c_kt),
+        pos: [vc[0], vc[1] + 4.0],
+        font_size: 9.5,
+        color: fg,
+        align: TextAlign::Center,
+        baseline: TextBaseline::Top,
+        angle_deg: 0.0,
+        bold: true,
+    });
 
     let cruise = axes.map_point(vn.v_cruise_op_kt, 1.0);
     let cruise_color = Color::from_hex(CRUISE_BLUE);
@@ -343,6 +377,23 @@ fn draw_markers(scene: &mut Scene, axes: &Axes2D, vn: &VnDiagramData, label_fg: 
         "Cruise",
         &format!("{:.0} kt", vn.v_cruise_op_kt),
     );
+}
+
+/// A one-line label just above `pos`, in the clear margin over the envelope.
+fn label_above(scene: &mut Scene, pos: Point2D, align: TextAlign, color: Color, text: &str) {
+    scene.add(SceneElement::Text {
+        text: text.to_owned(),
+        pos: [
+            pos[0] + if align == TextAlign::Right { -2.0 } else { 0.0 },
+            pos[1] - 6.0,
+        ],
+        font_size: 9.5,
+        color,
+        align,
+        baseline: TextBaseline::Bottom,
+        angle_deg: 0.0,
+        bold: true,
+    });
 }
 
 fn dot(pos: Point2D, color: Color) -> SceneElement {

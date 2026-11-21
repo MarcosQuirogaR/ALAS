@@ -30,6 +30,7 @@ tracing = { workspace = true }
 rayon = { workspace = true }
 serde = { workspace = true }
 serde_json = { workspace = true }
+serde_yaml = { workspace = true }
 roxmltree = { workspace = true }
 thiserror = { workspace = true }
 

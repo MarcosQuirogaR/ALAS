@@ -159,9 +159,67 @@ fn every_engine_matches_the_reference() {
         }
         if expected.name == "CFM56-5C" {
             // The frozen 0.58 was a recalled value. The catalogue carries the
-            // printed 0.545 of Scholz's engine table (see `cruise_tsfc_source`).
+            // printed engine value, 0.545 lb/(lbf h) (Scholz table, origin The
+            // Engine Handbook 1991; OpenAP 2CM015 0.544; Wikipedia CFM56
+            // specifications), see `cruise_tsfc_source`.
             assert_eq!(expected.cruise_tsfc_kg_kgf_hr, 0.58);
             expected.cruise_tsfc_kg_kgf_hr = 0.545;
+            // The frozen 151.0 kN was a rounded figure; `thrust_source` names
+            // ICAO EEDB UID 2CM015, whose rated thrust (151.25 kN) the mission
+            // deck already flew.
+            assert_eq!(expected.thrust_kn, 151.0);
+            expected.thrust_kn = 151.25;
+        }
+        for (name, frozen, catalogue, why) in [
+            ("LEAP-1A", 0.52, 0.51, "the printed LEAP-1A cruise TSFC (AIN Online 2019-08-19 via Wikipedia CFM LEAP)"),
+            ("LEAP-1C", 0.52, 0.51, "the printed LEAP-1C cruise TSFC (Take-off, Dec 2011 pp. 20-21 via Wikipedia CFM LEAP)"),
+            ("PW305A", 0.72, 0.675, "the PW305B printed cruise SFC (Jenkinson engine data file, M 0.8, 40,000 ft, same type certificate), grade C"),
+        ] {
+            if expected.name == name {
+                // The frozen value was an unsourced class figure; the catalogue
+                // carries `why` (see `cruise_tsfc_source`).
+                assert_eq!(expected.cruise_tsfc_kg_kgf_hr, frozen, "{why}");
+                expected.cruise_tsfc_kg_kgf_hr = catalogue;
+            }
+        }
+        if expected.name == "GEnx-1B" {
+            // The frozen 0.52 was an unsourced catalogue figure. The catalogue
+            // carries the uninstalled value backed out of the B788 overall
+            // efficiency of Poll and Schumann Part 2 Table 2 (see
+            // `cruise_tsfc_source`), grade C family proxy.
+            assert_eq!(expected.cruise_tsfc_kg_kgf_hr, 0.52);
+            expected.cruise_tsfc_kg_kgf_hr = 0.486;
+            // The frozen 339.0 kN was the superseded databank row; the record's
+            // `thrust_source` row, ICAO Aircraft Engine Emissions Databank v32B
+            // (11/2026) UID 07P27GE235 GEnx-1B74/75/P2, prints 341.18 kN.
+            assert_eq!(expected.thrust_kn, 339.0);
+            expected.thrust_kn = 341.18;
+        }
+        if expected.name == "Trent 900" {
+            // The frozen 0.54 was an unsourced catalogue figure. The catalogue
+            // carries the engine's printed cruise SFC, 16 g/(kN s) = 0.565
+            // kg/(kgf h) at M 0.85, 35,000 ft (Roux, Database Handbook 2007,
+            // p. 485; see `cruise_tsfc_source`).
+            assert_eq!(expected.cruise_tsfc_kg_kgf_hr, 0.54);
+            expected.cruise_tsfc_kg_kgf_hr = 0.565;
+        }
+        if expected.name == "CF6-50" {
+            // The frozen 227.0 kN was the CF6-50C. The DC-10 presets are the
+            // 572,000 lb option, which the Boeing DC-10 airport-planning
+            // charts pair with the CF6-50C1: ICAO EEDB 3GE073, 230.4 kN.
+            // The frozen bypass ratio 4.4 and pressure ratio 29.3 had no
+            // retained source; the catalogue carries the 3GE073 4.3 and 28.44.
+            assert_eq!(
+                (
+                    expected.thrust_kn,
+                    expected.bypass_ratio,
+                    expected.overall_pressure_ratio
+                ),
+                (227.0, 4.4, 29.3)
+            );
+            expected.thrust_kn = 230.4;
+            expected.bypass_ratio = 4.3;
+            expected.overall_pressure_ratio = 28.44;
         }
         let at = |field: &str| format!("{}.{field}", expected.name);
         if actual.nacelle_shape.is_some() || actual.nacelle_stations.is_some() {
@@ -294,12 +352,49 @@ fn every_airport_matches_the_reference() {
             continue;
         };
         let at = |field: &str| format!("{}.{field}", expected.icao);
+        // A declared correction (alas_testkit::airport_corrections): the reference must
+        // still read what the correction says it replaced, and the product reads the
+        // corrected value; the corrected row's notes keep the reference notes as prefix.
+        let correction = alas_testkit::airport_corrections::correction_for(&expected.icao);
+        let (elevation_m, toda_m, lda_m) = if let Some(correction) = correction {
+            comparison
+                .scalar(
+                    &at("reference.elevation_m"),
+                    expected.elevation_m,
+                    correction.reference[0],
+                )
+                .scalar(
+                    &at("reference.toda_m"),
+                    expected.toda_m,
+                    correction.reference[1],
+                )
+                .scalar(
+                    &at("reference.lda_m"),
+                    expected.lda_m,
+                    correction.reference[2],
+                );
+            (
+                correction.corrected[0],
+                correction.corrected[1],
+                correction.corrected[2],
+            )
+        } else {
+            (expected.elevation_m, expected.toda_m, expected.lda_m)
+        };
+        comparison.exact(&at("name"), &actual.name, &expected.name);
+        if correction.is_some() {
+            comparison.exact(
+                &at("notes prefix"),
+                &actual.notes.starts_with(&expected.notes),
+                &true,
+            );
+        } else {
+            comparison.exact(&at("notes"), &actual.notes, &expected.notes);
+        }
         comparison
-            .exact(&at("name"), &actual.name, &expected.name)
-            .exact(&at("notes"), &actual.notes, &expected.notes)
-            .scalar(&at("elevation_m"), actual.elevation_m, expected.elevation_m)
-            .scalar(&at("toda_m"), actual.toda_m, expected.toda_m)
-            .scalar(&at("lda_m"), actual.lda_m, expected.lda_m)
+            .scalar(&at("elevation_m"), actual.elevation_m, elevation_m)
+            .scalar(&at("toda_m"), actual.toda_m, toda_m)
+            .scalar(&at("lda_m"), actual.lda_m, lda_m)
             .scalar(
                 &at("isa_deviation_c"),
                 actual.isa_deviation_c,

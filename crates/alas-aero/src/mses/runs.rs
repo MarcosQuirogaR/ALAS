@@ -107,6 +107,106 @@ pub fn run_mses_pressure_distribution_with_checkpoint_and_cancel(
         .pressure_with_checkpoint_and_cancel(alpha_deg, reynolds, mach, offsets, checkpoint, cancel)
 }
 
+/// Solve a rising schedule of angles at one Mach and Reynolds number by
+/// alpha continuation and return the surface pressure and Mach distribution
+/// of every converged angle.
+///
+/// The polar sweep restarts each angle from the previous converged state in
+/// bounded steps (see [`MsesConvergedCheckpoint`]); each converged angle's
+/// distribution is then read back from its own checkpoint, so no point is a
+/// cold start. Angles that do not converge are omitted: nothing is
+/// interpolated over them. `cancel` stops the sweep between solver calls and
+/// keeps the angles converged so far. Results are in ascending angle.
+pub fn run_mses_pressure_continuation(
+    airfoil: &Airfoil,
+    mach: f64,
+    reynolds: f64,
+    alphas_deg: &[f64],
+    config: &MsesConfig,
+    mses_dir: &Path,
+    cancel: Option<&AtomicBool>,
+) -> Vec<MsesPressureResult> {
+    run_mses_pressure_continuation_with_status(
+        airfoil, mach, reynolds, alphas_deg, config, mses_dir, cancel,
+    )
+    .results
+}
+
+/// The outcome of [`run_mses_pressure_continuation_with_status`].
+#[derive(Debug, Clone, Default)]
+pub struct MsesPressureContinuation {
+    /// The distribution of every converged angle whose read-back succeeded,
+    /// in ascending angle.
+    pub results: Vec<MsesPressureResult>,
+    /// The sweep's status: a tool failure (timeout, launch or parse failure,
+    /// missing installation) says nothing about the flow.
+    pub status: MsesStatus,
+    /// The sweep's error text, if any.
+    pub error: Option<String>,
+    /// Where and why a solver tool failure stopped the sweep early; the
+    /// angles converged before it are in `results`.
+    pub stopped: Option<MsesSweepStop>,
+    /// Converged angles whose distribution could not be read back, so are
+    /// missing from `results`.
+    pub readback_failures: usize,
+}
+
+/// [`run_mses_pressure_continuation`] with the sweep's status, its early
+/// stop and the angles lost in read-back, so a caller can tell a solver that
+/// did not converge from a tool failure, which must not be recorded as a
+/// flow result.
+pub fn run_mses_pressure_continuation_with_status(
+    airfoil: &Airfoil,
+    mach: f64,
+    reynolds: f64,
+    alphas_deg: &[f64],
+    config: &MsesConfig,
+    mses_dir: &Path,
+    cancel: Option<&AtomicBool>,
+) -> MsesPressureContinuation {
+    let failed = |status: MsesStatus, error: Option<String>| MsesPressureContinuation {
+        status,
+        error,
+        ..MsesPressureContinuation::default()
+    };
+    if !config.enabled {
+        return failed(MsesStatus::Disabled, None);
+    }
+    if alphas_deg.is_empty() {
+        return failed(MsesStatus::NotRun, None);
+    }
+    let repaneled = match airfoil.repanel(N_POINTS_PER_SIDE) {
+        Ok(repaneled) => repaneled,
+        Err(error) => return failed(MsesStatus::Error, Some(error.to_string())),
+    };
+    let driver = Mses::new(repaneled, config, mses_dir);
+    let polar = driver.polar_with_cancel(alphas_deg, reynolds, mach, cancel);
+    let mut checkpoints: Vec<&MsesConvergedCheckpoint> = polar.checkpoints.iter().collect();
+    checkpoints.sort_by(|a, b| a.alpha_deg.total_cmp(&b.alpha_deg));
+    let converged = checkpoints.len();
+    let results: Vec<MsesPressureResult> = checkpoints
+        .into_iter()
+        .map(|checkpoint| {
+            driver.pressure_with_checkpoint_and_cancel(
+                checkpoint.alpha_deg,
+                reynolds,
+                mach,
+                &[0.0],
+                Some(checkpoint),
+                None,
+            )
+        })
+        .filter(|r| !r.x_upper.is_empty() && !r.x_lower.is_empty())
+        .collect();
+    MsesPressureContinuation {
+        readback_failures: converged - results.len(),
+        results,
+        status: polar.status,
+        error: polar.error,
+        stopped: polar.stopped,
+    }
+}
+
 /// A section's name, or the placeholder upstream uses when it has none.
 pub(super) fn display_name(airfoil: &Airfoil) -> String {
     if airfoil.name.is_empty() {
@@ -116,17 +216,31 @@ pub(super) fn display_name(airfoil: &Airfoil) -> String {
     }
 }
 
+/// Program stems of a complete MSES installation.
+const MSES_PROGRAMS: [&str; 3] = ["mset", "mses", "mplot"];
+
+/// Path of the MSES program `stem` in `directory`: `<stem>.exe` when that
+/// file exists, otherwise the bare `<stem>` of a native non-Windows build
+/// when that exists, otherwise `<stem>.exe` (the name reported as missing).
+pub(crate) fn program_path(directory: &Path, stem: &str) -> PathBuf {
+    let with_extension = directory.join(format!("{stem}.exe"));
+    let bare = directory.join(stem);
+    if !with_extension.is_file() && bare.is_file() {
+        bare
+    } else {
+        with_extension
+    }
+}
+
 /// Classify the required MSES installation before attempting a process spawn.
 pub(crate) fn installation_status(directory: &Path) -> Option<MsesStatus> {
     if !directory.is_dir() {
         return Some(MsesStatus::Absent);
     }
-    let missing = ["mset.exe", "mses.exe", "mplot.exe"]
+    if MSES_PROGRAMS
         .iter()
-        .filter(|name| !directory.join(name).is_file())
-        .copied()
-        .collect::<Vec<_>>();
-    if missing.is_empty() {
+        .all(|stem| program_path(directory, stem).is_file())
+    {
         None
     } else {
         Some(MsesStatus::Incomplete)

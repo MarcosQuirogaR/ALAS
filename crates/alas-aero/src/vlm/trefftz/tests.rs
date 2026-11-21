@@ -224,6 +224,12 @@ fn panel(left: [f64; 2], right: [f64; 2], trailing: bool, wing_index: usize) -> 
         vortex_center: [0.25, 0.5 * (left[0] + right[0]), 0.5 * (left[1] + right[1])],
         is_trailing_edge: trailing,
         wing_index,
+        // Chord along x, span from left to right: the normal is x cross span.
+        normal_direction: {
+            let (dy, dz) = (right[0] - left[0], right[1] - left[1]);
+            let norm = dy.hypot(dz);
+            [0.0, -dz / norm, dy / norm]
+        },
     }
 }
 

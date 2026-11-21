@@ -14,8 +14,9 @@
 use std::f64::consts::PI;
 
 use alas_aero::fourier_lifting_line::{
-    thin_airfoil_zero_lift_angle_rad, AircraftFourierLiftingLine, FourierLiftingLineError,
-    FourierLiftingLineSurface, LiftingLineSection,
+    thin_airfoil_quarter_chord_moment, thin_airfoil_zero_lift_angle_rad,
+    AircraftFourierLiftingLine, FourierLiftingLineError, FourierLiftingLineSurface,
+    LiftingLineSection,
 };
 use alas_geom::asb::airfoil::Airfoil;
 use alas_testkit::{Comparison, Tier};
@@ -165,6 +166,25 @@ fn airfoil_camber_recovers_the_analytic_naca2412_zero_lift_angle() {
     let symmetric_zero =
         thin_airfoil_zero_lift_angle_rad(&symmetric).expect("NACA 0012 has a finite camber line");
     assert!(symmetric_zero.abs() < 1.0e-14);
+}
+
+/// NACA 2412 thin-airfoil quarter-chord moment, `(pi/4)(A_2 - A_1)` in closed
+/// form on the two-parabola camber line (m = 0.02, p = 0.4): -0.0531195.
+#[test]
+fn airfoil_camber_recovers_the_analytic_naca2412_quarter_chord_moment() {
+    let airfoil = Airfoil::from_name("naca2412").expect("NACA 2412 is analytical");
+    let actual =
+        thin_airfoil_quarter_chord_moment(&airfoil).expect("NACA 2412 has a finite camber line");
+    let analytic = -0.053_119_513_460_09;
+    assert!(
+        (actual - analytic).abs() < 2.0e-5,
+        "computed {actual:.9e}, analytic {analytic:.9e}"
+    );
+
+    let symmetric = Airfoil::from_name("naca0012").expect("NACA 0012 is analytical");
+    let symmetric_moment =
+        thin_airfoil_quarter_chord_moment(&symmetric).expect("NACA 0012 has a finite camber line");
+    assert!(symmetric_moment.abs() < 1.0e-14);
 }
 
 #[test]

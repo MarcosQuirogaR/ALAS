@@ -9,7 +9,9 @@
 //! measures the wing: the quarter-chord sweep (the same mean line the Korn
 //! relation reads), the wing area spanned by the trailing-edge flap (full chord
 //! integrated over the flap span stations of
-//! `control_surfaces`), and the sweep of the hinge line. The reference
+//! `control_surfaces`), the sweep of the hinge line, and the slat chord ratio
+//! and slat span over the exposed semispan (outboard of the side of body). The
+//! reference
 //! geometry is the one the configured nominal design builds, so a candidate
 //! at that design returns `None` and keeps the declared values bit for bit.
 //!
@@ -65,6 +67,9 @@ pub(super) fn measure(
     controls: &ControlSurfacesConfig,
 ) -> Option<WingLiftGeometry> {
     let wing = plane.wings.first().filter(|wing| wing.xsecs.len() >= 2)?;
+    // No flap sits in the body.
+    let wing = wing.carried_box();
+    let wing: &Wing = &wing;
     let semi_span = wing
         .xsecs
         .iter()
@@ -85,17 +90,35 @@ pub(super) fn measure(
     let (y_in, y_out) = (start * semi_span, end * semi_span);
     // Both semispans when the wing is mirrored.
     let sides = if wing.symmetric { 2.0 } else { 1.0 };
-    let flapped_area = sides * chord_integral(wing, y_in, y_out);
+    // An inboard aileron between two flaps is not flapped area.
+    let flapped_area = sides
+        * controls
+            .flap_bands()
+            .iter()
+            .map(|(a, b)| chord_integral(wing, a * semi_span, b * semi_span))
+            .sum::<f64>();
     let (x_in, c_in) = section_at(wing, y_in)?;
     let (x_out, c_out) = section_at(wing, y_out)?;
     let hinge = |x_le: f64, chord: f64| x_le + (1.0 - chord_fraction) * chord;
     let hinge_sweep_deg = (hinge(x_out, c_out) - hinge(x_in, c_in))
         .atan2(y_out - y_in)
         .to_degrees();
+    // No slat sits in the body: the exposed span starts at the side of body.
+    let side_of_body = wing
+        .planform_datum
+        .map_or(0.0, |datum| datum.side_of_body_y_m);
+    let exposed = semi_span - side_of_body;
+    let slat_span = (controls.slat_span_end_frac * semi_span)
+        - (controls.slat_span_start_frac * semi_span).max(side_of_body);
+    if exposed <= 0.0 {
+        return None;
+    }
     let geometry = WingLiftGeometry {
         sweep_c4_deg: AeroAnalysis::quarter_chord_sweep_deg(plane, f64::NAN),
         flapped_area_ratio: flapped_area / plane.s_ref,
         hinge_sweep_deg,
+        slat_chord_ratio: controls.slat_chord_fraction,
+        slat_span_ratio: (slat_span / exposed).clamp(0.0, 1.0),
     };
     (geometry.sweep_c4_deg.is_finite() && geometry.hinge_sweep_deg.is_finite()).then_some(geometry)
 }
@@ -118,6 +141,7 @@ pub(super) fn candidate_set(config: &AlasConfig, plane: &Airplane) -> Option<Clm
             landing: performance.cl_max_land,
         },
         geometry: measure(&reference_plane, &config.control_surfaces)?,
+        leading_edge: performance.cl_max_le_increment,
     };
     reference.scale(&measure(plane, &config.control_surfaces)?)
 }
@@ -163,6 +187,12 @@ mod tests {
             let geometry = measure(&plane, &config.control_surfaces).expect("measurable");
             assert!(geometry.sweep_c4_deg.abs() < 45.0, "{name}");
             assert!(geometry.flapped_area_ratio > 0.2 && geometry.flapped_area_ratio < 0.9);
+            if name == "ATR72-600" {
+                assert_eq!(geometry.slat_chord_ratio, 0.0);
+            } else {
+                assert!(geometry.slat_chord_ratio > 0.05, "{name}");
+                assert!(geometry.slat_span_ratio > 0.6 && geometry.slat_span_ratio <= 1.0);
+            }
         }
     }
 
@@ -185,6 +215,23 @@ mod tests {
             / g0.sweep_c4_deg.to_radians().cos();
         assert!((set.clean - expected).abs() < 1e-12);
         assert!(set.clean < config.performance.cl_max_clean);
+        // The leading-edge part moves with Eq. 8.30, the rest with the flap ratio.
+        let p = &config.performance;
+        let le = p.cl_max_le_increment;
+        assert!(le > 0.0);
+        let slat = |g: &WingLiftGeometry| {
+            alas_perf::performance::clmax::roskam_slat_increment(
+                g.slat_chord_ratio,
+                g.slat_span_ratio,
+                g.sweep_c4_deg,
+            )
+        };
+        let device = g1.flapped_area_ratio / g0.flapped_area_ratio
+            * g1.hinge_sweep_deg.to_radians().cos()
+            / g0.hinge_sweep_deg.to_radians().cos();
+        let landing =
+            set.clean + le * slat(&g1) / slat(&g0) + (p.cl_max_land - p.cl_max_clean - le) * device;
+        assert!((set.landing - landing).abs() < 1e-12);
         assert!(set.clean < set.takeoff && set.takeoff < set.landing);
         config.performance.geometry_scaled_clmax = false;
         assert_eq!(candidate_set(&config, &plane), None);

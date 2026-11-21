@@ -29,6 +29,7 @@ pub const A220_300_CERTIFIED_EXIT_LAYOUT: CertifiedExitLayout = CertifiedExitLay
             station_m: None,
         },
     ],
+    upper_deck_pairs: &[],
     station_body_length_m: None,
     source: "EASA.IM.A.570 BD-500 TCDS Issue 24, 2026-02-20, Section 2 BD-500-1A11 III.19 p.23 (baseline C-III-C MPSC 145; Option C25631002 is required for C-III*-C 149)",
 };
@@ -59,6 +60,7 @@ pub const A320_200_CERTIFIED_EXIT_LAYOUT: CertifiedExitLayout = CertifiedExitLay
             station_m: None,
         },
     ],
+    upper_deck_pairs: &[],
     station_body_length_m: None,
     source: "EASA.A.064 A318/A319/A320/A321 TCDS Issue 12, 2013-09-12, Section 1 III.19 (maximum certified seating 180 with all four Type III overwing exits active)",
 };
@@ -90,6 +92,7 @@ pub const C919_CERTIFIED_EXIT_LAYOUT: CertifiedExitLayout = CertifiedExitLayout 
             station_m: None,
         },
     ],
+    upper_deck_pairs: &[],
     station_body_length_m: None,
     source: "COMAC C919-SVV19-50009-00 ACAP: 02-01 Table 1 (maximum seating capacity 174), 02-04 Figures 1-4 (FWD and AFT cabin doors, one cabin emergency exit per side), 02-07 Figures 1 and 3 (door 0.98 x 1.86 m; over-wing exit 0.52 x 1.12 m); exit classes inferred from those dimensions",
 };

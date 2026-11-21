@@ -26,6 +26,8 @@ use alas_config::{AlasConfig, DesignMode, MtowSizing};
 use alas_opt::mdo::ResidualRole;
 use alas_opt::{assess_product_candidate, CandidateAssessment};
 
+mod support;
+
 /// Registered aircraft spanning a turboprop, two narrow-bodies, a regional
 /// jet and a long-range wide-body.
 const PRESETS: [&str; 5] = ["ATR72-600", "A220-300", "A320-200", "E195-E2", "A340-300"];
@@ -49,6 +51,10 @@ fn preset_config(preset: &str, sizing: MtowSizing) -> (AlasConfig, DesignVector)
     let mut config = AlasConfig::from_value(&serde_json::json!({ "preset": preset })).unwrap();
     config.optimizer.design_space.mode = DesignMode::ReferenceAdaptation;
     config.optimizer.objective.mtow_sizing = sizing;
+    // No curated survey certifies a departure (completeness allowance on every survey),
+    // so the feasible point this invariance needs departs the open-ground
+    // test fixture. The test is about the band, not the obstacle data.
+    support::open_ground_departure(&mut config);
     let design = alas_config::presets::get(preset).unwrap().design_vector;
     (config, design)
 }

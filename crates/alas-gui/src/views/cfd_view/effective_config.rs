@@ -49,7 +49,10 @@ fn pressure_tolerance_summary(config: &CfdStudyConfig) -> String {
         Some(_) => tr_fields("{value} (explicit)", &[("value", resolved)]),
         None => tr_fields(
             "{value} (automatic, {preset})",
-            &[("value", resolved), ("preset", format!("{preset:?}"))],
+            &[
+                ("value", resolved),
+                ("preset", super::advanced::mesh_preset_label(preset)),
+            ],
         ),
     }
 }
@@ -75,7 +78,10 @@ pub(super) fn show_effective_configuration(config: &CfdStudyConfig, ui: &mut Ui)
                 &[
                     ("Airfoil".to_owned(), effective.airfoil_name.clone()),
                     ("Template".to_owned(), effective.template_version.clone()),
-                    ("Mesh preset".to_owned(), format!("{:?}", effective.mesh_preset)),
+                    (
+                        "Mesh preset".to_owned(),
+                        super::advanced::mesh_preset_label(effective.mesh_preset),
+                    ),
                     ("Reference chord lRef [m]".to_owned(), format!("{:.5}", reference.chord_m)),
                     ("Reference area Aref [m\u{00b2}]".to_owned(), format!("{:.4e}", reference.area_m2)),
                     ("Extrusion span [m]".to_owned(), format!("{:.4e}", reference.span_m)),
@@ -164,7 +170,7 @@ fn show_boundary_schema(boundaries: &[alas_cfd::PatchCondition], ui: &mut Ui) {
             Grid::new("airfoil_cfd_boundary_grid")
                 .num_columns(7)
                 .striped(true)
-                .spacing([10.0, 3.0])
+                .spacing(crate::theme::space::GRID_SPACING)
                 .show(ui, |ui| {
                     ui.label(RichText::new(tr("Patch")).strong());
                     ui.label(RichText::new(tr("Role")).strong());

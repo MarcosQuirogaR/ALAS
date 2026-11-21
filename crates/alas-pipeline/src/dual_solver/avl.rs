@@ -93,6 +93,7 @@ pub(super) fn run_avl_optimizer(
             nominal: &nominal,
             acceptance_route,
             cancel,
+            registered: None,
         },
         &mut optimization,
     ) {
@@ -286,18 +287,32 @@ impl AvlObjective<'_> {
         let Some(table) = artifacts.drag.table() else {
             return ObjectiveEvaluation::rejected(self.failure_cost(), "drag_table");
         };
-        let cd0 = table.cd0(point.mach, self.config.requirements.cruise_altitude_m);
+        // The parasite term holds the upsweep at the trimmed attitude of
+        // the required lift.
+        let zero_lift_cd = table.cd0(point.mach, self.config.requirements.cruise_altitude_m);
+        let cd0 = zero_lift_cd + table.upsweep_attitude_cd(required_cl, point.mach);
         let wave_drag_cd = table.wave_cd(required_cl, point.mach);
         // The external polar is one parabola, so the lift-dependent viscous
-        // drag (zero unless configured) joins AVL's induced curvature.
-        let viscous_lift_cd = table.viscous_lift_cd(required_cl, cd0);
+        // drag (zero unless configured) joins AVL's induced curvature. It
+        // scales the zero-lift profile drag, not the attitude term.
+        let viscous_lift_cd = table.viscous_lift_cd(required_cl, zero_lift_cd);
+        // AVL's lattice holds the lifting surfaces only, as the product's
+        // does: the same installation loss is added on the wing lift. AVL's
+        // polar carries no per-surface lift, so the required lift stands for
+        // the wing's.
+        let plane = &report.airplane;
+        let induced_cd = point.induced_drag_coefficient
+            + alas_aero::analysis::installation_induced_drag(
+                &self.config.geometry,
+                !plane.fuselages.is_empty(),
+                required_cl,
+                plane.b_ref * plane.b_ref / plane.s_ref,
+            );
         let polar = ExternalPolar {
             cd0,
-            induced_factor_k: (point.induced_drag_coefficient + viscous_lift_cd)
-                / (required_cl * required_cl),
+            induced_factor_k: (induced_cd + viscous_lift_cd) / (required_cl * required_cl),
             wave_drag_cd,
-            lift_to_drag: required_cl
-                / (cd0 + wave_drag_cd + point.induced_drag_coefficient + viscous_lift_cd),
+            lift_to_drag: required_cl / (cd0 + wave_drag_cd + induced_cd + viscous_lift_cd),
             alpha_deg: point.alpha_deg,
             incidence_deg: report
                 .trimmed_design_point
@@ -420,5 +435,6 @@ pub(super) fn sized_candidate(
         alas_opt::resolve_tail_sizing(config, design, preserve_explicit_fuselage_length)?;
     let mut sized_config = config.clone();
     tail_sizing.apply_to(&mut sized_config.geometry.empennage, &mut sized_design);
+    tail_sizing.apply_wing_to(&mut sized_config.geometry.wing, &mut sized_design);
     Ok((sized_config, sized_design))
 }

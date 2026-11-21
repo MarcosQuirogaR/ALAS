@@ -16,8 +16,8 @@
 
 use super::seating::Seating;
 use super::{
-    cabin_deck_segments, ceil_div, effective_pair_capacity, exit_spec, largest_pair_rating,
-    min_exit_pairs, monument_fill_order, pair_rating, select_exit_type, spread_bay_indices,
+    band_limit, cabin_deck_segments, ceil_div, effective_pair_capacity, exit_spec, min_exit_pairs,
+    monument_fill_order, pair_rating, select_exit_type, small_cabin_exit, spread_bay_indices,
     stack_y, Bay, DoorStation, ExitSpec, MonumentKind, MonumentSide, MONUMENT_LEN, SEAT_BOX_H,
 };
 use crate::cargo::{CargoLoadManager, CargoMassSemantics};

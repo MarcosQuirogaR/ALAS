@@ -84,6 +84,7 @@ pub fn si_conversion(unit: &str) -> Option<SiConversion> {
         "K" => ("K", 1.0),
         "N/m" => ("N/m", 1.0),
         "N/m2" | "N/m^2" => ("Pa", 1.0),
+        "kg/m2" | "kg/m^2" => ("kg/m^2", 1.0),
         "kg/m3" | "kg/m^3" => ("kg/m^3", 1.0),
         "kg/s" => ("kg/s", 1.0),
         "kg/m" => ("kg/m", 1.0),

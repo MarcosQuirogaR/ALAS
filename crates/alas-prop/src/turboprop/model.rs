@@ -94,7 +94,12 @@ impl Pw127m568fModel {
 
         let engine_power_w = self.rated_shaft_power_w(command.rating)
             * command.power_fraction
-            * self.power_lapse_fraction(command.rating, condition.density_kg_m3);
+            * self.power_lapse_fraction_in_flight(
+                command.rating,
+                condition.density_kg_m3,
+                condition.true_airspeed_m_s,
+                ambient_temperature_k,
+            );
         if engine_power_w <= self.accessory_power_w {
             return Err(TurbopropError::OutsideDomain {
                 field: "engine_shaft_power_minus_accessories_w",
@@ -145,9 +150,12 @@ impl Pw127m568fModel {
             command.mode == TurbopropMode::FlightIdle,
         );
         let propeller_thrust_n = if command.mode == TurbopropMode::FlightIdle {
-            // No OEM idle pitch or windmilling drag data: zero propeller
-            // force is the bounded neutral hypothesis. Nacelle/airframe drag
-            // remains outside this isolated propulsion kernel.
+            // No OEM idle pitch or windmilling drag data (NEEDS-DATA: 568F-1
+            // windmilling map): zero propeller force is the bounded neutral
+            // hypothesis. Raymer (2018) sec. 12.4 C_D 0.8 is a stopped,
+            // unfeathered propeller, not a driven flight-idle one, so it is
+            // not applied here; feather/windmill modes are rejected.
+            // Nacelle/airframe drag stays outside this isolated kernel.
             0.0
         } else {
             ideal_thrust_bound_n.min(efficiency_capped_thrust_n)
@@ -170,8 +178,13 @@ impl Pw127m568fModel {
         let psfc_kg_kwh = self.psfc_at_power_kg_kwh(
             ambient_temperature_k,
             engine_power_w
-                / self
-                    .available_shaft_power_w(Pw127mRating::NormalTakeoff, condition.density_kg_m3),
+                / (self.normal_takeoff_power_w
+                    * self.power_lapse_fraction_in_flight(
+                        Pw127mRating::NormalTakeoff,
+                        condition.density_kg_m3,
+                        condition.true_airspeed_m_s,
+                        ambient_temperature_k,
+                    )),
         );
         let fuel_flow_kg_s = engine_power_w * psfc_kg_kwh / JOULES_PER_KWH;
         let output = TurbopropOutput {
@@ -305,6 +318,16 @@ impl Pw127m568fModel {
                 "minimum_power_lapse_fraction",
                 self.minimum_power_lapse_fraction,
             ),
+            ("ram_power_exponent", self.ram_power_exponent),
+            (
+                "rating_temperature_limit_k",
+                self.rating_temperature_limit_k,
+            ),
+            ("thermodynamic_power_w", self.thermodynamic_power_w),
+            (
+                "power_lapse_fit_reference_true_airspeed_m_s",
+                self.power_lapse_fit_reference_true_airspeed_m_s,
+            ),
             ("part_power_knee_fraction", self.part_power_knee_fraction),
             ("part_power_psfc_exponent", self.part_power_psfc_exponent),
             ("tip_mach_critical", self.tip_mach_critical),
@@ -382,6 +405,28 @@ impl Pw127m568fModel {
                 self.minimum_power_lapse_fraction,
                 f64::MIN_POSITIVE,
                 1.0,
+            ),
+            // 0 is off; 4 is the ideal corrected-flow upper bound.
+            ("ram_power_exponent", self.ram_power_exponent, 0.0, 4.0),
+            // 0 is no limit; otherwise a sea-level airfield temperature.
+            (
+                "rating_temperature_limit_k",
+                self.rating_temperature_limit_k,
+                0.0,
+                350.0,
+            ),
+            // 0 is none; otherwise a shaft power, W.
+            (
+                "thermodynamic_power_w",
+                self.thermodynamic_power_w,
+                0.0,
+                1.0e8,
+            ),
+            (
+                "power_lapse_fit_reference_true_airspeed_m_s",
+                self.power_lapse_fit_reference_true_airspeed_m_s,
+                0.0,
+                250.0,
             ),
             (
                 "part_power_knee_fraction",

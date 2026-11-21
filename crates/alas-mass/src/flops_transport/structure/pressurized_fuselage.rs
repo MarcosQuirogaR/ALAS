@@ -56,7 +56,7 @@ pub const MAXIMUM_CABIN_PRESSURE_ALTITUDE_M: f64 = 8_000.0 * FOOT;
 const ULTIMATE_FACTOR_OF_SAFETY: f64 = 1.5;
 
 /// SI inputs to the pressure-bending fuselage method.
-#[derive(Debug, Clone, Copy, PartialEq)]
+#[derive(serde::Serialize, serde::Deserialize, Debug, Clone, Copy, PartialEq)]
 pub struct PressurizedFuselageInputs {
     /// Gross fuselage wetted area `S_fuse`, m^2.
     pub wetted_area_m2: f64,
@@ -80,8 +80,8 @@ pub struct PressurizedFuselageInputs {
 /// with the cabin at the CS 25.841(a) 8,000 ft limit, Pa. Zero when the
 /// aircraft never climbs above that cabin altitude.
 pub fn cabin_pressure_differential_pa(maximum_operating_altitude_m: f64) -> f64 {
-    let cabin_pa = Atmosphere::isa(MAXIMUM_CABIN_PRESSURE_ALTITUDE_M).pressure();
-    let ambient_pa = Atmosphere::isa(maximum_operating_altitude_m).pressure();
+    let cabin_pa = Atmosphere::new(MAXIMUM_CABIN_PRESSURE_ALTITUDE_M).pressure();
+    let ambient_pa = Atmosphere::new(maximum_operating_altitude_m).pressure();
     (cabin_pa - ambient_pa).max(0.0)
 }
 
@@ -129,6 +129,14 @@ pub(in crate::flops_transport) fn wing_mounted_turboprop_kg(
     }
 }
 
+/// Whether the fuselage of this declaration is priced by the pressurized
+/// regional-turboprop method rather than FLOPS equation 56.
+pub(in crate::flops_transport) fn priced_by_pressurized_method(
+    flops: &alas_config::FlopsTransportConfig,
+) -> bool {
+    flops.cabin_equipment_method.is_regional_turboprop_class()
+}
+
 /// The method's inputs when the aircraft is of the regional turboprop class,
 /// else `None` (equation 56 then applies).
 ///
@@ -143,25 +151,25 @@ pub(in crate::flops_transport) fn regional_turboprop_inputs(
     design_gross_mass_kg: f64,
     wing_mounted_propulsion_kg: f64,
 ) -> Option<PressurizedFuselageInputs> {
-    if !mass_model
-        .flops_transport
-        .cabin_equipment_method
-        .is_regional_turboprop_class()
-    {
+    if !priced_by_pressurized_method(&mass_model.flops_transport) {
         return None;
     }
     let technology = &mass_model.flops_structure;
     let altitude_m = technology
         .maximum_operating_altitude_m
         .unwrap_or(requirements.cruise_altitude_m);
-    let root_chord_m = built.wing.xsecs.first().map_or(0.0, |root| root.chord);
+    let root_chord_m = if built.wing.xsecs.is_empty() {
+        0.0
+    } else {
+        built.wing.design_root().1
+    };
     Some(PressurizedFuselageInputs {
         wetted_area_m2: built.fuselage.area_wetted(),
         width_m: built.width_m,
         height_m: built.depth_m,
         effective_length_m: built.length_m - root_chord_m / 2.0,
         pressure_differential_pa: cabin_pressure_differential_pa(altitude_m),
-        limit_load_factor: requirements.ultimate_load_factor / ULTIMATE_FACTOR_OF_SAFETY,
+        limit_load_factor: requirements.design_ultimate_load_factor() / ULTIMATE_FACTOR_OF_SAFETY,
         design_zero_fuel_mass_kg: technology
             .design_zero_fuel_mass_kg
             .unwrap_or(design_gross_mass_kg),

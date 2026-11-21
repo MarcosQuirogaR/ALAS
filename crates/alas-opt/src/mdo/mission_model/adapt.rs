@@ -19,7 +19,7 @@ use super::SegmentMissionModel;
 /// The same floor `alas_pipeline::mission_stage::guidance` uses, for the same
 /// reason: a zero-rate segment is not a climb and makes the altitude-time
 /// differential singular.
-const MINIMUM_CLIMB_RATE_M_S: f64 = 0.5;
+pub(super) const MINIMUM_CLIMB_RATE_M_S: f64 = 0.5;
 
 /// Coarse bracket scanned before the bisection, largest scale first. The
 /// halving factor is the native guidance module's own; six steps reach
@@ -32,12 +32,11 @@ pub(super) const CLIMB_RATE_BRACKET_STEPS: usize = 6;
 /// not depend on where the bisection stopped.
 pub(super) const CLIMB_RATE_RESOLUTION: f64 = 1.0e-3;
 
-/// Grid of the flown-altitude recovery, m. Searching an integer grid makes
-/// the recovered level the *highest feasible grid level*, which a warm start
-/// brackets from the last recovered level and a cold search from the planned
-/// level, both closing on it exactly, so the answer does not depend on call
-/// history.
-const ALTITUDE_GRID_M: f64 = 1.0;
+/// Tolerance of the flown-altitude recovery, m: the bisection on the continuous
+/// level stops when its bracket is narrower than this. The planned level is
+/// the upper bracket, so the recovered level is the highest feasible level to
+/// this tolerance, independent of any warm-start history.
+const ALTITUDE_TOLERANCE_M: f64 = 1.0;
 
 /// A flown leg and the inputs that reproduce it.
 pub(super) struct Adapted {
@@ -90,7 +89,7 @@ impl SegmentMissionModel {
     /// mass inside a dispatch closure, so it is made once, like the step
     /// points of a filed flight plan, and an unfrozen trip holds its initial
     /// level.
-    pub(super) fn fly_adapted(
+    pub(super) fn fly_adapted_at_level(
         &self,
         leg: LegKind,
         mass_kg: f64,
@@ -287,118 +286,57 @@ impl SegmentMissionModel {
             Err(error) if fixed.is_some() || !is_flyerror_recoverable(&error) => return Err(error),
             Err(_) => {}
         }
-        // Highest feasible grid level between the floor and `cruise_m`.
-        let attempt = |index: i64| {
-            plan_at(index as f64 * ALTITUDE_GRID_M)
-                .and_then(|plan| self.fly_counted(mass_kg, &plan, None))
-        };
+        // Highest feasible level between the floor and `cruise_m`, found by
+        // bisection on the continuous level to `ALTITUDE_TOLERANCE_M`. The earlier
+        // search stepped a 1 m grid with a warm start; a continuous bracket gives
+        // the same root without grid-step or bracket-history dependence.
+        let attempt =
+            |level_m: f64| plan_at(level_m).and_then(|plan| self.fly_counted(mass_kg, &plan, None));
         let floor_m = geometry.floor_cruise_m(leg).min(cruise_m);
-        let low_index = (floor_m / ALTITUDE_GRID_M).ceil() as i64;
-        let top_index = (cruise_m / ALTITUDE_GRID_M).floor() as i64;
-        let recovered = |flown: FlownLeg, index: i64| {
-            self.memory.set(leg, index);
-            Ok((
-                FlownLeg {
-                    adapted: true,
-                    ..flown
-                },
-                index as f64 * ALTITUDE_GRID_M,
-            ))
-        };
-        // The bracket is (highest feasible level found, lowest failed level
-        // above it); `top_index + 1` stands for the failed planned level.
-        let ceiling = top_index.max(low_index) + 1;
-        // Warm start: grow the bracket outward from the last recovered level
-        // with doubling steps. A dispatch iteration moves the mass a little,
-        // and the boundary with it by a few grid levels, so this brackets it
-        // in a few flights where the cold bracket below spends a dozen
-        // descending from the planned level. The feasible levels are the
-        // ones whose ladder fits the route, an interval from the floor, so
-        // both brackets close on the same highest feasible grid level. A
-        // non-recoverable failure leaves the answer to the cold search.
-        let warm = match self
-            .memory
-            .get(leg)
-            .filter(|i| (low_index..ceiling).contains(i))
-        {
-            Some(index) => match attempt(index) {
-                Ok(flown) => {
-                    let (mut best, mut step) = ((flown, index), 1);
-                    loop {
-                        self.check_cancelled()?;
-                        let probe = best.1 + step;
-                        if probe >= ceiling {
-                            break Some((best, ceiling));
-                        }
-                        match attempt(probe) {
-                            Ok(flown) => {
-                                best = (flown, probe);
-                                step *= 2;
-                            }
-                            Err(error) if is_flyerror_recoverable(&error) => {
-                                break Some((best, probe))
-                            }
-                            Err(_) => break None,
-                        }
-                    }
-                }
-                Err(error) if is_flyerror_recoverable(&error) => {
-                    let (mut high, mut step) = (index, 1);
-                    loop {
-                        self.check_cancelled()?;
-                        let probe = (high - step).max(low_index);
-                        match attempt(probe) {
-                            Ok(flown) => break Some(((flown, probe), high)),
-                            Err(error) if is_flyerror_recoverable(&error) && probe > low_index => {
-                                high = probe;
-                                step *= 2;
-                            }
-                            Err(_) => break None,
-                        }
-                    }
-                }
-                Err(_) => None,
-            },
-            None => None,
-        };
-        let (mut best, mut high) = match warm {
-            Some(bracket) => bracket,
-            None => {
-                // Bracket downwards from the failed level with doubling
-                // steps: the usual shortfall is a few hundred metres of
-                // footprint, so the bracket stays near the top instead of
-                // starting from the floor, where a ladder of zero length
-                // cannot even pay its own speed change.
-                let mut high = ceiling;
-                let mut drop = 1;
-                loop {
-                    self.check_cancelled()?;
-                    let index = (high - drop).max(low_index);
-                    match attempt(index) {
-                        Ok(flown) => break ((flown, index), high),
-                        Err(error) if is_flyerror_recoverable(&error) && index > low_index => {
-                            high = index;
-                            drop *= 2;
-                        }
-                        Err(error) => return Err(error),
-                    }
-                }
-            }
-        };
-        let mut low = best.1;
-        while high - low > 1 {
+        let mut low = floor_m;
+        let mut best = attempt(low)?;
+        let mut high = cruise_m;
+        while high - low > ALTITUDE_TOLERANCE_M {
             self.check_cancelled()?;
-            let middle = low + (high - low) / 2;
+            let middle = 0.5 * (low + high);
             match attempt(middle) {
                 Ok(flown) => {
-                    best = (flown, middle);
+                    best = flown;
                     low = middle;
                 }
                 Err(error) if is_flyerror_recoverable(&error) => high = middle,
                 Err(error) => return Err(error),
             }
         }
-        recovered(best.0, best.1)
+        // Under `OptimumStep` the recovered level is planned at a legal
+        // flight level, as the initial-level choice is
+        // (`cruise_levels::legal_level_at_or_below_m`): the legal levels at
+        // or below the bisected one are tried downward to the floor of the
+        // climb geometry, and the first that flies is kept. A legal level
+        // that fails, for any reason, never discards the leg already flown:
+        // only when no legal level above the floor flies does the
+        // continuous level stay. A cancelled run still stops, as in the
+        // bisection above.
+        if optimum {
+            let mut legal_m = super::cruise_levels::legal_level_at_or_below_m(low);
+            while (floor_m..low).contains(&legal_m) {
+                self.check_cancelled()?;
+                if let Ok(flown) = attempt(legal_m) {
+                    best = flown;
+                    low = legal_m;
+                    break;
+                }
+                legal_m = super::cruise_levels::legal_level_at_or_below_m(legal_m - 1.0);
+            }
+        }
+        self.memory.set(leg, low.round() as i64);
+        Ok((
+            FlownLeg {
+                adapted: true,
+                ..best
+            },
+            low,
+        ))
     }
 }
 

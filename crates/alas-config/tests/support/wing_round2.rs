@@ -1,7 +1,7 @@
 // SPDX-License-Identifier: AGPL-3.0-or-later
 // Copyright (C) 2026 Marcos Quiroga Rodriguez
 
-//! Preset geometry values moved by geometry round 2 (wing lane), as `(frozen reference, current)`.
+//! Preset geometry values moved by the wing re-fit (wing), as `(frozen reference, current)`.
 //!
 //! Sources and fits: the wing thickness distribution follows the NASA Common Research Model
 //! (Vassberg et al., AIAA 2008-6919, Table 2); dihedral heights and the tailplane height and
@@ -25,7 +25,7 @@ fn canonical(path: &str) -> String {
     }
 }
 
-/// `(frozen reference value, current preset value)` of a path moved by geometry round 2.
+/// `(frozen reference value, current preset value)` of a path moved by the wing re-fit.
 #[allow(clippy::approx_constant)] // -3.14 m is the A380 engine height, not pi
 pub fn lookup(path: &str) -> Option<(f64, f64)> {
     // The saved-file fixtures carry their own ledger for these two paths.
@@ -60,8 +60,8 @@ pub fn lookup(path: &str) -> Option<(f64, f64)> {
         "A380-800.geometry.empennage.hstab_z_m" => (1.5, 0.96),
         "A380-800.geometry.engine.inlet_x_offset_m" => (4.5, 6.3683),
         "A380-800.geometry.engine.z_m" => (-3.14, -0.82),
-        "A380-800.geometry.wing.root_datum_x_m" => (26.7, 23.6541), // step B w1: inboard LE crank, was 25.0368
-        "A380-800.geometry.empennage.hstab_root_chord_m" => (9.0, 10.0), // step B w1: drawn root chord, was 9.0
+        "A380-800.geometry.wing.root_datum_x_m" => (26.7, 23.6541), // inboard LE crank, was 25.0368
+        "A380-800.geometry.empennage.hstab_root_chord_m" => (9.0, 10.0), // drawn root chord, was 9.0
         "A380-800.geometry.wing.tip_z_m" => (3.0, -0.9704),
         "B787-9.design_vector.break_chord_m" => (6.5, 6.554279999999997),
         "B787-9.design_vector.sweep_deg" => (32.2, 34.74104381154634),

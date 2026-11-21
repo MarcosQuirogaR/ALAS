@@ -145,6 +145,18 @@ pub fn storage_inventory_with_temp(
     locations: &StorageLocations,
     temp: &Path,
 ) -> Vec<StorageEntry> {
+    storage_inventory_progress(locator, locations, temp, None)
+}
+
+/// [`storage_inventory_with_temp`] that adds the bytes of every file it
+/// measures to `progress`, so a caller can show a running partial sum while a
+/// large folder is still being walked.
+pub fn storage_inventory_progress(
+    locator: &ToolLocator,
+    locations: &StorageLocations,
+    temp: &Path,
+    progress: Option<&std::sync::atomic::AtomicU64>,
+) -> Vec<StorageEntry> {
     let output_root = locator.resolve_data_path(locations.output_dir);
     let cfd_root = locator.resolve_data_path(locations.cfd_case_root);
     let navdata_root = locator.resolve_data_path(locations.navdata_dir);
@@ -174,7 +186,7 @@ pub fn storage_inventory_with_temp(
                 .collect();
             let (bytes, files) = removable
                 .iter()
-                .map(|path| measure(path))
+                .map(|path| measure_counted(path, progress))
                 .fold((0, 0), |acc, item| (acc.0 + item.0, acc.1 + item.1));
             StorageEntry {
                 id,
@@ -241,10 +253,17 @@ fn same_path(a: &Path, b: &Path) -> bool {
 
 /// `(bytes, files)` under `path`, without following symbolic links.
 pub fn measure(path: &Path) -> (u64, u64) {
+    measure_counted(path, None)
+}
+
+fn measure_counted(path: &Path, progress: Option<&std::sync::atomic::AtomicU64>) -> (u64, u64) {
     let Ok(metadata) = path.symlink_metadata() else {
         return (0, 0);
     };
     if metadata.is_file() {
+        if let Some(progress) = progress {
+            progress.fetch_add(metadata.len(), std::sync::atomic::Ordering::Relaxed);
+        }
         return (metadata.len(), 1);
     }
     if !metadata.is_dir() {
@@ -255,7 +274,7 @@ pub fn measure(path: &Path) -> (u64, u64) {
     };
     entries
         .flatten()
-        .map(|entry| measure(&entry.path()))
+        .map(|entry| measure_counted(&entry.path(), progress))
         .fold((0, 0), |acc, item| (acc.0 + item.0, acc.1 + item.1))
 }
 

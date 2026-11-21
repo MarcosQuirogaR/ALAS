@@ -59,6 +59,82 @@ pub enum SegmentError {
         /// The configured rate magnitude, m/s.
         rate_m_s: f64,
     },
+    /// A cruise distance or its mean speed was negative or not finite, the
+    /// mean speed was zero, or the distance was zero on a leg that changes
+    /// speed: the leg has no time span its discretization is defined on.
+    #[error(
+        "segment {tag} cruise distance {distance_m} m at a mean speed of {mean_speed_m_s} m/s has no usable time span: both must be finite, the speed greater than zero, and the distance greater than zero where the speed changes along the leg"
+    )]
+    NonPositiveCruiseSpan {
+        /// The segment that was given the distance.
+        tag: String,
+        /// The configured cruise distance, m.
+        distance_m: f64,
+        /// The mean true airspeed of the leg's speed profile, m/s.
+        mean_speed_m_s: f64,
+    },
+    /// A load factor other than one on a leg that is not level, or one that is
+    /// not finite or below one. The lift balance `L = n W` stands in for the
+    /// whole gravity vector, which is the balance of a level turn only.
+    #[error("segment {tag} load factor {load_factor}: a sustained load factor of at least 1 is only defined on a level leg")]
+    InvalidLoadFactor {
+        /// The segment that was given the load factor.
+        tag: String,
+        /// The configured load factor.
+        load_factor: f64,
+    },
+}
+
+/// Reject a load factor that is not finite, below one, or on a path that is not level.
+pub(super) fn check_load_factor(
+    tag: &str,
+    level: bool,
+    load_factor: f64,
+) -> Result<(), SegmentError> {
+    if load_factor.is_finite() && load_factor >= 1.0 && (level || load_factor == 1.0) {
+        Ok(())
+    } else {
+        Err(SegmentError::InvalidLoadFactor {
+            tag: tag.to_owned(),
+            load_factor,
+        })
+    }
+}
+
+/// [`check_load_factor`] for the load factor of `spec` on the kind of leg it is.
+pub(super) fn check_spec_load_factor(spec: &super::SegmentSpec) -> Result<(), SegmentError> {
+    let level = matches!(spec.kind, super::SegmentKind::Cruise { .. });
+    check_load_factor(&spec.tag, level, spec.load_factor)
+}
+
+/// Reject a cruise whose time span `distance / mean speed` is not defined.
+///
+/// The mean speed must be finite and positive and the distance finite and
+/// not negative. A leg that changes speed (`differentiated`) takes its
+/// acceleration from the time-derivative operator, which does not exist on a
+/// zero span, so its distance must be positive. A constant-speed leg never
+/// reads that operator: at zero distance it is a leg of zero duration that
+/// burns no fuel and hands its start state on unchanged.
+pub(super) fn check_cruise_span(
+    tag: &str,
+    distance_m: f64,
+    mean_speed_m_s: f64,
+    differentiated: bool,
+) -> Result<(), SegmentError> {
+    let speed_usable = mean_speed_m_s.is_finite() && mean_speed_m_s > 0.0;
+    let span_usable = speed_usable && distance_m.is_finite() && {
+        let span_s = distance_m / mean_speed_m_s;
+        span_s.is_finite() && (span_s > 0.0 || (distance_m == 0.0 && !differentiated))
+    };
+    if span_usable {
+        Ok(())
+    } else {
+        Err(SegmentError::NonPositiveCruiseSpan {
+            tag: tag.to_owned(),
+            distance_m,
+            mean_speed_m_s,
+        })
+    }
 }
 
 /// Reject a climb or descent rate magnitude that is not finite and positive.
@@ -77,5 +153,49 @@ pub(super) fn check_vertical_rate(
             kind,
             rate_m_s,
         })
+    }
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    #[test]
+    fn a_cruise_needs_a_defined_time_span() {
+        assert!(check_cruise_span("cruise", 1.0e6, 230.0, false).is_ok());
+        assert!(check_cruise_span("cruise", 1.0e6, 230.0, true).is_ok());
+        // A constant-speed leg of zero distance is a leg of zero duration.
+        assert!(check_cruise_span("cruise", 0.0, 230.0, false).is_ok());
+        for (distance_m, mean_speed_m_s, differentiated) in [
+            (0.0, 230.0, true),
+            (-1.0e3, 230.0, false),
+            (f64::NAN, 230.0, false),
+            (0.0, 0.0, false),
+            (1.0e6, 0.0, false),
+            (1.0e6, f64::NAN, false),
+            (1.0e6, f64::INFINITY, false),
+        ] {
+            assert!(
+                matches!(
+                    check_cruise_span("cruise", distance_m, mean_speed_m_s, differentiated),
+                    Err(SegmentError::NonPositiveCruiseSpan { .. })
+                ),
+                "{distance_m} m at {mean_speed_m_s} m/s"
+            );
+        }
+    }
+
+    #[test]
+    fn a_load_factor_above_one_is_defined_on_a_level_leg_only() {
+        assert!(check_load_factor("turn", true, 1.3).is_ok());
+        assert!(check_load_factor("cruise", true, 1.0).is_ok());
+        assert!(check_load_factor("climb", false, 1.0).is_ok());
+        assert!(matches!(
+            check_load_factor("climb", false, 1.3),
+            Err(SegmentError::InvalidLoadFactor { .. })
+        ));
+        for bad in [0.5, f64::NAN, f64::INFINITY] {
+            assert!(check_load_factor("turn", true, bad).is_err(), "{bad}");
+        }
     }
 }

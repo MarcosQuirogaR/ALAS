@@ -1,7 +1,7 @@
 // SPDX-License-Identifier: AGPL-3.0-or-later
 // Copyright (C) 2026 Marcos Quiroga Rodriguez
 
-//! Fuel and time of the take-off ground roll (audit MIS-06).
+//! Fuel and time of the take-off ground roll.
 //!
 //! The planned ladder starts at the take-off speed over the runway, so the
 //! brake-release-to-lift-off burn is not in any segment. It is a listed
@@ -21,7 +21,7 @@ use alas_mass::fuel_plan::{FuelModelError, LegEstimate};
 use alas_prop::system::PropulsionRating;
 
 use super::adapt::Fixed;
-use super::integrate::{FlownLeg, FlyError};
+use super::integrate::{FlownLeg, FlownStep, FlyError};
 use super::profile::LegKind;
 use super::SegmentMissionModel;
 
@@ -38,7 +38,18 @@ impl Roll {
     /// `flown`, with the roll's fuel and time counted in the leg and in the
     /// time and fuel to the top of the climb (both run from brake release).
     pub(super) fn added_to(self, flown: FlownLeg) -> FlownLeg {
+        let mut steps = Vec::with_capacity(flown.steps.len() + 1);
+        if let (Some(first), true) = (flown.steps.first(), self.time_s > 0.0) {
+            let [start_kg, _] = first.mass_kg;
+            steps.push(FlownStep::ground_roll(
+                first.altitude_m[0],
+                self.time_s,
+                [start_kg + self.fuel_kg, start_kg],
+            ));
+        }
+        steps.extend(flown.steps.iter().map(|s| s.delayed(self.time_s)));
         FlownLeg {
+            steps,
             leg: LegEstimate {
                 fuel_kg: flown.leg.fuel_kg + self.fuel_kg,
                 time_s: flown.leg.time_s + self.time_s,
@@ -52,7 +63,7 @@ impl Roll {
 
 impl SegmentMissionModel {
     /// Fly a leg at the given climb-rate scales and, for a trip, with the
-    /// take-off ground roll in front of it (audit MIS-06); a diversion starts
+    /// take-off ground roll in front of it; a diversion starts
     /// from a go-around in the air. Every flown trip, frozen, replayed or
     /// adapted, passes through here, so the plan and its replay agree.
     pub(super) fn fly_at_scales(

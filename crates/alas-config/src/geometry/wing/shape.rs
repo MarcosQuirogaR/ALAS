@@ -12,11 +12,25 @@
 //! static-to-1 g tip rise `flight_tip_rise_semispan_fraction` times the
 //! semispan. A wing that declares no rise has one shape for both roles.
 //!
-//! The ground shape is the one ground clearance, nacelle strike and the FLOPS
-//! main-gear oleo length (equation 66, whose dihedral term is a ground-roll
-//! clearance) read. The flight shape is the one the aerodynamic lattice, the
-//! dihedral effect and the layout dihedral check read: the geometry builder
-//! lofts it by default.
+//! # Who reads which shape
+//!
+//! - Flight shape: every `AircraftBuilder::build` caller, so the overlays
+//!   against the manufacturer drawings, the aerodynamic lattice, the dihedral
+//!   effect, the layout dihedral check, the spar box and the mass stations. A
+//!   preset fits its front-view drawing here; the drawing is an unloaded shape,
+//!   so the drawn loft stands for both (a true 1 g deflection is not
+//!   lofted).
+//! - Ground shape: the tip height of the airport-planning clearance tables, the
+//!   line nacelles hang from under `nacelles_hold_ground_height`, and the
+//!   clearance residuals and FLOPS main-gear oleo length (equation 66, whose
+//!   dihedral term is a ground-roll clearance), which take the linear rise back
+//!   off the built wing.
+//!
+//! The rise between the two is therefore a physical statement about one wing,
+//! not the difference of two fits: it is zero on the centreline, where the wing
+//! box sits in the body, and grows outboard. A ground line that ends up flat
+//! inboard or below the body-mounted root says the fit is wrong, not that the
+//! wing bends that way.
 //!
 //! # Spanwise distribution
 //!
@@ -211,7 +225,7 @@ impl WingConfig {
                     <= super::profile::STATION_SPAN_TOLERANCE
             })
             .and_then(|station| station.flight_rise_m)
-            .unwrap_or(tip_rise_m * planform.kink.span_fraction);
+            .unwrap_or_else(|| self.flight_rise_between_stations(planform, tip_rise_m));
         Ok(WingHeights {
             root_z_m: ground.root_z_m + self.flight_root_rise_m.unwrap_or(0.0),
             break_z_m: ground.break_z_m + kink_rise_m,
@@ -219,5 +233,34 @@ impl WingConfig {
             interior,
             interpolation: self.wing_profile_interpolation,
         })
+    }
+
+    /// Flight rise of a kink no station names: linear between the rises either
+    /// side of it, so that the kink stays on the declared flight shape. Rises left
+    /// undeclared follow the tip rise in proportion to the span, which is then also
+    /// the answer here. The proportional rule alone, at a kink between declared
+    /// rises, would leave the kink below its neighbours and fold the wing there.
+    fn flight_rise_between_stations(&self, planform: &TransportPlanform, tip_rise_m: f64) -> f64 {
+        let kink = planform.kink.span_fraction;
+        let rises = std::iter::once((0.0, self.flight_root_rise_m.unwrap_or(0.0)))
+            .chain(self.interior_stations(kink).map(|station| {
+                (
+                    station.span_fraction,
+                    station
+                        .flight_rise_m
+                        .unwrap_or(tip_rise_m * station.span_fraction),
+                )
+            }))
+            .chain(std::iter::once((1.0, tip_rise_m)));
+        let (mut inboard, mut outboard) = ((0.0, 0.0), (1.0, tip_rise_m));
+        for (fraction, rise_m) in rises {
+            if fraction < kink {
+                inboard = (fraction, rise_m);
+            } else {
+                outboard = (fraction, rise_m);
+                break;
+            }
+        }
+        inboard.1 + (kink - inboard.0) / (outboard.0 - inboard.0) * (outboard.1 - inboard.1)
     }
 }

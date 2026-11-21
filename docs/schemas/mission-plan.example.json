@@ -1,0 +1,18 @@
+{
+  "name": "Drone relay",
+  "contingency_fraction": 0.05,
+  "stages": [
+    { "id": "taxi", "kind": { "type": "taxi", "time_min": 10.0 } },
+    { "id": "takeoff", "kind": { "type": "takeoff", "field": { "name": "LEVD", "elevation_ft": 2.0, "toda_m": 1250.0 } } },
+    { "id": "climb", "kind": { "type": "climb", "altitude_ft": 25000.0 } },
+    {
+      "id": "cruise-out",
+      "kind": { "type": "cruise", "extent": { "distance_km": 600.0 } },
+      "events": [ { "at": "end", "action": { "type": "payload_release", "items": ["drone"] } } ]
+    },
+    { "id": "relay", "kind": { "type": "loiter", "time_min": 180.0 } },
+    { "id": "cruise-back", "kind": { "type": "cruise", "extent": { "distance_km": 600.0 } } },
+    { "id": "descent", "kind": { "type": "descent", "altitude_ft": 3000.0 } },
+    { "id": "landing", "kind": { "type": "landing" } }
+  ]
+}

@@ -22,10 +22,13 @@ pub fn figure_propulsion_bpr_sensitivity(config: &AlasConfig, theme: Option<&str
         Err(scene) => return scene,
     };
     let pal = get_palette(theme);
-    let mut scene = Scene::new(700.0, 420.0, Some(Color::from_hex(pal.bg)));
+    let mut scene = Scene::new(700.0, 456.0, Some(Color::from_hex(pal.bg)));
+    // The cruise (throttled) temperature, as the cycle summary shows it.
+    let design = design_point(config, eng);
+    let cruise_tit_k = design.turbine_inlet_temperature_k;
     scene.title = Some(format!(
-        "Bypass-Ratio Sensitivity (OPR={:.0}, TIT={:.0} K)",
-        eng.overall_pressure_ratio, eng.turbine_inlet_temp_k
+        "Bypass-Ratio Sensitivity (OPR={:.0}, TIT={cruise_tit_k:.0} K)",
+        design.overall_pressure_ratio
     ));
     let title = scene.title.clone().unwrap_or_default();
     draw_title(&mut scene, &title, pal);
@@ -39,9 +42,9 @@ pub fn figure_propulsion_bpr_sensitivity(config: &AlasConfig, theme: Option<&str
     let bpr_vec = linspace(bpr_lo, bpr_hi, 40);
     let sens = compute_bpr_sensitivity(
         &bpr_vec,
-        eng.overall_pressure_ratio,
-        eng.turbine_inlet_temp_k,
-        eng.fan_pressure_ratio,
+        design.overall_pressure_ratio,
+        cruise_tit_k,
+        design.fan_pressure_ratio,
         req.cruise_mach,
         req.cruise_altitude_m,
         cyc_cfg,
@@ -92,19 +95,35 @@ pub fn figure_propulsion_bpr_sensitivity(config: &AlasConfig, theme: Option<&str
         .zip(&sens.feasible_mask)
         .filter_map(|((&x, &y), &ok)| ok.then_some((x, y)))
         .collect();
-    axes_sfn.add_line_series(&mut scene, &sfn_pts, Stroke::new(color_sfn, 2.0));
-
     let tsfc_pts: Vec<(f64, f64)> = bpr_vec
         .iter()
         .zip(&sens.tsfc_mg_ns)
         .zip(&sens.feasible_mask)
         .filter_map(|((&x, &y), &ok)| ok.then_some((x, y)))
         .collect();
+    // A corner in the specific-thrust curve is a solver branch or limit switch in the
+    // cycle, and the TSFC hump that follows it is not a trend. The curves are drawn
+    // solid up to the corner and dotted beyond it (never dropped), and the legend
+    // and the footnote say so.
+    let switch = super::bpr_helpers::branch_switch_index(&sfn_pts);
+    let valid_len = switch.map_or(sfn_pts.len(), |k| k + 1);
+    axes_sfn.add_line_series(
+        &mut scene,
+        &sfn_pts[..valid_len],
+        Stroke::new(color_sfn, 2.0),
+    );
     axes_tsfc.add_line_series(
         &mut scene,
-        &tsfc_pts,
+        &tsfc_pts[..valid_len],
         Stroke::dashed(color_tsfc, 2.0, 6.0, 4.0),
     );
+    let dotted = |c: Color| Stroke::dashed(Color::rgba(c.r, c.g, c.b, 120), 1.4, 1.5, 3.0);
+    if switch.is_some() {
+        axes_sfn.add_line_series(&mut scene, &sfn_pts[valid_len - 1..], dotted(color_sfn));
+        axes_tsfc.add_line_series(&mut scene, &tsfc_pts[valid_len - 1..], dotted(color_tsfc));
+    }
+    let valid_sfn = &sfn_pts[..valid_len];
+    let valid_tsfc = &tsfc_pts[..valid_len];
 
     if design_out.cycle_feasible {
         let p1 = axes_sfn.map_point(eng.bypass_ratio, design_out.specific_thrust_ms);
@@ -133,49 +152,59 @@ pub fn figure_propulsion_bpr_sensitivity(config: &AlasConfig, theme: Option<&str
         });
     }
 
-    draw_legend(
-        &mut scene,
-        [rect.0 + 345.0, rect.1 + 102.0],
-        &[
-            (
-                "SFn [m/s]".to_owned(),
-                LegendMarker::Line(Stroke::new(color_sfn, 2.0)),
-            ),
-            (
-                "TSFC [mg/(N\u{00b7}s)]".to_owned(),
-                LegendMarker::Line(Stroke::dashed(color_tsfc, 2.0, 6.0, 4.0)),
-            ),
-        ],
-        pal,
-        9.0,
-    );
-
-    // Right-axis (TSFC) tick labels, placed and colored manually per this
-    // family's dual-axis convention, see the module doc.
     let (rx, ry, rw, rh) = rect;
-    for frac in [0.0, 0.5, 1.0] {
-        let val = tsfc_lo + frac * (tsfc_hi - tsfc_lo);
-        let py = ry + rh - frac * rh;
+    let mut legend_rows = vec![
+        (
+            "SFn [m/s]".to_owned(),
+            LegendMarker::Line(Stroke::new(color_sfn, 2.0)),
+        ),
+        (
+            "TSFC [mg/(N\u{00b7}s)]".to_owned(),
+            LegendMarker::Line(Stroke::dashed(color_tsfc, 2.0, 6.0, 4.0)),
+        ),
+    ];
+    if switch.is_some() {
+        legend_rows.push((
+            "Past cycle limit".to_owned(),
+            LegendMarker::Line(dotted(Color::from_hex(pal.tick))),
+        ));
+    }
+    let curves_px: Vec<Vec<[f64; 2]>> = vec![
+        sfn_pts
+            .iter()
+            .map(|&(x, y)| axes_sfn.map_point(x, y))
+            .collect(),
+        tsfc_pts
+            .iter()
+            .map(|&(x, y)| axes_tsfc.map_point(x, y))
+            .collect(),
+    ];
+    let origin = super::super::support::least_cluttered_legend_origin(
+        rect,
+        legend_rows.len(),
+        9.0,
+        150.0,
+        &curves_px,
+    );
+    draw_legend(&mut scene, origin, &legend_rows, pal, 9.0);
+
+    // Right-axis (TSFC) ticks at round values, coloured like the curve. The left
+    // axis keeps the frame's own ticks: a second set of labels at the range ends
+    // collided with them.
+    let (right_ticks, decimals) = super::bpr_helpers::nice_ticks(tsfc_lo, tsfc_hi, 5);
+    for val in right_ticks {
+        let py = ry + rh - (val - tsfc_lo) / (tsfc_hi - tsfc_lo) * rh;
+        scene.add(SceneElement::Line {
+            p1: [rx + rw, py],
+            p2: [rx + rw + 4.0, py],
+            stroke: Stroke::new(color_tsfc, 0.8),
+        });
         scene.add(SceneElement::Text {
-            text: format!("{val:.1}"),
-            pos: [rx + rw + 6.0, py],
+            text: format!("{val:.decimals$}"),
+            pos: [rx + rw + 7.0, py],
             font_size: 8.0,
             color: color_tsfc,
             align: TextAlign::Left,
-            baseline: TextBaseline::Middle,
-            angle_deg: 0.0,
-            bold: false,
-        });
-    }
-    for frac in [0.0, 0.5, 1.0] {
-        let val = sfn_lo + frac * (sfn_hi - sfn_lo);
-        let py = ry + rh - frac * rh;
-        scene.add(SceneElement::Text {
-            text: format!("{val:.0}"),
-            pos: [rx - 6.0, py],
-            font_size: 8.0,
-            color: color_sfn,
-            align: TextAlign::Right,
             baseline: TextBaseline::Middle,
             angle_deg: 0.0,
             bold: false,
@@ -212,6 +241,49 @@ pub fn figure_propulsion_bpr_sensitivity(config: &AlasConfig, theme: Option<&str
         angle_deg: -90.0,
         bold: false,
     });
+
+    // Footnotes: the cycle-limit flag, and the stated offset of the design markers
+    // (the design cycle is solved on its own, not read off the 40-point sweep).
+    let mut notes: Vec<String> = Vec::new();
+    if let Some(k) = switch {
+        notes.push(format!(
+            "Dotted beyond BPR {:.1}: corner in SFn (cycle limit or solver branch switch), not a trend.",
+            sfn_pts[k].0
+        ));
+    }
+    if design_out.cycle_feasible {
+        let off = |design: f64, curve: Option<f64>| {
+            curve
+                .map(|c| 100.0 * (design - c) / c)
+                .filter(|v| v.is_finite())
+        };
+        let d_sfn = off(
+            design_out.specific_thrust_ms,
+            super::bpr_helpers::interpolate(valid_sfn, eng.bypass_ratio),
+        );
+        let d_tsfc = off(
+            design_out.tsfc_mg_ns,
+            super::bpr_helpers::interpolate(valid_tsfc, eng.bypass_ratio),
+        );
+        if let (Some(a), Some(b)) = (d_sfn, d_tsfc) {
+            if a.abs().max(b.abs()) >= 0.5 {
+                notes.push(format!(
+                    "Design markers (cycle solved at the engine's own BPR) sit {a:+.1} % (SFn) and {b:+.1} % (TSFC) from the sweep curves at the same BPR."
+                ));
+            }
+        }
+    }
+    if !notes.is_empty() {
+        super::super::support::wrapped_footnote(
+            &mut scene,
+            pal,
+            &notes.join(" "),
+            7.4,
+            350.0,
+            450.0,
+            620.0,
+        );
+    }
 
     scene
 }

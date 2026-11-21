@@ -147,10 +147,13 @@ mod tests {
             else {
                 continue;
             };
-            // The C919 MLW (67,800 / 75,100 kg, 0.9028) is a secondary-source
-            // value with no TCDS or planning manual behind it, so it is kept
-            // out of the class statistic (which stays 0.8598).
-            if preset.name == "C919" {
+            // A secondary-source MLW (the C919's 67,800 / 75,100 kg, 0.9028,
+            // has no TCDS or planning manual behind it) is kept out of the
+            // class statistic, which stays 0.8598, and so is any aircraft
+            // outside the transport class (the Learjet 60 business jet, 0.83).
+            if preset.reference.mlw_secondary_source.is_some()
+                || preset.class != crate::presets::AircraftClass::Transport
+            {
                 continue;
             }
             let class = crate::preset_flops::inputs_for(preset.name)

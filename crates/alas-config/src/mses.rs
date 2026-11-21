@@ -32,7 +32,8 @@ pub struct MsesConfig {
     #[config(
         hidden,
         label = "Enabled",
-        help = "Run an MSES 2-D polar sweep on the optimized design's root airfoil section as part of a normal Run, populating the Model Comparison tab. On by default. Set on Setup > External Tools."
+        help = "Run an MSES 2-D polar sweep on the optimized root airfoil in a normal Run, filling the Model Comparison tab. On by default.",
+        long_help = "Run an MSES 2-D polar sweep on the optimized design's root airfoil section as part of a normal Run, populating the Model Comparison tab. On by default. Set on Workspace > External Tools."
     )]
     pub enabled: bool,
 
@@ -40,7 +41,8 @@ pub struct MsesConfig {
     #[config(
         hidden,
         label = "MSES executables directory",
-        help = "Path (repo-root-relative or absolute) to the folder containing mset.exe/mses.exe/mplot.exe. MSES is licensed separately by MIT and its executables are not distributed with ALAS: obtain them yourself and point this at your own install. The compatible GPL osmapDP.dat transition map is bundled separately and selected automatically. Without the executables the Model Comparison tab simply omits the MSES column. Set on Setup > External Tools."
+        help = "Folder containing mset.exe, mses.exe and mplot.exe (absolute or repo-relative). MSES is licensed separately by MIT and is not distributed with ALAS.",
+        long_help = "Path (repo-root-relative or absolute) to the folder containing mset.exe/mses.exe/mplot.exe. MSES is licensed separately by MIT and its executables are not distributed with ALAS: obtain them yourself and point this at your own install. The compatible GPL osmapDP.dat transition map is bundled separately and selected automatically. Without the executables the Model Comparison tab simply omits the MSES column. Set on Workspace > External Tools."
     )]
     pub mses_dir: String,
 
@@ -52,7 +54,8 @@ pub struct MsesConfig {
     #[config(
         hidden,
         label = "MSES Orr-Sommerfeld database",
-        help = "Optional path to the double-precision osmapDP.dat resource used by MSES free-transition calculations. If empty, ALAS checks beside the MSES executables and then the release-bundled assets/mses resource. The selected path and compatibility check are recorded in the run manifest; a single-precision osmap.dat is rejected."
+        help = "Optional path to the double-precision osmapDP.dat used by MSES free-transition calculations.",
+        long_help = "Optional path to the double-precision osmapDP.dat resource used by MSES free-transition calculations. If empty, ALAS checks beside the MSES executables and then the release-bundled assets/mses resource. The selected path and compatibility check are recorded in the run manifest; a single-precision osmap.dat is rejected."
     )]
     pub osmap_path: Option<String>,
 
@@ -82,7 +85,8 @@ pub struct MsesConfig {
     /// Critical amplification factor for e^N transition prediction.
     #[config(
         label = "Transition N-crit",
-        help = "e^N transition-prediction critical amplification factor. 9.0 is the standard sea-level-cruise default (Drela); lower values (e.g. 4-5) predict earlier transition, appropriate for a high-turbulence/rough-surface environment."
+        help = "e^N transition critical amplification factor (dimensionless). 9 is the standard clean-flight default (Drela); 4-5 gives earlier transition in rough environments.",
+        long_help = "e^N transition-prediction critical amplification factor. 9.0 is the standard sea-level-cruise default (Drela); lower values (e.g. 4-5) predict earlier transition, appropriate for a high-turbulence/rough-surface environment."
     )]
     pub n_crit: f64,
 
@@ -111,7 +115,8 @@ pub struct MsesConfig {
     /// How many points the polar sweep has.
     #[config(
         label = "Alpha sweep point count",
-        help = "Number of alpha points in the MSES polar sweep. Kept small relative to the native VLM sweep (analysis.sweep_n_points) since each MSES point is a real viscous-compressible solve (~1-2s) rather than a linear-algebra VLM solve."
+        help = "Number of angle-of-attack points in the MSES polar sweep.",
+        long_help = "Number of alpha points in the MSES polar sweep. Kept small relative to the native VLM sweep (analysis.sweep_n_points) since each MSES point is a real viscous-compressible solve (~1-2s) rather than a linear-algebra VLM solve."
     )]
     pub alpha_sweep_n_points: i64,
 

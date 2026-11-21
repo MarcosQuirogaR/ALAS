@@ -236,32 +236,33 @@ pub fn render_geometry(request: AvlDeckRequest<'_>) -> Result<String, AvlError> 
     .ok();
     writeln!(deck, "0.0").ok();
 
-    for wing in &airplane.wings {
+    // The deck replays the lattice: a surface the lattice skips is not in it.
+    for wing in airplane
+        .wings
+        .iter()
+        .filter(|wing| !wing.is_geometry_only())
+    {
         writeln!(deck, "\nSURFACE").ok();
         writeln!(deck, "{}", sanitized_name(&wing.name)).ok();
-        writeln!(
-            deck,
-            "{} 1.0 {} -1.0",
-            request.chordwise_vortices,
-            request
-                .spanwise_vortices
-                // AVL needs more than one spanwise panel between adjacent
-                // SECTION stations after its cosine redistribution is applied.
-                // Four panels per station is a conservative lower bound for
-                // the refined ALAS loft: it keeps the native solver from
-                // rejecting dense section layouts while preserving the
-                // requested resolution when it is already higher.
-                .max(wing.xsecs.len().saturating_mul(4))
-        )
-        .ok();
+        // Spanwise vortices are given per SECTION interval (the surface line
+        // carries only Nchord and Cspace), as in the AVL 3.52 manual's SURFACE
+        // and SECTION keyword descriptions: a surface-wide Nspan makes
+        // MAKESURF stop when the refined loft has closely spaced sections.
+        writeln!(deck, "{} 1.0", request.chordwise_vortices).ok();
         if wing.symmetric {
             writeln!(deck, "YDUPLICATE\n0.0").ok();
         }
-        for section in &wing.xsecs {
+        let interval_counts = interval_vortex_counts(wing, request.spanwise_vortices);
+        for (index, section) in wing.xsecs.iter().enumerate() {
             writeln!(deck, "SECTION").ok();
+            // Nspan and Sspace (cosine) for the interval to the next section;
+            // AVL ignores them on the last section, so none is written there.
+            let interval = interval_counts
+                .get(index)
+                .map_or_else(String::new, |count| format!(" {count} 1.0"));
             writeln!(
                 deck,
-                "{:.12} {:.12} {:.12} {:.12} {:.12}",
+                "{:.12} {:.12} {:.12} {:.12} {:.12}{interval}",
                 section.xyz_le[0],
                 section.xyz_le[1],
                 section.xyz_le[2],
@@ -383,6 +384,12 @@ fn validate_deck_request(request: AvlDeckRequest<'_>) -> Result<(), AvlError> {
         request.chordwise_vortices,
         request.spanwise_vortices,
     );
+    let strips = avl_strip_count(airplane, request.spanwise_vortices);
+    if strips > AVL_STRIP_LIMIT {
+        return Err(AvlError::InvalidInput(format!(
+            "deck needs {strips} spanwise strips, above AVL's compiled limit of {AVL_STRIP_LIMIT} (NSMAX)"
+        )));
+    }
     if vortices > AVL_VORTEX_LIMIT {
         return Err(AvlError::InvalidInput(format!(
             "deck needs {vortices} horseshoe vortices, above AVL's compiled limit of {AVL_VORTEX_LIMIT} (NVMAX)"

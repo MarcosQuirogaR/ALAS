@@ -1,0 +1,38 @@
+name: Pull request text hygiene
+
+# Re-scans the title and body of a pull request into main whenever they are
+# edited or the head moves, without re-running the whole workspace gate (the `Publication
+# hygiene` job of gate.yml scans the same text when the pull request is opened
+# or pushed to). Require "Pull request text hygiene" next to the quick gate.
+
+on:
+  pull_request:
+    types: [opened, reopened, edited, synchronize]
+
+permissions:
+  contents: read
+
+concurrency:
+  group: pr-text-hygiene-${{ github.event.pull_request.number }}
+  cancel-in-progress: true
+
+jobs:
+  pr-text:
+    name: Pull request text hygiene
+    if: github.base_ref == 'main'
+    runs-on: ubuntu-latest
+    timeout-minutes: 15
+    steps:
+      - name: Check out source
+        uses: actions/checkout@v4
+      - name: Install the repository Rust toolchain
+        uses: dtolnay/rust-toolchain@1.97.1
+      - name: Scan the title and body
+        shell: bash
+        env:
+          PR_BODY: ${{ github.event.pull_request.body }}
+          PR_TITLE: ${{ github.event.pull_request.title }}
+        run: |
+          set -euo pipefail
+          { echo "$PR_TITLE"; echo "$PR_BODY"; } > "$RUNNER_TEMP/pr-text.txt"
+          cargo xtask hygiene --text "$RUNNER_TEMP/pr-text.txt"

@@ -11,6 +11,9 @@ mod search_evidence;
 #[path = "verification.rs"]
 mod verification;
 
+#[path = "replay_triage.rs"]
+mod replay_triage;
+
 /// Run the native search, then make product-profile finalists survive the
 /// application's reporting-fidelity re-evaluation before the branch is
 /// reported as completed.
@@ -30,10 +33,10 @@ mod verification;
 /// - never a design the search itself rejected - and the first one the
 ///   application accepts is delivered, with the run reported as a
 ///   reporting-fidelity fallback rather than as convergence. If none is
-///   accepted the search's own finalist is still returned, with its full
-///   report and every finding intact, and the run is reported as
-///   `reporting_fidelity_rejected`. No limit, residual or tolerance is
-///   weakened anywhere in that ladder.
+///   accepted, the registered aircraft (or a clean sheet's start) is
+///   delivered with its own reporting analysis and findings, and the run says
+///   so; a design the search found infeasible is never delivered. No limit,
+///   residual or tolerance is weakened anywhere in that ladder.
 pub(super) struct VlmOptimizerRequest<'a> {
     pub(super) config: AlasConfig,
     pub(super) seed: Option<u64>,
@@ -63,13 +66,55 @@ pub(super) fn run_vlm_optimizer(request: VlmOptimizerRequest<'_>) -> SolverOptim
     let mut persist_evidence = |result: &OptimizationResult| {
         search_evidence::persist(output_dir.as_deref(), result);
     };
-    let mut optimization = match optimizer.run_cancellable_with_evidence(
-        bounds,
-        Some(&nominal),
-        None,
-        cancel,
-        Some(&mut persist_evidence),
-    ) {
+    // The registered aircraft's reporting analysis does not depend on the
+    // search, so it runs beside it on one thread of its own instead of in
+    // the verification wave after it: the post-search verification is then
+    // the finalists alone. A failed or cancelled search stops it.
+    let registered_stop = AtomicBool::new(false);
+    let (searched, registered) = std::thread::scope(|threads| {
+        let registered = threads.spawn(|| {
+            let pool = rayon::ThreadPoolBuilder::new()
+                .num_threads(1)
+                .build()
+                .ok()?;
+            Some(pool.install(|| {
+                if config.optimizer.design_space.mode
+                    == alas_config::DesignMode::ReferenceAdaptation
+                {
+                    crate::acceptance::ReportingNominal::evaluate(
+                        &config,
+                        acceptance_route,
+                        Some(&registered_stop),
+                    )
+                } else {
+                    Some(crate::acceptance::ReportingNominal::of_baseline(
+                        &config,
+                        &nominal,
+                        acceptance_route,
+                        Some(&registered_stop),
+                    ))
+                }
+            }))
+        });
+        let searched = optimizer.run_cancellable_with_evidence(
+            bounds,
+            Some(&nominal),
+            None,
+            cancel,
+            Some(&mut persist_evidence),
+        );
+        if !matches!(&searched, Ok(result) if !result.was_cancelled()) {
+            registered_stop.store(true, std::sync::atomic::Ordering::Relaxed);
+        }
+        while !registered.is_finished() {
+            if cancel.is_some_and(|flag| flag.load(std::sync::atomic::Ordering::Relaxed)) {
+                registered_stop.store(true, std::sync::atomic::Ordering::Relaxed);
+            }
+            std::thread::sleep(std::time::Duration::from_millis(20));
+        }
+        (searched, registered.join().ok().flatten())
+    });
+    let mut optimization = match searched {
         Ok(result) => result,
         Err(error) => {
             return SolverOptimizationResult::failed(
@@ -105,6 +150,7 @@ pub(super) fn run_vlm_optimizer(request: VlmOptimizerRequest<'_>) -> SolverOptim
             nominal: &nominal,
             acceptance_route,
             cancel,
+            registered,
         },
         &mut optimization,
     ) {
@@ -139,7 +185,7 @@ pub(super) fn run_vlm_optimizer(request: VlmOptimizerRequest<'_>) -> SolverOptim
 
 /// One job of the reporting-fidelity ladder: the registered aircraft the
 /// relative balance guard compares against, or one ranked finalist.
-enum LadderJob {
+pub(super) enum LadderJob {
     Nominal(Option<Result<crate::acceptance::ReportingNominal, String>>),
     Finalist(Result<FinalistVerification, String>),
 }
@@ -154,10 +200,14 @@ pub(super) struct ReportingLadder<'a> {
     pub(super) nominal: &'a DesignVector,
     pub(super) acceptance_route: Option<&'a AcceptanceRoute>,
     pub(super) cancel: Option<&'a AtomicBool>,
+    /// The registered aircraft's reporting analysis when the caller made it
+    /// beside the search (`ReportingNominal::evaluate`'s answer); `None`
+    /// runs it in the ladder's own wave.
+    pub(super) registered: Option<Option<Result<crate::acceptance::ReportingNominal, String>>>,
 }
 
 /// What the ladder delivers: the verified (or best-rejected) reporting
-/// analysis and the registered aircraft it was compared against.
+/// analysis and the registered aircraft or start it was compared against.
 pub(super) struct LadderOutcome {
     pub(super) delivered: FinalistVerification,
     pub(super) reporting_nominal: Option<crate::acceptance::ReportingNominal>,
@@ -178,6 +228,7 @@ pub(super) fn run_reporting_ladder(
         nominal,
         acceptance_route,
         cancel,
+        registered,
     } = ladder;
     let nominal = *nominal;
     let label = match solver {
@@ -188,6 +239,8 @@ pub(super) fn run_reporting_ladder(
     // as well would put two identical records at the same timestamp.
     let scope = alas_opt::CancelScope::attach(cancel);
     let started = Instant::now();
+    let mut phases: Vec<alas_opt::LadderPhase> = Vec::new();
+    let mut lap = started;
     // The ladder runs inside the refinement's verification reserve: its
     // evaluations less the baseline and the final analysis, and the stage
     // time the search left. The finalist always runs.
@@ -195,9 +248,9 @@ pub(super) fn run_reporting_ladder(
     // The registered aircraft at reporting fidelity, once per run, for the
     // relative balance guard of every finalist. It is the baseline analysis
     // when the baseline is the registered vector, else one more analysis.
-    // It is job 0 of the first verification wave, so it runs beside the
-    // finalists instead of ahead of them; the guard is applied once both are
-    // known.
+    // The caller runs it beside the search when it can (`registered`); else
+    // it is job 0 of the verification wave, beside the finalists. The guard
+    // is applied once both are known.
     let mut analyses = 0usize;
     let registered_design = (config.optimizer.design_space.mode
         == alas_config::DesignMode::ReferenceAdaptation)
@@ -205,14 +258,6 @@ pub(super) fn run_reporting_ladder(
         .flatten()
         .map(|preset| config.band_design(preset.design_vector));
     let baseline_is_nominal = registered_design == Some(nominal);
-    let separate_nominal = usize::from(
-        config.optimizer.design_space.mode == alas_config::DesignMode::ReferenceAdaptation
-            && !baseline_is_nominal,
-    );
-    let ladder = reserve
-        .evaluations
-        .saturating_sub(2 + separate_nominal)
-        .clamp(1, MAX_VERIFIED_CANDIDATES);
     let time_left_s = reserve.time_s.map(|_| {
         optimization
             .search_diagnostics
@@ -221,91 +266,119 @@ pub(super) fn run_reporting_ladder(
             .find(|stage| stage.stage == "refinement")
             .map_or(0.0, |stage| stage.time_limit_s - stage.wall_time_s)
     });
-    let candidates = optimization.ranked_hard_feasible_candidates(ladder);
+    let workers = effective_config.optimizer.solver.resolved_workers();
+    let replay_triage::Screened {
+        candidates,
+        kept,
+        mut finalist_rejected_by,
+        mut rejection_messages,
+        guard,
+    } = replay_triage::screen(optimization, config, cancel, workers, &scope)?;
+    ladder_lap(&mut phases, &mut lap, "replay_screen");
     let mut evaluated = 0usize;
-    let mut finalist: Option<FinalistVerification> = None;
-    let mut finalist_rejected_by = Vec::new();
-    let mut rejection_messages: Vec<String> = Vec::new();
     let mut accepted: Option<(usize, FinalistVerification)> = None;
+    let ranks: Vec<usize> = kept.iter().map(|(rank, _)| *rank).collect();
+    let slots: Vec<std::sync::Mutex<Option<crate::acceptance::Replayed>>> = kept
+        .into_iter()
+        .map(|(_, replayed)| std::sync::Mutex::new(Some(replayed)))
+        .collect();
+    // Job 0 is the registered aircraft unless analysed beside the search. The
+    // finalist runs on every worker (LJ60: alone 50 s, two on half 92 s); the
+    // next kept candidate follows a rejected one before a retention.
+    let reference_adaptation =
+        config.optimizer.design_space.mode == alas_config::DesignMode::ReferenceAdaptation;
     let mass_nominals = crate::acceptance::MassNominals::default();
+    let offset = usize::from(registered.is_none());
+    let precomputed = registered
+        .as_ref()
+        .and_then(Option::as_ref)
+        .and_then(|evaluated| evaluated.as_ref().ok());
     let jobs = verification::evaluate_ordered(
-        candidates.len() + 1,
-        2.min(candidates.len() + 1),
-        effective_config.optimizer.solver.resolved_workers(),
+        slots.len() + offset,
+        1 + offset,
+        workers,
+        1 + offset,
         started,
         time_left_s,
         &scope,
         |job| {
-            if job == 0 {
-                LadderJob::Nominal(crate::acceptance::ReportingNominal::evaluate(
+            if job < offset {
+                return LadderJob::Nominal(crate::acceptance::ReportingNominal::evaluate(
                     config,
                     acceptance_route,
                     cancel,
-                ))
-            } else {
-                LadderJob::Finalist(crate::acceptance::verify_finalist_cancellable(
-                    config,
-                    &candidates[job - 1],
-                    acceptance_route,
-                    None,
-                    cancel,
-                ))
+                ));
             }
+            let replayed = slots[job - offset]
+                .lock()
+                .ok()
+                .and_then(|mut slot| slot.take());
+            LadderJob::Finalist(replayed.map_or_else(
+                || Err("reporting-fidelity job ran twice".to_owned()),
+                |replayed| crate::acceptance::verify_replayed(replayed, acceptance_route),
+            ))
         },
         |done| {
-            let nominal = done.iter().find_map(|(_, job)| match job {
-                LadderJob::Nominal(Some(Ok(nominal))) => Some(nominal),
-                _ => None,
-            });
-            done.iter().any(|(job, result)| match result {
-                LadderJob::Nominal(Some(Err(_))) => true,
-                LadderJob::Nominal(_) => false,
-                LadderJob::Finalist(Ok(verification)) => {
-                    let mut held = verification.clone();
-                    crate::acceptance::hold_to_nominal_at_mass(
-                        &mut held,
-                        config,
-                        nominal,
-                        acceptance_route,
-                        cancel,
-                        &mass_nominals,
-                    );
-                    held.accepted()
-                }
-                LadderJob::Finalist(Err(error)) => {
-                    *job == 1 || error.starts_with("Cancelled safely")
-                }
-            })
+            replay_triage::may_stop(
+                done,
+                precomputed,
+                reference_adaptation,
+                (config, acceptance_route, cancel),
+                &mass_nominals,
+            )
         },
     )?;
-    let mut reporting_nominal = None;
+    ladder_lap(&mut phases, &mut lap, "verification");
+    let mut registered = registered;
     let mut verifications = Vec::with_capacity(jobs.len());
     for (job, result) in jobs {
         match result {
-            LadderJob::Nominal(None) => {}
-            LadderJob::Nominal(Some(Ok(evaluated))) => {
-                analyses += 1;
-                reporting_nominal = Some(evaluated);
-            }
-            LadderJob::Nominal(Some(Err(error))) => {
-                return Err(error);
-            }
-            LadderJob::Finalist(result) => verifications.push((job - 1, result)),
+            LadderJob::Nominal(evaluated) => registered = Some(evaluated),
+            LadderJob::Finalist(result) => verifications.push((ranks[job - offset], result)),
         }
     }
+    // Outside a reference adaptation the analysis made beside the search is
+    // the run's own baseline (`ReportingNominal::of_baseline`): what the
+    // delivery is compared with and retained against, never a relative
+    // balance nominal.
+    let mut reporting_nominal = None;
+    let mut baseline_analysis = None;
+    match registered.flatten() {
+        None => {}
+        Some(Ok(evaluated)) => {
+            analyses += 1;
+            if reference_adaptation {
+                reporting_nominal = Some(evaluated);
+            } else {
+                baseline_analysis = Some(evaluated);
+            }
+        }
+        Some(Err(error)) => return Err(error),
+    }
+    // A clean sheet from a registered preset is held to the registered
+    // aircraft as a reference adaptation is: its
+    // baseline analysis is the registered vector's when the run starts there.
+    let hold_nominal = reporting_nominal.as_ref().or_else(|| {
+        baseline_analysis.as_ref().filter(|made| {
+            config.holds_to_registered_aircraft()
+                && alas_config::presets::get(&config.preset)
+                    .is_ok_and(|preset| made.design().same_geometry(&preset.design_vector))
+        })
+    });
     for (_, result) in &mut verifications {
         if let Ok(verification) = result {
             crate::acceptance::hold_to_nominal_at_mass(
                 verification,
                 config,
-                reporting_nominal.as_ref(),
+                hold_nominal,
                 acceptance_route,
                 cancel,
                 &mass_nominals,
             );
         }
     }
-    analyses += verifications.len();
+    ladder_lap(&mut phases, &mut lap, "hold_to_nominal");
+    analyses += candidates.len();
     evaluated += verifications
         .iter()
         .filter(|(_, result)| result.is_ok())
@@ -316,14 +389,8 @@ pub(super) fn run_reporting_ladder(
             Err(error) if error.starts_with("Cancelled safely") => {
                 return Err(error);
             }
-            Err(error) if rank == 0 => {
-                // The search returned a design its own replay rejects. That
-                // is an integration error in the search, not a reporting
-                // disagreement, and it stays a branch failure.
-                return Err(format!("{label} finalist replay failed: {error}"));
-            }
             Err(error) => {
-                tracing::warn!(%error, rank, "fallback candidate could not be re-evaluated");
+                tracing::warn!(%error, rank, "candidate could not be re-evaluated");
                 optimization.record_verification(
                     rank,
                     &candidates[rank],
@@ -346,21 +413,47 @@ pub(super) fn run_reporting_ladder(
             accepted = Some((rank, verification));
             break;
         }
-        if rank == 0 {
-            finalist = Some(verification);
-        }
     }
-
-    let (delivered, delivered_is_search_finalist) = match (accepted, finalist) {
-        (Some((rank, verification)), _) => (verification, rank == 0),
-        (None, Some(verification)) => (verification, true),
+    let held = (hold_nominal, &mass_nominals);
+    ladder_lap(&mut phases, &mut lap, "ranking");
+    let accepted = guard.check(accepted, config, (acceptance_route, cancel), held)?;
+    ladder_lap(&mut phases, &mut lap, "engine_start_guard");
+    // The registered aircraft is delivered when no candidate was accepted or
+    // the accepted one is worse than it at reporting fidelity
+    // (`acceptance::retention`): when it is worse, only if the run started
+    // from it; when nothing was accepted, always.
+    let source = reporting_nominal
+        .as_ref()
+        .filter(|_| baseline_is_nominal || accepted.is_none())
+        .or(baseline_analysis.as_ref());
+    let retained = source.and_then(|registered| {
+        registered.retained_over(
+            accepted.as_ref().map(|(_, verification)| verification),
+            config.optimizer.objective.kind,
+        )
+    });
+    let registered_retained = retained.is_some();
+    // A retained aircraft with a violated hard residual is delivered, not verified.
+    let retained_clean = source.is_some_and(|registered| registered.deliverable().is_some());
+    let (delivered, delivered_is_search_finalist) = match (retained, accepted) {
+        (Some(registered), _) => (registered, false),
+        (None, Some((rank, verification))) => (verification, rank == 0),
         (None, None) => {
+            // Nothing to deliver: the error names the physical cause, read
+            // off the search's least-violating design (never delivered).
+            let cause =
+                match crate::acceptance::Replayed::run(config, &optimization.best_design, cancel) {
+                    Err(error) => error,
+                    Ok(replayed) => replayed.not_hard_feasible(),
+                };
+            let nothing =
+                "no feasible design verified at reporting fidelity, no registered analysis";
             return Err(format!(
-                "{label} finalist could not be re-evaluated at reporting fidelity"
-            ))
+                "{label} optimization failed: {nothing}; the least-violating design: {cause}"
+            ));
         }
     };
-    let verified = delivered.accepted();
+    let verified = delivered.accepted() && (retained_clean || !registered_retained);
     let delivered_rejected_by = delivered.rejected_by();
     if !verified {
         // Nothing was accepted, so the messages a reader needs are the
@@ -379,17 +472,25 @@ pub(super) fn run_reporting_ladder(
     // across the in-loop and reporting models.
     let baseline = (!scope.requested())
         .then(|| {
-            analyses += usize::from(!baseline_is_nominal);
+            let made = reporting_nominal.as_ref().or(baseline_analysis.as_ref());
+            analyses += usize::from(made.is_none_or(|made| *made.design() != nominal));
             crate::acceptance::compare_with_baseline(
                 config,
                 &nominal,
                 &delivered,
                 acceptance_route,
-                reporting_nominal.as_ref(),
+                made,
                 cancel,
             )
         })
         .flatten();
+    ladder_lap(&mut phases, &mut lap, "baseline");
+    let worst_violation = (optimization.history.n_valid() == 0 && !scope.requested())
+        .then(|| {
+            replay_triage::worst_hard_violation(effective_config, &optimization.best_design, cancel)
+        })
+        .flatten();
+    ladder_lap(&mut phases, &mut lap, "worst_violation");
     optimization.record_delivered_acceptance(DeliveredAcceptance {
         verified,
         finalist_rejected_by,
@@ -400,10 +501,35 @@ pub(super) fn run_reporting_ladder(
         wall_time_s: started.elapsed().as_secs_f64(),
         analyses,
         baseline,
+        worst_violation,
+        phases,
     });
+    if registered_retained {
+        let registered = alas_config::presets::get(&effective_config.preset)
+            .is_ok_and(|preset| nominal.same_geometry(&preset.design_vector));
+        if registered {
+            optimization.record_registered_design_retained(nominal, verified);
+        } else {
+            optimization.record_start_design_retained(nominal, verified);
+        }
+    }
 
+    // The start's analysis is the downstream baseline comparison as well.
+    let reporting_nominal =
+        reporting_nominal.or_else(|| baseline_analysis.filter(|made| *made.design() == nominal));
     Ok(LadderOutcome {
         delivered,
         reporting_nominal,
     })
+}
+
+/// Close the ladder phase that started at `lap`: record its wall time under
+/// `phase` and start the next one now.
+fn ladder_lap(phases: &mut Vec<alas_opt::LadderPhase>, lap: &mut Instant, phase: &str) {
+    let now = Instant::now();
+    phases.push(alas_opt::LadderPhase {
+        phase: phase.to_owned(),
+        wall_time_s: now.duration_since(*lap).as_secs_f64(),
+    });
+    *lap = now;
 }

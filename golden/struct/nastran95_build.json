@@ -1,0 +1,23 @@
+{
+  "solver_note": "NASTRAN-95 (Foadsf fork 060ed900 + alas-local.patch, GNU Fortran 16.2.0 winlibs, -O0 -fno-automatic, Windows x86_64), recorded 2026-10-23 from the frozen decks in golden/struct/nastran95_build_decks; peak vertical deflection of subcase 1 (pull-up), metres, NASTRAN-95 alone.",
+  "refinements": [
+    {
+      "num_ribs": 5,
+      "chordwise": 6,
+      "peak_grid": 41,
+      "n95_peak_t3": 5.3635690000
+    },
+    {
+      "num_ribs": 9,
+      "chordwise": 10,
+      "peak_grid": 137,
+      "n95_peak_t3": 5.1482150000
+    },
+    {
+      "num_ribs": 16,
+      "chordwise": 20,
+      "peak_grid": 531,
+      "n95_peak_t3": 4.6234040000
+    }
+  ]
+}

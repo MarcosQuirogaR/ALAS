@@ -10,9 +10,11 @@
 //! than inventing them.
 
 mod aircraft;
+mod body_record;
 mod model;
 mod reader;
 mod render;
+mod tail_planform_record;
 mod validation;
 mod wing_roles;
 

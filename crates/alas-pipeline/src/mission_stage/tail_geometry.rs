@@ -46,6 +46,9 @@ fn surface<'a>(report: &'a AnalysisReport, name: &str) -> Result<&'a Wing, Strin
 }
 
 fn built_surface(wing: &Wing, vertical: bool) -> Result<TailSurface, String> {
+    // The reduced-order model is a trapezoid of the theoretical tail planform.
+    let wing = wing.reference_planform();
+    let wing = &*wing;
     let (root, tip) = match (wing.xsecs.first(), wing.xsecs.last()) {
         (Some(root), Some(tip)) if wing.xsecs.len() >= 2 => (root, tip),
         _ => return Err(format!("{} has fewer than two cross-sections", wing.name)),

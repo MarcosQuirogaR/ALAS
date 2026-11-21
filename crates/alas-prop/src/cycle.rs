@@ -18,20 +18,31 @@
 //! Every equation is first-principles compressible flow (isentropic plus
 //! polytropic-efficiency relations, energy and momentum conservation) with no
 //! curve-fit constants; the only external input is the ambient state, read
-//! from [`alas_atmo::Atmosphere::new`]: the fitted model upstream's
-//! `Atmosphere(altitude=...)` selects when no method is named, not the
-//! closed-form ISA.
+//! from [`alas_atmo::Atmosphere::new`]: the U.S. Standard Atmosphere, 1976
+//! at the pressure altitude, the same air the mission deck built from this
+//! cycle flies.
 //!
 //! All station temperatures are stagnation ("total") temperatures in kelvin.
 //! Station naming mirrors the standard two-spool notation: 0 = freestream,
-//! t2 = post-inlet (fan/LPC face), t13 = post-fan (bypass duct), t25 =
-//! post-LPC, t3 = post-HPC (combustor inlet), t4 = combustor exit (turbine
-//! inlet temperature, the design input), t45 = post-HPT, t5 = post-LPT (core
-//! nozzle inlet), t6 = core nozzle exit.
+//! t2 = post-inlet (fan face), t13 = post-fan bypass stream, t21 = post-fan
+//! core (hub) stream, t25 = post-booster (LPC) / HPC face, t3 = post-HPC
+//! (combustor inlet), t4 = combustor exit (turbine inlet temperature, the
+//! design input), t45 = post-HPT, t5 = post-LPT (core nozzle inlet), t6 =
+//! core nozzle exit.
+//!
+//! The core stream crosses the fan hub before the booster, so the low-pressure
+//! spool compresses it from 2 to 25 (fan hub then booster) and Tt25 > Tt21 =
+//! Tt13. This is the topology of the GE90 cycle model in NASA/TM-2004-213076
+//! (Turner, Reed, Ryder, Veres, 2004), p. 8: "the splitter is upstream of the
+//! fan and the lower part of the fan is part of the booster component". The
+//! engine overall pressure ratio is pt3/pt2, last compressor discharge over
+//! compressor entry (ICAO Annex 16, Vol. II, Part I, Ch. 1, "pressure ratio"),
+//! so it includes the fan-hub ratio and the HPC ratio is OPR / (FPR * booster).
 
 use alas_atmo::Atmosphere;
 use alas_config::PropulsionCycleConfig;
 
+pub mod operating_line;
 pub mod states;
 pub mod sweeps;
 
@@ -44,7 +55,8 @@ pub struct TurbofanCycleInputs {
     pub altitude_m: f64,
     /// Bypass ratio (bypass mass flow / core mass flow).
     pub bypass_ratio: f64,
-    /// Core (LPC * HPC) overall pressure ratio, i.e. `EngineSpec::overall_pressure_ratio`.
+    /// Overall pressure ratio pt3/pt2 (fan hub * booster * HPC), i.e.
+    /// `EngineSpec::overall_pressure_ratio`.
     pub overall_pressure_ratio: f64,
     /// Fan pressure ratio.
     pub fan_pressure_ratio: f64,
@@ -79,9 +91,10 @@ pub struct TurbofanCycleResult {
 
     /// Post-inlet stagnation temperature (station t0/tt0), K.
     pub temperature_t0_k: f64,
-    /// Post-fan stagnation temperature (station t13), K.
+    /// Post-fan stagnation temperature (station t13, bypass; equal to the
+    /// core-side fan-hub exit t21 for the radially uniform fan), K.
     pub temperature_t13_k: f64,
-    /// Post-LPC stagnation temperature (station t25), K.
+    /// Post-booster (LPC) stagnation temperature (station t25, HPC face), K.
     pub temperature_t25_k: f64,
     /// Post-HPC / combustor-inlet stagnation temperature (station t3), K.
     pub temperature_t3_k: f64,
@@ -174,6 +187,8 @@ pub(crate) struct CycleWalk {
     pub(crate) pt2: f64,
     pub(crate) tt13: f64,
     pub(crate) pt13: f64,
+    pub(crate) tt21: f64,
+    pub(crate) pt21: f64,
     pub(crate) tt25: f64,
     pub(crate) pt25: f64,
     pub(crate) tt3: f64,
@@ -214,18 +229,33 @@ pub(crate) fn walk_cycle(
     let pt0 = p0 * (1.0 + 0.5 * (gc - 1.0) * m0.powi(2)).powf(gc / (gc - 1.0));
     let (tt2, pt2) = (tt0, pt0 * cfg.inlet_pressure_recovery);
 
-    // Fan branch (parallel to the core compressors, same inlet state)
+    // Fan. The whole inlet flow crosses the fan; the splitter sits behind it.
+    // The outer (bypass) stream leaves at station 13, the inner (core) stream
+    // at station 21 and goes on to the booster. The fan is taken radially
+    // uniform, so the hub stream sees the same pressure ratio and polytropic
+    // efficiency as the bypass stream.
     let pi_f = inputs.fan_pressure_ratio.max(1.0);
     let tt13 = tt2 * pi_f.powf((gc - 1.0) / (gc * cfg.fan_polytropic_efficiency));
     let pt13 = pt2 * pi_f * cfg.fan_nozzle_pressure_ratio;
+    let (tt21, pt21) = (tt13, pt2 * pi_f);
 
-    // Core compressors (LPC then HPC)
+    // Core compressors: booster (LPC) behind the fan hub, then HPC. The
+    // overall pressure ratio is pt3/pt2, so it already contains the fan-hub
+    // ratio; the HPC supplies what the fan hub and booster leave.
     let pi_lpc = cfg.lpc_pressure_ratio_split;
-    let pi_hpc = (inputs.overall_pressure_ratio / pi_lpc).max(1.0);
-    let tt25 = tt2 * pi_lpc.powf((gc - 1.0) / (gc * cfg.lpc_polytropic_efficiency));
-    let pt25 = pt2 * pi_lpc;
+    let pi_low = pi_f * pi_lpc;
+    if inputs.overall_pressure_ratio < pi_low {
+        return Err(format!(
+            "Overall pressure ratio ({:.2}) is below the fan-hub times booster pressure \
+             ratio ({pi_f:.2} x {pi_lpc:.2} = {pi_low:.2}).",
+            inputs.overall_pressure_ratio
+        ));
+    }
+    let pi_hpc = inputs.overall_pressure_ratio / pi_low;
+    let tt25 = tt21 * pi_lpc.powf((gc - 1.0) / (gc * cfg.lpc_polytropic_efficiency));
+    let pt25 = pt21 * pi_lpc;
     let tt3 = tt25 * pi_hpc.powf((gc - 1.0) / (gc * cfg.hpc_polytropic_efficiency));
-    let pt3 = pt2 * pi_lpc * pi_hpc;
+    let pt3 = pt25 * pi_hpc;
 
     // Combustor
     let tt4 = inputs.turbine_inlet_temperature_k;
@@ -257,7 +287,8 @@ pub(crate) fn walk_cycle(
     }
     let pt45 = pt4 * (tt45 / tt4).powf(gh / ((gh - 1.0) * cfg.hpt_polytropic_efficiency));
 
-    // LPT (drives LPC + fan)
+    // LPT (drives fan + booster): the core stream takes the fan-hub and
+    // booster work (2 -> 25), the bypass stream the fan work (2 -> 13).
     let lpc_work = cpc * (tt25 - tt2);
     let fan_work = cpc * (tt13 - tt2);
     let d_tt_lpt = (lpc_work + inputs.bypass_ratio * fan_work)
@@ -288,6 +319,8 @@ pub(crate) fn walk_cycle(
         pt2,
         tt13,
         pt13,
+        tt21,
+        pt21,
         tt25,
         pt25,
         tt3,
@@ -508,6 +541,31 @@ mod tests {
         assert!(result.temperature_t3_k < result.temperature_t4_k);
         assert!(result.temperature_t45_k < result.temperature_t4_k);
         assert!(result.temperature_t5_k < result.temperature_t45_k);
+    }
+
+    #[test]
+    fn the_core_stream_crosses_the_fan_hub_before_the_booster() {
+        // The booster sits behind the fan hub, so the HPC face is hotter than
+        // the bypass stream, and the core pressure ratio pt3/pt2 is the OPR.
+        let cfg = PropulsionCycleConfig::default();
+        let inputs = nominal();
+        let walk = walk_cycle(&inputs, &cfg).expect("feasible");
+        assert_eq!(walk.tt21, walk.tt13);
+        assert!(walk.tt25 > walk.tt13, "{} K vs {} K", walk.tt25, walk.tt13);
+        assert!((walk.pt21 / walk.pt2 - inputs.fan_pressure_ratio).abs() < 1e-12);
+        assert!((walk.pt3 / walk.pt2 - inputs.overall_pressure_ratio).abs() < 1e-9);
+        let pi_hpc = walk.pt3 / walk.pt25;
+        let expected = inputs.overall_pressure_ratio
+            / (inputs.fan_pressure_ratio * cfg.lpc_pressure_ratio_split);
+        assert!((pi_hpc - expected).abs() < 1e-9);
+        // An overall ratio below the fan-hub times booster ratio has no HPC.
+        let mut low = inputs;
+        low.overall_pressure_ratio = 1.5;
+        let result = compute_turbofan_cycle(&low, &cfg);
+        assert!(!result.cycle_feasible);
+        assert!(result
+            .infeasibility_reason
+            .contains("fan-hub times booster"));
     }
 
     #[test]

@@ -27,17 +27,14 @@ use super::{
 /// payload) are all placed as fractions of the **installed cabin**, because
 /// all three are distributed over the same floor. See `x_payload` below for
 /// the payload placement.
+///
+/// The cabin groups are placed from geometry alone; the payload's linear
+/// density is what `alas_mass::stations` uses for the payload station's
+/// spatial extent.
 pub fn define_mass_coordinates(
     plane: &Airplane,
     geometry_config: &GeometryConfig,
-    requirements: Option<&DesignRequirements>,
-    mass_model: Option<&MassModelConfig>,
 ) -> MassCoordinates {
-    // The cabin groups are placed from geometry alone; the payload's linear
-    // density is what `alas_mass::stations` uses for the payload station's
-    // spatial extent.
-    let _ = (requirements, mass_model);
-
     let wing = wing_named_or_first(&plane.wings, "Main Wing");
     let fus = &plane.fuselages[0];
 
@@ -45,8 +42,12 @@ pub fn define_mass_coordinates(
     let fus_len = fus.xsecs[last_xsec].xyz_c[0] - fus.xsecs[0].xyz_c[0];
     let fus_z = fus.xsecs[0].xyz_c[2];
 
-    let w_ac = wing.aerodynamic_center(AERODYNAMIC_CENTER_CHORD_FRACTION);
-    let w_root_z = wing.xsecs[0].xyz_le[2];
+    // Mass locations are stated on the structure, not on the buried plan.
+    let w_ac = wing
+        .carried_box()
+        .aerodynamic_center(AERODYNAMIC_CENTER_CHORD_FRACTION);
+    let (w_root_le, w_root_chord) = wing.design_root();
+    let w_root_z = w_root_le[2];
 
     let cabin_start = geometry_config.fuselage.cabin_start_x_m;
     let tailcone_len = geometry_config.fuselage.tailcone_length_m;
@@ -81,7 +82,7 @@ pub fn define_mass_coordinates(
 
     let mut coords = MassCoordinates {
         fuselage: [fus_len * 0.46, 0.0, fus_z],
-        wing: [w_ac[0] + wing.xsecs[0].chord * 0.2, 0.0, w_root_z],
+        wing: [w_ac[0] + w_root_chord * 0.2, 0.0, w_root_z],
         h_stab: [
             fus_len - geometry_config.empennage.hstab_offset_from_tail_m / 2.0,
             0.0,
@@ -141,7 +142,7 @@ pub fn define_mass_coordinates_with_model(
     mass_model: Option<&MassModelConfig>,
     coordinate_model: MassCoordinateModel<'_>,
 ) -> Result<MassCoordinates, WingCentroidError> {
-    let mut coordinates = define_mass_coordinates(plane, geometry_config, requirements, mass_model);
+    let mut coordinates = define_mass_coordinates(plane, geometry_config);
     if matches!(
         coordinate_model,
         MassCoordinateModel::ReferenceCompatibility
@@ -234,8 +235,7 @@ pub fn run_mass_analysis(
     payload_layout: Option<&PayloadLayoutSummary>,
 ) -> (MassBreakdown, MassCoordinates, [f64; 3]) {
     let masses = calculate_component_masses(plane, requirements, geometry_config, mass_model);
-    let mut coordinates =
-        define_mass_coordinates(plane, geometry_config, Some(requirements), mass_model);
+    let mut coordinates = define_mass_coordinates(plane, geometry_config);
     restore_reference_payload_coordinate(
         &mut coordinates,
         plane,

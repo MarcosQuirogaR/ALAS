@@ -104,6 +104,10 @@ pub(crate) fn seed_preset_less_defaults(
     if let Ok(named) = overlay::<AlasConfig>(instance, data) {
         if named.is_turboprop_brief() {
             super::turboprop_class::seed(instance, &named, data);
+        } else if named.geometry.engine.propulsion_technology
+            == crate::engines::PropulsionTechnology::Turbofan
+        {
+            super::jet_class::seed(instance, &named, data);
         }
     }
     let Ok(mut brief) = overlay::<AlasConfig>(instance, data) else {
@@ -133,9 +137,41 @@ pub(crate) fn seed_preset_less_defaults(
         if let Some(profile) = super::turboprop_mission::profile(&brief) {
             instance.mission.profile = profile;
         }
+    } else if let Some(profile) = jet_profile(&brief) {
+        instance.mission.profile = profile;
     }
     instance.geometry = brief.geometry;
     Ok(())
+}
+
+/// The schedule of a clean-sheet jet: the widebody worked example's fixed true
+/// airspeeds (`MissionProfileConfig::default()`, 253.5 m/s cruise, M 0.855 at
+/// 10,668 m) replaced by the brief's own cruise Mach at its cruise altitude
+/// and the registered presets' default CAS/Mach rule
+/// ([`crate::presets::apply_default_rule`]). The cruise true airspeed is the
+/// Mach times the US1976 speed of sound at the cruise level, as a preset's.
+/// `None` when the brief's cruise does not resolve.
+fn jet_profile(brief: &AlasConfig) -> Option<crate::MissionProfileConfig> {
+    let requirements = &brief.requirements;
+    let (mach, altitude_m) = (requirements.cruise_mach, requirements.cruise_altitude_m);
+    if !(mach > 0.0 && altitude_m.is_finite() && altitude_m > 0.0) {
+        return None;
+    }
+    let mut profile = brief.mission.profile.clone();
+    let cruise_tas_m_s = mach
+        * alas_atmo::us1976_try_compute_values(altitude_m, 0.0)
+            .ok()?
+            .speed_of_sound_m_s;
+    profile.cruise_1_air_speed_m_s = cruise_tas_m_s;
+    profile.cruise_2_air_speed_m_s = cruise_tas_m_s;
+    profile.cruise_3_air_speed_m_s = cruise_tas_m_s;
+    crate::presets::apply_default_rule(
+        &mut profile,
+        mach,
+        requirements.design_cruise_speed_eas_m_s(),
+        altitude_m,
+    )
+    .then_some(profile)
 }
 
 /// First estimate of the fuselage length, m: nose taper and tail cone plus
@@ -154,21 +190,28 @@ pub(super) fn estimated_fuselage_length_m(config: &AlasConfig) -> Option<f64> {
         return Some(DesignVector::default().fuselage_length_m * d / reference);
     }
     let cabin = &config.cabin.passenger;
-    let seat_m = cabin.economy.width_m;
-    let usable_m = d - 2.0 * cabin.wall_thickness_m;
-    let abreast = MAX_ABREAST
-        .iter()
-        .map(|(aisles, max)| {
-            ((usable_m - aisles * MIN_AISLE_WIDTH_M) / seat_m)
-                .floor()
-                .min(*max)
-        })
-        .fold(1.0_f64, f64::max);
+    let abreast = seats_abreast(config);
     let rows = (config.requirements.num_passengers.max(1) as f64 / abreast).ceil();
     let length_m = f.cabin_start_x_m
         + f.tailcone_length_m
         + rows * cabin.economy.pitch_m * (1.0 + MONUMENT_ALLOWANCE);
     (length_m.is_finite() && length_m > 0.0).then_some(length_m)
+}
+
+/// Economy seats abreast the brief's section admits, at least one: the most
+/// that one or two aisles of the minimum width leave room for, within the
+/// CS 25.817 limit of each.
+pub(super) fn seats_abreast(config: &AlasConfig) -> f64 {
+    let cabin = &config.cabin.passenger;
+    let usable_m = config.geometry.fuselage.diameter_m - 2.0 * cabin.wall_thickness_m;
+    MAX_ABREAST
+        .iter()
+        .map(|(aisles, max)| {
+            ((usable_m - aisles * MIN_AISLE_WIDTH_M) / cabin.economy.width_m)
+                .floor()
+                .min(*max)
+        })
+        .fold(1.0_f64, f64::max)
 }
 
 /// Relative section disagreement above which the builder rejects a body loft
@@ -242,6 +285,25 @@ pub(super) fn derive(brief: &AlasConfig, data: &Value) -> Option<GeometryConfig>
     let semispan_m = 0.5 * class.span_m;
     let g = &mut config.geometry;
     let w = &mut g.wing;
+    // A brief started from a loaded aircraft carries that airframe's tip rake,
+    // outboard trailing-edge breaks and edge stations, absolute dimensions of
+    // its own wing: the A320's 1.336 m rake chord exceeds the tip chord of a
+    // smaller class wing, whose loft then does not build and no start is
+    // derived. The class wing is the fleet-tapered straight-line planform
+    // unless the brief names these options.
+    const EDGE_OPTIONS: [&str; 8] = [
+        "/geometry/wing/tip_rake_tip_chord_m",
+        "/geometry/wing/tip_rake_reference_tip_chord_m",
+        "/geometry/wing/tip_rake_start_span_fraction",
+        "/geometry/wing/te_break_span_fraction",
+        "/geometry/wing/te_break_chord_offset_m",
+        "/geometry/wing/te_break_2_span_fraction",
+        "/geometry/wing/te_break_2_chord_offset_m",
+        "/geometry/wing/edge_stations",
+    ];
+    if !EDGE_OPTIONS.iter().any(|pointer| set(pointer)) {
+        w.clear_outboard_edge_options();
+    }
     let kink = w.kink_span_fraction.unwrap_or(w.break_span_fraction);
     let side_of_body = 0.5 * d / semispan_m;
     if !set("/geometry/wing/side_of_body_span_fraction") && side_of_body < kink {
@@ -265,10 +327,21 @@ pub(super) fn derive(brief: &AlasConfig, data: &Value) -> Option<GeometryConfig>
     let twin =
         e.spanwise_positions_m.len() == 2 && e.spanwise_positions_m.iter().all(|y| *y != 0.0);
     if twin && !set("/geometry/engine/spanwise_positions_m") {
-        let y = stats.engine_semispan_fraction * semispan_m;
+        // A rear-fuselage pair stands one nacelle radius off the body side, not on the wing.
+        let y = if e.aft_fuselage.is_some() {
+            0.5 * d + e.radius_scale_m
+        } else {
+            stats.engine_semispan_fraction * semispan_m
+        };
         e.spanwise_positions_m = vec![y, -y];
     }
-    if twin {
+    // The vertical offset and the inlet station are per-pod relations of the wing
+    // engines, so they hold on any arrangement that has some, a trijet's underwing pair
+    // included. The spanwise stations of more than two engines stay the brief's: the
+    // fleet relation is for a twin's pair. Rear-fuselage engines stand on their own
+    // installation and read neither.
+    let wing_engines = e.aft_fuselage.is_none() && e.spanwise_positions_m.iter().any(|y| *y != 0.0);
+    if wing_engines {
         let radius = e.radius_scale_m;
         let length = e.nacelle_length_m();
         put(

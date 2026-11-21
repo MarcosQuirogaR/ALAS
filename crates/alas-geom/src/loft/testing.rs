@@ -83,6 +83,7 @@ pub(super) fn spec(
         fit: FitRecord::default(),
         provenance: Vec::new(),
         residual: None,
+        apu_cone: None,
     }
 }
 

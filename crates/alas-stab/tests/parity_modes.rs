@@ -24,6 +24,17 @@
 //! so its short-period and dutch roll degrade to the aperiodic branch (a zero
 //! imaginary part, the characteristic root folded into the real part). The
 //! generator refuses to write a fixture that reaches only one branch.
+//!
+//! # The dutch roll is compared through its natural frequency only
+//!
+//! `alas-stab::modes` takes the dutch roll as the root pair of the
+//! sideslip/yaw-rate quadratic, which upstream's real part (yaw-damping term
+//! not halved) and imaginary part (the undamped frequency) are not: see the
+//! module doc there. What the two still share is the quadratic's constant
+//! term: upstream's imaginary part is `omega_n`, and the modulus of this
+//! implementation's complex root is the same `omega_n`. That is compared when
+//! the reference mode is oscillatory; the roots themselves are pinned by the
+//! hand cases in the module's unit tests.
 
 // This file is itself a test binary, so an unwrap or expect that fails is the
 // assertion failing.
@@ -32,9 +43,10 @@
 use std::collections::HashMap;
 
 use alas_aero::operating_point::OperatingPoint;
-use alas_atmo::Atmosphere;
+use alas_atmo::{Atmosphere, GAS_CONSTANT_AIR, STANDARD_GRAVITY};
 use alas_geom::asb::airplane::Airplane;
 use alas_stab::modes::{self, MassProperties, Mode, StabilityAero};
+use alas_testkit::reference_ambient::try_reference_ambient;
 use alas_testkit::{Comparison, Tier};
 use serde::Deserialize;
 
@@ -118,18 +130,90 @@ fn airplane(fixture: &AirplaneFixture) -> Airplane {
     }
 }
 
-fn op_point(fixture: &OpFixture) -> OperatingPoint {
+/// The reference's gravity in the phugoid term, m/s^2: the two-decimal
+/// default of its `get_modes`.
+const REFERENCE_GRAVITY: f64 = 9.81;
+
+/// The density the reference's fitted atmosphere returned for this case, and
+/// whether it was read from a recorded state.
+///
+/// The fixture was generated with that fitted atmosphere, which differs from
+/// the U.S. Standard Atmosphere, 1976 the product evaluates by 1.5 % in
+/// temperature at 11 km and up to 1.7 % in density. `get_modes` reads the
+/// ambient state only through the density (the airspeed is an input), so the
+/// density is the quantity to restore.
+///
+/// - At an altitude the atmosphere fixture records (`golden/atmo/
+///   differentiable.json`: the `unstable` case at 8 000 m) the recorded
+///   density is used, and every mode is compared with the reference.
+/// - The `b737` case sits at 8 000 ft = 2 438.4 m, between the recorded rows.
+///   Its density follows from the reference's own roll-subsidence root,
+///   `sigma_roll = rho u0 S b^2 C_lp / (4 I_xx)` (Caughey's roll-subsidence
+///   approximation, the relation `get_modes` evaluates). That root then
+///   defines the density instead of being checked against it, so the case
+///   compares the other four modes with the reference and the roll root only
+///   by consistency; the density it yields is required to lie within 2 % of
+///   the 1976 value as a sanity check.
+fn reference_density(case: &Case) -> (f64, bool) {
+    if let Some(ambient) = try_reference_ambient(case.op_point.altitude_m) {
+        return (ambient.density_kg_m3, true);
+    }
+    let b = case.airplane.b_ref;
+    let rho = 4.0 * case.mass.ixx * case.modes.roll_subsidence.eigenvalue_real
+        / (case.op_point.velocity * case.airplane.s_ref * b * b * case.aero.clp);
+    let standard = Atmosphere::new(case.op_point.altitude_m).density();
+    assert!(
+        (rho / standard - 1.0).abs() < 0.02,
+        "the density implied by the reference roll root, {rho}, is not within 2 % of {standard}"
+    );
+    (rho, false)
+}
+
+/// The operating point of a case at the reference's density: the standard
+/// atmosphere at the altitude, with the temperature deviation that gives that
+/// density at the pressure of the level.
+fn op_point(case: &Case, density: f64) -> OperatingPoint {
     // alpha/beta and the three rates are irrelevant here: get_modes reads only
     // the dynamic pressure, airspeed and density off the operating point.
+    let level = Atmosphere::new(case.op_point.altitude_m);
+    let temperature = level.pressure() / (GAS_CONSTANT_AIR * density);
     OperatingPoint::new(
-        Atmosphere::new(fixture.altitude_m),
-        fixture.velocity,
+        level.with_temperature_deviation(temperature - level.temperature()),
+        case.op_point.velocity,
         0.0,
         0.0,
         0.0,
         0.0,
         0.0,
     )
+}
+
+/// The reference's phugoid, restated at the product's gravity.
+///
+/// The phugoid is `sigma +- i omega` with `sigma = x_u / 2` and
+/// `omega^2 = -sigma^2 - g z_u / u0`; the product reads the standard gravity
+/// 9.80665 m/s^2 where the reference's `get_modes` reads 9.81. Gravity enters
+/// only through the squared natural frequency `sigma^2 + omega^2`, so the
+/// reference mode at the product's gravity follows exactly from the recorded
+/// real part and natural frequency: `wn' = wn sqrt(g / 9.81)`,
+/// `omega' = sqrt(wn'^2 - sigma^2)`, `zeta' = -sigma / wn'`. The factor is
+/// 0.99983. An aperiodic phugoid (zero imaginary part) is not restated.
+fn phugoid_at_product_gravity(mode: &ModeFixture) -> ModeFixture {
+    if mode.eigenvalue_imag <= 0.0 {
+        return ModeFixture {
+            eigenvalue_real: mode.eigenvalue_real,
+            eigenvalue_imag: mode.eigenvalue_imag,
+            damping_ratio: mode.damping_ratio,
+        };
+    }
+    let sigma = mode.eigenvalue_real;
+    let wn_squared =
+        (sigma.powi(2) + mode.eigenvalue_imag.powi(2)) * (STANDARD_GRAVITY / REFERENCE_GRAVITY);
+    ModeFixture {
+        eigenvalue_real: sigma,
+        eigenvalue_imag: (wn_squared - sigma.powi(2)).sqrt(),
+        damping_ratio: -sigma / wn_squared.sqrt(),
+    }
 }
 
 fn mass(fixture: &MassFixture) -> MassProperties {
@@ -184,9 +268,10 @@ fn get_modes_matches_aerosandbox_for_every_case() {
     let mut comparison = Comparison::new("alas-stab::modes", Tier::Closed);
     for name in names {
         let case = &fixture.cases[name];
+        let (density, recorded) = reference_density(case);
         let result = modes::get_modes(
             &airplane(&case.airplane),
-            &op_point(&case.op_point),
+            &op_point(case, density),
             &mass(&case.mass),
             &aero(&case.aero),
         );
@@ -194,7 +279,7 @@ fn get_modes_matches_aerosandbox_for_every_case() {
             &mut comparison,
             &format!("{name}.phugoid"),
             &result.phugoid,
-            &case.modes.phugoid,
+            &phugoid_at_product_gravity(&case.modes.phugoid),
         );
         compare_mode(
             &mut comparison,
@@ -202,18 +287,24 @@ fn get_modes_matches_aerosandbox_for_every_case() {
             &result.short_period,
             &case.modes.short_period,
         );
-        compare_mode(
-            &mut comparison,
-            &format!("{name}.roll_subsidence"),
-            &result.roll_subsidence,
-            &case.modes.roll_subsidence,
-        );
-        compare_mode(
-            &mut comparison,
-            &format!("{name}.dutch_roll"),
-            &result.dutch_roll,
-            &case.modes.dutch_roll,
-        );
+        if recorded {
+            compare_mode(
+                &mut comparison,
+                &format!("{name}.roll_subsidence"),
+                &result.roll_subsidence,
+                &case.modes.roll_subsidence,
+            );
+        }
+        if case.modes.dutch_roll.eigenvalue_imag > 0.0 {
+            comparison.scalar(
+                &format!("{name}.dutch_roll.natural_frequency"),
+                result
+                    .dutch_roll
+                    .eigenvalue_real
+                    .hypot(result.dutch_roll.eigenvalue_imag),
+                case.modes.dutch_roll.eigenvalue_imag,
+            );
+        }
         compare_mode(
             &mut comparison,
             &format!("{name}.spiral"),

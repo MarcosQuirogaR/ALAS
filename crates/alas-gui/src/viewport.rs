@@ -32,9 +32,27 @@ impl PreviewCamera {
         Self::from(alas_report::scene::Camera3D::top())
     }
 
-    /// Return the front camera from the shared report camera contract.
+    /// The camera ahead of the aircraft, looking aft at the nose.
+    ///
+    /// Aircraft frame of every 3-D scene: x aft from the nose, y to starboard,
+    /// z up. The unit vector from the model toward the camera is
+    /// `(sin az cos el, cos az cos el, sin el)`, so a camera ahead of the
+    /// nose (toward -x) is azimuth -90 degrees.
     pub fn front() -> Self {
-        Self::from(alas_report::scene::Camera3D::front())
+        Self {
+            pitch_deg: 0.0,
+            yaw_deg: -90.0,
+            zoom: 1.0,
+        }
+    }
+
+    /// The camera behind the aircraft, looking forward at the tail cone.
+    pub fn rear() -> Self {
+        Self {
+            pitch_deg: 0.0,
+            yaw_deg: 90.0,
+            zoom: 1.0,
+        }
     }
 
     /// Return the side camera from the shared report camera contract.
@@ -56,6 +74,17 @@ impl PreviewCamera {
     pub fn apply_zoom_factor(&mut self, factor: f64) {
         if factor.is_finite() && factor > 0.0 {
             self.zoom = (self.zoom * factor).clamp(0.15, 8.0);
+        }
+    }
+
+    /// [`Self::apply_orbit_motion`] at `degrees_per_point` instead of the
+    /// default gain (the sandbox turns more gently over its large viewport).
+    pub fn apply_orbit_motion_at(&mut self, delta: egui::Vec2, degrees_per_point: f64) {
+        if delta.is_finite() {
+            self.yaw_deg =
+                (self.yaw_deg + f64::from(delta.x) * degrees_per_point).rem_euclid(360.0);
+            self.pitch_deg = (self.pitch_deg - f64::from(delta.y) * degrees_per_point)
+                .clamp(-ORBIT_PITCH_LIMIT_DEG, ORBIT_PITCH_LIMIT_DEG);
         }
     }
 

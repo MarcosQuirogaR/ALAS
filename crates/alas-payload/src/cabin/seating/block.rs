@@ -8,12 +8,16 @@
 use std::collections::VecDeque;
 
 use super::CabinClass;
-use crate::cabin::{abreast_and_aisles, MIN_PITCH, MONUMENT_LEN};
+use crate::cabin::{abreast_and_aisles_in, cabin_aisles, MIN_PITCH, MONUMENT_LEN};
 use crate::geometry::CabinGeometry;
 
 /// Bisection steps of the pitch back-off: 2^-20 of the stretch range is far
 /// below a millimetre of row placement.
 pub(super) const STRETCH_BACKOFF_ITERATIONS: usize = 20;
+
+/// Slack on the aft end of a deck stretch, m, so a row ending exactly at the
+/// aft bay is not lost to rounding.
+pub(super) const ROW_FIT_EPS_M: f64 = 1e-6;
 
 /// One row a block placed.
 pub(super) struct BlockRow {
@@ -95,12 +99,18 @@ impl BlockPlan<'_> {
             }
 
             let class = &classes[ci];
+            let pitch = class.config.pitch_m.max(MIN_PITCH) * stretch;
+            let cabin = cabin_aisles(classes.iter().map(|c| &c.config), deck, g, self.aisle_w, x);
             let (row_abreast, n_aisles) =
-                abreast_and_aisles(&class.config, deck, g, self.aisle_w, x);
+                abreast_and_aisles_in(&class.config, deck, g, self.aisle_w, x, pitch, cabin);
             let seats_row = row_abreast
                 .min(remaining[ci])
                 .min(self.deck_cap - placed.seated);
-            let pitch = class.config.pitch_m.max(MIN_PITCH) * stretch;
+            // A row that would run into the aft bay is not a row of this block.
+            if g.enforces_physical_envelope() && x + pitch > self.x1 - MONUMENT_LEN + ROW_FIT_EPS_M
+            {
+                break;
+            }
             placed.rows.push(BlockRow {
                 class: ci,
                 x0: x,

@@ -73,15 +73,15 @@ impl GroundShape {
     }
 }
 
-/// Nacelle heights that the geometry freeze of 2026-10-12 (owner-approved
-/// overlays) placed where the drawing puts them rather than where the
+/// Nacelle heights that the drawn geometry (overlay-checked)
+/// places where the drawing puts them rather than where the
 /// airport-planning table puts them. The table is a MRW clearance and the
 /// drawing is "related to aircraft attitude and weight" (A380 AC 2-2-0 note),
 /// so the two are different statements; the loading condition does not
 /// explain the gap (A380 AC 2-3-0: light weight raises N1/N2 by 0.22/0.37 m
 /// but the fuselage bottom by 0.21 m, i.e. +0.01/+0.16 m relative to the
-/// airframe). The deviation is therefore PINNED here as an owner decision,
-/// not hidden: `deviation_m` is model minus published, m.
+/// airframe). The deviation is therefore PINNED here as a documented
+/// deviation, not hidden: `deviation_m` is model minus published, m.
 fn assert_overlay_compromise(label: &str, actual: f64, published: f64, deviation_m: f64) {
     assert_close(
         &format!(
@@ -150,9 +150,11 @@ fn the_twin_ground_shapes_stand_at_their_published_nacelle_clearances() {
     // A220-300: ACP Issue 013 ground-clearance table, nacelle 22.9 in
     // (0.582 m) minimum. 787-9: D6-58333 Rev Q section 2.3.2, GE nacelle
     // (F) 0.69 m minimum.
-    // The freeze raised the A320, A220 and E195 nacelles to their drawings:
+    // The A320, A220 and E195 nacelles are raised to their drawings:
     // deviations A320 +0.155 m, A220 -0.118 m (drawing lip compromise),
-    // 787-9 +0.024 m; see assert_overlay_compromise.
+    // 787-9 +0.012 m (the fuselage belly minimum, which sets
+    // the ground plane, is a 1.2 cm keel undershoot at x = 10.3 m, so the nacelle stands
+    // close to the published 0.69 m); see assert_overlay_compromise.
     let a320 = ground_shape("A320-200");
     assert_overlay_compromise("A320 nacelle", a320.nacelle_low_points_m()[0], 0.577, 0.155);
     assert_close(
@@ -169,5 +171,5 @@ fn the_twin_ground_shapes_stand_at_their_published_nacelle_clearances() {
         -0.118,
     );
     let b787 = ground_shape("B787-9");
-    assert_overlay_compromise("787-9 nacelle", b787.nacelle_low_points_m()[0], 0.69, 0.024);
+    assert_overlay_compromise("787-9 nacelle", b787.nacelle_low_points_m()[0], 0.69, 0.012);
 }

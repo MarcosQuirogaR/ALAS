@@ -30,10 +30,13 @@ pub fn figure_propulsion_carpet_plot(config: &AlasConfig, theme: Option<&str>) -
         Err(scene) => return scene,
     };
     let pal = get_palette(theme);
-    let mut scene = Scene::new(700.0, 500.0, Some(Color::from_hex(pal.bg)));
+    // Tall enough for the four-line masked-points footnote under the x label.
+    let mut scene = Scene::new(700.0, 560.0, Some(Color::from_hex(pal.bg)));
+    // The throttled cruise point, as the cycle summary shows it.
+    let design = design_point(config, eng);
     scene.title = Some(format!(
         "On-Design Carpet Plot (BPR={:.1}, FPR={:.2})",
-        eng.bypass_ratio, eng.fan_pressure_ratio
+        eng.bypass_ratio, design.fan_pressure_ratio
     ));
     let title = scene.title.clone().unwrap_or_default();
     draw_title(&mut scene, &title, pal);
@@ -49,19 +52,24 @@ pub fn figure_propulsion_carpet_plot(config: &AlasConfig, theme: Option<&str>) -
         &tit_vec,
         req.cruise_mach,
         req.cruise_altitude_m,
-        eng.fan_pressure_ratio,
+        design.fan_pressure_ratio,
         eng.bypass_ratio,
         cyc_cfg,
     );
-    let design_out = compute_turbofan_cycle(&design_point(config, eng), cyc_cfg);
+    let design_out = compute_turbofan_cycle(&design, cyc_cfg);
+
+    // Mask the backward branch: along each fixed-T4t curve (OPR increasing), a
+    // specific thrust more than 20 % below its running maximum is a collapsed cycle,
+    // not a design option; that point and every later one on the curve are dropped.
+    let (ok, masked_cells) = mask_backward_branch(&carpet);
 
     let mut sfn_min = f64::INFINITY;
     let mut sfn_max = f64::NEG_INFINITY;
     let mut tsfc_min = f64::INFINITY;
     let mut tsfc_max = f64::NEG_INFINITY;
-    for i in 0..tit_vec.len() {
-        for j in 0..pi_c_vec.len() {
-            if carpet.feasible_mask[i][j] {
+    for (i, ok_row) in ok.iter().enumerate() {
+        for (j, &cell) in ok_row.iter().enumerate() {
+            if cell {
                 sfn_min = sfn_min.min(carpet.specific_thrust_ms[i][j]);
                 sfn_max = sfn_max.max(carpet.specific_thrust_ms[i][j]);
                 tsfc_min = tsfc_min.min(carpet.tsfc_mg_ns[i][j]);
@@ -85,13 +93,18 @@ pub fn figure_propulsion_carpet_plot(config: &AlasConfig, theme: Option<&str>) -
     let tsfc_pad = (tsfc_max - tsfc_min).max(0.1) * 0.08;
     let axes = Axes2D::new(
         (70.0, 60.0, 580.0, 380.0),
-        (sfn_min - sfn_pad, sfn_max + sfn_pad),
+        // Axis rule: specific thrust is a non-negative magnitude with a
+        // physical zero (no thrust), so its axis starts at 0 and the carpet
+        // is read against it. TSFC stays autoscaled: zero fuel use is not a
+        // reachable limit and would flatten the carpet into a sliver.
+        (0.0, sfn_max + sfn_pad),
         (tsfc_min - tsfc_pad, tsfc_max + tsfc_pad),
     );
     axes.draw_frame(&mut scene, pal);
 
+    let mut curves_px: Vec<Vec<[f64; 2]>> = Vec::new();
     // Family of curves at fixed TIT, across the OPR sweep.
-    for (i, mask_row) in carpet.feasible_mask.iter().enumerate() {
+    for (i, mask_row) in ok.iter().enumerate() {
         if mask_row.iter().filter(|&&ok| ok).count() < 2 {
             continue;
         }
@@ -100,14 +113,13 @@ pub fn figure_propulsion_carpet_plot(config: &AlasConfig, theme: Option<&str>) -
             .map(|j| (carpet.specific_thrust_ms[i][j], carpet.tsfc_mg_ns[i][j]))
             .collect();
         let color = plt_cmap_sample(Colormap::Plasma, i, tit_vec.len());
+        curves_px.push(pts.iter().map(|&(x, y)| axes.map_point(x, y)).collect());
         axes.add_line_series(&mut scene, &pts, Stroke::new(color, 1.4));
     }
 
     // Family of curves at fixed OPR, across the TIT sweep.
     for j in 0..pi_c_vec.len() {
-        let col_feasible: Vec<bool> = (0..tit_vec.len())
-            .map(|i| carpet.feasible_mask[i][j])
-            .collect();
+        let col_feasible: Vec<bool> = (0..tit_vec.len()).map(|i| ok[i][j]).collect();
         if col_feasible.iter().filter(|&&ok| ok).count() < 2 {
             continue;
         }
@@ -116,8 +128,34 @@ pub fn figure_propulsion_carpet_plot(config: &AlasConfig, theme: Option<&str>) -
             .map(|i| (carpet.specific_thrust_ms[i][j], carpet.tsfc_mg_ns[i][j]))
             .collect();
         let color = plt_cmap_sample(Colormap::Viridis, j, pi_c_vec.len());
+        curves_px.push(pts.iter().map(|&(x, y)| axes.map_point(x, y)).collect());
         axes.add_line_series(&mut scene, &pts, Stroke::dashed(color, 0.9, 4.0, 3.0));
     }
+
+    // The masked points stay visible as faint hollow markers (those inside the
+    // plotted range; the footnote counts the rest).
+    let masked_xy: Vec<(f64, f64)> = masked_cells
+        .iter()
+        .map(|&(i, j)| (carpet.specific_thrust_ms[i][j], carpet.tsfc_mg_ns[i][j]))
+        .collect();
+    let inside = |&(x, y): &(f64, f64)| {
+        x.is_finite()
+            && y.is_finite()
+            && x >= axes.x_min
+            && x <= axes.x_max
+            && y >= axes.y_min
+            && y <= axes.y_max
+    };
+    let ink = Color::from_hex(pal.tick);
+    for &(x, y) in masked_xy.iter().filter(|p| inside(p)) {
+        scene.add(SceneElement::Circle {
+            center: axes.map_point(x, y),
+            radius: 2.6,
+            fill: None,
+            stroke: Some(Stroke::new(Color::rgba(ink.r, ink.g, ink.b, 110), 0.8)),
+        });
+    }
+    let masked_outside = masked_xy.iter().filter(|p| !inside(p)).count();
 
     if design_out.cycle_feasible {
         let p = axes.map_point(design_out.specific_thrust_ms, design_out.tsfc_mg_ns);
@@ -144,16 +182,60 @@ pub fn figure_propulsion_carpet_plot(config: &AlasConfig, theme: Option<&str>) -
             LegendMarker::Line(Stroke::dashed(color, 0.9, 4.0, 3.0)),
         ));
     }
+    // The design point is always computed and plotted; when it lies outside the
+    // swept OPR x T4t grid the legend says the carpet does not bracket it.
+    let off_grid = design.overall_pressure_ratio < pi_c_vec[0]
+        || design.overall_pressure_ratio > pi_c_vec[pi_c_vec.len() - 1]
+        || design.turbine_inlet_temperature_k < tit_vec[0]
+        || design.turbine_inlet_temperature_k > tit_vec[tit_vec.len() - 1];
     if design_out.cycle_feasible {
         legend_entries.push((
             format!(
-                "Design point (SFn={:.0} m/s)",
-                design_out.specific_thrust_ms
+                "Design point (SFn={:.0} m/s{})",
+                design_out.specific_thrust_ms,
+                if off_grid {
+                    ", extrapolated: off the carpet grid"
+                } else {
+                    ""
+                }
             ),
             LegendMarker::Circle(Color::from_hex("#f1c40f")),
         ));
     }
-    draw_legend(&mut scene, [82.0, 72.0], &legend_entries, pal, 7.2);
+    let origin = super::super::support::least_cluttered_legend_origin(
+        (70.0, 60.0, 580.0, 380.0),
+        legend_entries.len(),
+        7.2,
+        if off_grid { 215.0 } else { 150.0 },
+        &curves_px,
+    );
+    draw_legend(&mut scene, origin, &legend_entries, pal, 7.2);
+    if !masked_cells.is_empty() {
+        let (sfn_lo, sfn_hi) = masked_xy
+            .iter()
+            .map(|p| p.0)
+            .filter(|v| v.is_finite())
+            .fold((f64::INFINITY, f64::NEG_INFINITY), |(lo, hi), v| {
+                (lo.min(v), hi.max(v))
+            });
+        let outside_sentence = if masked_outside > 0 {
+            format!(" {masked_outside} of them fall outside the plotted range and are not drawn.")
+        } else {
+            String::new()
+        };
+        super::super::support::wrapped_footnote(
+            &mut scene,
+            pal,
+            &format!(
+                "{} grid point(s) masked (faint hollow markers): specific thrust fell more than 20 % below its running maximum along the OPR sweep (backward branch, not a valid operating point). SFn of the masked points: {sfn_lo:.0} to {sfn_hi:.0} m/s.{outside_sentence}",
+                masked_cells.len()
+            ),
+            7.4,
+            350.0,
+            554.0,
+            620.0,
+        );
+    }
 
     axis_labels(
         &mut scene,
@@ -164,6 +246,39 @@ pub fn figure_propulsion_carpet_plot(config: &AlasConfig, theme: Option<&str>) -
     );
 
     scene
+}
+
+/// Feasible-and-not-collapsed mask of a carpet, and the (row, column) cells
+/// the collapse rule removed. See the call site for the rule.
+fn mask_backward_branch(
+    carpet: &alas_prop::cycle::sweeps::CarpetPlotResult,
+) -> (Vec<Vec<bool>>, Vec<(usize, usize)>) {
+    let mut masked: Vec<(usize, usize)> = Vec::new();
+    let ok = carpet
+        .feasible_mask
+        .iter()
+        .enumerate()
+        .map(|(i, row)| {
+            let mut running_max = f64::NEG_INFINITY;
+            let mut collapsed = false;
+            row.iter()
+                .enumerate()
+                .map(|(j, &feasible)| {
+                    if !feasible {
+                        return false;
+                    }
+                    let sfn = carpet.specific_thrust_ms[i][j];
+                    running_max = running_max.max(sfn);
+                    collapsed |= sfn < 0.8 * running_max;
+                    if collapsed {
+                        masked.push((i, j));
+                    }
+                    !collapsed
+                })
+                .collect()
+        })
+        .collect();
+    (ok, masked)
 }
 
 /// Thermal / propulsive / overall efficiency vs overall pressure ratio, at
@@ -186,9 +301,12 @@ pub fn figure_propulsion_efficiency_decomposition(
     };
     let pal = get_palette(theme);
     let mut scene = Scene::new(700.0, 420.0, Some(Color::from_hex(pal.bg)));
+    // The cruise (throttled) temperature, as the cycle summary shows it.
+    let design = design_point(config, eng);
+    let cruise_tit_k = design.turbine_inlet_temperature_k;
     scene.title = Some(format!(
-        "Efficiency Decomposition vs OPR (BPR={:.1}, TIT={:.0} K)",
-        eng.bypass_ratio, eng.turbine_inlet_temp_k
+        "Efficiency Decomposition vs OPR (BPR={:.1}, TIT={cruise_tit_k:.0} K)",
+        eng.bypass_ratio
     ));
     let title = scene.title.clone().unwrap_or_default();
     draw_title(&mut scene, &title, pal);
@@ -202,9 +320,9 @@ pub fn figure_propulsion_efficiency_decomposition(
     let pi_c_vec = linspace(pi_c_lo, pi_c_hi, 60);
     let dec = compute_efficiency_decomposition(
         &pi_c_vec,
-        eng.turbine_inlet_temp_k,
+        cruise_tit_k,
         eng.bypass_ratio,
-        eng.fan_pressure_ratio,
+        design.fan_pressure_ratio,
         req.cruise_mach,
         req.cruise_altitude_m,
         cyc_cfg,
@@ -242,19 +360,18 @@ pub fn figure_propulsion_efficiency_decomposition(
         Stroke::dashed(color_o, 2.2, 6.0, 4.0),
     );
 
-    let opr = eng.overall_pressure_ratio;
+    let opr = design.overall_pressure_ratio;
     let mut legend_entries = vec![
         (
-            "\u{03b7}\u{209c}\u{2095} (thermal)".to_owned(),
+            "Thermal efficiency (\u{03b7}th)".to_owned(),
             LegendMarker::Line(Stroke::new(color_th, 2.0)),
         ),
         (
-            "\u{03b7}\u{209a} (propulsive)".to_owned(),
+            "Propulsive efficiency (\u{03b7}p)".to_owned(),
             LegendMarker::Line(Stroke::new(color_p, 2.0)),
         ),
         (
-            "\u{03b7}\u{2092} = \u{03b7}\u{209c}\u{2095} \u{00b7} \u{03b7}\u{209a} (overall)"
-                .to_owned(),
+            "Overall efficiency (\u{03b7}o = \u{03b7}th \u{00b7} \u{03b7}p)".to_owned(),
             LegendMarker::Line(Stroke::new(color_o, 2.2)),
         ),
     ];
@@ -271,7 +388,30 @@ pub fn figure_propulsion_efficiency_decomposition(
             LegendMarker::Line(Stroke::dashed(Color::from_hex(pal.title), 1.3, 2.0, 2.0)),
         ));
     }
-    draw_legend(&mut scene, [82.0, 78.0], &legend_entries, pal, 8.5);
+    let mut curves_px: Vec<Vec<[f64; 2]>> = [
+        &dec.thermal_efficiency,
+        &dec.propulsive_efficiency,
+        &dec.overall_efficiency,
+    ]
+    .iter()
+    .map(|values| {
+        feasible_series(values)
+            .iter()
+            .map(|&(x, y)| axes.map_point(x, y))
+            .collect()
+    })
+    .collect();
+    if !opr.is_nan() {
+        curves_px.push(vec![axes.map_point(opr, 1.0), axes.map_point(opr, 0.0)]);
+    }
+    let origin = super::super::support::least_cluttered_legend_origin(
+        rect,
+        legend_entries.len(),
+        8.5,
+        215.0,
+        &curves_px,
+    );
+    draw_legend(&mut scene, origin, &legend_entries, pal, 8.5);
 
     axis_labels(
         &mut scene,

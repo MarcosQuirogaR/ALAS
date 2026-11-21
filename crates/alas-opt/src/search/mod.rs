@@ -10,4 +10,5 @@ pub(crate) mod elite;
 pub(crate) mod fidelity_pairs;
 pub(crate) mod planform_projection;
 pub(crate) mod screening;
+pub(crate) mod surrogate;
 pub(crate) mod work_cap;

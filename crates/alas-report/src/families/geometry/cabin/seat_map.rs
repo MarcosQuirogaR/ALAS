@@ -59,7 +59,7 @@ pub fn figure_main_deck_seat_map(
         let hi = if segment == 2 { x1 } else { lo + segment_span };
         let rect = (55.0, 58.0 + segment as f64 * 220.0, 890.0, 175.0);
         let axes = Axes2D::new(rect, (lo, hi), (y0, y1));
-        axes.draw_frame_with_labels(&mut scene, pal, "longitudinal X [m]", "lateral Y [m]");
+        axes.draw_frame_with_labels(&mut scene, pal, "Longitudinal X [m]", "Lateral Y [m]");
         scene.add(SceneElement::Text {
             text: format!("{} / 3   X={lo:.1}-{hi:.1} m", segment + 1),
             pos: [rect.0 + 6.0, rect.1 + 5.0],

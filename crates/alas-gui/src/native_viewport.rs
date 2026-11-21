@@ -44,9 +44,42 @@ struct InitialViewportGeometry {
     root_native_pixels_per_point: Option<f32>,
 }
 
+/// Record whether a modal prompt of the root window waits for an answer;
+/// returns the previous value.
+pub(crate) fn set_modal_pending(ctx: &Context, pending: bool) -> bool {
+    let id = Id::new("alas_modal_pending");
+    let previous = ctx.data(|data| data.get_temp::<bool>(id).unwrap_or(false));
+    ctx.data_mut(|data| data.insert_temp(id, pending));
+    previous
+}
+
+/// Whether a modal prompt of the root window waits for an answer.
+pub(crate) fn modal_pending(ctx: &Context) -> bool {
+    ctx.data(|data| {
+        data.get_temp::<bool>(Id::new("alas_modal_pending"))
+            .unwrap_or(false)
+    })
+}
+
 /// Build the stable ID used for a detached viewport.
 pub(crate) fn viewport_id(key: impl std::hash::Hash) -> ViewportId {
     ViewportId::from_hash_of(("alas_native_viewport", key))
+}
+
+/// Bring an already-open detached window to the front.
+///
+/// Opening a window that exists only sets its "open" flag again, which does
+/// nothing for a window that is minimised or behind the main one. Every action
+/// that opens a detached surface calls this with the same `key` it passes to
+/// [`show_native_viewport`]: a window that does not exist yet is created
+/// active, and an existing one is restored from minimised and focused.
+pub(crate) fn raise(ctx: &Context, key: impl std::hash::Hash) {
+    let id = viewport_id(&key);
+    if !ctx.input(|input| input.raw.viewports.contains_key(&id)) {
+        return;
+    }
+    ctx.send_viewport_cmd_to(id, ViewportCommand::Minimized(false));
+    ctx.send_viewport_cmd_to(id, ViewportCommand::Focus);
 }
 
 /// Show a detached surface in a true native viewport.
@@ -167,6 +200,15 @@ fn show_native_viewport_with_size_policy(
     let fallback_size = builder.inner_size;
     let fallback_min_size = builder.min_inner_size;
     let fallback_max_size = builder.max_inner_size;
+    // The remembered size is a creation-time request. Re-sending it to a live
+    // window feeds the window's own reported size back as a resize command:
+    // when the UI zoom changes, the reported size (in points) changes, the
+    // command resizes the window, rounding moves the report again, and the
+    // window flickers through an endless resize loop. A live window is left
+    // at the size the user or the OS gave it.
+    if child_exists {
+        builder.inner_size = None;
+    }
     let fallback_resizable = builder.resizable.unwrap_or(true);
     // A newly opened tool should receive keyboard focus. Applying `active` to
     // an existing viewport asks the native backend to activate it on every
@@ -222,8 +264,11 @@ fn show_native_viewport_with_size_policy(
         match class {
             ViewportClass::Immediate => {
                 let content_ctx = child_ctx.clone();
+                // A modal prompt in the root window cannot cover an OS
+                // window, so the detached surfaces go read-only meanwhile.
+                let blocked = modal_pending(child_ctx);
                 CentralPanel::default().show(child_ctx, |ui| {
-                    content(&content_ctx, ui, class);
+                    ui.add_enabled_ui(!blocked, |ui| content(&content_ctx, ui, class));
                 });
             }
             ViewportClass::Embedded => {
@@ -400,10 +445,161 @@ fn valid_size(size: egui::Vec2) -> bool {
     size.x.is_finite() && size.y.is_finite() && size.x > 1.0 && size.y > 1.0
 }
 
+/// Headless stand-in for a windowing backend that can open OS windows: every
+/// immediate viewport a frame requests is recorded and its content is run.
+#[cfg(test)]
+pub(crate) mod capture {
+    use std::cell::RefCell;
+    use std::rc::Rc;
+
+    use egui::{Context, RawInput, ViewportId};
+
+    /// One native window a frame asked for.
+    #[derive(Debug, Clone, PartialEq)]
+    pub(crate) struct Requested {
+        pub id: ViewportId,
+        pub title: Option<String>,
+        pub maximized: Option<bool>,
+        /// `Focus` commands the window's own pass drained.
+        pub focus_commands: usize,
+    }
+
+    /// A context that opens viewports as native windows, and the log of them.
+    pub(crate) fn native_context() -> (Context, Rc<RefCell<Vec<Requested>>>) {
+        let ctx = Context::default();
+        ctx.set_embed_viewports(false);
+        let seen = Rc::new(RefCell::new(Vec::new()));
+        let log = Rc::clone(&seen);
+        Context::set_immediate_viewport_renderer(move |ctx, mut viewport| {
+            let id = viewport.ids.this;
+            let title = viewport.builder.title.clone();
+            let maximized = viewport.builder.maximized;
+            let input = RawInput {
+                viewport_id: viewport.ids.this,
+                viewports: std::iter::once((viewport.ids.this, egui::ViewportInfo::default()))
+                    .collect(),
+                screen_rect: Some(egui::Rect::from_min_size(
+                    egui::Pos2::ZERO,
+                    egui::vec2(800.0, 600.0),
+                )),
+                ..RawInput::default()
+            };
+            let output = ctx.run(input, |ctx| (viewport.viewport_ui_cb)(ctx));
+            let focus_commands = output.viewport_output.get(&id).map_or(0, |out| {
+                out.commands
+                    .iter()
+                    .filter(|command| matches!(command, egui::ViewportCommand::Focus))
+                    .count()
+            });
+            log.borrow_mut().push(Requested {
+                id,
+                title,
+                maximized,
+                focus_commands,
+            });
+        });
+        (ctx, seen)
+    }
+
+    /// Run one root frame at 1280x800 points.
+    pub(crate) fn frame(ctx: &Context, mut run: impl FnMut(&Context)) -> egui::FullOutput {
+        ctx.run(
+            RawInput {
+                screen_rect: Some(egui::Rect::from_min_size(
+                    egui::Pos2::ZERO,
+                    egui::vec2(1280.0, 800.0),
+                )),
+                ..RawInput::default()
+            },
+            |ctx| run(ctx),
+        )
+    }
+}
+
 #[cfg(test)]
 mod tests {
     use super::*;
+    #[test]
+    fn a_native_window_is_read_only_while_a_root_prompt_waits() {
+        let (ctx, seen) = capture::native_context();
+        let mut enabled = Vec::new();
+        for pending in [false, true, false] {
+            set_modal_pending(&ctx, pending);
+            capture::frame(&ctx, |ctx| {
+                show_native_viewport(
+                    ctx,
+                    "prompt_probe",
+                    "Probe",
+                    ViewportBuilder::default(),
+                    |_ctx, ui, class| {
+                        assert!(class == ViewportClass::Immediate);
+                        enabled.push(ui.is_enabled());
+                    },
+                );
+            });
+        }
+        assert_eq!(enabled, [true, false, true]);
+        assert_eq!(seen.borrow()[0].id, viewport_id("prompt_probe"));
+    }
 
+    /// A live detached window is never re-sent a size: after a UI zoom change
+    /// the remembered size (its own report in points) differs from the last
+    /// one, and echoing it back as `InnerSize` is the resize feedback loop
+    /// that made detached windows flicker.
+    #[test]
+    fn a_live_window_gets_no_resize_command_when_its_remembered_size_changes() {
+        let (ctx, _seen) = capture::native_context();
+        let id = viewport_id("flicker_probe");
+        let memory = Id::new(("alas_native_viewport_size", &"flicker_probe"));
+        let mut resizes = Vec::new();
+        for (frame, size) in [None, Some(900.0), Some(750.0), Some(900.5), Some(750.0)]
+            .into_iter()
+            .enumerate()
+        {
+            if let Some(width) = size {
+                ctx.data_mut(|data| {
+                    data.insert_temp(
+                        memory,
+                        RememberedViewportSize {
+                            size: egui::vec2(width, 600.0),
+                        },
+                    );
+                });
+            }
+            let mut viewports = egui::ViewportIdMap::default();
+            viewports.insert(ViewportId::ROOT, egui::ViewportInfo::default());
+            if frame > 0 {
+                viewports.insert(id, egui::ViewportInfo::default());
+            }
+            let output = ctx.run(
+                egui::RawInput {
+                    screen_rect: Some(Rect::from_min_size(Pos2::ZERO, egui::vec2(1280.0, 800.0))),
+                    viewports,
+                    ..egui::RawInput::default()
+                },
+                |ctx| {
+                    show_native_viewport(
+                        ctx,
+                        "flicker_probe",
+                        "Probe",
+                        ViewportBuilder::default().with_inner_size(egui::vec2(640.0, 480.0)),
+                        |_ctx, _ui, _class| {},
+                    );
+                },
+            );
+            let count = output.viewport_output.get(&id).map_or(0, |out| {
+                out.commands
+                    .iter()
+                    .filter(|c| matches!(c, ViewportCommand::InnerSize(_)))
+                    .count()
+            });
+            resizes.push(count);
+        }
+        assert!(
+            resizes.iter().all(|&n| n == 0),
+            "resize commands per frame: {resizes:?}"
+        );
+    }
     #[test]
     fn detached_viewport_ids_are_stable_and_distinct() {
         assert_eq!(viewport_id("run_log"), viewport_id("run_log"));

@@ -13,9 +13,14 @@ use crate::mdo::types::{HistoryFields, PayloadCapacity, SizedCandidate};
 
 /// Everything a mission-sized residual table is computed from, beyond the
 /// scalar summary in [`SizedCandidate`].
+#[derive(Clone)]
 pub(crate) struct SizingOutcome {
     pub plane: Airplane,
     pub masses: MassBreakdown,
+    /// The configuration mass `masses` were evaluated at
+    /// ([`crate::mdo::mda::EvaluationMass`]); `None` for the candidate's own
+    /// configuration.
+    pub evaluated_at: Option<crate::mdo::mda::EvaluationMass>,
     pub coords: MassCoordinates,
     pub cg_x: f64,
     pub x_np: f64,
@@ -71,6 +76,9 @@ pub(crate) struct SizingOutcome {
     /// [`Self::clmax`] is: what the nominal references are keyed on and
     /// resolved under (lever A12).
     pub declared_clmax: Option<alas_perf::performance::clmax::ClmaxSet>,
+    /// What the clean-sheet engine sizing settled on; `None` outside the
+    /// clean-sheet mode, whose engine is the declared one.
+    pub engine_sizing: Option<crate::mdo::engine::sizing::EngineSizing>,
 }
 
 impl SizingOutcome {
@@ -83,11 +91,21 @@ impl SizingOutcome {
         &self,
         config: &'a AlasConfig,
     ) -> std::borrow::Cow<'a, AlasConfig> {
+        // The registered aircraft has its declared engine, not the one a
+        // clean-sheet sizing scaled for this candidate.
+        let declared = match self.engine_sizing.as_ref().filter(|sizing| sizing.sizes) {
+            Some(sizing) => {
+                let mut declared = config.clone();
+                declared.apply_sized_engine(&sizing.base);
+                std::borrow::Cow::Owned(declared)
+            }
+            None => std::borrow::Cow::Borrowed(config),
+        };
         match &self.declared_clmax {
             Some(set) if crate::mdo::speedups::enabled(crate::mdo::speedups::Lever::NominalKey) => {
-                std::borrow::Cow::Owned(super::clmax_geometry::with_clmax(config, set))
+                std::borrow::Cow::Owned(super::clmax_geometry::with_clmax(&declared, set))
             }
-            _ => std::borrow::Cow::Borrowed(config),
+            _ => declared,
         }
     }
 
@@ -115,14 +133,25 @@ impl SizingOutcome {
 /// trimmed at the old centre of gravity stands, as it does between the
 /// passes of one closure, and beyond it the re-sizing trims afresh. The
 /// lattice and wake cache is exact for any centre of gravity.
+///
+/// A derived wing setting (`wing_setting`) is part of the trim: the key is
+/// the candidate as built, before the rotation, and the rotation the trim
+/// settled is carried in [`Self::wing_rotation_deg`] and applied again by the
+/// re-sizing. Keyed on the rotated airframe, a re-sizing (built unrotated)
+/// never matched, and every clean-sheet transport trimmed afresh and rotated
+/// again after placing its gear: two drag tables per placement.
 #[derive(Clone)]
 pub(crate) struct TrimReuse {
     /// The configuration the trim was solved for, without its gear
-    /// translation.
+    /// translation, as built (before any derived wing rotation).
     pub(super) config: AlasConfig,
-    /// The design vector and the airframe as built, before any trim.
+    /// The design vector and the airframe as built, before any trim or
+    /// derived wing rotation.
     pub(super) dv: alas_config::DesignVector,
     pub(super) untrimmed: Airplane,
+    /// The derived wing setting rotation, degrees, the trimmed airframe
+    /// carries (`None`: the wing as built).
+    pub(super) wing_rotation_deg: Option<f64>,
     /// The airframe as the closure's last trim left it.
     pub(super) trimmed: Airplane,
     pub(super) polar: TrimmedPolar,
@@ -138,9 +167,8 @@ impl TrimReuse {
     /// The trim (polar and centre of gravity) a closure left on `plane`, for a candidate configured as
     /// `config` and built as `untrimmed` from `dv`.
     pub(super) fn of_closure(
-        config: &AlasConfig,
-        dv: alas_config::DesignVector,
-        untrimmed: Airplane,
+        (config, dv, untrimmed): (&AlasConfig, alas_config::DesignVector, Airplane),
+        wing_rotation_deg: Option<f64>,
         plane: &Airplane,
         trim: (&TrimmedPolar, f64),
         screening_drag_table: bool,
@@ -152,6 +180,7 @@ impl TrimReuse {
             config: without_gear,
             dv,
             untrimmed,
+            wing_rotation_deg,
             trimmed: plane.clone(),
             polar: trim.0.clone(),
             trim_cg_x_m: trim.1,
@@ -159,6 +188,17 @@ impl TrimReuse {
             vlm_cache,
             cg_tolerance_pct_mac: None,
         }
+    }
+
+    /// The airframe as the closure's last trim left it, the geometric body
+    /// angle of that trim, degrees, and the candidate's lattice cache: what
+    /// a re-solve of the trimmed aircraft in another flow state needs.
+    pub(crate) fn trimmed_lattice(&self) -> (&Airplane, f64, &crate::mdo::trim::CandidateVlmCache) {
+        (
+            &self.trimmed,
+            self.polar.geometric_body_alpha_deg,
+            &self.vlm_cache,
+        )
     }
 
     /// This trim, standing for a centre-of-gravity shift of up to

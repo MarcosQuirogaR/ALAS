@@ -44,7 +44,12 @@ fn a_no_engine_build_flags_its_propulsion_station_as_a_fallback() {
     );
 
     let feasibility = assess_physical_feasibility(&config, &preset.design_vector, &report, None);
-    assert!(feasibility.propulsion_station_fallback);
+    assert_eq!(
+        feasibility.propulsion_station,
+        PropulsionStationEvidence::WingCentroidFallback
+    );
+    assert!(feasibility.contains(FindingCode::PropulsionStationFallback));
+    assert!(format_feasibility(&feasibility).contains("no nacelle"));
 
     // The same aircraft built with its engines keeps a real nacelle station
     // and must not raise the flag.
@@ -53,7 +58,12 @@ fn a_no_engine_build_flags_its_propulsion_station_as_a_fallback() {
         .expect("A320 full analysis with engines");
     let feasibility_with_engines =
         assess_physical_feasibility(&config, &preset.design_vector, &report_with_engines, None);
-    assert!(!feasibility_with_engines.propulsion_station_fallback);
+    assert_eq!(
+        feasibility_with_engines.propulsion_station,
+        PropulsionStationEvidence::MeasuredNacelle
+    );
+    assert!(!feasibility_with_engines.contains(FindingCode::PropulsionStationFallback));
+    assert!(!feasibility_with_engines.contains(FindingCode::PropulsionStationUnknown));
 }
 
 #[test]
@@ -72,6 +82,13 @@ fn cruise_equilibrium_reports_scalar_and_inertial_force_residuals() {
         true_course_rad: 0.0,
         temperature_deviation_k: 0.0,
         number_control_points: 2,
+        takeoff_rated: false,
+        rating_limited: false,
+        configuration_delta_cd: 0.0,
+        load_factor: 1.0,
+        entry_speed_m_s: 0.0,
+        exit_speed_m_s: 0.0,
+        speed_profile: Vec::new(),
     };
     let mut segment = Segment::new(spec, None).expect("declared cruise altitude");
     segment.numerics.converged = Some(true);
@@ -372,37 +389,49 @@ fn a_propeller_aircraft_gets_its_cruise_thrust_margin_from_the_propeller_model()
     assert!(static_thrust::propeller_cruise_thrust_n(&jet).is_none());
 }
 
-/// The take-off band (owner decision 2026-10-14): the AVE's second segment
-/// needs 0.2655 against 0.2655 installed at the improved-climb speed, so it
-/// passes (re-pinned by lane field lengths, 2026-10-17, by probe: it needed
-/// 0.2528 at the schedule speed before the BPR 8 take-off chart was capped).
-/// Raising the failed engine's windmilling drag coefficient by configuration
-/// (the derived value is 0.0039) lifts the requirement: 0.0100 gives 0.2791
-/// (4.9 % short, inside the 8.2 % take-off band: a Warning finding), 0.0240
-/// gives 0.3064 (13.3 % short, beyond it: the hard ThrustMarginViolation
-/// error).
+/// The take-off band on the CS 25.121(b) second
+/// segment of the AVE flown at the CS 25.107 schedule speed (the improved-
+/// climb rule is switched off, so the requirement is read where the failed
+/// engine's drag enters it directly: required T/W = N/(N-1) (CD/CL + 0.024),
+/// which rises by 2 dCD/CL for a twin). The two cases are two published
+/// estimates of the failed engine's own drag, not values placed on the
+/// threshold:
+/// - the drag the engine-out model derives for the windmilling engine
+///   (no override): the shortfall is inside the 8.2 % band, a Warning;
+/// - Jenkinson, Simpkin and Rhodes, Civil Jet Aircraft Design (1999), Sec.
+///   8.4, p. 176: "the windmill drag, can be estimated from dCD = 0.3 Af/S"
+///   (Af the fan cross-section area, S the wing reference area), a flow-
+///   blockage estimate above the derived one: the shortfall is beyond the
+///   band, the hard ThrustMarginViolation error.
 #[test]
 fn a_second_segment_shortfall_inside_the_take_off_band_is_a_warning_beyond_it_an_error() {
     let preset = presets::get("AVE").expect("registered AVE preset");
-    let findings_for = |windmilling_cd: Option<f64>| {
+    let run = |improved_climb: bool, windmilling_cd: Option<f64>| {
         let mut config =
             AlasConfig::from_value(&serde_json::json!({ "preset": "AVE" })).expect("AVE config");
+        config.performance.improved_climb_v2 = improved_climb;
         config.performance.oei_windmilling_cd = windmilling_cd;
         let report = crate::full_analysis::FullAnalysis::new(config.clone())
             .run(&preset.design_vector, true)
             .expect("AVE full analysis");
-        assess_physical_feasibility(&config, &preset.design_vector, &report, None)
+        let blockage_cd =
+            0.3 * std::f64::consts::FRAC_PI_4 * config.geometry.engine.fan_diameter_m.powi(2)
+                / report.airplane.s_ref;
+        let findings = assess_physical_feasibility(&config, &preset.design_vector, &report, None)
             .findings
             .into_iter()
             .filter(|finding| {
                 finding.code != FindingCode::ImprovedClimbV2
+                    && finding.code != FindingCode::TakeoffClimbOutPolarDomain
                     && (finding.message.contains("second segment")
                         || finding.message.contains("second-segment"))
             })
-            .collect::<Vec<_>>()
+            .collect::<Vec<_>>();
+        (findings, blockage_cd)
     };
-    assert!(findings_for(None).is_empty());
-    let inside = findings_for(Some(0.010));
+    // The preset as shipped flies the improved-climb speed and meets.
+    assert!(run(true, None).0.is_empty());
+    let (inside, blockage_cd) = run(false, None);
     assert_eq!(inside.len(), 1, "{inside:?}");
     assert_eq!(inside[0].code, FindingCode::ThrustWithinChartScatter);
     assert_eq!(inside[0].severity, FindingSeverity::Warning);
@@ -415,8 +444,8 @@ fn a_second_segment_shortfall_inside_the_take_off_band_is_a_warning_beyond_it_an
         (0.918..1.0).contains(&(available / required)),
         "{available} {required}"
     );
-    let beyond = findings_for(Some(0.024));
-    assert_eq!(beyond.len(), 1, "{beyond:?}");
+    let (beyond, _) = run(false, Some(blockage_cd));
+    assert_eq!(beyond.len(), 1, "{beyond:?} at windmill drag {blockage_cd}");
     assert_eq!(beyond[0].code, FindingCode::ThrustMarginViolation);
     assert_eq!(beyond[0].severity, FindingSeverity::Error);
 }

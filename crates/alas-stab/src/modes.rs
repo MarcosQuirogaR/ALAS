@@ -12,7 +12,8 @@
 //! # Closed-form, given the derivatives
 //!
 //! Every formula here is `f64` arithmetic over its inputs: Flight Vehicle
-//! Aerodynamics Eqs. 9.55-9.68, transcribed. It runs no solve of its own. The
+//! Aerodynamics Eqs. 9.55-9.68, transcribed, except the dutch roll (below).
+//! It runs no solve of its own. The
 //! [`StabilityAero`] set it consumes *is* produced by a vortex-lattice solve
 //! upstream (`alas-aero::vlm`'s [`run_with_stability_derivatives`], through
 //! [`crate::dynamics::compute_dynamic_modes`]), but that solve is not part of
@@ -37,15 +38,51 @@
 //! The author's own reference eigenvalues (in the module's `__main__`) note
 //! that this closed-form set has a factor-of-two error in the phugoid real
 //! part against AVL, and disagreements in dutch-roll frequency and the spiral
-//! and roll roots. Reproduced faithfully; `docs/PORTING.md` carries the
-//! `deviation-candidate` (replace with a state-space eigensolve in P14).
+//! and roll roots. The phugoid, spiral and roll roots are reproduced
+//! faithfully; `docs/PORTING.md` carries the `deviation-candidate` (replace
+//! with a state-space eigensolve in P14).
+//!
+//! # Dutch roll: the two-degree-of-freedom approximation, not upstream's
+//!
+//! The dutch roll is the pair of roots of the sideslip/yaw-rate approximation
+//! (rolling freedom suppressed): Nelson, *Flight Stability and Automatic
+//! Control*, 2nd ed., chapter 5, "Dutch roll approximation". Stability axes
+//! (x along the trim velocity, z down), small perturbations about steady
+//! level flight, side-force and yawing-moment equations with `p = phi = 0`:
+//!
+//! ```text
+//! d(beta)/dt = (Y_beta / u0) beta - (1 - Y_r / u0) r
+//! d(r)/dt    =  N_beta beta + N_r r
+//! ```
+//!
+//! with the dimensional derivatives (`Q` the dynamic pressure; coefficients
+//! per radian and per `r b / (2 u0)`):
+//!
+//! ```text
+//! Y_beta = Q S C_Ybeta / m            [m/s^2]
+//! Y_r    = Q S b C_Yr / (2 m u0)      [m/s]
+//! N_beta = Q S b C_nbeta / I_zz       [1/s^2]
+//! N_r    = Q S b^2 C_nr / (2 I_zz u0) [1/s]
+//! ```
+//!
+//! The characteristic equation is
+//! `lambda^2 - (Y_beta/u0 + N_r) lambda + N_beta + (Y_beta N_r - N_beta Y_r)/u0 = 0`,
+//! so `sigma = (Y_beta/u0 + N_r) / 2`,
+//! `omega_n^2 = N_beta + (Y_beta N_r - N_beta Y_r)/u0` and the damped
+//! frequency is `sqrt(omega_n^2 - sigma^2)`. Upstream evaluates
+//! `N_r + Y_beta/(2 u0)` for the real part (the yaw-damping term not halved)
+//! and reports `omega_n` as the imaginary part; that pair is not a root of
+//! the quadratic. Validity: the approximation neglects the dihedral effect,
+//! so it over-predicts the damping when `|C_lbeta|` is large against
+//! `C_nbeta`; it is a handling-qualities estimate, not an eigensolve.
 
 use alas_aero::operating_point::OperatingPoint;
 use alas_geom::aircraft::airplane::Airplane;
 
-/// Standard gravity, m/s^2: `get_modes`'s `g=9.81` default, which no call
-/// site overrides.
-const GRAVITY: f64 = 9.81;
+/// Standard gravity, m/s^2 (9.80665, the program-wide constant). Upstream's
+/// `get_modes` defaults to the two-decimal `g=9.81`; only the phugoid
+/// frequency term reads it.
+const GRAVITY: f64 = alas_atmo::STANDARD_GRAVITY;
 
 /// The subset of a `run_with_stability_derivatives` result `get_modes` reads:
 /// the two base coefficients and the nine stability derivatives the eigenmode
@@ -185,11 +222,17 @@ pub fn get_modes(
     let roll_real = qs * (b * b) / (2.0 * ixx * u0) * aero.clp;
     let roll_imag = 0.0;
 
+    // Dutch roll: roots of the sideslip/yaw-rate quadratic (module doc).
+    // `sigma = (N_r + Y_beta/u0) / 2`, 1/s; `omega_n^2`, 1/s^2, is
+    // `N_beta + (Y_beta N_r - N_beta Y_r)/u0` with `Q/u0^2 = density/2`.
+    let n_r = qs * (b * b) / (2.0 * izz * u0) * aero.cnr;
+    let y_beta_over_u0 = qs / (m * u0) * aero.cyb;
+    let dutch_roll_sigma = 0.5 * (n_r + y_beta_over_u0);
+    let dutch_roll_omega_n_squared = qs * b / izz
+        * (aero.cnb + (density * s * b / (4.0 * m) * (aero.cyb * aero.cnr - aero.cnb * aero.cyr)));
     let (dutch_roll_real, dutch_roll_imag) = mode_info(
-        qs * (b * b) / (2.0 * izz * u0) * (aero.cnr + izz / (m * (b * b)) * aero.cyb),
-        qs * b / izz
-            * (aero.cnb
-                + (density * s * b / (4.0 * m) * (aero.cyb * aero.cnr - aero.cnb * aero.cyr))),
+        dutch_roll_sigma,
+        dutch_roll_omega_n_squared - dutch_roll_sigma * dutch_roll_sigma,
     );
 
     let spiral_parameter = aero.cnr - aero.cnb * aero.clr / aero.clb;
@@ -243,6 +286,106 @@ mod tests {
         let (real, imag) = mode_info(-0.3, -4.0);
         assert!((real - (-0.3 + 2.0)).abs() < 1e-12);
         assert_eq!(imag, 0.0);
+    }
+
+    /// A twin-jet transport at low speed, round numbers: reference area
+    /// 120 m^2, span 34 m, mass 60 000 kg, `I_zz` 3.8e6 kg.m^2, 100 m/s at
+    /// sea level.
+    fn hand_case(cnb: f64) -> Modes {
+        let airplane = Airplane {
+            name: "hand case".to_owned(),
+            xyz_ref: [0.0, 0.0, 0.0],
+            wings: Vec::new(),
+            fuselages: Vec::new(),
+            s_ref: 120.0,
+            c_ref: 4.0,
+            b_ref: 34.0,
+        };
+        let op_point = OperatingPoint::new(
+            alas_atmo::Atmosphere::new(0.0),
+            100.0,
+            0.0,
+            0.0,
+            0.0,
+            0.0,
+            0.0,
+        );
+        let mass = MassProperties {
+            mass: 60_000.0,
+            ixx: 1.2e6,
+            iyy: 3.0e6,
+            izz: 3.8e6,
+        };
+        let aero = StabilityAero {
+            cl: 0.8,
+            cd: 0.06,
+            cma: -1.5,
+            cmq: -20.0,
+            clp: -0.5,
+            cyb: -0.9,
+            cnb,
+            cyr: 0.5,
+            cnr: -0.2,
+            clb: -0.15,
+            clr: 0.2,
+        };
+        get_modes(&airplane, &op_point, &mass, &aero)
+    }
+
+    /// The four dimensional derivatives of the hand case, formed here from
+    /// their definitions, independently of `get_modes`:
+    /// `(Y_beta/u0, Y_r/u0, N_beta, N_r)`.
+    fn hand_case_derivatives(cnb: f64) -> (f64, f64, f64, f64) {
+        let (s, b, m, izz, u0) = (120.0, 34.0, 60_000.0, 3.8e6, 100.0);
+        let q = 0.5 * alas_atmo::Atmosphere::new(0.0).density() * u0 * u0;
+        (
+            q * s * -0.9 / m / u0,
+            q * s * b * 0.5 / (2.0 * m * u0) / u0,
+            q * s * b * cnb / izz,
+            q * s * b * b * -0.2 / (2.0 * izz * u0),
+        )
+    }
+
+    #[test]
+    fn dutch_roll_is_the_root_pair_of_the_sideslip_yaw_quadratic() {
+        let (y_beta, y_r, n_beta, n_r) = hand_case_derivatives(0.12);
+        let modes = hand_case(0.12);
+        let (real, imag) = (
+            modes.dutch_roll.eigenvalue_real,
+            modes.dutch_roll.eigenvalue_imag,
+        );
+        assert!(imag > 0.0, "the hand case is oscillatory");
+
+        // Half the trace of [[Y_beta/u0, -(1 - Y_r/u0)], [N_beta, N_r]]: both
+        // damping terms are halved.
+        let trace = y_beta + n_r;
+        assert!((real - 0.5 * trace).abs() < 1e-12);
+        // The determinant is omega_n^2, and |lambda|^2 of a complex pair is
+        // the determinant: the imaginary part is the damped frequency.
+        let determinant = y_beta * n_r + (1.0 - y_r) * n_beta;
+        assert!((real * real + imag * imag - determinant).abs() < 1e-12);
+        // lambda satisfies the characteristic equation (real and imaginary
+        // parts of lambda^2 - trace lambda + determinant).
+        assert!((real * real - imag * imag - trace * real + determinant).abs() < 1e-12);
+        assert!((2.0 * real * imag - trace * imag).abs() < 1e-12);
+        // zeta = -trace / (2 omega_n).
+        let zeta = -trace / (2.0 * determinant.sqrt());
+        assert!((modes.dutch_roll.damping_ratio - zeta).abs() < 1e-12);
+    }
+
+    #[test]
+    fn aperiodic_dutch_roll_reports_the_least_stable_real_root() {
+        // Directionally unstable: the determinant is negative, the roots are
+        // real and the larger one is trace/2 + sqrt(trace^2/4 - determinant).
+        let (y_beta, y_r, n_beta, n_r) = hand_case_derivatives(-0.05);
+        let modes = hand_case(-0.05);
+        let trace = y_beta + n_r;
+        let determinant = y_beta * n_r + (1.0 - y_r) * n_beta;
+        assert!(determinant < 0.0);
+        let root = 0.5 * trace + (0.25 * trace * trace - determinant).sqrt();
+        assert_eq!(modes.dutch_roll.eigenvalue_imag, 0.0);
+        assert!((modes.dutch_roll.eigenvalue_real - root).abs() < 1e-12);
+        assert!(root > 0.0);
     }
 
     #[test]

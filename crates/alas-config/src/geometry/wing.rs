@@ -18,9 +18,13 @@
 mod airfoil_class;
 mod config;
 mod custom_validation;
+mod divergence_law;
+mod edge_stations;
 mod inboard;
+mod inboard_lines;
 mod korn;
 mod planform;
+mod planform_inputs;
 mod profile;
 mod reference;
 mod shape;
@@ -32,15 +36,24 @@ mod wingtip;
 
 pub use airfoil_class::AirfoilClass;
 pub use config::WingConfig;
+pub use divergence_law::{DivergenceRelation, DragDivergenceLaw};
+pub use edge_stations::{WingEdgeStation, MAX_EDGE_STATIONS, MIN_EDGE_STATION_SPACING};
+pub use inboard_lines::{InboardEdgeLine, InboardEdgeLines};
 pub use planform::{
     InboardAerodynamicStation, MainWingPanel, MainWingStation, MainWingStationKind,
     TransportPlanform, TransportPlanformError, WingSection, WingSectionError,
 };
-pub use profile::{WingDihedralStation, WingProfileError, WingThicknessStation};
+pub use profile::{
+    WingDihedralStation, WingProfileError, WingSectionStation, WingThicknessStation,
+    STATION_SPAN_TOLERANCE,
+};
 pub use reference::{
     PublishedReference, ReferenceTrapezoid, ReferenceWingConfig, ReferenceWingMode,
     RegisteredBasis, PUBLISHED_AREA_TOLERANCE,
 };
 pub use shape::{WingHeights, WingShape, MAX_FLIGHT_TIP_RISE_SEMISPAN_FRACTION};
 pub use smooth::{ProfileSpline, WingProfileInterpolation};
-pub use wingtip::{DeviceStation, WingtipDevice, WingtipDeviceError, WingtipDeviceKind};
+pub use wingtip::{
+    DeviceStation, WingtipDevice, WingtipDeviceError, WingtipDeviceKind, WingtipPathStation,
+    WingtipTeFlare,
+};

@@ -180,3 +180,78 @@ fn from_assessment(
         work: Some(assessment.sized.work),
     }
 }
+
+/// Score `designs` with `fidelity` under `config`, spread over `workers`
+/// one-thread lanes, in input order: the replay a fidelity-ladder study runs
+/// on candidates a finished search recorded.
+///
+/// With `capped` every candidate is sized under the search's own work cap
+/// (`search::work_cap`), measured once on the nominal with the full model, as
+/// the product search does.
+///
+/// # Errors
+///
+/// The optimizer's own refusal of the configuration, before anything is
+/// evaluated.
+pub fn score_designs(
+    config: &AlasConfig,
+    fidelity: ScreeningFidelity,
+    designs: &[Vec<f64>],
+    workers: usize,
+    capped: bool,
+) -> Result<Vec<CandidateScore>, OptimizationError> {
+    let (_, nominal) = DesignOptimizer::new(config.clone()).anchored_search_space()?;
+    let mut model = DesignObjective::new_with_nominal(fidelity.configure(config), nominal);
+    model.sizing_controls = fidelity.controls();
+    if capped && model.sizing_controls.budget.is_none() {
+        let full = DesignObjective::new_with_nominal(config.clone(), nominal);
+        model.sizing_controls.budget = super::work_cap::nominal_work_cap(&full, &nominal);
+    }
+    let next = AtomicUsize::new(0);
+    let results = Mutex::new(vec![None; designs.len()]);
+    let lanes = (0..workers.clamp(1, designs.len().max(1)))
+        .map(|_| ThreadPoolBuilder::new().num_threads(1).build())
+        .collect::<Result<Vec<_>, _>>()
+        .map_err(|error| {
+            OptimizationError::InvalidConfiguration(format!(
+                "could not create fidelity-replay compute lanes: {error}"
+            ))
+        })?;
+    std::thread::scope(|scope| {
+        for lane in &lanes {
+            let (next, results, model) = (&next, &results, &model);
+            scope.spawn(move || {
+                lane.install(|| loop {
+                    let index = next.fetch_add(1, Ordering::Relaxed);
+                    let Some(design) = designs.get(index) else {
+                        break;
+                    };
+                    let scored = score(model, design);
+                    if let Ok(mut results) = results.lock() {
+                        results[index] = Some(scored);
+                    }
+                });
+            });
+        }
+    });
+    Ok(results
+        .into_inner()
+        .unwrap_or_default()
+        .into_iter()
+        .flatten()
+        .collect())
+}
+
+/// Per-variable `(lower, upper)` bounds of a search box.
+pub type SearchBox = Vec<(f64, f64)>;
+
+/// The anchored search box and the canonical nominal design vector a product
+/// run of `config` searches, for a study that proposes its own candidates.
+///
+/// # Errors
+///
+/// The optimizer's own refusal of the configuration.
+pub fn anchored_box(config: &AlasConfig) -> Result<(SearchBox, Vec<f64>), OptimizationError> {
+    let (bounds, nominal) = DesignOptimizer::new(config.clone()).anchored_search_space()?;
+    Ok((bounds, nominal.to_array()))
+}

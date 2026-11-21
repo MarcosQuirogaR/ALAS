@@ -1,30 +1,30 @@
 // SPDX-License-Identifier: AGPL-3.0-or-later
 // Copyright (C) 2026 Marcos Quiroga Rodriguez
 
-//! In-window maximized view of one Results figure.
+//! Detached view of one Results figure, in its own native OS window.
 //!
-//! Result figures maximize inside the main ALAS window: a foreground [`Area`]
-//! covers the current viewport and is restored with Escape, the Close button,
-//! or a double-click on the maximized figure.  Detached native viewports
-//! (`crate::native_viewport`) are reserved for menus, editors and tool
-//! windows; a figure is inspected in place and never spawns an OS window.
+//! The figure opens in a real viewport (`crate::native_viewport`, which falls
+//! back to an egui window where the platform cannot create one) and is closed
+//! with Escape, the window's close button, the Close button, or a double-click
+//! on the figure.
 
 use super::{
     close_fullscreen_result, fullscreen_cache_key, fullscreen_camera_key, fullscreen_slot_key,
     fullscreen_view_key, images, result_3d, FullscreenFigure,
 };
-use egui::{vec2, Align2, Area, Color32, Frame, Id, Key, Layout, Order};
+use egui::{vec2, Color32, Frame, Id, Key, Layout, ViewportBuilder};
 
+use crate::native_viewport::show_native_viewport;
 use crate::state::AppState;
 use crate::views::tr;
 
-/// Stable identity of the maximized overlay.  It shares the display-neutral
-/// slot key so a theme or language change keeps the same overlay alive.
+/// Stable identity of the detached window. It shares the display-neutral slot
+/// key so a theme or language change keeps the same window alive.
 pub(super) fn fullscreen_area_id(view_key: &str) -> Id {
     Id::new(("alas_result_fullscreen_area", fullscreen_slot_key(view_key)))
 }
 
-/// Render one Results figure maximized over the main window.
+/// Render one Results figure in its own window.
 pub(super) fn show_fullscreen_result(
     state: &mut AppState,
     ctx: &egui::Context,
@@ -41,11 +41,6 @@ pub(super) fn show_fullscreen_result(
         description,
         orbitable,
     } = figure;
-    if ctx.input(|input| input.key_pressed(Key::Escape)) {
-        close_fullscreen_result(state, ctx, view_key, camera_key);
-        return;
-    }
-
     let fullscreen_view = fullscreen_view_key(view_key);
     let fullscreen_camera = fullscreen_camera_key(camera_key);
     let fullscreen_cache = fullscreen_cache_key(view_key);
@@ -62,21 +57,23 @@ pub(super) fn show_fullscreen_result(
         None
     };
     let active_scene = fullscreen_scene.as_deref().unwrap_or(scene);
-    let screen = ctx.screen_rect();
-    let screen_size = screen.size();
     let mut restore = false;
-    Area::new(fullscreen_area_id(view_key))
-        .order(Order::Foreground)
-        .default_size(screen_size)
-        .constrain_to(screen)
-        .pivot(Align2::LEFT_TOP)
-        .fixed_pos(screen.min)
-        .show(ctx, |ui| {
-            // Area defaults to the size its content requests.  A figure was
-            // therefore able to create a short overlay on a tall monitor.
-            // Establish the full window before the frame measures itself so
-            // the overlay also covers, and shields, the gallery beneath it.
-            ui.set_min_size(screen_size);
+    let window_title = tr(title);
+    let response = show_native_viewport(
+        ctx,
+        fullscreen_area_id(view_key),
+        window_title.clone(),
+        ViewportBuilder::default()
+            .with_title(window_title)
+            .with_inner_size(vec2(1100.0, 760.0))
+            .with_maximized(true)
+            .with_min_inner_size(vec2(640.0, 420.0))
+            .with_resizable(true),
+        |child_ctx, ui, _class| {
+            if child_ctx.input(|input| input.key_pressed(Key::Escape)) {
+                restore = true;
+                return;
+            }
             Frame::default()
                 .fill(Color32::from_black_alpha(220))
                 .inner_margin(egui::Margin::same(18.0))
@@ -138,7 +135,7 @@ pub(super) fn show_fullscreen_result(
                                 config,
                                 theme,
                             );
-                            ctx.request_repaint();
+                            child_ctx.request_repaint();
                         }
                     } else {
                         let response = ui.add(
@@ -168,8 +165,9 @@ pub(super) fn show_fullscreen_result(
                         super::openvsp::show_launch_button(state, ui);
                     }
                 });
-        });
-    if restore {
+        },
+    );
+    if restore || response.close_requested {
         close_fullscreen_result(state, ctx, view_key, camera_key);
     }
 }

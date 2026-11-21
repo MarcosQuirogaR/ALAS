@@ -10,8 +10,9 @@ use super::drawing::{outline_aspect, paint_airfoil_outline};
 use super::layout::{
     field, preview_height, scientific_field, show_groups, Group, FIELD_WIDTH, PREVIEW_PADDING,
 };
-use super::widgets::{card, card_title};
-use crate::cfd::{AirfoilCfdState, CfdSweepVariable};
+use super::study_sweep::show_sweep_card;
+use super::widgets::card;
+use crate::cfd::AirfoilCfdState;
 use crate::state::{AppState, LogKind};
 use crate::views::{tr, tr_fields};
 use alas_cfd::{
@@ -100,6 +101,7 @@ fn show_airfoil_picker(cfd: &mut AirfoilCfdState, ui: &mut Ui) {
         .text_style_height(&egui::TextStyle::Button)
         .max(ui.spacing().interact_size.y);
     ComboBox::from_id_salt("airfoil_cfd_database_picker")
+        .icon(crate::combo_icon::down_arrow)
         .width(200.0)
         .selected_text(RichText::new(&selected).strong())
         .show_ui(ui, |ui| {
@@ -161,7 +163,7 @@ fn show_study_card(state: &mut AppState, ui: &mut Ui) {
 fn operating_point_group(ui: &mut Ui, config: &mut CfdStudyConfig) {
     Grid::new("airfoil_cfd_operating_grid")
         .num_columns(2)
-        .spacing([10.0, 5.0])
+        .spacing(crate::theme::space::GRID_SPACING)
         .show(ui, |ui| {
             row_label(ui, "Chord [m]", "Reference chord used for geometry, Reynolds number and coefficients.");
             field(ui, DragValue::new(&mut config.chord_m).speed(0.01).range(0.01..=100.0));
@@ -171,6 +173,7 @@ fn operating_point_group(ui: &mut Ui, config: &mut CfdStudyConfig) {
             ui.end_row();
             row_label(ui, "Operating input", "Choose whether speed or chord Reynolds number is entered directly; the other is derived using Re = rho U c / mu.");
             ComboBox::from_id_salt("airfoil_cfd_operating_input")
+.icon(crate::combo_icon::down_arrow)
                 .width(FIELD_WIDTH)
                 .selected_text(match config.operating_input {
                     OperatingInput::Speed => tr("Speed"),
@@ -211,7 +214,7 @@ const COMPRESSIBLE_FAR_FIELD_NOTE: &str =
 fn boundary_group(ui: &mut Ui, config: &mut CfdStudyConfig) {
     Grid::new("airfoil_cfd_boundary_state_grid")
         .num_columns(2)
-        .spacing([10.0, 5.0])
+        .spacing(crate::theme::space::GRID_SPACING)
         .show(ui, |ui| {
             row_label(ui, "Turbulence intensity [%]", "Freestream turbulence intensity used to initialize k and omega for the selected SST model.");
             let mut turbulence_percent = config.turbulence_intensity * 100.0;
@@ -233,6 +236,7 @@ fn boundary_group(ui: &mut Ui, config: &mut CfdStudyConfig) {
             ui.vertical(|ui| {
                 ui.add_enabled_ui(!compressible, |ui| {
                     ComboBox::from_id_salt("airfoil_cfd_far_field")
+.icon(crate::combo_icon::down_arrow)
                         .width(FIELD_WIDTH)
                         .selected_text(match config.boundaries.far_field {
                             FarFieldCondition::FixedValue => tr("Fixed velocity"),
@@ -258,6 +262,7 @@ fn boundary_group(ui: &mut Ui, config: &mut CfdStudyConfig) {
             row_label(ui, "Far-field turbulence", "Treatment of k and omega on the outer patch while the far field is Fixed velocity. inletOutlet imposes the freestream state on inflow and convects the interior value out on outflow; fixedValue clamps every outer face, including outflow.");
             ui.add_enabled_ui(sub_conditions_apply, |ui| {
                 ComboBox::from_id_salt("airfoil_cfd_far_field_turbulence")
+.icon(crate::combo_icon::down_arrow)
                     .width(FIELD_WIDTH)
                     .selected_text(tr(config.boundaries.far_field_turbulence.as_str()))
                     .show_ui(ui, |ui| {
@@ -279,6 +284,7 @@ fn boundary_group(ui: &mut Ui, config: &mut CfdStudyConfig) {
             row_label(ui, "Far-field velocity", "Treatment of U on the outer patch while the far field is Fixed velocity. freestream is inletOutlet for velocity: the freestream vector on inflow, zero gradient on outflow. The pressure treatment is untouched either way.");
             ui.add_enabled_ui(sub_conditions_apply, |ui| {
                 ComboBox::from_id_salt("airfoil_cfd_far_field_velocity")
+.icon(crate::combo_icon::down_arrow)
                     .width(FIELD_WIDTH)
                     .selected_text(tr(config.boundaries.far_field_velocity.as_str()))
                     .show_ui(ui, |ui| {
@@ -307,7 +313,7 @@ fn boundary_group(ui: &mut Ui, config: &mut CfdStudyConfig) {
 fn effective_condition_group(ui: &mut Ui, config: &mut CfdStudyConfig) {
     Grid::new("airfoil_cfd_derived_grid")
         .num_columns(2)
-        .spacing([10.0, 5.0])
+        .spacing(crate::theme::space::GRID_SPACING)
         .show(ui, |ui| {
             for (label, value) in [
                 ("U [m/s]", format!("{:.4}", config.effective_speed_m_s())),
@@ -410,87 +416,4 @@ fn show_case_files_card(state: &mut AppState, ui: &mut Ui) {
             }
         });
     });
-}
-
-fn show_sweep_card(state: &mut AppState, ui: &mut Ui) {
-    let before = state.cfd.sweep_settings.clone();
-    crate::theme::card_frame(ui).show(ui, |ui| {
-        ui.set_min_width(ui.available_width());
-        card_title(
-            ui,
-            "Sequential AoA / Reynolds sweep",
-            "Run one isolated OpenFOAM case per point after single-case verification. Each point keeps its own inputs, status, case path and numerical evidence.",
-        );
-        let sweep = &mut state.cfd.sweep_settings;
-        let speed = if sweep.variable == CfdSweepVariable::Reynolds { 1.0e4 } else { 0.5 };
-        let unit = sweep.variable.unit().to_owned();
-        ui.horizontal_wrapped(|ui| {
-            ui.label(RichText::new(tr("Sweep variable")).weak());
-            ComboBox::from_id_salt("airfoil_cfd_sweep_variable")
-                .width(150.0)
-                .selected_text(tr(sweep.variable.label()))
-                .show_ui(ui, |ui| {
-                    for variable in [CfdSweepVariable::AngleOfAttack, CfdSweepVariable::Reynolds] {
-                        ui.selectable_value(&mut sweep.variable, variable, tr(variable.label()));
-                    }
-                });
-            ui.separator();
-            for (label, value) in [
-                ("Start [{unit}]", &mut sweep.start),
-                ("End [{unit}]", &mut sweep.end),
-                ("Step [{unit}]", &mut sweep.step),
-            ] {
-                ui.label(RichText::new(tr_fields(label, &[("unit", unit.clone())])).weak());
-                field(ui, DragValue::new(value).speed(speed));
-            }
-        });
-        ui.horizontal_wrapped(|ui| {
-            if ui
-                .add_enabled(!state.cfd.running, egui::Button::new(tr("Run sweep")))
-                .on_hover_text(tr("Run the configured points sequentially in isolated case directories."))
-                .clicked()
-            {
-                match state.cfd.start_sweep() {
-                    Ok(run_id) => state.log(format!("Airfoil CFD sweep #{run_id} started."), LogKind::Info),
-                    Err(error) => state.log(error, LogKind::Error),
-                }
-            }
-            if ui
-                .add_enabled(
-                    state.cfd.running && state.cfd.sweep_running,
-                    egui::Button::new(tr("Cancel sweep")),
-                )
-                .clicked()
-            {
-                state.cfd.cancel_run();
-                state.log("Airfoil CFD sweep cancellation requested.", LogKind::Warn);
-            }
-            if state.cfd.sweep_running {
-                ui.spinner();
-            }
-            ui.separator();
-            match state.cfd.sweep_settings.values() {
-                Ok(values) => {
-                    ui.label(
-                        RichText::new(tr_fields(
-                            "{count} cases",
-                            &[("count", values.len().to_string())],
-                        ))
-                        .weak()
-                        .small(),
-                    )
-                    .on_hover_text(tr_fields(
-                        "{count} sequential cases will be generated.",
-                        &[("count", values.len().to_string())],
-                    ));
-                }
-                Err(error) => {
-                    ui.colored_label(ui.visuals().error_fg_color, tr(&error));
-                }
-            }
-        });
-    });
-    if state.cfd.sweep_settings != before {
-        state.cfd.mark_inputs_changed();
-    }
 }

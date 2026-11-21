@@ -120,19 +120,21 @@ pub(crate) fn apply_candidate_payload_load_case(
             config.requirements.num_passengers = counts.total();
         }
         let to_count = |count: i64| usize::try_from(count.max(0)).unwrap_or(usize::MAX);
-        annotate_flops_cabin_resolution(&mut config.mass_model, counts);
-        config
-            .mass_model
-            .flops_transport
-            .first_class_passenger_count = Some(to_count(counts.first));
-        config
-            .mass_model
-            .flops_transport
-            .business_class_passenger_count = Some(to_count(counts.business));
-        config
-            .mass_model
-            .flops_transport
-            .tourist_class_passenger_count = Some(to_count(counts.tourist));
+        if !config.mass_model.flops_transport.manual_cabin_inputs {
+            annotate_flops_cabin_resolution(&mut config.mass_model, counts);
+            config
+                .mass_model
+                .flops_transport
+                .first_class_passenger_count = Some(to_count(counts.first));
+            config
+                .mass_model
+                .flops_transport
+                .business_class_passenger_count = Some(to_count(counts.business));
+            config
+                .mass_model
+                .flops_transport
+                .tourist_class_passenger_count = Some(to_count(counts.tourist));
+        }
     }
     config.requirements.cargo_payload_kg = target_cargo_kg;
     config
@@ -278,6 +280,13 @@ impl DesignObjective {
                 && envelope.name == "tail_scale"
                 && alas_config::presets::get(&self.config.preset).is_ok()
             {
+                continue;
+            }
+            // The wing position of a redesigned registered aircraft is held in
+            // the search and derived from its balance (`mdo::wing_position`,
+            // bounded by that module's travel limit), so a delivered vector
+            // carries the derived value, which may leave the shift window.
+            if envelope.name == "wing_x_shift_m" && self.config.derives_wing_position() {
                 continue;
             }
             // A clean sheet's derived or explicit box steers its search; it

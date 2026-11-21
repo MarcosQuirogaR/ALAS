@@ -20,6 +20,9 @@
 #![allow(clippy::unwrap_used, clippy::expect_used)]
 
 use alas_config::AlasConfig;
+
+#[path = "../../alas-testkit/fixtures/open_ground.rs"]
+mod open_ground;
 use alas_pipeline::{DesignPipeline, PipelineOptions, PipelineResult, RunEnvironment};
 use alas_report::families::mass_balance::load_trim::data::load_trim_data_from_pipeline;
 use alas_report::families::performance;
@@ -39,6 +42,10 @@ fn run_seeded_a220(mode: alas_config::MtowSizing) -> PipelineResult {
         .try_into()
         .unwrap_or(1);
     config.structures.enabled = false;
+    // Open ground at the preset's own departure: no curated survey
+    // certifies a take-off obstacle clearance, so no candidate at EVRA is
+    // feasible (see the fixture's documentation).
+    open_ground::open_ground_at_own_departure(&mut config);
     // The checks are about numbers flowing consistently between stages, not
     // about any aerodynamic value, so the run uses the draft analysis
     // resolution (only its five resolution fields, leaving tuned assumptions

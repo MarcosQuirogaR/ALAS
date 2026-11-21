@@ -149,7 +149,14 @@ fn a_double_deck_section_cuts_a_seat_row_on_both_decks() {
 
 #[test]
 fn a_cabin_too_shallow_for_a_standing_figure_reports_it_instead_of_shrinking_one() {
-    let cabin = scene_for("ATR72-600");
+    // The ATR 72-600 was this fixture while its floor stood on the section
+    // centre line (a 1.2 m cabin); with its drawn floor the cabin is
+    // the 1.9 m of the real aircraft and a figure stands in it, so a shallow
+    // cabin is made by raising the floor of a registered body under its liner.
+    let mut cabin = scene_for("A320-200");
+    for deck in cabin.decks.iter_mut().filter(|deck| deck.passenger) {
+        deck.floor_z_m += 0.9;
+    }
     let slice = slice_section(&cabin).expect("sectionable station");
     assert!(slice
         .decks

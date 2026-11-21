@@ -137,7 +137,7 @@ fn render_run_and_routing(
     show_help: bool,
     edits: &mut Vec<FormEdit>,
 ) {
-    let run_fields = fields_named(fields, &["enabled", "timeout_s"]);
+    let run_fields = fields_named(fields, &["enabled"]);
     let routing_fields = fields_named(
         fields,
         &["great_circle_points", "simbrief_overrides_airports"],
@@ -213,9 +213,8 @@ fn render_field_card(
     }
     card_frame(ui).show(ui, |ui| {
         ui.set_min_width(ui.available_width());
-        ui.label(RichText::new(tr(title)).strong())
-            .on_hover_text(tr(description));
-        ui.add_space(4.0);
+        let heading = crate::theme::card_title(ui, tr(title));
+        crate::theme::header_label(ui, heading).on_hover_text(tr(description));
         edits.extend(dynamic_form(
             ui,
             fields,
@@ -240,11 +239,10 @@ fn render_flight_profile(
 ) {
     card_frame(ui).show(ui, |ui| {
         ui.set_min_width(ui.available_width());
-        ui.label(RichText::new(tr("Flight profile")).strong())
-            .on_hover_text(tr(
-                "Each card below maps to an actual solver segment. Choose the active cruise legs and descent rungs before setting their targets.",
-            ));
-        ui.add_space(6.0);
+        let heading = crate::theme::card_title(ui, tr("Flight profile"));
+        crate::theme::header_label(ui, heading).on_hover_text(tr(
+            "Each card below maps to an actual solver segment. Choose the active cruise legs and descent rungs before setting their targets.",
+        ));
         phase_count_controls(ui, profile, edits);
         let active_cruise = active_cruise_count(profile);
         let active_descent = active_descent_count(profile);
@@ -420,19 +418,16 @@ fn render_phase_card(
     let fields = fields_named(profile_fields, section.fields);
     card_frame(ui).show(ui, |ui| {
         ui.set_min_width(ui.available_width());
-        egui::CollapsingHeader::new(RichText::new(tr(section.title)).strong())
+        let header = egui::CollapsingHeader::new(crate::theme::card_title(ui, tr(section.title)))
             .id_salt(format!("mission_profile::{}", section.id))
             .default_open(section.default_open)
-            .show(ui, |ui| {
-                edits.extend(dynamic_form(
-                    ui,
-                    &fields,
-                    profile,
-                    error_fields,
-                    lang,
-                    show_help,
-                ));
-            });
+            .open(crate::perf_tour::force_open());
+        crate::theme::show_header(ui, header, |ui| {
+            edits.extend(crate::views::form::with_baseline_group(
+                "mission.profile",
+                || dynamic_form(ui, &fields, profile, error_fields, lang, show_help),
+            ));
+        });
     });
 }
 

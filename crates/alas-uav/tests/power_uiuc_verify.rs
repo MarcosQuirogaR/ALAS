@@ -11,7 +11,7 @@
 //! The measured files are NOT part of the repository and are never
 //! redistributed.  Point `ALAS_UIUC_PROPS` at a folder holding the files you
 //! downloaded yourself (the names are the site's: `apce_12x6_static_0629od.txt`,
-//! `apce_12x6_0635od_6044.txt`, ...); without it the test reports a skip.
+//! `apce_12x6_0635od_6044.txt`, ...); the test is `#[ignore]`d and runs with `--include-ignored`.
 //! The site has no robots.txt and asks for citation; fetch politely (one file
 //! every 5 s).
 //!
@@ -21,7 +21,7 @@
 //! normalised by the first (lowest J) measured value of the same file, CT0
 //! and CP0, so that points near zero thrust do not blow up a relative error.
 //!
-//! Status (measured on 8 props, 2026-10-12; see the lane report): the
+//! Status (measured on 8 props, 2026-10-12): the
 //! generic blade has NO systematic forward-speed over-efficiency on this
 //! class.  Bias of CT is -6 % and of efficiency -6 % for J/J0 < 0.6, close to
 //! zero for 0.6-0.85; the zero-thrust advance ratio J0 is predicted 2-8 %
@@ -168,11 +168,11 @@ fn evaluate(dir: &Path, p: &Prop) -> Option<Stats> {
 }
 
 #[test]
+#[ignore = "needs ALAS_UIUC_PROPS (UIUC propeller data folder); run with --include-ignored"]
 fn generic_blade_against_uiuc_apc_thin_electric_measurements() {
-    let Some(dir) = std::env::var_os("ALAS_UIUC_PROPS").map(PathBuf::from) else {
-        println!("SKIP: set ALAS_UIUC_PROPS to a folder of UIUC propeller files");
-        return;
-    };
+    let dir = std::env::var_os("ALAS_UIUC_PROPS")
+        .map(PathBuf::from)
+        .expect("ALAS_UIUC_PROPS must name a folder of UIUC propeller files for this ignored test");
     let mut checked = 0;
     for p in &PROPS {
         let Some(s) = evaluate(&dir, p) else {

@@ -26,6 +26,17 @@ impl Default for ObjectiveWeights {
             // unsourced engineering limit (no primary source gives a number
             // above "a few degrees"); it is unchanged because compressibility
             // only lowers the attitude.
+            // The window [0, 4] deg is a DEFAULT, not a printed limit. Printed: the cabin
+            // floor is "kept level in the normal cruise attitude" (Torenbeek, Synthesis of
+            // Subsonic Airplane Design, 1982, Ch. 3, p. 73; Sadraey 2013, Ch. 7, p. 358),
+            // the wing incidence is chosen so the fuselage sits at its minimum-drag
+            // attitude, "often a few degrees nose-up" (Raymer 6th ed., Ch. 4, pp. 87-88), and
+            // the only printed number on the cabin floor angle is Jenkinson's (1999, Ch. 14,
+            // p. 323) limit of 4 deg nose-down change in the transition from cruise to
+            // descent, a different quantity. No cabin-floor or regulatory source gives a
+            // cruise window of [0, 4]. A clean-sheet transport derives its wing setting
+            // angle so the trimmed attitude sits inside it
+            // (`alas_opt::mdo::sizing::wing_setting`).
             geometric_body_alpha_min_deg: 0.0,
             geometric_body_alpha_max_deg: 4.0,
             min_root_wingbox_depth_m: 1.20,

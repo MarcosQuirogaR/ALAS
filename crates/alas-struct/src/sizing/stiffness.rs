@@ -138,7 +138,7 @@ pub fn size_for_linear_model(
                     .load_cases
                     .iter()
                     .map(|case| case.moment_nm[station].abs())
-                    .fold(0.0_f64, f64::max)
+                    .fold(0.0_f64, super::section::max_or_nan)
             })
             .collect();
         let shears: Vec<_> = (0..count)
@@ -147,7 +147,7 @@ pub fn size_for_linear_model(
                     .load_cases
                     .iter()
                     .map(|case| case.shear_n[station].abs())
-                    .fold(0.0_f64, f64::max)
+                    .fold(0.0_f64, super::section::max_or_nan)
             })
             .collect();
         if pass < MAX_PASSES
@@ -192,7 +192,7 @@ pub fn size_for_linear_model(
             .iter()
             .filter_map(|case| case.moment_nm.first())
             .map(|value| value.abs())
-            .fold(0.0_f64, f64::max);
+            .fold(0.0_f64, super::section::max_or_nan);
         let original = *initial_root_moment.get_or_insert(root_moment);
         let ribs_remain_conservative =
             root_moment <= original * (1.0 + super::MARGIN_NUMERICAL_ZERO);
@@ -314,8 +314,13 @@ mod tests {
             CaseSet::ALL,
         );
         let (front, rear) = crate::sizing::box_chord_band(&wsg);
-        let fuel =
-            crate::tanks::integral_fuel_running_mass_kg_m(&wsg, &sized.y_stations, front, rear);
+        let fuel = crate::tanks::integral_fuel_running_mass_kg_m(
+            &wsg,
+            &sized.y_stations,
+            front,
+            rear,
+            crate::tanks::JET_FUEL_DENSITY_KG_M3,
+        );
         let result = size_for_linear_model(
             &wsg,
             sized,

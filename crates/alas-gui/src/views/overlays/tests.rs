@@ -11,7 +11,7 @@ use super::walkthrough::{
 use egui::{pos2, vec2, Pos2, Rect, Vec2};
 
 #[test]
-fn walkthrough_explanation_is_available_without_painting_inline_prose() {
+fn walkthrough_card_paints_the_step_title_and_body() {
     alas_i18n::set_language(Some("en"));
     let mut state = crate::state::AppState {
         show_walkthrough: true,
@@ -44,7 +44,10 @@ fn walkthrough_explanation_is_available_without_painting_inline_prose() {
         painted.contains(&crate::views::tour_data::TOUR_STEPS[0].title),
         "{painted:?}"
     );
-    assert!(!painted.contains(&crate::views::tour_data::TOUR_STEPS[0].body));
+    assert!(
+        painted.contains(&crate::views::tour_data::TOUR_STEPS[0].body),
+        "{painted:?}"
+    );
 }
 
 #[test]
@@ -86,7 +89,6 @@ fn overlay_shell_strings_have_spanish_desktop_translations() {
         "Get started",
         "Next ->",
         "<- Back",
-        "Advanced Walkthrough",
         "Manage storage",
         "Only ALAS-owned generated data is listed here. Tool installations and saved aircraft documents are not removed.",
         "Storage clearing is disabled while an analysis is running.",

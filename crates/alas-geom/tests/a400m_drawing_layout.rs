@@ -43,15 +43,26 @@ fn overall_length_is_set_by_the_tail_plane_tips_not_the_fuselage() {
 fn wing_is_high_with_anhedral_and_the_drawn_leading_edge() {
     let plane = a400m();
     let wing = &plane.wings[0];
-    let root = &wing.xsecs[0];
     let tip = wing.xsecs.last().expect("tip");
-    // Leading edge on x = 12.5 + 0.332 y (brochure top view).
-    assert!((root.xyz_le[0] - 12.5).abs() < 0.2, "{}", root.xyz_le[0]);
-    let slope = (tip.xyz_le[0] - root.xyz_le[0]) / tip.xyz_le[1].abs();
+    // The planform root is a design datum; the sections inboard of the side of body copy the
+    // side-of-body station, so the drawn line is read at the datum.
+    let datum_x = wing
+        .planform_datum
+        .as_ref()
+        .expect("planform datum")
+        .root_le_m[0];
+    // Leading edge on x = 12.75 + 0.332 y (brochure top view, fitted on a per-axis scale).
+    assert!((datum_x - 12.75).abs() < 0.2, "{datum_x}");
+    let slope = (tip.xyz_le[0] - datum_x) / tip.xyz_le[1].abs();
     assert!((slope - 0.332).abs() < 0.02, "{slope}");
     // High wing above the 2.8 m crown, tip 1.75 m below the root (front view).
-    assert!(root.xyz_le[2] > 2.8);
-    let drop = root.xyz_le[2] - tip.xyz_le[2];
+    let datum_z = wing
+        .planform_datum
+        .as_ref()
+        .expect("planform datum")
+        .root_le_m[2];
+    assert!(datum_z > 2.8);
+    let drop = datum_z - tip.xyz_le[2];
     assert!((drop - 1.75).abs() < 0.25, "{drop}");
 }
 

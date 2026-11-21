@@ -4,7 +4,7 @@
 //! Actual aerodynamic curves assembled from isolated CFD sweep cases.
 
 use super::super::widgets::{card_title, coefficient_value, WIDE_ROW_WIDTH};
-use super::{show_line_plot, tr, tr_fields};
+use super::{show_sweep_plot, tr, tr_fields};
 use crate::cfd::{CfdSweepPointResult, CfdSweepPointStatus};
 use crate::state::{AppState, LogKind};
 use alas_cfd::CfdOutcome;
@@ -30,12 +30,14 @@ pub(super) fn show_sweep_results(state: &mut AppState, ui: &mut Ui) {
         .iter()
         .filter(|point| sweep_point_is_plot_usable(point))
         .filter_map(|point| {
-            point
-                .result
-                .as_ref()?
-                .forces
-                .last()
-                .map(|force| (point.value, force.cl, force.cd))
+            point.result.as_ref()?.forces.last().map(|force| {
+                (
+                    point.value,
+                    force.cl,
+                    force.cd,
+                    point.status == CfdSweepPointStatus::Finished(CfdOutcome::NumericallyConverged),
+                )
+            })
         })
         .collect::<Vec<_>>();
     // A sequential worker usually returns points in requested order, but the
@@ -43,27 +45,46 @@ pub(super) fn show_sweep_results(state: &mut AppState, ui: &mut Ui) {
     // every curve by its physical sweep coordinate before drawing it so the
     // line never connects unrelated AoA/Reynolds samples.
     actual_points.sort_by(|left, right| left.0.total_cmp(&right.0));
-    let cl_points = actual_points
-        .iter()
-        .map(|(value, cl, _)| (*value, *cl))
-        .collect::<Vec<_>>();
-    let cd_points = actual_points
-        .iter()
-        .map(|(value, _, cd)| (*value, *cd))
-        .collect::<Vec<_>>();
-    let cl_vs_cd = actual_points
-        .iter()
-        .map(|(_, cl, cd)| (*cd, *cl))
-        .collect::<Vec<_>>();
-    let efficiency_points = if variable == crate::cfd::CfdSweepVariable::AngleOfAttack {
-        actual_points
+    // Converged points make the curve; unconverged ones are drawn apart as
+    // open markers, never joined to it.
+    let split = |converged: bool| {
+        let selected = actual_points
             .iter()
-            .filter(|(_, _, cd)| cd.is_finite() && cd.abs() > f64::EPSILON)
-            .map(|(alpha, cl, cd)| (*alpha, *cl / *cd))
-            .collect::<Vec<_>>()
-    } else {
-        Vec::new()
+            .filter(move |point| point.3 == converged)
+            .copied()
+            .collect::<Vec<_>>();
+        let cl = selected
+            .iter()
+            .map(|(value, cl, _, _)| (*value, *cl))
+            .collect::<Vec<_>>();
+        let cd = selected
+            .iter()
+            .map(|(value, _, cd, _)| (*value, *cd))
+            .collect::<Vec<_>>();
+        let cl_vs_cd = selected
+            .iter()
+            .map(|(_, cl, cd, _)| (*cd, *cl))
+            .collect::<Vec<_>>();
+        let efficiency = if variable == crate::cfd::CfdSweepVariable::AngleOfAttack {
+            selected
+                .iter()
+                .filter(|(_, _, cd, _)| cd.is_finite() && cd.abs() > f64::EPSILON)
+                .map(|(alpha, cl, cd, _)| (*alpha, *cl / *cd))
+                .collect::<Vec<_>>()
+        } else {
+            Vec::new()
+        };
+        SweepCurves {
+            cl,
+            cd,
+            cl_vs_cd,
+            efficiency,
+        }
     };
+    let curves = split(true);
+    let open = split(false);
+    let (cl_points, cd_points, cl_vs_cd, efficiency_points) =
+        (curves.cl, curves.cd, curves.cl_vs_cd, curves.efficiency);
     let has_unconverged_actual_point = state.cfd.sweep_results.iter().any(|point| {
         sweep_point_is_plot_usable(point)
             && point.status == CfdSweepPointStatus::Finished(CfdOutcome::Unconverged)
@@ -102,7 +123,7 @@ pub(super) fn show_sweep_results(state: &mut AppState, ui: &mut Ui) {
                 Grid::new("airfoil_cfd_sweep_table")
                     .striped(true)
                     .num_columns(9)
-                    .spacing([10.0, 4.0])
+                    .spacing(crate::theme::space::GRID_SPACING)
                     .show(ui, |ui| {
                         for label in [
                             "Point",
@@ -156,82 +177,100 @@ pub(super) fn show_sweep_results(state: &mut AppState, ui: &mut Ui) {
                     });
             });
     });
-    if !cl_points.is_empty() || !cd_points.is_empty() {
+    if !cl_points.is_empty() || !cd_points.is_empty() || !open.cl.is_empty() {
         ui.add_space(8.0);
         if ui.available_width() >= WIDE_ROW_WIDTH {
             ui.columns(2, |columns| {
-                show_line_plot(
+                show_sweep_plot(
                     &mut columns[0],
                     "Sweep CL (actual points)",
                     variable.label(),
                     "CL",
                     &cl_points,
+                    &open.cl,
                 );
-                show_line_plot(
+                show_sweep_plot(
                     &mut columns[1],
                     "Sweep CD (actual points)",
                     variable.label(),
                     "CD",
                     &cd_points,
+                    &open.cd,
                 );
             });
         } else {
-            show_line_plot(
+            show_sweep_plot(
                 ui,
                 "Sweep CL (actual points)",
                 variable.label(),
                 "CL",
                 &cl_points,
+                &open.cl,
             );
             ui.add_space(8.0);
-            show_line_plot(
+            show_sweep_plot(
                 ui,
                 "Sweep CD (actual points)",
                 variable.label(),
                 "CD",
                 &cd_points,
+                &open.cd,
             );
         }
     }
-    if !cl_vs_cd.is_empty() {
+    if !cl_vs_cd.is_empty() || !open.cl_vs_cd.is_empty() {
         ui.add_space(8.0);
-        if ui.available_width() >= WIDE_ROW_WIDTH && !efficiency_points.is_empty() {
+        if ui.available_width() >= WIDE_ROW_WIDTH
+            && (!efficiency_points.is_empty() || !open.efficiency.is_empty())
+        {
             ui.columns(2, |columns| {
-                show_line_plot(
+                show_sweep_plot(
                     &mut columns[0],
                     "CL versus CD (actual points)",
                     "CD",
                     "CL",
                     &cl_vs_cd,
+                    &open.cl_vs_cd,
                 );
-                show_line_plot(
+                show_sweep_plot(
                     &mut columns[1],
                     "CL/CD versus angle of attack",
                     "angle of attack [deg]",
                     "CL/CD [-]",
                     &efficiency_points,
+                    &open.efficiency,
                 );
             });
         } else {
-            show_line_plot(ui, "CL versus CD (actual points)", "CD", "CL", &cl_vs_cd);
+            show_sweep_plot(
+                ui,
+                "CL versus CD (actual points)",
+                "CD",
+                "CL",
+                &cl_vs_cd,
+                &open.cl_vs_cd,
+            );
         }
     }
-    if !efficiency_points.is_empty() && ui.available_width() < 760.0 {
+    if (!efficiency_points.is_empty() || !open.efficiency.is_empty())
+        && ui.available_width() < 760.0
+    {
         ui.add_space(8.0);
-        show_line_plot(
+        show_sweep_plot(
             ui,
             "CL/CD versus angle of attack",
             "angle of attack [deg]",
             "CL/CD [-]",
             &efficiency_points,
+            &open.efficiency,
         );
     }
     if has_unconverged_actual_point {
         ui.colored_label(
             ui.visuals().warn_fg_color,
-            tr("Polar curves include provisional unconverged points"),
+            tr("Unconverged points are drawn as open markers and are not joined to the curves"),
         )
-        .on_hover_text(tr("Polar curves include finite native samples from unconverged points as provisional evidence. Their individual numerical status remains visible in the table and result artifacts."));
+        .on_hover_text(tr("Finite native samples from unconverged points are shown as provisional evidence only. Their individual numerical status remains visible in the table and result artifacts."));
     }
     if let Some(case_dir) = open_case {
         if let Err(error) = state.cfd.open_case_in_paraview(&case_dir) {
@@ -239,6 +278,14 @@ pub(super) fn show_sweep_results(state: &mut AppState, ui: &mut Ui) {
             state.log(error, LogKind::Error);
         }
     }
+}
+
+/// The four derived curves of one group of sweep points.
+struct SweepCurves {
+    cl: Vec<(f64, f64)>,
+    cd: Vec<(f64, f64)>,
+    cl_vs_cd: Vec<(f64, f64)>,
+    efficiency: Vec<(f64, f64)>,
 }
 
 fn sweep_point_is_plot_usable(point: &CfdSweepPointResult) -> bool {

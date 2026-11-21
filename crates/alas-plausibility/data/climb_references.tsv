@@ -1,0 +1,5 @@
+# Published time-to-climb of a type: the climb-rate rule compares the model's time to the altitude at the
+# corresponding weight with it. Reference data, never a tuning target.
+# columns: aircraft <TAB> altitude_ft <TAB> mass_kg <TAB> minutes <TAB> sea_level_roc_ft_min <TAB> source
+ATR72-600	17000	22800	17.5	1355	ATR 72-600 factsheet 2020 p.2 (https://www.atr-aircraft.com/wp-content/uploads/2020/07/Factsheets_-_ATR_72-600.pdf): time to climb to FL170 17.5 min and rate of climb 1,355 ft/min, ISA, SL, MTOW (basic 22,800 kg), optimum climb speed 170 KCAS
+CLASS:turboprop	17000	22800	17.5	1355	Single cited turboprop datum (ATR 72-600 factsheet 2020 p.2, as above) used as the class mean rate for turboprops without a row of their own; a multi-type cited band is still wanted (owner to accept the single datum or supply sources)

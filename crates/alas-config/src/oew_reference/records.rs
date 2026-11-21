@@ -174,20 +174,17 @@ pub(super) static RECORDS: &[OewReference] = &[
             cabin: "product cabin 42 business / 260 economy (302 seats)",
         },
         differences_from_preset: &[],
-        // Rev Q prints no value, but it does print the definition, and the
-        // definition is readable on its own. Boeing D6-58333 Rev Q section 2.1
-        // states the operating empty weight without unit load devices, and FAA
-        // AC 120-27F says the same of basic operating weight while AC 120-85B
-        // treats a ULD as tare tracked with the load. That one field is
-        // therefore Excluded rather than Unknown; every other field stays
-        // Unknown because Rev Q does not itemize them. This does not make the
-        // list complete and does not change `counts_toward_validation`, which
-        // stays false on a `SourceGap` record - it records, in the registry
-        // instead of in a handoff, the boundary the mass model computes on.
-        inclusion: OewInclusionList {
-            cargo_containers: InclusionStatus::Excluded,
-            ..unknown()
-        },
+        // Rev Q prints no value. Its section 2.1 definition (structure, systems
+        // and "certain standard items, personnel, equipment, and supplies")
+        // names no unit load device either way, and neither does FAA AC 120-27F
+        // Appendix A (A.3, basic operating weight), so cargo containers stay
+        // Unknown with every other field. Where an itemized source does say,
+        // the answer differs by document: the 747-400F spec OEW carries a
+        // standard pallet set (Aircraft Commerce Issue 51, pp. 4-6). The mass
+        // model's boundary (tare outside OEW, tracked with the built-up load as
+        // in FAA AC 120-85B 2.4.7.3 and 2.6.2.5) is the product's convention.
+        // `counts_toward_validation` stays false on a `SourceGap` record.
+        inclusion: unknown(),
         source: None,
         uncertainty_kg: None,
         case_anchor: Some(OewCaseAnchor {
@@ -395,7 +392,7 @@ pub(super) static RECORDS: &[OewReference] = &[
             model: "DC-10-30 passenger",
             weight_variant: "572,000 lb MTOGW option (259,454 kg); landing weight 421,000 lb (190,962 kg); MZFW 368,000 lb (166,922 kg)",
             mtow_kg: Some(259_454.0),
-            engine: "CF6-50C",
+            engine: "CF6-50C1 (the ACAP pairs the 572,000 lb option with the CF6-50C1)",
             modification_state: "ACAP Revision A planning standard (2004)",
             cabin: "ACAP standard seating 255 (class split not published)",
         },

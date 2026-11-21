@@ -2,7 +2,7 @@
  "schema": 1,
  "preset": "A400M",
  "body": "fuselage",
- "reference_length_m": 39.8,
+ "reference_length_m": 39.09,
  "degree": 5,
  "frame": "x aft of nose tip, y right, z up, metres; z datum identical to the preset fuselage frame (cabin_z_m etc.)",
  "curves": {
@@ -14,23 +14,16 @@
     0.0,
     0.0,
     0.0,
-    0.08542713567839197,
-    0.17085427135678394,
-    0.17085427135678394,
-    0.17085427135678394,
-    0.6658291457286433,
-    0.6658291457286433,
-    0.6658291457286433,
-    0.7663316582914573,
-    0.8040201005025126,
-    0.8417085427135679,
-    0.8793969849246231,
-    0.9170854271356784,
-    0.9422110552763819,
-    0.9623115577889447,
-    0.9773869346733669,
-    0.9874371859296482,
-    0.9937185929648241,
+    0.030698388334612428,
+    0.08186236889229982,
+    0.17907393195190585,
+    0.17907393195190585,
+    0.17907393195190585,
+    0.7162957278076234,
+    0.7162957278076234,
+    0.7162957278076234,
+    0.8186236889229981,
+    0.9209516500383729,
     1.0,
     1.0,
     1.0,
@@ -39,29 +32,22 @@
     1.0
    ],
    "coeffs": [
-    2.1845635792256115e-14,
-    0.13599999999995926,
-    4.087540181903004,
-    3.3928186384988357,
-    7.840000000000015,
-    7.839999999999979,
-    7.840000000000057,
-    7.839999999999982,
-    7.840000000000026,
-    7.839999999999997,
-    7.593591025109452,
-    6.7271005306826765,
-    5.073318129128203,
-    3.8307437370289237,
-    2.5579136533916516,
-    1.716808652951934,
-    1.0916284784715193,
-    0.4716416144550963,
-    0.18774921073744463,
-    0.07573464840176125,
-    0.03408654272161217,
-    0.01843271719305037,
-    0.012441362546153717
+    0.0,
+    0.05601490413411118,
+    0.35443602368792704,
+    3.028438214569346,
+    4.138824819164354,
+    7.843818482994298,
+    7.839999999999999,
+    7.839999999999999,
+    7.839999999999999,
+    7.839999999999999,
+    7.819312693544051,
+    4.768191264511053,
+    4.476165666911386,
+    1.7866491295345965,
+    0.7179007748362584,
+    0.2746432118240932
    ]
   },
   "E": {
@@ -72,23 +58,21 @@
     0.0,
     0.0,
     0.0,
-    0.17587939698492464,
-    0.17587939698492464,
-    0.17587939698492464,
-    0.5527638190954774,
-    0.5527638190954774,
-    0.5527638190954774,
-    0.642211055276382,
-    0.7663316582914573,
-    0.8040201005025126,
-    0.8417085427135679,
-    0.8793969849246231,
-    0.9170854271356784,
-    0.9422110552763819,
-    0.9623115577889447,
-    0.9773869346733669,
-    0.9874371859296482,
-    0.9937185929648241,
+    0.030698388334612428,
+    0.08186236889229982,
+    0.16850412758519798,
+    0.16850412758519798,
+    0.16850412758519798,
+    0.5730365822460987,
+    0.5730365822460987,
+    0.5730365822460987,
+    0.5986185725249423,
+    0.624200562803786,
+    0.6497825530826298,
+    0.6753645433614734,
+    0.7162957278076234,
+    0.7930416986441544,
+    0.8953696597595292,
     1.0,
     1.0,
     1.0,
@@ -97,29 +81,27 @@
     1.0
    ],
    "coeffs": [
-    1.5924338122492491e-15,
-    0.27999999999999536,
-    4.623958114241454,
-    6.9256597406621925,
-    6.9256597406621605,
-    6.925659740662115,
-    6.925659740662193,
-    6.9256597406621605,
-    6.925659740662177,
-    5.366917198895715,
-    3.493121243191837,
-    1.971682970106686,
-    1.092689255019303,
-    0.6708453681608753,
-    0.3590768669851956,
-    0.1796913434785247,
-    0.07464089496851227,
-    0.0202760212401787,
-    0.004426373955531097,
-    0.001492601660920443,
-    0.0008329709494759741,
-    0.0006519290691930652,
-    0.0005999871164114358
+    0.0,
+    0.30433417090951626,
+    1.0437761108404429,
+    3.4436233915674297,
+    5.506032323661269,
+    6.555771916015588,
+    6.5536,
+    6.5536,
+    6.5536,
+    6.5536,
+    6.558981417316541,
+    6.36110719549478,
+    6.182687275965615,
+    5.450481842192999,
+    4.608713490142771,
+    3.5372001822987325,
+    2.2446959400115705,
+    1.2506724903883322,
+    0.6079881809111545,
+    0.29242267132806593,
+    0.18035081514024973
    ]
   },
   "zc": {
@@ -130,23 +112,21 @@
     0.0,
     0.0,
     0.0,
-    0.17587939698492464,
-    0.17587939698492464,
-    0.17587939698492464,
-    0.5527638190954774,
-    0.5527638190954774,
-    0.5527638190954774,
-    0.642211055276382,
-    0.7663316582914573,
-    0.8040201005025126,
-    0.8417085427135679,
-    0.8793969849246231,
-    0.9170854271356784,
-    0.9422110552763819,
-    0.9623115577889447,
-    0.9773869346733669,
-    0.9874371859296482,
-    0.9937185929648241,
+    0.030698388334612428,
+    0.08186236889229982,
+    0.16850412758519798,
+    0.16850412758519798,
+    0.16850412758519798,
+    0.5730365822460987,
+    0.5730365822460987,
+    0.5730365822460987,
+    0.5986185725249423,
+    0.624200562803786,
+    0.6497825530826298,
+    0.6753645433614734,
+    0.7162957278076234,
+    0.7930416986441544,
+    0.8953696597595292,
     1.0,
     1.0,
     1.0,
@@ -155,29 +135,27 @@
     1.0
    ],
    "coeffs": [
-    -0.37000000000002503,
-    -0.32034763699416846,
-    0.2314774636988308,
-    0.1683351769910476,
-    0.16833517699127157,
-    0.16833517699106898,
-    0.1683351769912072,
-    0.16833517699113695,
-    0.16833517699115125,
-    0.5052024685986958,
-    0.9205343214537948,
-    1.3561215651991623,
-    1.7242977638299324,
-    1.9640005689404814,
-    2.2026410081364474,
-    2.377811478919993,
-    2.528254699189488,
-    2.6381436347334937,
-    2.7202103642011384,
-    2.7680832873363883,
-    2.7944516891941067,
-    2.808423029686097,
-    2.815246447281883
+    -0.268128702969673,
+    -0.18651108951821324,
+    -0.2340574692593049,
+    0.20471989018618417,
+    0.3560934724126589,
+    0.23935795796394418,
+    0.23999999999999977,
+    0.23999999999999977,
+    0.23999999999999977,
+    0.23999999999999977,
+    0.23897909727707847,
+    0.2790583314024204,
+    0.3343527368080382,
+    0.5452179468671363,
+    0.8561336269615645,
+    1.2831444465508353,
+    1.8132754678162204,
+    2.2675434087005915,
+    2.6467318837631817,
+    2.9052211126224075,
+    3.038361338902561
    ]
   },
   "n": {
@@ -231,14 +209,14 @@
  },
  "front": {
   "kind": "point",
-  "tip_radius_m": 0.1
+  "tip_radius_m": 0.37536361983711186
  },
  "rear": {
   "kind": "base"
  },
  "cabin": {
   "x_start_m": 8.0,
-  "x_end_m": 29.099999999999998
+  "x_end_m": 29.1
  },
  "fairness": {
   "inflections": {
@@ -249,10 +227,10 @@
   "tv_ratio_max": 1.5
  },
  "fit": {
-  "rms_m": 0.04369278111415858,
-  "max_m": 0.25758442861796677,
-  "lambda": 1.0,
-  "tool_version": "loft_fit 0.1 + fairfit 1 (quality pass 2026-10-11) + tail_refit 1 (aft-only, 2026-10-12)"
+  "rms_m": 0.0357,
+  "max_m": 0.1472,
+  "lambda": 0.0,
+  "tool_version": "geometry refit 2026-11-05: weighted least-squares quintic B-spline with plateau snap; rms_m and max_m are over the drawn samples (hidden intervals interpolated)"
  },
  "provenance": [
   {
@@ -263,15 +241,15 @@
     "title": "Airbus A400M brochure 2025 (CGI renders, not dimensioned drawings)",
     "page": "p.25",
     "sha256": "e3509c5b4db418dae76ce48c9b23e84e75b838ecf92ed9d0ed47a8b772b903ae",
-    "path": "<fit-workdir>/A400M_brochure.pdf"
+    "path": "A400M_brochure.pdf"
    },
    "view": "top",
-   "px_per_m": 39.39688532820148,
-   "n_samples": 858,
-   "rms_m": 0.04211436098443654,
-   "max_m": 0.19680424067620977,
+   "px_per_m": 19.78,
+   "n_samples": 402,
+   "rms_m": 0.011557031564882402,
+   "max_m": 0.033393918171501724,
    "confidence": "C",
-   "note": "plan half-width from the calibrated top silhouette (both halves averaged, centreline offset 0.013 m removed); wing/hstab/fairing intervals excluded (exclusions/A400M.json); plateau value = preset D/2, line-width correction +0.030 m/side | quality pass 2026-10-11: refit under the Rust sampled fairness metric (inflections where radius < 50 local half-sizes) with the accuracy gates kept | TAIL REFIT 2026-10-12: aft body (x >= 29.1 m) refitted with the forward coefficients frozen; keel from the calibrated side mask (drawn tail ends at x = 39.55 m, the old closure left a 0.25 m base at 39.8 m with the crown rising 7 cm above the datum crown)"
+   "note": "plan half-width from the brochure p025 plan view (both halves agree to one pixel); plateau 2.80 m = TCDS width / 2; wing fillet and sponson intervals and the part under the tailplane interpolated, tail end 0.55 m estimated"
   },
   {
    "group": "E",
@@ -281,15 +259,15 @@
     "title": "Airbus A400M brochure 2025 (CGI renders, not dimensioned drawings)",
     "page": "p.25",
     "sha256": "e3509c5b4db418dae76ce48c9b23e84e75b838ecf92ed9d0ed47a8b772b903ae",
-    "path": "<fit-workdir>/A400M_brochure.pdf"
+    "path": "A400M_brochure.pdf"
    },
    "view": "side",
-   "px_per_m": 40.08869179600887,
-   "n_samples": 1700,
-   "rms_m": 0.047625271933806966,
-   "max_m": 0.2575844286179705,
+   "px_per_m": 20.04,
+   "n_samples": 402,
+   "rms_m": 0.04293796521046996,
+   "max_m": 0.1471773824040592,
    "confidence": "C",
-   "note": "half-height from crown and keel of the side silhouette; fin/engine/gear/fairing intervals excluded; plateau = preset height_m/2 (H measured 5.263 m) | quality pass 2026-10-11: refit under the Rust sampled fairness metric (inflections where radius < 50 local half-sizes) with the accuracy gates kept | INTEGRATION STEP A 2026-10-11: hull basis (owner decision: the loft is the hull, sponsons/gear bays/wing-root fairing excluded and held at the cylinder); hull height 5.263 m = preset height_m 5.26 (was None -> 5.6 circular), crown datum 2.80 m unchanged (cabin_z_m 0.17); S(x) held non-increasing aft of 22 m so the section area has one maximum (the earlier r4 fit had a second 0.07 m rise at the tail base); sources: Airbus A400M brochure 2025 side render (class C), EASA TCDS A.169 width 5.600 m. | TAIL REFIT 2026-10-12: aft body (x >= 29.1 m) refitted with the forward coefficients frozen; keel from the calibrated side mask (drawn tail ends at x = 39.55 m, the old closure left a 0.25 m base at 39.8 m with the crown rising 7 cm above the datum crown)"
+   "note": "crown and keel from the brochure p025 side view on a per-axis scale: 20.04 px/m on x (45.09 m nose tip to HTP tip), 20.5 px/m on z (14.7 m overall height); hull height 5.12 m (105 rows); crown datum 2.80 m; fin, wing hump, sponson, nose gear and probe fairing intervals interpolated; the fuselage ends at the printed 39.09 m (Jane's 2008-09 p.298), the drawn end reads 39.27 m"
   },
   {
    "group": "zc",
@@ -299,15 +277,15 @@
     "title": "Airbus A400M brochure 2025 (CGI renders, not dimensioned drawings)",
     "page": "p.25",
     "sha256": "e3509c5b4db418dae76ce48c9b23e84e75b838ecf92ed9d0ed47a8b772b903ae",
-    "path": "<fit-workdir>/A400M_brochure.pdf"
+    "path": "A400M_brochure.pdf"
    },
    "view": "side",
-   "px_per_m": 40.08869179600887,
-   "n_samples": 1700,
-   "rms_m": 0.047625271933806966,
-   "max_m": 0.2575844286179705,
+   "px_per_m": 20.04,
+   "n_samples": 402,
+   "rms_m": 0.04293796521046996,
+   "max_m": 0.1471773824040592,
    "confidence": "C",
-   "note": "centreline height; z datum: crown of the drawing = cabin_z + H/2 of the preset; nose tip z from the drawing -0.370 m (preset nose_z_m 0.0) | quality pass 2026-10-11: refit under the Rust sampled fairness metric (inflections where radius < 50 local half-sizes) with the accuracy gates kept | TAIL REFIT 2026-10-12: aft body (x >= 29.1 m) refitted with the forward coefficients frozen; keel from the calibrated side mask (drawn tail ends at x = 39.55 m, the old closure left a 0.25 m base at 39.8 m with the crown rising 7 cm above the datum crown)"
+   "note": "crown and keel from the brochure p025 side view on a per-axis scale: 20.04 px/m on x (45.09 m nose tip to HTP tip), 20.5 px/m on z (14.7 m overall height); hull height 5.12 m (105 rows); crown datum 2.80 m; fin, wing hump, sponson, nose gear and probe fairing intervals interpolated; the fuselage ends at the printed 39.09 m (Jane's 2008-09 p.298), the drawn end reads 39.27 m"
   },
   {
    "group": "n",
@@ -317,7 +295,7 @@
     "title": "Airbus A400M brochure 2025 (CGI renders, not dimensioned drawings)",
     "page": "p.25",
     "sha256": "e3509c5b4db418dae76ce48c9b23e84e75b838ecf92ed9d0ed47a8b772b903ae",
-    "path": "<fit-workdir>/A400M_brochure.pdf"
+    "path": "A400M_brochure.pdf"
    },
    "view": "front",
    "px_per_m": 40.08869179600887,
@@ -335,7 +313,7 @@
     "title": "Airbus A400M brochure 2025 (CGI renders, not dimensioned drawings)",
     "page": "p.25",
     "sha256": "e3509c5b4db418dae76ce48c9b23e84e75b838ecf92ed9d0ed47a8b772b903ae",
-    "path": "<fit-workdir>/A400M_brochure.pdf"
+    "path": "A400M_brochure.pdf"
    },
    "view": "side",
    "px_per_m": 40.08869179600887,
@@ -353,7 +331,7 @@
     "title": "Airbus A400M brochure 2025 (CGI renders, not dimensioned drawings)",
     "page": "p.25",
     "sha256": "e3509c5b4db418dae76ce48c9b23e84e75b838ecf92ed9d0ed47a8b772b903ae",
-    "path": "<fit-workdir>/A400M_brochure.pdf"
+    "path": "A400M_brochure.pdf"
    },
    "view": "side",
    "px_per_m": 40.08869179600887,
@@ -361,7 +339,7 @@
    "rms_m": 0.0,
    "max_m": 0.0,
    "confidence": "C",
-   "note": "front: point nose, tip radius 0.10 m (scan 0.10-0.30 m, minimum-knot/minimum-RMS choice, resolution-limited); rear: finite base A=0.002 m2 (a=0.048 m), E=0.000 m2 (e=0.020 m)"
+   "note": "front: point nose at the drawn tip z; rear: blunt base 0.55 m half-width, 0.29 m half-height, read at the drawn tail end (side view; plan width hidden by the tailplane, estimated)"
   },
   {
    "group": "cabin",
@@ -371,7 +349,7 @@
     "title": "Airbus A400M brochure 2025 (CGI renders, not dimensioned drawings)",
     "page": "p.25",
     "sha256": "e3509c5b4db418dae76ce48c9b23e84e75b838ecf92ed9d0ed47a8b772b903ae",
-    "path": "<fit-workdir>/A400M_brochure.pdf"
+    "path": "A400M_brochure.pdf"
    },
    "view": "side",
    "px_per_m": 40.08869179600887,
@@ -379,7 +357,7 @@
    "rms_m": 0.0,
    "max_m": 0.0,
    "confidence": "C",
-   "note": "cabin_start_x_m / tailcone_length_m of the preset (payload semantics, unchanged); the flat plateau of the loft is fitted from the drawing and is NOT the payload cabin interval"
+   "note": "cabin_start_x_m / tailcone_length_m of the preset (payload semantics); the flat plateau of the loft is fitted from the drawing and is NOT the payload cabin interval"
   }
  ]
 }

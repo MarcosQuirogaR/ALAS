@@ -7849,7 +7849,7 @@
               },
               {
                 "advanced": false,
-                "help": "Below this Mach number, transonic wave drag is assumed zero (not yet computed).",
+                "help": "Below this Mach number, transonic wave drag is assumed zero.",
                 "kind": "float",
                 "label": "Wave-drag onset Mach",
                 "name": "wave_drag_onset_mach",
@@ -11681,7 +11681,7 @@
           },
           {
             "advanced": false,
-            "help": "Below this Mach number, transonic wave drag is assumed zero (not yet computed).",
+            "help": "Below this Mach number, transonic wave drag is assumed zero.",
             "kind": "float",
             "label": "Wave-drag onset Mach",
             "name": "wave_drag_onset_mach",

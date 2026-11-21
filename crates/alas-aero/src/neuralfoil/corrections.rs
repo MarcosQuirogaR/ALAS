@@ -151,7 +151,16 @@ pub(super) fn apply(
     // critical-Mach fit's `(-Cpmin_0)**0.67` on the wrong side of zero.
     cpmin_0 = soft::softmin(&[cpmin_0, 0.0], 0.001);
     let mach_crit = critical_mach(cpmin_0);
-    // W. H. Mason's form of the Korn equation.
+    // W. H. Mason's form of the Korn equation: Lock's rise
+    // `CD = C (M - M_crit)^4` meets `dCD/dM = 0.1` at
+    // `M_dd - M_crit = (0.1 / (4 C))^(1/3)`. Upstream's section constant is
+    // `C = 80` (`4 C = 320`), offset 0.0679; it is kept because this function
+    // is compared value-for-value with the upstream section model. The WING
+    // law (`analysis::wave`, `AeroAnalysis::divergence_law`) takes the
+    // configured `drag.wave_drag_coefficient` instead (`C = 20` by default,
+    // offset 0.1077). The two offsets belong to different scopes: this one to
+    // a two-dimensional section result, that one to the aircraft polar; a
+    // critical Mach from one must not be read against the other.
     let mach_dd = mach_crit + (0.1_f64 / 320.0).powf(1.0 / 3.0);
 
     let beta_squared_ideal = 1.0 - mach * mach;

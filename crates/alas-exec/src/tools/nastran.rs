@@ -53,6 +53,28 @@ fn msc_install_root(path: &Path) -> Option<PathBuf> {
     })
 }
 
+/// `path.is_dir()` for an entry of a directory listing, without opening the
+/// entry: the listing already carries its type. Links (symbolic links and
+/// junctions) are followed, as `is_dir` follows them. An MSC installation
+/// holds some 15,000 entries, and opening each one made the two walks below
+/// cost several seconds per resolved environment.
+fn listed_dir(entry: &fs::DirEntry, path: &Path) -> bool {
+    match entry.file_type() {
+        Ok(kind) if !kind.is_symlink() => kind.is_dir(),
+        _ => path.is_dir(),
+    }
+}
+
+/// Whether a component of `path` is `wanted`, ignoring ASCII case.
+fn has_component(path: &Path, wanted: &str) -> bool {
+    path.components().any(|component| {
+        component
+            .as_os_str()
+            .to_string_lossy()
+            .eq_ignore_ascii_case(wanted)
+    })
+}
+
 fn find_servermode_solver(root: &Path) -> Option<PathBuf> {
     let mut pending = vec![root.to_path_buf()];
     while let Some(directory) = pending.pop() {
@@ -61,7 +83,7 @@ fn find_servermode_solver(root: &Path) -> Option<PathBuf> {
         };
         for entry in entries.filter_map(Result::ok) {
             let path = entry.path();
-            if path.is_dir() {
+            if listed_dir(&entry, &path) {
                 pending.push(path);
                 continue;
             }
@@ -69,13 +91,7 @@ fn find_servermode_solver(root: &Path) -> Option<PathBuf> {
                 .file_name()
                 .and_then(|name| name.to_str())
                 .is_some_and(|name| name.eq_ignore_ascii_case("analysis.exe"));
-            let in_servermode = path.components().any(|component| {
-                component
-                    .as_os_str()
-                    .to_string_lossy()
-                    .eq_ignore_ascii_case("servermode")
-            });
-            if is_analysis && in_servermode {
+            if is_analysis && has_component(&path, "servermode") {
                 return Some(path);
             }
         }
@@ -91,7 +107,7 @@ pub(super) fn find_embedded_nastran(root: &Path) -> Option<PathBuf> {
         };
         for entry in entries.filter_map(Result::ok) {
             let path = entry.path();
-            if path.is_dir() {
+            if listed_dir(&entry, &path) {
                 pending.push(path);
                 continue;
             }
@@ -99,25 +115,13 @@ pub(super) fn find_embedded_nastran(root: &Path) -> Option<PathBuf> {
                 .file_name()
                 .and_then(|name| name.to_str())
                 .is_some_and(|name| name.eq_ignore_ascii_case("nastran.exe"));
-            let is_versioned_solver = path.components().any(|component| {
-                component
-                    .as_os_str()
-                    .to_string_lossy()
-                    .eq_ignore_ascii_case("win64i8")
-            });
-            let is_nastran_tree = path.components().any(|component| {
-                component
-                    .as_os_str()
-                    .to_string_lossy()
-                    .eq_ignore_ascii_case("Nastran")
-            });
-            let is_visible_bin = path.components().any(|component| {
-                component
-                    .as_os_str()
-                    .to_string_lossy()
-                    .eq_ignore_ascii_case("bin")
-            });
-            if is_launcher && is_versioned_solver && is_nastran_tree && !is_visible_bin {
+            // A launcher of the versioned solver tree, not the visible
+            // `Nastran/bin` one.
+            if is_launcher
+                && has_component(&path, "win64i8")
+                && has_component(&path, "Nastran")
+                && !has_component(&path, "bin")
+            {
                 return Some(path);
             }
         }

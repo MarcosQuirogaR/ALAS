@@ -165,7 +165,6 @@ pub(super) fn static_loads(
         let gravity_sid = GRAVITY_SID_BASE + sid;
         let force_sid = FORCE_SID_BASE + sid;
         let gravity_magnitude = case.load_factor.abs() * req.gravity_m_s2;
-        let lift_sign = if case.total_force_n >= 0.0 { 1.0 } else { -1.0 };
         let gravity_sign: f64 = if case.load_factor >= 0.0 { -1.0 } else { 1.0 };
 
         card(
@@ -194,9 +193,14 @@ pub(super) fn static_loads(
                 Field::Real(gravity_sign),
             ],
         );
-        for (nid, force) in
-            elliptic_forces_by_y_trapezoid(&nid_y, case.total_force_n.abs(), semi_span)
-        {
+        for (nid, force) in crate::nastran::product_lift_forces(
+            deck,
+            node_index,
+            &nid_y,
+            case.total_force_n,
+            loads::level_semi_wing_lift_n(req),
+            semi_span,
+        ) {
             card(
                 out,
                 tags,
@@ -205,7 +209,7 @@ pub(super) fn static_loads(
                     Field::Int(force_sid),
                     Field::Int(nid),
                     Field::Int(0),
-                    Field::Real(force.abs() * lift_sign * units.force()),
+                    Field::Real(force * units.force()),
                     Field::Real(0.0),
                     Field::Real(0.0),
                     Field::Real(1.0),

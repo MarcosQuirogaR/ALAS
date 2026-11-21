@@ -14,13 +14,15 @@ name: Workspace gate
 # the push gate on main. Other branches are gated through their pull request.
 #
 # Branch protection (settings are NOT changed by this file): require
-#   "Quick gate (pull request)", "Dependency licenses, advisories and sources"
-#   and "Conventional Commits title" (pr-title.yml) on main.
+#   "Quick gate (pull request)" and "Dependency licenses, advisories and sources"
+#   on main.
 # "Quick gate (pull request)" is the aggregate job below, so the check name is
 # stable however many jobs the quick gate is split into. It is skipped, which
 # GitHub counts as passing, outside pull requests, and it passes without
 # running anything when a change touches only documentation or the site (see
-# the `changes` job). That classification is a job rather than a workflow-level
+# the `changes` job), except the `hygiene` job, which always runs and is
+# required by the aggregate (a documentation-only change is where a stray
+# reference would land). That classification is a job rather than a workflow-level
 # `paths-ignore` because a path-filtered workflow leaves a required check
 # pending forever.
 
@@ -97,7 +99,6 @@ jobs:
               .github/PULL_REQUEST_TEMPLATE.md) ;;
               .github/dependabot.yml) ;;
               .github/workflows/site-*.yml) ;;
-              .github/workflows/pr-title.yml) ;;
               CITATION.cff|LICENSE|NOTICE) ;;
               docs/*.md) ;;
               */*) code=true ;;
@@ -107,6 +108,62 @@ jobs:
           done < <(git diff --name-only "$range")
           echo "code=$code" >> "$GITHUB_OUTPUT"
           echo "changed files require the gate: $code"
+
+  # Publication hygiene is not classified by `changes`: a documentation-only
+  # change is exactly where a stray AI reference would land. It builds only the
+  # small xtask crate and runs on pull requests and on pushes to main.
+  hygiene:
+    name: Publication hygiene
+    if: github.event_name == 'pull_request' || github.event_name == 'push'
+    runs-on: ubuntu-latest
+    timeout-minutes: 15
+    env:
+      RUSTC_WRAPPER: ""
+    steps:
+      - name: Check out source
+        uses: actions/checkout@v4
+        with:
+          fetch-depth: 0
+      - name: Install the repository Rust toolchain
+        uses: dtolnay/rust-toolchain@1.97.1
+      # A pull request into main, a push to main or a tag is a public ref and
+      # is checked as one; any other branch is a private work branch, which
+      # may track its working documents (the flag is explicit, never implied).
+      - name: Tracked files (no internal documents or AI-assistant references)
+        shell: bash
+        env:
+          BASE_REF: ${{ github.base_ref }}
+          HEAD_REF: ${{ github.ref }}
+        run: |
+          if [ "$BASE_REF" = "main" ] || [ "$HEAD_REF" = "refs/heads/main" ] || [[ "$HEAD_REF" == refs/tags/* ]]; then
+            cargo xtask hygiene
+          else
+            cargo xtask hygiene --private-branch
+          fi
+      # Commit messages and identities and the pull-request text are scanned
+      # for the range that is published: pull requests into main, and the
+      # commits a push adds to main. Private integration branches keep history
+      # written before the no-attribution rule and are not scanned.
+      - name: Commits and pull-request text published to main
+        if: github.event_name == 'push' || github.base_ref == 'main'
+        shell: bash
+        env:
+          EVENT: ${{ github.event_name }}
+          BASE_REF: ${{ github.base_ref }}
+          BEFORE: ${{ github.event.before }}
+          PR_BODY: ${{ github.event.pull_request.body }}
+          PR_TITLE: ${{ github.event.pull_request.title }}
+        run: |
+          set -euo pipefail
+          if [ "$EVENT" = "pull_request" ]; then
+            { echo "$PR_TITLE"; echo "$PR_BODY"; } > "$RUNNER_TEMP/pr-text.txt"
+            cargo xtask hygiene --range "origin/${BASE_REF}..HEAD" --text "$RUNNER_TEMP/pr-text.txt"
+          elif [ -n "$BEFORE" ] && [ "$BEFORE" != "0000000000000000000000000000000000000000" ] \
+               && git cat-file -e "$BEFORE^{commit}" 2>/dev/null; then
+            cargo xtask hygiene --range "$BEFORE..HEAD"
+          else
+            echo "no previous main commit: the tracked-file scan above is the check"
+          fi
 
   # The two halves of the quick gate share nothing but the source tree, so they
   # run as parallel jobs: clippy builds check artifacts, nextest builds test
@@ -187,7 +244,7 @@ jobs:
   # failed, cancelled or skipped half can never read as a pass.
   quick-gate:
     name: Quick gate (pull request)
-    needs: [changes, quick-lint, quick-tests]
+    needs: [changes, hygiene, quick-lint, quick-tests]
     if: always() && github.event_name == 'pull_request'
     runs-on: ubuntu-latest
     timeout-minutes: 5
@@ -197,12 +254,14 @@ jobs:
         env:
           CODE: ${{ needs.changes.outputs.code }}
           CHANGES: ${{ needs.changes.result }}
+          HYGIENE: ${{ needs.hygiene.result }}
           LINT: ${{ needs.quick-lint.result }}
           TESTS: ${{ needs.quick-tests.result }}
         run: |
           set -euo pipefail
-          echo "changes=$CHANGES code=$CODE lint=$LINT tests=$TESTS"
+          echo "changes=$CHANGES hygiene=$HYGIENE code=$CODE lint=$LINT tests=$TESTS"
           [ "$CHANGES" = "success" ] || { echo "classification did not succeed"; exit 1; }
+          [ "$HYGIENE" = "success" ] || { echo "publication hygiene did not succeed"; exit 1; }
           if [ "$CODE" != "true" ]; then
             echo "documentation or site only: the quick gate does not apply"; exit 0
           fi
@@ -240,12 +299,14 @@ jobs:
         uses: taiki-e/install-action@v2
         with:
           tool: cargo-nextest
+      # The same lint set as the pull request tier (-D warnings), so a Linux-only
+      # lint error on main or overnight fails here instead of at a release.
       - name: Build the lint artifacts
         if: matrix.part == 'lint'
-        run: cargo clippy --workspace --all-targets
+        run: cargo clippy --locked --workspace --all-targets -- -D warnings
       - name: Build the test binaries
         if: matrix.part == 'tests'
-        run: cargo nextest run --workspace --profile default --no-run
+        run: cargo nextest run --locked --workspace --profile default --no-run
       - name: Cache statistics
         if: always()
         run: sccache --show-stats
@@ -312,9 +373,35 @@ jobs:
           tool: cargo-nextest
       - name: Execute the nightly tier
         run: cargo xtask gate --nightly
+      # The reference and parity tools under tools/ carry their own Node tests.
+      - name: Tool tests (node)
+        shell: bash
+        run: node --test tools/*.test.cjs
       - name: Cache statistics
         if: always()
         run: sccache --show-stats
+
+  # Run-time budget: the test tiers are generated from measured test times, so
+  # a slower analysis moves its tests to a slower tier and never fails. This
+  # job times the benchmark workloads once each and fails when one exceeds its
+  # ceiling in crates/alas-acceptance/bench-budget.txt or fails outright.
+  bench-budget:
+    name: Benchmark run-time budget (ubuntu)
+    needs: changes
+    if: (github.event_name == 'schedule' || github.event_name == 'workflow_dispatch') && needs.changes.outputs.code == 'true'
+    runs-on: ubuntu-latest
+    timeout-minutes: 150
+    steps:
+      - name: Check out source
+        uses: actions/checkout@v4
+      - name: Install the repository Rust toolchain
+        uses: dtolnay/rust-toolchain@1.97.1
+      - name: Install Linux system dependencies
+        uses: ./.github/actions/linux-deps
+      - name: Cache the compiler output
+        uses: mozilla-actions/sccache-action@7d986dd989559c6ecdb630a3fd2557667be217ad # v0.0.9
+      - name: Time the workloads against their ceilings
+        run: cargo run --locked --profile harness -p alas-acceptance --bin alas-bench -- --quick --budget crates/alas-acceptance/bench-budget.txt
 
   dependencies:
     name: Dependency licenses, advisories and sources

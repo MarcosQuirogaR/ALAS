@@ -28,6 +28,7 @@ fn discovery_mode_enabled(mode: Option<&str>) -> bool {
 
 mod types;
 pub use types::*;
+mod discovery;
 mod locator;
 mod nastran;
 mod platform;

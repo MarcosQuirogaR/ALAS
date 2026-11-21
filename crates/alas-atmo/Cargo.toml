@@ -1,6 +1,6 @@
 [package]
 name = "alas-atmo"
-description = "Atmosphere models: native aerodynamic model's ISA and its differentiable fit, and mission analysis model's US Standard 1976."
+description = "The standard atmosphere (U.S. Standard Atmosphere, 1976) and airspeed conversions."
 version.workspace = true
 edition.workspace = true
 license.workspace = true
@@ -8,11 +8,6 @@ authors.workspace = true
 rust-version.workspace = true
 
 [dependencies]
-# native aerodynamic model's default atmosphere is a cubic B-spline fitted through the ISA,
-# not the closed form, so this crate needs the interpolating spline that
-# `alas-math` owns. `alas-math` depends on nothing in the workspace, so the edge
-# introduces no layering.
-alas-math = { path = "../alas-math" }
 alas-units = { path = "../alas-units" }
 # The checked-construction and airspeed error enums derive their `Display`
 # through it, as every other error type in the workspace does.

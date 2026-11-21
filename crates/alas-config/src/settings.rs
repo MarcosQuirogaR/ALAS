@@ -59,7 +59,8 @@ pub const WORKSPACE_ENVELOPE_KEY: &str = "alas_workspace";
 pub struct AlasConfig {
     /// The aircraft this configuration started from, if any.
     #[config(
-        help = "Name of the aircraft preset this configuration was started from, or blank for one built from the defaults. Selecting one replaces the geometry and requirements below, and applies that aircraft's own mass-model and high-lift calibration where it has them."
+        help = "Name of the aircraft preset this configuration started from, or blank for one built from defaults.",
+        long_help = "Name of the aircraft preset this configuration was started from, or blank for one built from the defaults. Selecting one replaces the geometry and requirements below, and applies that aircraft's own mass-model and high-lift calibration where it has them."
     )]
     pub preset: String,
 
@@ -72,6 +73,7 @@ pub struct AlasConfig {
 
     /// The shape the design vector is hung on.
     #[config(
+        advanced,
         nested,
         help = "The geometry scaffold: everything about the airframe's shape that the optimizer's design vector does not itself vary."
     )]
@@ -79,6 +81,7 @@ pub struct AlasConfig {
 
     /// What the search is looking for, and how hard it looks.
     #[config(
+        advanced,
         nested,
         help = "What the design search optimizes for and how it is run: the objective weights and the differential-evolution solver settings."
     )]
@@ -86,6 +89,7 @@ pub struct AlasConfig {
 
     /// How finely each discipline is resolved.
     #[config(
+        advanced,
         nested,
         help = "Analysis fidelity: which disciplines run, how finely each one is resolved, and how long they are allowed to take."
     )]
@@ -100,6 +104,7 @@ pub struct AlasConfig {
 
     /// The high-lift system and the field-performance rules.
     #[config(
+        advanced,
         nested,
         help = "Field-performance and high-lift assumptions: the maximum lift coefficients, the thrust lapse, and the certification speed schedule the takeoff and landing distances follow."
     )]
@@ -108,12 +113,14 @@ pub struct AlasConfig {
     /// How the empty weight is estimated.
     #[config(
         nested,
-        help = "Mass architecture and weight-and-balance inputs. Pure FLOPS transport is the product default and owns every production mass group; the legacy reference-compatible fractions remain available only through an explicit comparison path."
+        help = "Mass architecture and weight-and-balance inputs.",
+        long_help = "Mass architecture and weight-and-balance inputs. Pure FLOPS transport is the product default and owns every production mass group; the legacy reference-compatible fractions remain available only through an explicit comparison path."
     )]
     pub mass_model: MassModelConfig,
 
     /// The undercarriage.
     #[config(
+        advanced,
         nested,
         help = "Landing-gear sizing: strut and tire selection, and the geometry the tip-over and clearance checks are run against."
     )]
@@ -135,6 +142,7 @@ pub struct AlasConfig {
 
     /// The viscous airfoil solver.
     #[config(
+        advanced,
         nested,
         help = "MSES settings: the operating points the airfoil sections are analysed at, and the convergence limits the solver is run under."
     )]
@@ -142,6 +150,7 @@ pub struct AlasConfig {
 
     /// The moving surfaces.
     #[config(
+        advanced,
         nested,
         help = "Control-surface sizing: the chord and span fractions of the ailerons, elevator and rudder, and their deflection limits."
     )]
@@ -190,7 +199,8 @@ pub struct AlasConfig {
     /// Saved with the configuration rather than chosen per run, so reloading
     /// a file reproduces the same route without the user re-selecting it.
     #[config(
-        help = "Departure aerodrome, by display name. Saved with the configuration so a reloaded file flies the same route; the field-performance check is run against its elevation, runway length and hot-day temperature."
+        help = "Departure aerodrome, by display name.",
+        long_help = "Departure aerodrome, by display name. Saved with the configuration so a reloaded file flies the same route; the field-performance check is run against its elevation, runway length and hot-day temperature."
     )]
     pub departure_airport: String,
 
@@ -199,6 +209,32 @@ pub struct AlasConfig {
         help = "Arrival aerodrome, by display name. Together with the departure aerodrome this fixes the range the mission is flown over and the landing field length that has to be met."
     )]
     pub arrival_airport: String,
+
+    /// A stated take-off distance available that can only tighten the route's.
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    #[config(
+        advanced,
+        label = "Design take-off field length",
+        unit = "m",
+        min = 600.0,
+        max = 5000.0,
+        help = "Design take-off distance available for this case [m]. The requirement uses the shorter of this and the aerodrome's value, so it can only tighten it.",
+        long_help = "Design take-off distance available, stated for this case. The field requirement is the shorter of this value and the departure aerodrome's take-off distance available, so it can only make the requirement more demanding; a longer value is ignored and a notice says so. Leave unset to use the aerodrome's. The take-off constraint, the field-performance findings and the clean-sheet engine sizing all read the same effective value."
+    )]
+    pub toda_override_m: Option<f64>,
+
+    /// A stated landing distance available that can only tighten the route's.
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    #[config(
+        advanced,
+        label = "Design landing field length",
+        unit = "m",
+        min = 600.0,
+        max = 5000.0,
+        help = "Design landing distance available for this case [m]. The requirement uses the shorter of this and the arrival aerodrome's value, so it can only tighten it.",
+        long_help = "Design landing distance available, stated for this case. The landing field requirement is the shorter of this value and the arrival aerodrome's landing distance available, so it can only make the requirement more demanding; a longer value is ignored and a notice says so. Leave unset to use the aerodrome's. The landing field-length check and the landing wing-loading limit read the same effective value."
+    )]
+    pub lda_override_m: Option<f64>,
 }
 
 impl Default for AlasConfig {
@@ -226,11 +262,22 @@ impl Default for AlasConfig {
             // than a zero-length one.
             departure_airport: "London Heathrow (EGLL)".to_owned(),
             arrival_airport: "Dubai (OMDB)".to_owned(),
+            toda_override_m: None,
+            lda_override_m: None,
         }
     }
 }
 
 impl AlasConfig {
+    /// The drag model with the viscous margin settled for this aircraft's
+    /// propulsion class (see [`DragModelConfig::resolved_for`]); the model
+    /// every aerodynamic analysis of this configuration is built from.
+    #[must_use]
+    pub fn resolved_drag_model(&self) -> DragModelConfig {
+        self.drag_model
+            .resolved_for(self.geometry.engine.propulsion_technology)
+    }
+
     /// Build a configuration from what a saved file holds.
     ///
     /// `data` names a subset of the fields below, to any depth. A `preset` key
@@ -342,6 +389,10 @@ impl AlasConfig {
                     if let Some(structures) = crate::preset_structures::config_for(name) {
                         instance.structures = structures;
                     }
+                    // A registered aircraft's control-surface runs are aircraft data too.
+                    if let Some(surfaces) = crate::preset_control_surfaces::config_for(name) {
+                        instance.control_surfaces = surfaces;
+                    }
                     instance.departure_airport = operational.departure_airport.to_owned();
                     instance.arrival_airport = operational.arrival_airport.to_owned();
                     instance.mission.profile = operational.profile;
@@ -399,6 +450,26 @@ impl AlasConfig {
             });
 
         let mut loaded: Self = overlay(&instance, data)?;
+        // `AUTO` is a selector for a hold nobody has declared. On a registered
+        // preset whose source prints its lower-hold container, the file's
+        // `AUTO` names that container: left as a selector it replaces the
+        // declaration with a capacity ranking that can pick a unit the type
+        // never carried (a 1.19 m LD2, three abreast, in the 747-400F).
+        if let Some(uld) = data
+            .get("preset")
+            .and_then(serde_json::Value::as_str)
+            .and_then(crate::presets::declared_lower_uld)
+        {
+            if loaded
+                .cabin
+                .cargo
+                .lower_deck_uld
+                .trim()
+                .eq_ignore_ascii_case("auto")
+            {
+                loaded.cabin.cargo.lower_deck_uld = uld.to_owned();
+            }
+        }
         crate::cruise_speed::follow_requirement_mach(&mut loaded, &instance);
         loaded.drop_mismatched_clean_sheet_loft();
         // The overlay merges `data` onto the *serialized defaults*, so the
@@ -443,84 +514,6 @@ impl AlasConfig {
         notes.retired_keys = retired_keys;
         Ok((loaded, notes))
     }
-
-    /// The maximum landing mass to enforce for `candidate_mtow_kg`.
-    ///
-    /// In [`crate::optimizer::DesignMode::BaselineSandbox`], a valid declared
-    /// reference MLW (the registered preset's own certified limit) governs
-    /// as a fixed aircraft limit and does not scale with `candidate_mtow_kg`:
-    /// BaselineSandbox replays that certified airframe unchanged, so its
-    /// certified MLW does not move because a candidate MTOW does.
-    /// [`crate::optimizer::DesignMode::ReferenceAdaptation`] applies the same
-    /// declared value, but there it is a *reference-aircraft* limit rather
-    /// than a certification of the adapted design: that mode may move some
-    /// design variables inside configured windows, so the aircraft actually
-    /// being evaluated is no longer necessarily the certified article the MLW
-    /// was published for. Using the reference value there models "hold to the
-    /// envelope of the aircraft this design is adapted from," not "this
-    /// modified design is certified to that mass." In
-    /// [`crate::optimizer::DesignMode::CleanSheet`], where there is no
-    /// reference airframe to anchor to at all, the configured mass-model
-    /// fraction of `candidate_mtow_kg` is used for sizing instead. A preset
-    /// with no declared MLW, or no preset at all, falls back to the fraction
-    /// in every mode; nothing here invents a value the registry does not
-    /// carry.
-    ///
-    /// No configuration field currently lets an explicit TLAR override this
-    /// (see [`DesignRequirements`]); if one is added later it must be checked
-    /// ahead of the design-mode branch below, not folded into either fallback.
-    pub fn landing_mass_limit_kg(&self, candidate_mtow_kg: f64) -> f64 {
-        use crate::optimizer::DesignMode;
-
-        let fraction_limit_kg = candidate_mtow_kg * self.mass_model.mlw_fraction_mtow;
-        match self.optimizer.design_space.mode {
-            DesignMode::CleanSheet => fraction_limit_kg,
-            DesignMode::BaselineSandbox | DesignMode::ReferenceAdaptation => {
-                let declared_kg = self
-                    .declared_reference_mlw_kg()
-                    .unwrap_or(fraction_limit_kg);
-                crate::landing_mass_ratio::clip_to_takeoff_mass(declared_kg, candidate_mtow_kg)
-            }
-        }
-    }
-
-    /// The registered preset's own declared MLW, if it names one and it is a
-    /// finite positive mass.
-    fn declared_reference_mlw_kg(&self) -> Option<f64> {
-        let mlw_kg = crate::presets::get(&self.preset).ok()?.reference.mlw_kg?;
-        is_valid_declared_mass_kg(mlw_kg).then_some(mlw_kg)
-    }
-
-    /// This configuration's saved mass model, with `mlw_fraction_mtow`
-    /// replaced by the ratio that reproduces [`Self::landing_mass_limit_kg`]
-    /// for `candidate_mtow_kg`.
-    ///
-    /// Mass APIs below `AlasConfig` (e.g.
-    /// `run_mass_analysis_with_model_checked_product_with_gear`) take a
-    /// [`MassModelConfig`] and read a landing-mass fraction straight out of
-    /// it; they have no `DesignMode`/preset identity to resolve a reference
-    /// MLW themselves. `mlw_fraction_mtow` is this method's only way to carry
-    /// [`Self::landing_mass_limit_kg`]'s mode-aware result through that
-    /// existing slot; it is not a new scalable design fraction. In
-    /// BaselineSandbox/ReferenceAdaptation it is a fixed reference MLW
-    /// divided by whatever `candidate_mtow_kg` is, so it changes if
-    /// `candidate_mtow_kg` does and must be recomputed per call rather than
-    /// cached. Every other field, and the caller's own saved configuration,
-    /// is returned unchanged.
-    ///
-    /// For a non-finite or non-positive `candidate_mtow_kg` the configured
-    /// fraction is left as-is: no ratio can be formed from it, and inventing
-    /// one would manufacture a finite result for an input the caller's own
-    /// design-requirements validation should already have rejected before it
-    /// reaches a mass call.
-    pub fn analysis_mass_model(&self, candidate_mtow_kg: f64) -> MassModelConfig {
-        let mut model = self.mass_model.clone();
-        if is_valid_declared_mass_kg(candidate_mtow_kg) {
-            model.mlw_fraction_mtow =
-                self.landing_mass_limit_kg(candidate_mtow_kg) / candidate_mtow_kg;
-        }
-        model
-    }
 }
 
 /// Whether a declared reference mass (MLW, MTOW, ...) is usable as a fixed
@@ -529,26 +522,20 @@ fn is_valid_declared_mass_kg(mass_kg: f64) -> bool {
     mass_kg.is_finite() && mass_kg > 0.0
 }
 
-/// A registered aircraft's own certified landing-to-takeoff mass ratio.
-///
-/// `None` when either mass is absent or the pair is not physical (a landing
-/// mass above the takeoff mass is a registry error, not a design choice), in
-/// which case the generic [`MassModelConfig`] fraction stays in force. A
-/// notional preset such as AVE has no certified pair and keeps it by
-/// construction.
-fn declared_landing_mass_ratio(preset: &crate::AircraftPreset) -> Option<f64> {
-    let mlw_kg = preset.reference.mlw_kg?;
-    let mtow_kg = preset.reference.mtow_kg?;
-    if !is_valid_declared_mass_kg(mlw_kg) || !is_valid_declared_mass_kg(mtow_kg) {
-        return None;
-    }
-    let ratio = mlw_kg / mtow_kg;
-    (ratio > 0.0 && ratio <= 1.0).then_some(ratio)
-}
-
+#[path = "settings_declared_mass.rs"]
+mod declared_mass;
+#[path = "settings_landing_field.rs"]
+mod landing_field;
+#[path = "settings_landing_mass.rs"]
+mod landing_mass;
+use declared_mass::declared_landing_mass_ratio;
 #[path = "settings_load_notes.rs"]
 mod load_notes;
+#[path = "settings_takeoff.rs"]
+mod takeoff;
+pub use landing_field::LANDING_FIELD_RANGE_M;
 pub use load_notes::{legacy_mission_disabled, legacy_solver_method, ConfigLoadNotes};
+pub use takeoff::TAKEOFF_FIELD_RANGE_M;
 
 // A test asserts on values it constructed here directly, so a failed unwrap
 // or expect is the assertion failing, not a library invariant being broken.
@@ -1104,8 +1091,8 @@ mod tests {
             .map(|field| field.name)
             .collect();
         assert_eq!(names.first(), Some(&"preset"));
-        assert_eq!(names.last(), Some(&"arrival_airport"));
-        assert_eq!(names.len(), 20);
+        assert_eq!(names.last(), Some(&"lda_override_m"));
+        assert_eq!(names.len(), 22);
         assert!(names.contains(&"fuel_policy"));
         assert!(names.contains(&"fuel_tanks"));
     }
@@ -1134,6 +1121,31 @@ mod tests {
         assert_eq!(ave.structures, StructuresConfig::default());
     }
 
+    #[test]
+    fn auto_lower_deck_uld_resolves_to_the_declared_container_of_a_preset() {
+        let auto = |preset: &str| {
+            AlasConfig::from_value(&json!({
+                "preset": preset,
+                "cabin": {"cargo": {"lower_deck_uld": "AUTO"}}
+            }))
+            .unwrap()
+            .cabin
+            .cargo
+            .lower_deck_uld
+        };
+        // The 747-400 (and its freighter, one registered body) declares LD1.
+        assert_eq!(auto("B747-400"), "LD1");
+        assert_eq!(auto("DC-10"), "LD3");
+        // Nothing declared: AUTO stays the selector.
+        assert_eq!(auto("A320-200"), "AUTO");
+        // An explicit container is never replaced.
+        let explicit = AlasConfig::from_value(&json!({
+            "preset": "B747-400",
+            "cabin": {"cargo": {"lower_deck_uld": "LD3"}}
+        }))
+        .unwrap();
+        assert_eq!(explicit.cabin.cargo.lower_deck_uld, "LD3");
+    }
     #[test]
     fn explicit_structures_overlay_overrides_preset_structures() {
         let custom = AlasConfig::from_value(&json!({

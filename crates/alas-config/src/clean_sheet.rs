@@ -42,11 +42,13 @@
 
 mod fleet;
 mod geometry;
+mod jet_class;
+mod oei_thrust;
 mod planform;
 #[cfg(test)]
 mod tests;
 mod turboprop_class;
-mod turboprop_mission;
+pub(crate) mod turboprop_mission;
 
 use std::sync::OnceLock;
 
@@ -143,7 +145,7 @@ pub(crate) fn cruise_dynamic_pressure_pa(mach: f64, altitude_m: f64) -> Option<f
     if !(mach.is_finite() && mach > 0.0) {
         return None;
     }
-    let pressure_pa = alas_atmo::Atmosphere::try_isa(altitude_m).ok()?.pressure();
+    let pressure_pa = alas_atmo::Atmosphere::try_new(altitude_m).ok()?.pressure();
     let q = 0.5 * HEAT_CAPACITY_RATIO * pressure_pa * mach * mach;
     (q.is_finite() && q > 0.0).then_some(q)
 }
@@ -302,8 +304,9 @@ impl AlasConfig {
         // narrow-body CleanSheet fuselage to 65 m (finding F44).
         let f = &self.geometry.fuselage;
         let shortest_m = f.cabin_start_x_m + f.tailcone_length_m + f.diameter_m;
-        if shortest_m.is_finite() && shortest_m < spec.preset_upper {
-            return (shortest_m.max(spec.preset_lower), spec.preset_upper);
+        let (guard_lower, guard_upper) = spec.guardrails_for(self.aircraft_class());
+        if shortest_m.is_finite() && shortest_m < guard_upper {
+            return (shortest_m.max(guard_lower), guard_upper);
         }
         (spec.lower, spec.upper)
     }
@@ -319,6 +322,7 @@ impl AlasConfig {
         let derived = DesignVector::from_array(&nominal)
             .ok()
             .and_then(|nominal| self.clean_sheet_box(&nominal));
+        let class = self.aircraft_class();
         for (index, variable) in envelope.iter_mut().enumerate() {
             if variable.fixed {
                 continue;
@@ -327,9 +331,9 @@ impl AlasConfig {
             // then both boxes are widened to contain the start: the start is
             // always a candidate the search may return.
             if let Some(&(lower, upper)) = derived.as_ref().and_then(|b| b.get(index)) {
-                let guard = &SPECS[index];
-                let lower = lower.clamp(guard.preset_lower, guard.preset_upper);
-                let upper = upper.clamp(guard.preset_lower, guard.preset_upper);
+                let (guard_lower, guard_upper) = SPECS[index].guardrails_for(class);
+                let lower = lower.clamp(guard_lower, guard_upper);
+                let upper = upper.clamp(guard_lower, guard_upper);
                 variable.lower = lower.min(variable.nominal);
                 variable.upper = upper.max(variable.nominal);
             }

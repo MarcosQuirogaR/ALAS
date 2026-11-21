@@ -22,30 +22,40 @@
 //! side and removing from the heavy side instead means the two steps pull the
 //! same way.
 
-use alas_config::CargoDeckConfig;
+use alas_config::{CargoDeckConfig, FreightHoldConfig};
 
-use super::headroom::{realized_height, uld_fits};
+use super::headroom::{
+    is_pallet, pallet_build_height, pallet_load_area_m2, realized_height, realized_width, uld_fits,
+};
 use super::{
-    uld_or, CargoSlot, UldType, BULK, LOWER_DECK_DEFAULT, LOWER_HOLD_AUTO_CANDIDATES,
-    LOWER_HOLD_FALLBACKS, MAIN_DECK_DEFAULT,
+    turned_pallet, uld_or, CargoSlot, UldType, BULK, LOWER_DECK_DEFAULT,
+    LOWER_HOLD_AUTO_CANDIDATES, LOWER_HOLD_FALLBACKS, MAIN_DECK_AUTO_CANDIDATES, MAIN_DECK_DEFAULT,
 };
 use crate::geometry::{CabinGeometry, DeckSpec};
 use crate::layout::MAIN;
 use crate::numeric::floor_div;
 
-/// Lateral clearance between two containers standing side by side.
+/// Lateral clearance between two containers standing side by side. A modelling
+/// value, unsourced: no readable printed source gives the spacing of positions.
 const SLOT_GAP_M: f64 = 0.05;
 /// Numerical tolerance for a row whose dimensions close exactly.
 const SLOT_FIT_TOLERANCE_M: f64 = 1e-9;
 /// Longitudinal clearance between two rows in a lower hold.
 const LOWER_ROW_GAP_M: f64 = 0.08;
-/// The same on a main deck, where the handling system needs more room.
+/// How far the hold height of a lower hold whose source prints its container rows may fall short of
+/// the container height, m: the source places that many containers in the compartment, so a
+/// shortfall below the resolution of the fitted keel and crown outlines (0.014 m, one pixel of the
+/// vector airport-planning drawings) is the loft's error, not a missing position.
+const PRINTED_ROWS_HEIGHT_SLACK_M: f64 = 0.014;
+/// The same on the frozen compatibility main deck and a declared freight
+/// hold; the physical main deck keeps [`SLOT_GAP_M`] along the deck too.
 const MAIN_ROW_GAP_M: f64 = 0.20;
 /// How far aft of the cabin start the forward hold's first row sits.
 const FWD_HOLD_INSET_M: f64 = 0.8;
 /// How far aft of the wing box the aft hold's first row sits.
 const AFT_HOLD_INSET_M: f64 = 0.2;
-/// How far aft of the cabin start a main-deck freighter's first row sits.
+/// How far aft of the cabin start a main-deck freighter's first row sits. A
+/// modelling value, unsourced: no readable printed source gives it.
 const MAIN_DECK_INSET_M: f64 = 1.5;
 /// Where the loose bulk position sits, forward of the cabin's aft end.
 const BULK_INSET_M: f64 = 0.8;
@@ -55,6 +65,9 @@ const MAX_ACROSS: i64 = 3;
 const MAX_LOWER_ROWS: usize = 40;
 /// The same for a main deck.
 const MAX_MAIN_ROWS: usize = 60;
+/// Station resolution of the search that slides the first main-deck row aft and
+/// stands the turned nose pallet, m (a numerical step, not a dimension).
+const ROW_SLIDE_STEP_M: f64 = 0.05;
 
 /// Equally spaced slot centres for one transverse row.
 fn transverse_centers(usable_width: f64, container_width: f64) -> Vec<f64> {
@@ -109,8 +122,8 @@ pub enum CargoMassSemantics {
 /// Builds the loading positions from a fuselage and solves the load across
 /// them.
 pub struct CargoLoadManager<'g> {
-    geometry: &'g CabinGeometry,
-    config: CargoDeckConfig,
+    pub(super) geometry: &'g CabinGeometry,
+    pub(super) config: CargoDeckConfig,
     /// Every position, in the order the decks were walked.
     pub slots: Vec<CargoSlot>,
     /// The container the lower holds ended up taking, after the fit check.
@@ -119,7 +132,10 @@ pub struct CargoLoadManager<'g> {
 
 mod correction;
 mod declared;
+mod main_deck;
+mod relocate;
 mod slots;
+pub use slots::freight_deck_spec;
 mod solve;
 
 #[cfg(test)]

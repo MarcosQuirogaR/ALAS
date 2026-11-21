@@ -39,9 +39,30 @@ fn product_caps_have_two_physical_flange_centroids_and_no_extra_beam_web() {
     let cards = parse(&product.write_bulk());
     let bars: Vec<_> = cards.iter().filter(|card| card.name == "CBAR").collect();
     let properties: Vec<_> = cards.iter().filter(|card| card.name == "PBARL").collect();
+    // The product deck meshes the swept-root region through its truncated
+    // ribs with grids of its own, numbered after the reference's; outboard of
+    // it the two decks share their grids, webs and cap segments.
+    let reference_last = reference.grids().iter().map(|g| g.nid).max().unwrap();
+    let region_end = product
+        .grids()
+        .iter()
+        .filter(|g| g.nid > reference_last)
+        .map(|g| g.xyz[1])
+        .fold(0.0, f64::max);
+    assert!(region_end > 0.0, "the product deck meshes a root region");
+    let outboard = |deck: &alas_struct::mesh::Deck, nodes: &[i64]| {
+        nodes.iter().all(|&n| deck.node_y(n) > region_end + 1e-9)
+    };
+    let outboard_bars = |deck: &alas_struct::mesh::Deck, cards: &[support::deck::Card]| {
+        cards
+            .iter()
+            .filter(|card| card.name == "CBAR")
+            .filter(|card| outboard(deck, &[card.integer(2), card.integer(3)]))
+            .count()
+    };
     assert_eq!(
-        bars.len(),
-        2 * old.iter().filter(|card| card.name == "CBAR").count()
+        outboard_bars(&product, &cards),
+        2 * outboard_bars(&reference, &old)
     );
     // The web shells keep their nodes and elements; the web property is per
     // panel in the product mesh (one gauge per station) and per spar in the
@@ -57,19 +78,21 @@ fn product_caps_have_two_physical_flange_centroids_and_no_extra_beam_web() {
     // leading- and trailing-edge skin, rib web outside the spars and the
     // trailing-edge strips (secondary structure, outside the sized box), so
     // element numbers shift and only the webs are compared, by their nodes.
-    let webs = |quads: &[alas_struct::mesh::Shell], map: &dyn Fn(i64) -> i64| {
-        let mut webs: Vec<_> = quads
+    let webs = |deck: &alas_struct::mesh::Deck, map: &dyn Fn(i64) -> i64| {
+        let mut webs: Vec<_> = deck
+            .quads()
             .iter()
             .filter(|quad| (100..10_000).contains(&quad.pid))
+            .filter(|quad| outboard(deck, &quad.nodes))
             .map(|quad| (map(quad.pid), quad.nodes.clone()))
             .collect::<Vec<_>>();
         webs.sort();
         webs
     };
     assert_eq!(
-        webs(product.quads(), &product_spar),
-        webs(reference.quads(), &|pid| pid),
-        "web shells are unchanged"
+        webs(&product, &product_spar),
+        webs(&reference, &|pid| pid),
+        "web shells outboard of the root region are unchanged"
     );
     let skin =
         |quads: &[alas_struct::mesh::Shell]| quads.iter().filter(|quad| quad.pid == 1).count();

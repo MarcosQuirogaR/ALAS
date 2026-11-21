@@ -69,7 +69,7 @@ pub const RETIRED_WEIGHT_KEYS: &[&str] = &[
     "fineness_ratio_max",
     "fineness_ratio_penalty_scale",
     "instability_failure_cost",
-    // Removed 2026-10-19: the transport planform limits are constraint
+    // Removed: the transport planform limits are constraint
     // residuals now; these six scales multiplied no penalty term.
     "geometric_body_alpha_penalty_scale",
     "wingbox_packaging_penalty_scale",
@@ -84,6 +84,16 @@ pub const RETIRED_WEIGHT_KEYS: &[&str] = &[
 /// no fan-face area (hub-to-tip ratio) is configured to check it against, so
 /// no code ever read it.
 pub const RETIRED_PROPULSION_CYCLE_KEYS: &[&str] = &["fan_face_mach"];
+
+/// `optimizer.design_space` keys that nothing reads any more: the clean-sheet
+/// search has no engine-thrust coordinate (the selected catalogue engine, with
+/// its off-design deck, is bound once and used by every discipline), so the
+/// engine-scale switch and its two bounds are retired.
+pub const RETIRED_DESIGN_SPACE_KEYS: &[&str] = &[
+    "engine_scale_enabled",
+    "engine_scale_lower",
+    "engine_scale_upper",
+];
 
 /// `optimizer.solver` keys that stated the search budget in generations.
 /// Unlike the keys above they are converted, not dropped: see
@@ -161,10 +171,11 @@ pub(crate) fn with_migrated_solver_budget(
 }
 
 /// The optimizer groups whose retired keys are dropped at load.
-const GROUPS: [(&str, &[&str]); 3] = [
+const GROUPS: [(&str, &[&str]); 4] = [
     ("solver", RETIRED_SOLVER_KEYS),
     ("weights", RETIRED_WEIGHT_KEYS),
     ("objective", RETIRED_OBJECTIVE_KEYS),
+    ("design_space", RETIRED_DESIGN_SPACE_KEYS),
 ];
 
 fn carries(data: &serde_json::Value, group: &str, keys: &[&str]) -> bool {
@@ -181,6 +192,34 @@ fn carries_propulsion_cycle(data: &serde_json::Value) -> bool {
             RETIRED_PROPULSION_CYCLE_KEYS
                 .iter()
                 .any(|key| map.contains_key(*key))
+        })
+}
+
+/// A saved drag model that carries a retired shipped viscous margin in a
+/// document whose `drag_model.schema_version` is absent or below 2, which every build since the
+/// margin became the sourced propulsion-class allowance writes. Builds before
+/// it always wrote the margin: v1.4.x shipped 1.00 (with fraction 0.25) and
+/// v1.3.x shipped 1.10 with no lift-dependent fraction, so in an unmarked file
+/// those two defaults are stale defaults and not stated values. Any other
+/// unmarked value, 1.10 with a non-zero fraction included, is kept as stated.
+/// A marked file keeps any stated value, either of these included.
+fn carries_fitted_viscous_margin(data: &serde_json::Value) -> bool {
+    data.get("drag_model")
+        .and_then(serde_json::Value::as_object)
+        .is_some_and(|map| {
+            let margin = map
+                .get("viscous_margin")
+                .and_then(serde_json::Value::as_f64);
+            let fraction = map
+                .get("lift_dependent_viscous_fraction")
+                .and_then(serde_json::Value::as_f64)
+                .unwrap_or(0.0);
+            let version = map
+                .get("schema_version")
+                .and_then(serde_json::Value::as_u64)
+                .unwrap_or(1);
+            version < u64::from(crate::physics::DRAG_MODEL_SCHEMA_VERSION)
+                && (margin == Some(1.0) || (margin == Some(1.10) && fraction == 0.0))
         })
 }
 
@@ -211,6 +250,8 @@ pub struct RetiredKeysDropped {
     /// `drag_model.korn_technology_factor`, replaced by the declared airfoil
     /// class.
     pub korn_technology_factor: bool,
+    /// `optimizer.design_space.engine_scale_*`, which no search coordinate read.
+    pub engine_scale: bool,
     /// `propulsion_cycle.fan_face_mach`, which no code read.
     pub fan_face_mach: bool,
     /// A stage budget saved when pre-gate rejections counted against
@@ -219,6 +260,11 @@ pub struct RetiredKeysDropped {
     /// A replay count recorded under that meaning, which cannot be
     /// converted and was dropped.
     pub requested_count_replay: bool,
+    /// `drag_model.viscous_margin` saved as the retired shipped default (1.00
+    /// or the v1.3 default 1.10 with no fraction, in a drag model without a
+    /// schema version); it now follows the
+    /// aircraft's propulsion class unless stated.
+    pub fitted_viscous_margin: bool,
 }
 
 impl RetiredKeysDropped {
@@ -231,10 +277,12 @@ impl RetiredKeysDropped {
                 || carries(data, "objective", &RETIRED_OBJECTIVE_KEYS[1..5]),
             preference_weight: carries(data, "objective", &["soft_penalty_weight"]),
             korn_technology_factor: carries_drag_model(data),
+            engine_scale: carries(data, "design_space", RETIRED_DESIGN_SPACE_KEYS),
             fan_face_mach: carries_propulsion_cycle(data),
             requested_count_budget: requested_count_stages(data).next().is_some(),
             requested_count_replay: requested_count_stages(data)
                 .any(|stage| stage.contains_key(REPLAY_KEY)),
+            fitted_viscous_margin: carries_fitted_viscous_margin(data),
         }
     }
 
@@ -247,8 +295,10 @@ impl RetiredKeysDropped {
             (self.constraint_allowances, "The saved constraint policies and violation allowances were dropped; every constraint is hard."),
             (self.preference_weight, "The saved soft-penalty weight was migrated to the study-preference weight; hard constraints do not use it."),
             (self.korn_technology_factor, "The saved Korn technology factor 'drag_model.korn_technology_factor' was dropped; it now follows the wing's declared airfoil class (0.87 conventional, 0.95 supercritical)."),
+            (self.engine_scale, "The saved engine-scale switch and bounds 'optimizer.design_space.engine_scale_*' were dropped; the engine rating is now sized from the thrust requirements, controlled by 'optimizer.design_space.engine_sized_by_requirements' and 'engine_rating_window' (deprecated)."),
             (self.fan_face_mach, "The saved fan-face Mach number 'propulsion_cycle.fan_face_mach' was dropped; the engine mass flow follows the rated static thrust and no code read this value (deprecated)."),
             (self.requested_count_budget, "The saved stage evaluation budgets counted design-vector pre-gate rejections; the same numbers now count analysed candidates only, and rejections have their own cap (20 times the budget unless set)."),
+            (self.fitted_viscous_margin, "The saved viscous drag margin (1.00, or the v1.3 default 1.10 with no lift-dependent fraction) came from a file saved before the margin followed the aircraft's propulsion class (it was the shipped default) and was reset to unset; it now takes the default 1.00: the Poll and Schumann (turbofan) and Obert (turboprop) build-ups book those items themselves. Set the margin again and save to keep a different value, including 1.00; in a hand-written file add \"schema_version\": 2 to its drag_model block to keep the stated margin."),
             (self.requested_count_replay, "The saved replay evaluation counts were recorded when pre-gate rejections counted as evaluations and were dropped; they would not reproduce that run."),
         ]
         .into_iter()
@@ -266,6 +316,7 @@ pub(crate) fn without_retired_optimizer_keys(
     if !stale_replay
         && data.pointer("/optimizer/relaxation").is_none()
         && !carries_drag_model(data)
+        && !carries_fitted_viscous_margin(data)
         && !carries_propulsion_cycle(data)
         && !GROUPS
             .iter()
@@ -304,6 +355,14 @@ pub(crate) fn without_retired_optimizer_keys(
     {
         for key in RETIRED_DRAG_MODEL_KEYS {
             map.remove(*key);
+        }
+    }
+    if carries_fitted_viscous_margin(&cleaned) {
+        if let Some(map) = cleaned
+            .get_mut("drag_model")
+            .and_then(serde_json::Value::as_object_mut)
+        {
+            map.remove("viscous_margin");
         }
     }
     if let Some(map) = cleaned
@@ -371,6 +430,26 @@ mod tests {
             .messages()
             .iter()
             .any(|m| m.contains("fan_face_mach") && m.contains("deprecated")));
+    }
+
+    #[test]
+    fn older_files_with_engine_scale_keys_still_load_with_a_notice() {
+        let mut document = serde_json::to_value(AlasConfig::default()).unwrap();
+        for (key, value) in [
+            ("engine_scale_enabled", serde_json::json!(false)),
+            ("engine_scale_lower", serde_json::json!(0.7)),
+            ("engine_scale_upper", serde_json::json!(1.4)),
+        ] {
+            document["optimizer"]["design_space"][key] = value;
+        }
+        let (loaded, notes) = AlasConfig::from_value_with_notes(&document).unwrap();
+        assert_eq!(loaded, AlasConfig::default());
+        assert!(notes.retired_keys.engine_scale);
+        assert!(notes
+            .retired_keys
+            .messages()
+            .iter()
+            .any(|m| m.contains("engine_scale")));
     }
 
     #[test]

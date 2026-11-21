@@ -12,7 +12,7 @@ use crate::types::AirfoilCandidateResult;
 
 /// Run indexed jobs with a bounded worker count and return results by index.
 ///
-/// Workers claim indices atomically and only the coordinator invokes the
+/// Workers claim indices atomically and only the controlling thread invokes the
 /// progress callback. This keeps cancellation and callback ordering stable,
 /// while sorting the collected results prevents completion timing from
 /// changing the ranked candidate order.
@@ -92,7 +92,7 @@ pub(super) fn mark_mses_not_configured(candidates: &mut [AirfoilCandidateResult]
     for candidate in candidates.iter_mut().filter(|candidate| candidate.refined) {
         candidate.mses_status = Some("not_configured".to_owned());
         candidate.mses_error = Some(
-            "MSES verification was selected, but no MSES installation was resolved. Configure Setup > External Tools."
+            "MSES verification was selected, but no MSES installation was resolved. Configure Workspace > External Tools."
                 .to_owned(),
         );
     }

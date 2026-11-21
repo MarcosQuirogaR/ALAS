@@ -141,7 +141,7 @@ pub(super) fn inputs(
         composite,
         wing_area_m2: wing.reference_area(),
         span_m: wing.reference_span(),
-        ultimate_load_factor: config.requirements.ultimate_load_factor,
+        ultimate_load_factor: config.requirements.design_ultimate_load_factor(),
         design_gross_mass_kg,
         landing_mass_kg: config.landing_mass_limit_kg(design_gross_mass_kg),
         wing_mounted_powerplant_kg: 2.0 * engines.iter().map(|&(_, mass)| mass).sum::<f64>(),
@@ -149,7 +149,7 @@ pub(super) fn inputs(
         wing_gear_load_fraction: sized_box.main_gear_wing_fraction.unwrap_or(0.0),
         dive_dynamic_pressure_pa: 0.5 * SEA_LEVEL_DENSITY_KG_M3 * dive_eas * dive_eas,
         // AMC 25.335(b): M_D = M_C + 0.07 (PDF p. 217 of CS-25 Amdt 27).
-        dive_mach: config.requirements.cruise_mach + alas_struct::gust::MACH_MARGIN_C_TO_D,
+        dive_mach: config.requirements.design_dive_mach(),
         le_sweep_rad: wing.mean_sweep_angle(0.0).to_radians(),
         mid_chord_sweep_rad: wing.mean_sweep_angle(0.5).to_radians(),
         aileron_root_thickness_ratio: thickness_ratio_at(wing, aileron_start),

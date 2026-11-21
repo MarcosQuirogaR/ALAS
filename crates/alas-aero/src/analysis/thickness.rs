@@ -47,7 +47,9 @@ impl AeroAnalysis<'_> {
     /// surfaces retain the same observable fallback as
     /// [`Self::section_thickness`].
     fn wing_section_thickness(wing: &Wing) -> f64 {
-        wing.xsecs
+        // The box's root: the side-of-body section, not the loft's apex.
+        wing.carried_box()
+            .xsecs
             .first()
             .map_or(SECTION_THICKNESS_FALLBACK, |xsec| {
                 xsec.airfoil
@@ -73,6 +75,10 @@ impl AeroAnalysis<'_> {
     /// Falls back to [`Self::wing_section_thickness`] for a wing with fewer
     /// than two cross-sections, where no panel exists to weight.
     pub fn area_weighted_thickness(wing: &Wing) -> f64 {
+        // The plan of the wing inside the body has no form drag: the weights are
+        // the carried box's, so it does not weigh in.
+        let wing = wing.carried_box();
+        let wing: &Wing = &wing;
         // Each section's thickness is sampled once; interior sections bound
         // two panels and would otherwise be sampled twice.
         let samples = linspace(0.0, 1.0, MAX_THICKNESS_SAMPLES);

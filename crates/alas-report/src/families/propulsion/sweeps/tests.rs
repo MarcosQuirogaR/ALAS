@@ -66,7 +66,15 @@ fn bpr_sensitivity_draws_both_series_and_two_design_point_markers() {
         .iter()
         .filter(|e| matches!(e, SceneElement::Polyline { .. }))
         .count();
-    assert_eq!(polylines, 2, "specific thrust and TSFC");
+    // Two curves, plus one dotted tail each when the sweep has a cycle-limit corner.
+    let flagged = scene.elements.iter().any(
+        |e| matches!(e, SceneElement::Text { text, .. } if text.starts_with("Dotted beyond BPR")),
+    );
+    assert_eq!(
+        polylines,
+        if flagged { 4 } else { 2 },
+        "specific thrust and TSFC"
+    );
     assert!(scene
         .elements
         .iter()

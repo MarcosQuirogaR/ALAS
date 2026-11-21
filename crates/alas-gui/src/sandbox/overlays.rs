@@ -21,7 +21,7 @@
 //! lofted sections, deg; `taper` tip over root chord; `L_fus` overall
 //! fuselage length, m.
 
-use egui::{pos2, Context, Rect, RichText, Ui};
+use egui::{pos2, vec2, Context, Rect, RichText, Ui};
 
 use crate::state::AppState;
 use crate::views::tr;
@@ -34,13 +34,19 @@ use super::workspace::{start_full_analysis, start_quick_analysis};
 
 /// Height of the action row, in points.
 pub const ACTION_ROW_HEIGHT: f32 = 30.0;
+/// Minimum height of every button in the action rows, so Quick analysis, Full
+/// analysis, Undo, Redo, Run log and Results are one height.
+const ACTION_BUTTON_HEIGHT: f32 = 26.0;
+
 /// Vertical gap between the rows of the block, in points.
 pub const ROW_GAP: f32 = 4.0;
-/// Nominal width of the full action row (Quick Analysis, Full Analysis,
+/// Nominal width of the full action row (Quick Analysis, Full Analysis, Cancel,
 /// Undo, Redo, Run log, Results), used to decide whether it splits.
-const ACTIONS_WIDTH: f32 = 470.0;
+const ACTIONS_WIDTH: f32 = 720.0;
+/// Room at each side of the Cancel label for the run spinner, points.
+const SPINNER_ROOM: f32 = 22.0;
 /// Hover text of every metric row: the conventions of the eight values.
-pub(super) const CONVENTIONS: &str = "S_ref: projected planform area of the main wing including the carry-through, m2. b: projected tip-to-tip span, m. MAC: mean aerodynamic chord, m. LE sweep: inboard leading-edge sweep design variable, deg, positive aft. c/4 sweep: area-weighted mean quarter-chord sweep of the lofted sections, deg. AR: b^2 / S_ref. taper: tip chord over root chord. L_fus: overall fuselage length, m. Axes: x aft, y right, z up.";
+pub(super) const CONVENTIONS: &str = "S_ref: projected planform area of the main wing including the carry-through, m^2. b: projected tip-to-tip span, m. MAC: mean aerodynamic chord, m. Λ_LE: inboard leading-edge sweep design variable, deg, positive aft. Λ_c4: area-weighted mean quarter-chord sweep of the lofted sections, deg. AR: b^2 / S_ref. taper: tip chord over root chord. L_fus: overall fuselage length, m. Axes: x aft, y right, z up.";
 
 /// Action rows for a viewport width: one, or a launch row over an edit
 /// row when the full row would not fit.
@@ -84,21 +90,21 @@ pub fn action_block_rect(ctx: &Context, viewport: Rect) -> Rect {
     )
 }
 
-/// The metric texts in display order, each a symbol, value and unit.
-pub fn metric_chips(state: &AppState) -> Vec<String> {
+/// The metrics in display order, each a symbol and its value with the unit.
+pub fn metric_chips(state: &AppState) -> Vec<(&'static str, String)> {
     let (Some(plane), Some(design)) = (&state.sandbox.airplane, state.current_design()) else {
         return Vec::new();
     };
     let m = geometry_metrics(plane, &design);
     vec![
-        format!("S_ref {:.1} m\u{b2}", m.reference_area_m2),
-        format!("b {:.2} m", m.span_m),
-        format!("MAC {:.2} m", m.mean_aerodynamic_chord_m),
-        format!("AR {:.2}", m.aspect_ratio),
-        format!("LE sweep {:.1} deg", m.leading_edge_sweep_deg),
-        format!("c/4 sweep {:.1} deg", m.quarter_chord_sweep_deg),
-        format!("taper {:.3}", m.taper_ratio),
-        format!("L_fus {:.2} m", m.fuselage_length_m),
+        ("S_ref", format!("{:.1} m\u{b2}", m.reference_area_m2)),
+        ("b", format!("{:.2} m", m.span_m)),
+        ("MAC", format!("{:.2} m", m.mean_aerodynamic_chord_m)),
+        ("AR", format!("{:.2}", m.aspect_ratio)),
+        ("Λ_LE", format!("{:.1}°", m.leading_edge_sweep_deg)),
+        ("Λ_c4", format!("{:.1}°", m.quarter_chord_sweep_deg)),
+        ("taper", format!("{:.3}", m.taper_ratio)),
+        ("L_fus", format!("{:.2} m", m.fuselage_length_m)),
     ]
 }
 
@@ -140,7 +146,8 @@ fn show_launch_actions(state: &mut AppState, ui: &mut Ui) {
     {
         let running = state.is_running;
         let blocked = state.blocked();
-        let quick = egui::Button::new(RichText::new(tr("Quick Analysis")).strong());
+        let quick = egui::Button::new(RichText::new(tr("Quick Analysis")).strong())
+            .min_size(vec2(0.0, ACTION_BUTTON_HEIGHT));
         if floating_control(
             ui,
             "action",
@@ -158,27 +165,47 @@ fn show_launch_actions(state: &mut AppState, ui: &mut Ui) {
             "action",
             !running && !blocked,
             false,
-            egui::Button::new(tr("Full Analysis")),
+            egui::Button::new(tr("Full Analysis")).min_size(vec2(0.0, ACTION_BUTTON_HEIGHT)),
         )
         .on_hover_text(tr("Run the complete pipeline on the drawn aircraft as a fixed design; results open in their own window."))
         .clicked()
         {
             start_full_analysis(state);
         }
-        if running {
-            if floating_control(
-                ui,
-                "action",
-                !state.cancellation_requested,
-                false,
-                egui::Button::new(tr("Cancel")),
+        // Cancel keeps its slot, greyed out while nothing runs, and carries
+        // the run spinner inside its own box: the centred row never changes
+        // width, so no button moves when a run starts or ends.
+        let label = tr("Cancel");
+        let text_width = ui
+            .painter()
+            .layout_no_wrap(
+                label.clone(),
+                egui::TextStyle::Button.resolve(ui.style()),
+                ui.visuals().text_color(),
             )
-            .clicked()
-            {
-                state.request_pipeline_cancel();
-            }
-            let spinner = ui.spinner();
-            super::viewport::register_overlay_rect(ui.ctx(), "action", spinner.rect);
+            .size()
+            .x;
+        let width = text_width + 2.0 * ui.spacing().button_padding.x + 2.0 * SPINNER_ROOM;
+        let cancel = floating_control(
+            ui,
+            "action",
+            running && !state.cancellation_requested,
+            false,
+            egui::Button::new(label).min_size(vec2(width, ACTION_BUTTON_HEIGHT)),
+        );
+        if running {
+            let side = SPINNER_ROOM - 6.0;
+            let spinner = Rect::from_center_size(
+                pos2(
+                    cancel.rect.left() + SPINNER_ROOM * 0.5 + 3.0,
+                    cancel.rect.center().y,
+                ),
+                vec2(side, side),
+            );
+            egui::Spinner::new().size(side).paint_at(ui, spinner);
+        }
+        if cancel.clicked() {
+            state.request_pipeline_cancel();
         }
     }
 }
@@ -192,7 +219,7 @@ fn show_edit_actions(state: &mut AppState, ui: &mut Ui) {
             "action",
             state.sandbox.undo.can_undo(),
             false,
-            egui::Button::new(tr("Undo")).small(),
+            egui::Button::new(tr("Undo")).min_size(vec2(0.0, ACTION_BUTTON_HEIGHT)),
         )
         .clicked()
         {
@@ -203,18 +230,35 @@ fn show_edit_actions(state: &mut AppState, ui: &mut Ui) {
             "action",
             state.sandbox.undo.can_redo(),
             false,
-            egui::Button::new(tr("Redo")).small(),
+            egui::Button::new(tr("Redo")).min_size(vec2(0.0, ACTION_BUTTON_HEIGHT)),
         )
         .clicked()
         {
             state.sandbox_redo();
         }
-        if floating_button(ui, "action", egui::Button::new(tr("Run log")).small()).clicked() {
-            state.sandbox.layout.log_window_open = !state.sandbox.layout.log_window_open;
-        }
-        if state.pipeline_result.is_some()
-            && floating_button(ui, "action", egui::Button::new(tr("Results")).small()).clicked()
+        if floating_button(
+            ui,
+            "action",
+            egui::Button::new(tr("Run log")).min_size(vec2(0.0, ACTION_BUTTON_HEIGHT)),
+        )
+        .clicked()
         {
+            state.sandbox.layout.log_window_open = !state.sandbox.layout.log_window_open;
+            if state.sandbox.layout.log_window_open {
+                crate::native_viewport::raise(ui.ctx(), "sandbox_run_log");
+            }
+        }
+        // Results keeps its slot, greyed out until a result exists.
+        if floating_control(
+            ui,
+            "action",
+            state.pipeline_result.is_some(),
+            false,
+            egui::Button::new(tr("Results")).min_size(vec2(0.0, ACTION_BUTTON_HEIGHT)),
+        )
+        .clicked()
+        {
+            crate::native_viewport::raise(ui.ctx(), "sandbox_results");
             state.sandbox.results_window_open = true;
         }
     }
@@ -246,9 +290,57 @@ mod tests {
         assert!(state.enter_sandbox(true));
         let chips = metric_chips(&state);
         assert_eq!(chips.len(), 8);
-        assert!(chips[0].starts_with("S_ref ") && chips[0].ends_with(" m\u{b2}"));
-        assert!(chips[1].starts_with("b ") && chips[1].ends_with(" m"));
-        assert!(chips[4].starts_with("LE sweep ") && chips[4].ends_with(" deg"));
-        assert!(chips[7].starts_with("L_fus "));
+        assert!(chips[0].0 == "S_ref" && chips[0].1.ends_with(" m\u{b2}"));
+        assert!(chips[1].0 == "b" && chips[1].1.ends_with(" m"));
+        assert!(chips[4].0 == "Λ_LE" && chips[4].1.ends_with('°'));
+        assert_eq!(chips[7].0, "L_fus");
+    }
+}
+
+#[cfg(test)]
+mod fixed_position_tests {
+    use super::*;
+
+    fn action_rects(state: &mut AppState) -> Vec<Rect> {
+        let ctx = Context::default();
+        let mut time = 0.0;
+        for _ in 0..3 {
+            time += 0.05;
+            let _ = ctx.run(
+                egui::RawInput {
+                    screen_rect: Some(Rect::from_min_size(pos2(0.0, 0.0), vec2(1400.0, 900.0))),
+                    time: Some(time),
+                    ..Default::default()
+                },
+                |ctx| crate::sandbox::workspace::show_sandbox_workspace(state, ctx),
+            );
+        }
+        crate::sandbox::viewport::overlay_rects_tagged(&ctx, "action")
+    }
+
+    /// The row is centred, so a button that appears (Cancel while a run is
+    /// active, Results once a result exists) must not move the others: its
+    /// slot is always there, greyed out.
+    #[test]
+    fn the_action_buttons_keep_their_positions_whatever_is_running() {
+        let mut idle = AppState::default();
+        assert!(idle.enter_sandbox(true));
+        let before = action_rects(&mut idle);
+        let mut running = AppState::default();
+        assert!(running.enter_sandbox(true));
+        running.is_running = true;
+        let during = action_rects(&mut running);
+        // Quick, Full, Cancel, Undo, Redo, Run log, Results.
+        assert_eq!(before.len(), 7, "{} idle buttons", before.len());
+        assert_eq!(during.len(), before.len());
+        for index in 0..before.len() {
+            assert!(
+                (before[index].left() - during[index].left()).abs() < 0.5,
+                "button {index} moved from {} to {}",
+                before[index].left(),
+                during[index].left()
+            );
+            assert!((before[index].width() - during[index].width()).abs() < 0.5);
+        }
     }
 }

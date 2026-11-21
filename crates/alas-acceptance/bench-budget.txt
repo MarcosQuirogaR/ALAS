@@ -1,0 +1,20 @@
+# Run-time ceilings for `alas-bench --quick --budget crates/alas-acceptance/bench-budget.txt`,
+# checked nightly by the `bench-budget` job of .github/workflows/gate.yml.
+#
+# One `Workload name = ceiling_ms` per line; the name is the report's Workload
+# column. A workload that exceeds its ceiling, fails, or disappears from the
+# report fails the check.
+#
+# Ratchet: each ceiling is 1.5x the quick-mode time measured on 2026-11-14 at
+# v15/speedup (16-thread desktop shared with other jobs). Lower a ceiling when a
+# speed-up lands; raise one only in the commit that knowingly buys accuracy
+# with time, and say so in its message. For reference, the 2026-10-19 A320
+# native baseline pipeline took 2.4 s, and the September bench rows were
+# pipeline 0.66 s, full analysis 0.15 s and fine VLM 13.7 ms.
+Full Baseline Pipeline = 1870000
+Full Analysis (VLM/Polars/Trim) = 107000
+Native VLM Solve (1x1) = 50
+Native VLM Solve (fine 2x8) = 260
+Wingbox Structural Sizing = 1500
+Airfoil DB Screening (NACA) = 400
+Scene Generation & SVG Export = 5200

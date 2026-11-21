@@ -80,7 +80,7 @@ pub struct PreflightIssue {
 /// `checkMesh` defaults this template targets; no code compares a parsed value
 /// against them.
 ///
-/// That gap is pre-existing, not introduced with these fields, and it matters:
+/// That gap exists independently of these fields, and it matters:
 /// `max_non_orthogonality_deg` is `70.0` while the fine preset measures
 /// `71.37 deg` on one face out of 436 389 cells and `checkMesh` still reports
 /// `Non-orthogonality check OK` and `Mesh OK`. Under the `checkMesh` verdict

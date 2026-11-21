@@ -17,7 +17,8 @@
 //! each call site.
 //!
 //! [`supervise`] is the other half of owning a process: every solver spawned
-//! through it joins one kill-on-close Windows job, so ending ALAS ends them,
+//! through it is tied to ALAS's life (the kill-on-close Windows job; on Unix a
+//! per-child parent-exit watchdog), so ending ALAS ends them,
 //! and a ledger ties each PID to the task that launched it.
 //!
 //! [`vspaero`] executes an extensionless native case directly, captures both
@@ -25,8 +26,10 @@
 //! causal process status for product-level orchestration.
 
 pub mod avl;
+pub mod captured;
 pub mod download;
 pub mod flowunsteady;
+pub mod installer;
 pub mod openfoam;
 pub mod process;
 pub mod sha256;

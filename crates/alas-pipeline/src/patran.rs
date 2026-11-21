@@ -177,6 +177,8 @@ fn run_one(
         .args(["-b", "-graphics", "-sfp"])
         .arg(session_name)
         .current_dir(case_dir)
+        // Never the parent's stdin: under `ALAS --mcp` it is the protocol pipe.
+        .stdin(Stdio::null())
         .stdout(Stdio::piped())
         .stderr(Stdio::piped())
         .no_window()

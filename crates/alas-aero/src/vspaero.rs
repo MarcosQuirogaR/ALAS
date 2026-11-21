@@ -51,8 +51,6 @@ pub struct VspaeroReference {
 pub enum VspaeroGeometryScope {
     /// Wing and tail lifting surfaces, with no fuselage, nacelle, or gear mesh.
     LiftingSurfacesOnly,
-    /// Thick whole-aircraft surface mesh.
-    FullAircraft,
 }
 
 /// VSPAERO formulation used to produce the polar.

@@ -12,19 +12,19 @@ timeout_s = 20.0
 name = "mtow_kg"
 unit = "kg"
 default = 73500.0
-description = "Flight design gross weight Wdg"
+description = "Flight design gross weight W_dg"
 
 [[inputs]]
 name = "limit_load_factor"
 unit = "g"
 default = 2.5
-description = "Limit load factor; Nz = 1.5 x this"
+description = "Limit load factor; N_z = 1.5 x this"
 
 [[inputs]]
 name = "wing_area_m2"
 unit = "m^2"
 default = 122.4
-description = "Trapezoidal wing area Sw"
+description = "Trapezoidal wing area S_w"
 
 [[inputs]]
 name = "aspect_ratio"
@@ -36,25 +36,25 @@ description = "Wing aspect ratio A"
 name = "thickness_ratio_root"
 unit = "-"
 default = 0.12
-description = "Thickness-to-chord ratio at the wing root (t/c)root"
+description = "Thickness-to-chord ratio at the wing root, t/c_root"
 
 [[inputs]]
 name = "taper_ratio"
 unit = "-"
 default = 0.24
-description = "Wing taper ratio lambda"
+description = "Wing taper ratio λ"
 
 [[inputs]]
 name = "sweep_quarter_chord_deg"
 unit = "deg"
 default = 25.0
-description = "Wing sweep at 25% MAC, Lambda"
+description = "Wing sweep at 25% MAC, Λ"
 
 [[inputs]]
 name = "control_surface_area_m2"
 unit = "m^2"
 default = 30.0
-description = "Wing-mounted control surface area including flaps, Scsw"
+description = "Wing-mounted control surface area including flaps, S_csw"
 
 [[outputs]]
 name = "wing_mass_kg"

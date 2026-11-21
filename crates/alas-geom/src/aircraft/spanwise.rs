@@ -153,7 +153,56 @@ impl Wing {
             xsecs: new_xsecs,
             symmetric: self.symmetric,
             reference: self.reference,
+            planform_datum: self.planform_datum,
+            dynamic_pressure_ratio: self.dynamic_pressure_ratio,
+            reference_xsecs: self.reference_xsecs.clone(),
+            tip_te_flare_m: self.tip_te_flare_m,
+            twist_about_pitch_axis: self.twist_about_pitch_axis,
         })
+    }
+
+    /// A copy of this surface with cross-sections inserted inside its lofted
+    /// sections: `fractions[i]` lists, ascending in `(0, 1)`, where section
+    /// `i` (from cross-section `i` to `i + 1`) gains one. Every existing
+    /// cross-section stays, and an inserted one lies on the same linear loft
+    /// [`Wing::subdivide_sections`] interpolates, so the surface is unchanged
+    /// and only its panel edges move. A missing entry inserts nothing.
+    ///
+    /// # Errors
+    ///
+    /// As [`Wing::mesh_spanwise`].
+    pub fn with_inserted_stations(
+        &self,
+        fractions: &[Vec<f64>],
+    ) -> Result<Self, SubdivideSectionsError> {
+        let mut new_xsecs = Vec::with_capacity(self.xsecs.len());
+        for (index, pair) in self.xsecs.windows(2).enumerate() {
+            new_xsecs.push(pair[0].clone());
+            for &s in fractions.get(index).map_or(&[][..], Vec::as_slice) {
+                if s > 0.0 && s < 1.0 {
+                    new_xsecs.push(interpolate(&pair[0], &pair[1], s)?);
+                }
+            }
+        }
+        if let Some(last) = self.xsecs.last() {
+            new_xsecs.push(last.clone());
+        }
+        Ok(Self {
+            xsecs: new_xsecs,
+            ..self.clone()
+        })
+    }
+}
+
+impl WingXSec {
+    /// The cross-section a fraction `s` of the way from `a` to `b` on their
+    /// linear loft, as [`Wing::mesh_spanwise`] places its interior stations.
+    ///
+    /// # Errors
+    ///
+    /// [`SubdivideSectionsError`] when the two airfoils cannot be blended.
+    pub fn between(a: &Self, b: &Self, s: f64) -> Result<Self, SubdivideSectionsError> {
+        interpolate(a, b, s)
     }
 }
 
@@ -181,30 +230,70 @@ fn interpolate(a: &WingXSec, b: &WingXSec, s: f64) -> Result<WingXSec, Subdivide
         chord: a.chord * a_weight + b.chord * b_weight,
         twist: a.twist * a_weight + b.twist * b_weight,
         airfoil,
+        span_axis: super::wing::interpolated_span_axis(a, b, a_weight),
     })
 }
+
+/// The narrowest panel the mesh may make, as a fraction of the surface's lofted extent.
+///
+/// The vortex lattice cannot condition a sliver panel (a 0.27 m panel at the A320 side of body gave
+/// a pivot ratio above 1e5), so a section is never split into panels narrower than this: a
+/// declared curve of 0.8 % of the semispan (the DC-10 rake) is one panel, not two of 0.4 %. A
+/// section that is itself narrower than this still receives its one panel, because a section is a
+/// feature.
+pub const MIN_PANEL_EXTENT_FRACTION: f64 = 0.005;
 
 /// Split `panels` between sections of the given extents, every section
 /// receiving at least one.
 ///
 /// Evenly, with the remainder going to the longest sections first; see the
-/// module doc for why this is not proportional to span. The total is exactly
-/// `panels` whenever `panels >= extents.len()`, which the caller guarantees.
+/// module doc for why this is not proportional to span. A section takes at most
+/// `floor(extent / MIN_PANEL_EXTENT_FRACTION)` panels (at least one); the panels it cannot take go
+/// to the other sections with room, longest first, so the total is exactly `panels` unless every
+/// section is full.
 fn allocate(extents: &[f64], panels: usize) -> Vec<usize> {
     let sections = extents.len();
     let mut counts = vec![panels / sections; sections];
     let remainder = panels % sections;
-    if remainder > 0 {
-        // Longest section first, then inboard, so the extra panels land where
-        // they buy the most resolution and the result stays reproducible.
-        let mut order: Vec<usize> = (0..sections).collect();
-        order.sort_by(|&left, &right| {
-            extents[right]
-                .total_cmp(&extents[left])
-                .then(left.cmp(&right))
-        });
-        for &index in order.iter().take(remainder) {
-            counts[index] += 1;
+    // Longest section first, then inboard, so the extra panels land where
+    // they buy the most resolution and the result stays reproducible.
+    let mut order: Vec<usize> = (0..sections).collect();
+    order.sort_by(|&left, &right| {
+        extents[right]
+            .total_cmp(&extents[left])
+            .then(left.cmp(&right))
+    });
+    for &index in order.iter().take(remainder) {
+        counts[index] += 1;
+    }
+    let total: f64 = extents.iter().sum();
+    if total <= 0.0 || !total.is_finite() {
+        return counts;
+    }
+    let limit = |index: usize| -> usize {
+        // The small margin keeps a section of exactly n minimum panels at n in floating point.
+        let fit = (extents[index] / total / MIN_PANEL_EXTENT_FRACTION + 1.0e-9).floor();
+        (fit as usize).max(1)
+    };
+    let mut surplus = 0;
+    for (index, count) in counts.iter_mut().enumerate() {
+        let cap = limit(index);
+        if *count > cap {
+            surplus += *count - cap;
+            *count = cap;
+        }
+    }
+    while surplus > 0 {
+        let mut placed = false;
+        for &index in &order {
+            if surplus > 0 && counts[index] < limit(index) {
+                counts[index] += 1;
+                surplus -= 1;
+                placed = true;
+            }
+        }
+        if !placed {
+            break;
         }
     }
     counts

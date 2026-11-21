@@ -154,6 +154,16 @@ fn objective_label_rows(language: Language) -> Vec<(&'static str, f32)> {
     let size = [760.0, 1400.0];
     frame(&ctx, &mut state, size, Vec::new());
     let top = frame(&ctx, &mut state, size, Vec::new());
+    // Rows are measured from the page heading: the tab strip above it wraps
+    // into a language-dependent number of rows, which is not what is compared.
+    let heading = crate::views::tr("Optimizer");
+    let heading_top = top.output.shapes.iter().rev().find_map(|shape| {
+        let egui::Shape::Text(text) = &shape.shape else {
+            return None;
+        };
+        (text.galley.text() == heading).then_some(text.pos.y)
+    });
+    let heading_top = heading_top.unwrap_or_default();
     // Fields the Inputs card owns are not on this page and are not found.
     let schema = alas_config::ObjectiveConfig::default().schema();
     schema
@@ -161,7 +171,7 @@ fn objective_label_rows(language: Language) -> Vec<(&'static str, f32)> {
         .iter()
         .filter(|field| matches!(field.entry, alas_config::Entry::Leaf(_)))
         .filter_map(|field| {
-            let label = alas_i18n::t(Some(field.label), Some(language.code())).into_owned();
+            let label = crate::views::form_label(field.label, Some(language.code()));
             // The last match: the "Objective" group header paints the same
             // word before the field label does.
             let rect = top.output.shapes.iter().rev().find_map(|shape| {
@@ -171,7 +181,7 @@ fn objective_label_rows(language: Language) -> Vec<(&'static str, f32)> {
                 (text.galley.text() == label)
                     .then(|| text.galley.rect.translate(text.pos.to_vec2()))
             })?;
-            Some((field.name, rect.top()))
+            Some((field.name, rect.top() - heading_top))
         })
         .collect()
 }
@@ -332,9 +342,9 @@ fn exercise(export: bool) {
                     assert!(!text.contains(&crate::views::tr(removed)));
                 }
                 if tab == "mass_advanced" {
-                    assert!(
-                        text.contains(&crate::views::tr("Hard MTOW constraint (preset default)"))
-                    );
+                    assert!(text.contains(&crate::views::tr_label(
+                        "Hard MTOW constraint (preset default)"
+                    )));
                 }
                 if export {
                     svg::write(
@@ -355,7 +365,7 @@ fn exercise(export: bool) {
                         let bounds = text.galley.rect.translate(text.pos.to_vec2());
                         let group = ["Screening stage", "Refinement stage"]
                             .iter()
-                            .any(|name| label == crate::views::tr(name));
+                            .any(|name| label == crate::views::form_label(name, None));
                         let advanced = label.starts_with(
                             crate::views::tr("Advanced ({count})")
                                 .split('{')
@@ -425,7 +435,7 @@ fn exercise(export: bool) {
                     }
                     last = bottom;
                     seen.push_str(&svg::all_text(&last.output.shapes));
-                    let workers = crate::views::tr("Native compute worker threads");
+                    let workers = crate::views::form_label("Native compute worker threads", None);
                     if export
                         && svg::text_rect(&last.output.shapes, &workers)
                             .is_some_and(|rect| last.content.contains_rect(rect))
@@ -465,17 +475,20 @@ fn exercise(export: bool) {
                     );
                     for group in ["Screening stage", "Refinement stage"] {
                         assert!(
-                            opened.contains(&crate::views::tr(group)),
+                            opened.contains(&crate::views::form_label(group, None)),
                             "{group} must be expanded: {opened:?}"
                         );
                     }
                     assert!(
-                        seen.contains(&crate::views::tr("Native compute worker threads")),
+                        seen.contains(&crate::views::form_label(
+                            "Native compute worker threads",
+                            None
+                        )),
                         "worker control is exercised"
                     );
                     for label in ["Evaluation ceiling", "Time limit [s]"] {
                         assert!(
-                            seen.contains(&crate::views::tr(label)),
+                            seen.contains(&crate::views::form_label(label, None)),
                             "{label} is exercised"
                         );
                     }
@@ -495,4 +508,52 @@ fn bilingual_settings_fit_narrow_short_and_default_viewports() {
 #[ignore = "exports bilingual settings paint output"]
 fn export_bilingual_settings_layout() {
     exercise(true);
+}
+
+/// The window and the guided pages are two layouts of one set of forms: a page
+/// added to one without the other would let the full-screen Sandbox and the
+/// guided workspace disagree about which settings exist.
+#[test]
+fn the_window_tabs_are_exactly_the_pages_the_guided_advanced_sections_host() {
+    use std::collections::BTreeSet;
+    let hosted: BTreeSet<&str> = crate::nav::NAV
+        .iter()
+        .flat_map(|group| group.subgroups.iter())
+        .flat_map(|subgroup| subgroup.pages.iter())
+        .flat_map(|page| page.advanced.iter())
+        .flat_map(|section| section.pages.iter().copied())
+        .collect();
+    let tabs: BTreeSet<&str> = super::pages().iter().map(|page| page.id).collect();
+    // Every tab is hosted by a guided Advanced section. The sections also
+    // show the routine page of the same discipline, which the Sandbox window
+    // leaves to the Parameter Panel.
+    assert!(tabs.is_subset(&hosted), "{tabs:?} vs {hosted:?}");
+    let routine: BTreeSet<&str> = hosted.difference(&tabs).copied().collect();
+    assert_eq!(
+        routine,
+        BTreeSet::from([
+            "aerodynamics",
+            "engine_designer",
+            "mass_model",
+            "structures"
+        ])
+    );
+    // Each tab is the very page the section renders, so its fields (group,
+    // surface, relocations, extra cards) are the same declaration.
+    for id in &tabs {
+        let hosted_page = crate::nav::page(id).expect("hosted page resolves");
+        let tab = crate::nav::ADVANCED_SETTINGS_PAGES
+            .iter()
+            .find(|tab| tab.id == *id)
+            .expect("tab");
+        assert_eq!(
+            (
+                hosted_page.group,
+                hosted_page.surface,
+                hosted_page.extra.len()
+            ),
+            (tab.group, tab.surface, tab.extra.len()),
+            "{id}"
+        );
+    }
 }

@@ -1,6 +1,6 @@
 // Raymer, Aircraft Design: A Conceptual Approach, 6th ed., Eq. 15.25 (p. 574).
 // British units inside the equation: pounds and square feet.
-let wdg = kg_to_lb(inputs.mtow_kg);
+let wdg = kg_to_lb(inputs.wdg_kg);
 let nz = 1.5 * inputs.limit_load_factor;
 let sw = m2_to_ft2(inputs.wing_area_m2);
 let scsw = m2_to_ft2(inputs.control_surface_area_m2);

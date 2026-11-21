@@ -32,14 +32,16 @@ pub use units::{si_conversion, unit_from_label, SiConversion};
 /// Schema identifier written into every exported file.
 pub const SCHEMA: &str = "alas.plot-data/1";
 
-/// Serialization of f64 arrays that keeps NaN and infinities (JSON has none).
+/// Serialization of f64 arrays. JSON has no NaN or infinity: a NaN (a value
+/// that does not exist, such as a masked heatmap cell) is `null`, and an
+/// infinity is the string `"inf"` / `"-inf"`.
 pub(crate) mod f64_array {
     use serde::{Deserialize, Deserializer, Serialize, Serializer};
 
     #[derive(Serialize, Deserialize)]
     #[serde(untagged)]
     enum Value {
-        Number(f64),
+        Number(Option<f64>),
         Text(String),
     }
 
@@ -48,7 +50,9 @@ pub(crate) mod f64_array {
             .iter()
             .map(|v| {
                 if v.is_finite() {
-                    Value::Number(*v)
+                    Value::Number(Some(*v))
+                } else if v.is_nan() {
+                    Value::Number(None)
                 } else {
                     Value::Text(format!("{v}"))
                 }
@@ -62,7 +66,7 @@ pub(crate) mod f64_array {
         encoded
             .into_iter()
             .map(|v| match v {
-                Value::Number(n) => Ok(n),
+                Value::Number(n) => Ok(n.unwrap_or(f64::NAN)),
                 Value::Text(t) => t.parse::<f64>().map_err(serde::de::Error::custom),
             })
             .collect()

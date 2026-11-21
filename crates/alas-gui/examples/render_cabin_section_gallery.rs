@@ -4,7 +4,12 @@
 // An example is a console program: reporting what it wrote is the whole point,
 // and there is no tracing subscriber installed to carry it instead.
 #![allow(clippy::print_stdout, clippy::print_stderr)]
-#![doc = "Render a dimensioned cabin cross-section for every registered aircraft preset."]
+//! Render a dimensioned cabin cross-section for every registered aircraft preset.
+//!
+//! Each preset is built through `AircraftBuilder` and `build_payload_layout`, and
+//! `figure_cabin_section` draws the section in a light and a dark theme (SVG) beside
+//! the cabin scene JSON, with an `index.html` gallery that lists each figure.
+//! The output directory is the first argument.
 
 use std::error::Error;
 use std::fmt::Write as _;

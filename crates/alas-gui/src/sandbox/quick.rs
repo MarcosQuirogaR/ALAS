@@ -253,7 +253,10 @@ mod tests {
     use std::time::Duration;
 
     fn wait_until_idle(estimates: &mut QuickEstimates) {
-        let deadline = Instant::now() + Duration::from_secs(120);
+        // A hang guard, not a timing assertion: the job runs the full
+        // baseline analysis, about 45 s alone (measured) and three
+        // times that with the suite's other tests on every core.
+        let deadline = Instant::now() + Duration::from_secs(900);
         while estimates.running() && Instant::now() < deadline {
             estimates.poll();
             thread::sleep(Duration::from_millis(20));

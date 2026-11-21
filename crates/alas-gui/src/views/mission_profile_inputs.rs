@@ -9,19 +9,15 @@
 //! cruise-leg estimate fits step climbs to the route and makes manual edits
 //! explicit.
 
-use egui::{vec2, Context, Id, RichText, Ui, ViewportBuilder, ViewportClass, Window};
+use egui::{vec2, Context, RichText, Ui, ViewportBuilder, ViewportClass};
 use serde_json::Value;
 
 use alas_config::{airport_dataset, airports::Airport, AlasConfig, MissionProfileConfig};
 
-use crate::native_viewport::show_native_viewport;
+use crate::native_viewport::show_compact_native_viewport;
 use crate::state::AppState;
 use crate::theme::card_frame;
-use crate::views::{tr, tr_fields};
-
-#[path = "mission_phase_launcher.rs"]
-mod phase_launcher;
-pub(crate) use phase_launcher::show_mission_profile_advanced;
+use crate::views::{tr_fields, tr_label as tr};
 
 const SHORT_ROUTE_M: f64 = 2_500_000.0;
 
@@ -36,183 +32,166 @@ pub(crate) struct MissionProfileWindow {
     pub phase_id: Option<String>,
 }
 
-#[derive(Clone, Copy)]
-struct Phase {
-    id: &'static str,
-    title: &'static str,
-    fields: &'static [&'static str],
+mod phases;
+use phases::fit_to_content;
+pub(crate) use phases::PHASES;
+mod route;
+pub(crate) use route::*;
+
+/// What the Route row shows: the route distance and the cruise-leg count of
+/// the standard mission, read before the row is drawn.
+#[derive(Debug, Clone)]
+pub(crate) struct RouteRow {
+    distance_m: Option<f64>,
+    cruise_count: usize,
+    issue: Option<String>,
+    leg_note: Option<String>,
+    /// Total distance flown, m, with every loiter, diversion and reserve leg.
+    flown_m: Option<f64>,
+    /// Distance flown from take-off to landing, m, without the reserves.
+    trip_m: Option<f64>,
+    /// The route's own cruise altitude, m, when it is not the design one.
+    route_cruise_m: Option<f64>,
 }
 
-const PHASES: &[Phase] = &[
-    Phase {
-        id: "takeoff",
-        title: "Take-off",
-        fields: &[
-            "takeoff_altitude_gain_m",
-            "takeoff_air_speed_m_s",
-            "takeoff_climb_rate_m_s",
-        ],
-    },
-    Phase {
-        id: "initial_climb",
-        title: "Initial climb",
-        fields: &[
-            "initial_climb_air_speed_m_s",
-            "initial_climb_rate_m_s",
-            "initial_climb_altitude_fraction",
-        ],
-    },
-    Phase {
-        id: "cruise_1",
-        title: "Cruise leg 1",
-        fields: &["cruise_1_air_speed_m_s", "cruise_1_distance_fraction"],
-    },
-    Phase {
-        id: "step_climb_1",
-        title: "Step climb 1",
-        fields: &[
-            "step_climb_1_air_speed_m_s",
-            "step_climb_1_rate_m_s",
-            "step_climb_1_altitude_fraction",
-        ],
-    },
-    Phase {
-        id: "cruise_2",
-        title: "Cruise leg 2",
-        fields: &["cruise_2_air_speed_m_s", "cruise_2_distance_fraction"],
-    },
-    Phase {
-        id: "step_climb_2",
-        title: "Step climb 2",
-        fields: &["step_climb_2_air_speed_m_s", "step_climb_2_rate_m_s"],
-    },
-    Phase {
-        id: "cruise_3",
-        title: "Cruise leg 3",
-        fields: &["cruise_3_air_speed_m_s", "cruise_3_distance_fraction"],
-    },
-    Phase {
-        id: "descent_1",
-        title: "Descent rung 1",
-        fields: &[
-            "descent_1_altitude_ft",
-            "descent_1_air_speed_m_s",
-            "descent_1_rate_m_s",
-        ],
-    },
-    Phase {
-        id: "descent_2",
-        title: "Descent rung 2",
-        fields: &[
-            "descent_2_altitude_ft",
-            "descent_2_air_speed_m_s",
-            "descent_2_rate_m_s",
-        ],
-    },
-    Phase {
-        id: "descent_3",
-        title: "Descent rung 3",
-        fields: &[
-            "descent_3_altitude_ft",
-            "descent_3_air_speed_m_s",
-            "descent_3_rate_m_s",
-        ],
-    },
-    Phase {
-        id: "descent_4",
-        title: "Descent rung 4",
-        fields: &[
-            "descent_4_altitude_ft",
-            "descent_4_air_speed_m_s",
-            "descent_4_rate_m_s",
-        ],
-    },
-    Phase {
-        id: "final_approach",
-        title: "Final approach",
-        fields: &["landing_air_speed_m_s", "landing_descent_rate_m_s"],
-    },
-];
-
-/// Render the route cards and interactive live profile on the Setup > Inputs
-/// page. This is the only inline mission-profile view: clicking a phase opens
-/// its detached editor, so the page stays a live overview rather than another
-/// copy of the parameter form.
-pub(crate) fn show_mission_profile_inputs(state: &mut AppState, ui: &mut Ui) {
+/// Reconcile the profile with the route and read what the Route row shows.
+pub(crate) fn begin_route_row(state: &mut AppState) -> RouteRow {
     reconcile_route_profile(state);
-    let route_distance = route_distance_m(&state.config_values);
     let profile = state
         .typed_config_arc()
         .map(|config| config.mission.profile.clone())
         .unwrap_or_default();
-    let cruise_count = active_cruise_count(&profile);
-
-    card_frame(ui).show(ui, |ui| {
-        ui.set_min_width(ui.available_width());
-        ui.label(RichText::new(tr("Mission profile")).strong());
-        ui.add_space(4.0);
-        let card_width = ui.available_width();
-        if card_width >= 560.0 {
-            ui.columns(2, |columns| {
-                show_route_distance_card(&mut columns[0], route_distance);
-                show_cruise_legs_card(&mut columns[1], state, cruise_count);
-            });
-        } else {
-            show_route_distance_card(ui, route_distance);
-            ui.add_space(6.0);
-            show_cruise_legs_card(ui, state, cruise_count);
-        }
-        ui.add_space(8.0);
-        if let Some(config) = state.typed_config_arc() {
-            crate::views::mission_profile_preview::show_interactive_mission_profile_preview(
-                state, ui, &config,
-            );
-        }
-        if let Some(issue) = &state.mission_profile_retained_validation {
-            ui.label(
-                RichText::new(issue)
-                    .color(ui.visuals().warn_fg_color)
-                    .small(),
-            );
-        }
-    });
-
-    show_regeneration_prompt(state, ui);
+    RouteRow {
+        distance_m: route_distance_m(&state.config_values),
+        cruise_count: active_cruise_count(&profile),
+        issue: state.mission_profile_retained_validation.clone(),
+        leg_note: None,
+        flown_m: None,
+        trip_m: None,
+        route_cruise_m: route_cruise_override_m(state),
+    }
 }
 
-fn show_route_distance_card(ui: &mut Ui, distance_m: Option<f64>) {
-    card_frame(ui).show(ui, |ui| {
-        ui.set_min_width(ui.available_width());
-        ui.label(RichText::new(tr("Route distance")).strong());
-        match distance_m {
-            Some(distance_m) => ui.label(format!("{:.0} km", distance_m / 1000.0)),
+impl RouteRow {
+    /// This row with the total distance flown by the planned flight.
+    pub(crate) fn with_flown_m(mut self, flown_m: Option<f64>) -> Self {
+        self.flown_m = flown_m.filter(|m| m.is_finite() && *m > 0.0);
+        self
+    }
+
+    /// This row with the distance flown from take-off to landing.
+    pub(crate) fn with_trip_m(mut self, trip_m: Option<f64>) -> Self {
+        self.trip_m = trip_m.filter(|m| m.is_finite() && *m > 0.0);
+        self
+    }
+
+    /// This row with the note shown next to the cruise-leg radios.
+    pub(crate) fn with_leg_note(mut self, note: Option<String>) -> Self {
+        self.leg_note = note;
+        self
+    }
+}
+
+/// The cruise legs the profile sets (the radio value).
+pub(crate) fn set_cruise_legs(config: &AlasConfig) -> usize {
+    active_cruise_count(&config.mission.profile)
+}
+
+/// The compact Route row: the distance as text and the cruise legs as three
+/// radios. Returns the leg count the user picked, if it changed.
+pub(crate) fn route_row(ui: &mut Ui, row: &RouteRow) -> Option<usize> {
+    let mut picked = None;
+    ui.horizontal_wrapped(|ui| {
+        ui.label(RichText::new(tr("Route")).strong());
+        match row.distance_m {
+            Some(distance_m) => ui
+                .label(format!("{:.0} km", distance_m / 1000.0))
+                .on_hover_text(tr("Airport to airport; it does not change with loiter or diversion phases.")),
             None => ui.label(
                 RichText::new(tr("Unavailable until both airports resolve."))
                     .color(ui.visuals().warn_fg_color),
             ),
         };
+        if let Some(trip_m) = row.trip_m.filter(|trip_m| {
+            row.distance_m
+                .is_some_and(|route_m| (trip_m - route_m).abs() > 0.02 * route_m)
+        }) {
+            ui.label(RichText::new(tr("Trip")).strong()).on_hover_text(tr(
+                "Distance flown take-off to landing; the climbs and descents flown are longer than the planned ones.",
+            ));
+            ui.label(format!("{:.0} km", trip_m / 1000.0));
+        }
+        if let Some(flown_m) = row.flown_m {
+            ui.label(RichText::new(tr("Flown")).strong()).on_hover_text(tr(
+                "Total distance flown by the planned mission: trip, reserves, loiter and diversion.",
+            ));
+            ui.label(format!("{:.0} km", flown_m / 1000.0));
+        }
+        ui.separator();
+        ui.label(tr("Cruise legs")).on_hover_text(tr(
+            "Each additional cruise leg adds a step climb. The default is estimated from route cruise time and typical fuel-burn altitude drift; choose another count to edit the profile.",
+        ));
+        let mut selected = row.cruise_count.clamp(1, 3);
+        for count in 1..=3 {
+            ui.radio_value(&mut selected, count, count.to_string());
+        }
+        if selected != row.cruise_count {
+            picked = Some(selected);
+        }
+        if let Some(cruise_m) = row.route_cruise_m {
+            ui.separator();
+            ui.label(RichText::new(tr_fields(
+                "Cruise {level} (route default)",
+                &[(
+                    "level",
+                    crate::views::mission_stage_editor::flight_level(cruise_m),
+                )],
+            )))
+            .on_hover_text(tr(
+                "The altitude this route flies by default; the design cruise altitude is set on the Aircraft page.",
+            ));
+        }
     });
+    // One line is always reserved for the note, so the page below does not move when it comes and goes.
+    ui.horizontal(|ui| {
+        let text = row.leg_note.as_deref().or(row.issue.as_deref());
+        let shown = text.unwrap_or(" ");
+        let label = egui::Label::new(
+            RichText::new(shown)
+                .color(ui.visuals().warn_fg_color)
+                .small(),
+        )
+        .wrap_mode(egui::TextWrapMode::Truncate);
+        let response = ui.add(label);
+        if let Some(text) = text {
+            response.on_hover_text(text);
+        }
+    });
+    picked
 }
 
-fn show_cruise_legs_card(ui: &mut Ui, state: &mut AppState, cruise_count: usize) {
-    card_frame(ui).show(ui, |ui| {
-        ui.set_min_width(ui.available_width());
-        ui.label(RichText::new(tr("Cruise legs")).strong())
-            .on_hover_text(tr(
-                "Each additional cruise leg adds a step climb. The default is estimated from route cruise time and typical fuel-burn altitude drift; choose another count to edit the profile.",
-            ));
-        let mut selected = cruise_count.clamp(1, 3);
-        ui.horizontal(|ui| {
-            for count in 1..=3 {
-                ui.radio_value(&mut selected, count, count.to_string());
-            }
-        });
-        if selected != cruise_count && apply_cruise_leg_count(state, selected) {
+/// Apply the leg count picked in the Route row and show the regeneration
+/// prompt when the route changed.
+pub(crate) fn finish_route_row(state: &mut AppState, ui: &Ui, picked: Option<usize>) {
+    if let Some(count) = picked {
+        if apply_cruise_leg_count(state, count) {
             state.mission_profile_manual_edit = true;
             state.mission_profile_retained_validation = None;
             state.on_config_modified();
         }
+    }
+    show_regeneration_prompt(state, ui);
+}
+
+/// The Route row in a card of its own, for the legacy Inputs page.
+pub(crate) fn show_mission_profile_inputs(state: &mut AppState, ui: &mut Ui) {
+    let row = begin_route_row(state);
+    let mut picked = None;
+    card_frame(ui).show(ui, |ui| {
+        ui.set_min_width(ui.available_width());
+        picked = route_row(ui, &row);
     });
+    finish_route_row(state, ui, picked);
 }
 
 /// Open the native editor for a phase selected in the live preview.
@@ -238,17 +217,29 @@ pub(crate) fn show_mission_profile_window(state: &mut AppState, ctx: &Context) {
         .find(|phase| phase.id == phase_id)
         .map_or_else(|| tr("Mission profile"), |phase| tr(phase.title));
     let title = tr_fields("Mission profile: {phase}", &[("phase", phase_title)]);
-    let response = show_native_viewport(
+    // The window is as large as its fields: one grid column per field (three at
+    // most) wide, and the height of what is drawn, fitted after the first frame.
+    let field_count = PHASES
+        .iter()
+        .find(|phase| phase.id == phase_id)
+        .map_or(3, |phase| phase.fields.len());
+    let columns = field_count.clamp(1, 3) as f32;
+    let width = (columns * 300.0 + 60.0).max(420.0);
+    let response = show_compact_native_viewport(
         ctx,
         "mission_profile_phase",
         title.clone(),
         ViewportBuilder::default()
             .with_title(title)
-            .with_inner_size(vec2(560.0, 430.0))
-            .with_min_inner_size(vec2(420.0, 300.0))
+            .with_inner_size(vec2(width, 200.0))
+            .with_min_inner_size(vec2(420.0, 120.0))
             .with_resizable(true),
-        |_child_ctx, ui, class| {
+        |child_ctx, ui, class| {
+            let frame = child_ctx.screen_rect().size() - ui.max_rect().size();
             show_phase_editor(state, ui, &phase_id, class);
+            if matches!(class, ViewportClass::Immediate) {
+                fit_to_content(child_ctx, &phase_id, frame + ui.min_rect().size());
+            }
         },
     );
     if response.close_requested {
@@ -273,14 +264,16 @@ fn show_phase_editor(state: &mut AppState, ui: &mut Ui, phase_id: &str, class: V
         .collect::<Vec<_>>();
     let mut edits = Vec::new();
     if let Some(profile) = state.config_values.pointer_mut("/mission/profile") {
-        edits = crate::views::form::dynamic_form(
-            ui,
-            &fields,
-            profile,
-            &std::collections::HashSet::new(),
-            Some(state.language.code()),
-            false,
-        );
+        edits = crate::views::form::with_baseline_group("mission", || {
+            crate::views::form::dynamic_form_at(
+                ui,
+                &fields,
+                profile,
+                &Default::default(),
+                Some(state.language.code()),
+                "::profile",
+            )
+        });
     }
     if !edits.is_empty() {
         state.mission_profile_manual_edit = true;
@@ -298,36 +291,50 @@ fn show_regeneration_prompt(state: &mut AppState, ui: &Ui) {
     }
     let distance = route_distance_m(&state.config_values);
     let issues = profile_issues(state, distance);
-    let mut open = true;
-    let mut decision = None;
-    Window::new(tr("Mission profile changed with route"))
-        .id(Id::new("mission_profile_regeneration_prompt"))
-        .open(&mut open)
-        .collapsible(false)
-        .show(ui.ctx(), |ui| {
-            ui.label(tr(
-                "The route changed after a manual profile edit. Regenerate the route-linked suggestion or retain the edited phases and validate them below.",
-            ));
-            if issues.is_empty() {
-                ui.label(
-                    RichText::new(tr("The retained profile is valid for the new route.")).weak(),
-                );
-            } else {
-                for issue in &issues {
-                    ui.label(RichText::new(issue).color(ui.visuals().warn_fg_color));
-                }
-            }
-            ui.horizontal(|ui| {
-                if ui.button(tr("Regenerate profile")).clicked() {
-                    decision = Some(true);
-                }
-                if ui.button(tr("Retain edited profile")).clicked() {
-                    decision = Some(false);
-                }
-            });
-        });
-    if let Some(regenerate) = decision {
+    use crate::shell_confirm::{confirm_dialog, ConfirmAction, ConfirmAnswer};
+    let mut body = tr(
+        "The route changed after a manual profile edit. Regenerate the route-linked suggestion or retain the edited phases and validate them below.",
+    );
+    if issues.is_empty() {
+        body.push_str(
+            "
+
+",
+        );
+        body.push_str(&tr("The retained profile is valid for the new route."));
+    } else {
+        for issue in &issues {
+            body.push_str(
+                "
+
+",
+            );
+            body.push_str(issue);
+        }
+    }
+    // Some(Some(true)): regenerate; Some(Some(false)): keep the edited
+    // phases; Some(None): cancel (also Escape).
+    let decision = match confirm_dialog(
+        ui.ctx(),
+        "mission_profile_regeneration_block",
+        &tr("Mission profile changed with route"),
+        Some(&body),
+        &[
+            ConfirmAction::primary(tr("Regenerate profile")),
+            ConfirmAction::plain(tr("Keep edited profile")),
+        ],
+    ) {
+        Some(ConfirmAnswer::Action(0)) => Some(Some(true)),
+        Some(ConfirmAnswer::Action(_)) => Some(Some(false)),
+        Some(ConfirmAnswer::Cancel) => Some(None),
+        None => None,
+    };
+    if let Some(choice) = decision {
         state.mission_profile_regeneration_prompt = false;
+        // Cancel dismisses the prompt and leaves the edited profile as it is.
+        let Some(regenerate) = choice else {
+            return;
+        };
         if regenerate {
             state.mission_profile_manual_edit = false;
             state.mission_profile_retained_validation = None;
@@ -341,13 +348,6 @@ fn show_regeneration_prompt(state: &mut AppState, ui: &Ui) {
                 Some(issues.join(" "))
             };
         }
-    } else if !open {
-        state.mission_profile_regeneration_prompt = false;
-        state.mission_profile_retained_validation = if issues.is_empty() {
-            Some(tr("Retained profile validated for the new route."))
-        } else {
-            Some(issues.join(" "))
-        };
     }
 }
 
@@ -365,94 +365,6 @@ fn profile_fields(schema: &alas_config::Node) -> Vec<alas_config::Field> {
         return Vec::new();
     };
     profile.fields.clone()
-}
-
-/// Stable route identity used by the explicit regeneration policy.
-pub(crate) fn route_signature(values: &Value) -> String {
-    format!(
-        "{}|{}",
-        airport_signature(
-            values
-                .get("departure_airport")
-                .and_then(Value::as_str)
-                .unwrap_or_default(),
-        ),
-        airport_signature(
-            values
-                .get("arrival_airport")
-                .and_then(Value::as_str)
-                .unwrap_or_default(),
-        )
-    )
-}
-
-/// Include the resolved physical endpoint in the route identity. A custom
-/// airport can retain its ICAO/name while its coordinates or field climate
-/// are edited; the profile policy must see that as a route change rather than
-/// silently retaining a schedule derived from the old endpoint.
-fn airport_signature(name: &str) -> String {
-    let resolved = airport_dataset::resolve(name).ok().map(|airport| {
-        (
-            airport.icao.value,
-            airport.latitude_deg.value,
-            airport.longitude_deg.value,
-            airport.elevation_m.value,
-            airport.isa_deviation_c.value,
-        )
-    });
-    format!("{name}|{resolved:?}")
-}
-
-fn route_distance_m(values: &Value) -> Option<f64> {
-    let departure = values.get("departure_airport").and_then(Value::as_str)?;
-    let arrival = values.get("arrival_airport").and_then(Value::as_str)?;
-    let departure = airport_dataset::resolve(departure).ok()?;
-    let arrival = airport_dataset::resolve(arrival).ok()?;
-    let lat1 = departure.latitude_deg.value?.to_radians();
-    let lat2 = arrival.latitude_deg.value?.to_radians();
-    let dlat = lat2 - lat1;
-    let lon1 = departure.longitude_deg.value?.to_radians();
-    let lon2 = arrival.longitude_deg.value?.to_radians();
-    let dlon = lon2 - lon1;
-    let a = (dlat / 2.0).sin().powi(2) + lat1.cos() * lat2.cos() * (dlon / 2.0).sin().powi(2);
-    Some(2.0 * 6_371_000.0 * a.sqrt().atan2((1.0 - a).sqrt()))
-}
-
-/// Resolve route endpoints into the minimal airport values needed by
-/// the shared route-aware mission proposal. Route distance and cruise-altitude
-/// selection must use the same endpoint records as the Inputs card.
-pub(crate) fn resolved_route_airports(config: &AlasConfig) -> Option<(Airport, Airport)> {
-    fn resolve(name: &str) -> Option<Airport> {
-        let airport = airport_dataset::resolve(name).ok()?;
-        Some(Airport {
-            name: airport.name.value.unwrap_or_else(|| name.to_owned()),
-            icao: airport.icao.value.unwrap_or_default(),
-            elevation_m: airport.elevation_m.value?,
-            toda_m: airport.toda_m.value.unwrap_or_default(),
-            lda_m: airport.lda_m.value.unwrap_or_default(),
-            isa_deviation_c: airport.isa_deviation_c.value.unwrap_or_default(),
-            notes: String::new(),
-            latitude_deg: airport.latitude_deg.value?,
-            longitude_deg: airport.longitude_deg.value?,
-        })
-    }
-
-    Some((
-        resolve(&config.departure_airport)?,
-        resolve(&config.arrival_airport)?,
-    ))
-}
-
-/// Whether the profile still matches a registered preset's unedited
-/// operational schedule (or the generic default), so its route-based cruise
-/// count may be initialized automatically.
-pub(crate) fn is_automatic_profile(config: &AlasConfig) -> bool {
-    config.mission.profile == MissionProfileConfig::default()
-        || alas_config::presets::get(&config.preset)
-            .ok()
-            .is_some_and(|preset| {
-                config.mission.profile == preset.operational_mission_defaults().profile
-            })
 }
 
 fn route_suggested_cruise_count(state: &AppState, route_distance_m: f64) -> Option<usize> {
@@ -630,6 +542,14 @@ fn profile_issues(state: &AppState, distance_m: Option<f64>) -> Vec<String> {
     issues
 }
 
+/// The route's own cruise altitude, m, when it is not the design one the Aircraft page sets.
+fn route_cruise_override_m(state: &AppState) -> Option<f64> {
+    let config = state.typed_config_arc()?;
+    let (origin, destination) = resolved_route_airports(&config)?;
+    let route_m = alas_mission::route_cruise_altitude_m(&config, &origin, &destination);
+    ((route_m - config.requirements.cruise_altitude_m).abs() > 1.0).then_some(route_m)
+}
+
 #[cfg(test)]
 mod tests {
     use super::{
@@ -740,5 +660,35 @@ mod tests {
             state.mission_profile_window.phase_id.as_deref(),
             Some("takeoff")
         );
+    }
+}
+
+#[cfg(test)]
+mod phase_window_tests {
+    use super::*;
+    use crate::test_raster::{render, write_in};
+
+    /// The window of a phase at the size it asks for holds its fields on one
+    /// row with no empty body below.
+    #[test]
+    fn the_phase_editor_fills_a_window_sized_to_it() {
+        let mut state = AppState::default();
+        state.load_preset("A320-200");
+        for id in ["descent_1", "cruise_1"] {
+            let Some(phase) = PHASES.iter().find(|phase| phase.id == id) else {
+                continue;
+            };
+            let columns = phase.fields.len().clamp(1, 3) as f32;
+            let width = (columns * 300.0 + 60.0).max(420.0);
+            let shot = render(width, 260.0, 4, 0, |ui| {
+                ui.set_width(width - 16.0);
+                show_phase_editor(&mut state, ui, id, ViewportClass::Immediate);
+            });
+            write_in(
+                &crate::test_raster::render_dir(),
+                &format!("phase-window-{id}.png"),
+                &shot,
+            );
+        }
     }
 }

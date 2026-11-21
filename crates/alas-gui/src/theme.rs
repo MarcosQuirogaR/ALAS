@@ -13,6 +13,17 @@ use egui::{
     Response, Rounding, Sense, Stroke, TextStyle, Ui, Visuals,
 };
 
+pub use crate::lock_icon::lock_icon;
+
+mod card;
+pub mod figure;
+pub mod mark;
+pub mod space;
+pub use card::{
+    card_content_width, card_depth, card_frame, card_title, column_padding, header_label,
+    header_row, record_column_end, section_title, show_header, title_at_depth, CARD_INNER_MARGIN_X,
+};
+
 /// Available UI themes for the desktop application.
 #[derive(Debug, Clone, Copy, PartialEq, Eq, Default)]
 pub enum AppTheme {
@@ -72,13 +83,6 @@ pub fn success_color(visuals: &Visuals) -> Color32 {
     }
 }
 
-/// Return the shared elevated surface used for cards, navigation groups, and
-/// other bounded work areas.
-///
-/// A distinct fill plus a single ordered corner radius makes grouping visible
-/// without relying on the indentation rule that competes with form content.
-pub const CARD_INNER_MARGIN_X: f32 = 14.0;
-
 /// Corner radius shared by ordinary and selected navigation controls.
 ///
 /// `egui::Button::selected` deliberately defaults to square corners. Keeping
@@ -97,22 +101,139 @@ pub fn selectable_button(
         .rounding(Rounding::same(SELECTABLE_CONTROL_RADIUS))
 }
 
-/// Frame used for grouped content cards, filled with the window color.
-pub fn card_frame(ui: &Ui) -> Frame {
-    Frame::group(ui.style())
-        .fill(ui.visuals().window_fill())
-        .inner_margin(Margin::symmetric(CARD_INNER_MARGIN_X, 10.0))
-        .rounding(Rounding::same(12.0))
+/// One row of a selectable list (the add-ons list): as wide as the list and at
+/// least `height` tall, its text left-aligned and centred in height whether or
+/// not the row is selected, so the entries of a list line up at one edge.
+pub fn list_row(
+    ui: &mut Ui,
+    selected: bool,
+    text: impl Into<egui::WidgetText>,
+    height: f32,
+) -> Response {
+    // `left_to_right` centres a widget's text along the row by default.
+    let row = egui::Layout::left_to_right(egui::Align::Center)
+        .with_main_align(egui::Align::Min)
+        .with_main_justify(true)
+        .with_cross_justify(true);
+    ui.allocate_ui_with_layout(vec2(ui.available_width(), height), row, |ui| {
+        ui.add(egui::SelectableLabel::new(selected, text))
+    })
+    .inner
 }
 
-/// Return the content width that produces the requested outer card width.
-///
-/// A frame's horizontal inner margin belongs to the painted card, not to the
-/// child UI that receives a requested width. Accounting for it here keeps a
-/// row of cards inside its measured gallery width instead of growing each card
-/// by the frame padding.
-pub fn card_content_width(outer_width: f32) -> f32 {
-    (outer_width - 2.0 * CARD_INNER_MARGIN_X).max(1.0)
+/// The status line of a background job (`text`) that has been running since
+/// `since`: from its first second on it counts the seconds, so a slow job
+/// reads as work in progress, not as a label left behind; the page replaces
+/// the line with the job's result as soon as the job ends. Without a running
+/// job (`since` is `None`) it is `text` alone.
+pub fn in_progress(ctx: &Context, text: &str, since: Option<std::time::Instant>) -> String {
+    let Some(since) = since else {
+        return text.to_owned();
+    };
+    ctx.request_repaint_after(std::time::Duration::from_secs(1));
+    match since.elapsed().as_secs() {
+        0 => text.to_owned(),
+        seconds => format!("{text} ({seconds} s)"),
+    }
+}
+
+/// The destructive-action red shared by [`danger_button`] and the dialogs.
+const DANGER_RGB: (u8, u8, u8) = (229, 83, 75);
+
+/// A subtle red button for destructive actions (discard, delete, exit
+/// without saving): a faint red fill and outline at rest, which strengthen on
+/// hover. Use it only when the action loses something; ordinary actions keep
+/// the plain button.
+pub fn danger_button(ui: &mut Ui, text: impl Into<egui::WidgetText>) -> Response {
+    let (r, g, b) = DANGER_RGB;
+    let text_color = Color32::from_rgb(0xff, 0x9a, 0x93);
+    let strong = Color32::from_rgb(r, g, b);
+    let button = egui::Button::new(egui::RichText::new(text.into().text()).color(text_color))
+        .rounding(Rounding::same(SELECTABLE_CONTROL_RADIUS));
+    ui.scope(|ui| {
+        let widgets = &mut ui.visuals_mut().widgets;
+        let states = [
+            (
+                &mut widgets.inactive,
+                0.10_f32,
+                Color32::from_rgba_unmultiplied(r, g, b, 115),
+            ),
+            (&mut widgets.hovered, 0.22, strong),
+            (&mut widgets.active, 0.30, strong),
+        ];
+        for (state, fill_alpha, stroke_color) in states {
+            let fill = Color32::from_rgba_unmultiplied(r, g, b, (fill_alpha * 255.0) as u8);
+            state.weak_bg_fill = fill;
+            state.bg_fill = fill;
+            state.bg_stroke = Stroke::new(1.0_f32, stroke_color);
+        }
+        ui.add(button)
+    })
+    .inner
+}
+
+/// The highlighted main action of a dialog: the selection fill, rounded like
+/// every other control.
+pub fn primary_button(text: impl Into<egui::WidgetText>) -> egui::Button<'static> {
+    selectable_button(text, true)
+}
+
+/// Paint the push-pin of the navigation toggle centred on `center`: an
+/// outline when the navigation floats, a filled pin when it is pinned.
+pub fn paint_pin_icon(painter: &egui::Painter, center: egui::Pos2, color: Color32, filled: bool) {
+    // A push-pin drawn upright (head up, needle down) and turned 45 degrees
+    // clockwise, so the head sits upper right and the needle points lower left.
+    let (sin, cos) = std::f32::consts::FRAC_PI_4.sin_cos();
+    let at = |x: f32, y: f32| center + vec2(x * cos - y * sin, x * sin + y * cos) + vec2(-0.5, 0.5);
+    let stroke = Stroke::new(1.5_f32, color);
+    let fill = if filled { color } else { Color32::TRANSPARENT };
+    let head = vec![at(-2.6, -9.0), at(2.6, -9.0), at(2.6, -3.0), at(-2.6, -3.0)];
+    painter.add(egui::Shape::convex_polygon(head, fill, stroke));
+    let flange = vec![at(-5.5, -3.0), at(5.5, -3.0), at(5.5, -1.0), at(-5.5, -1.0)];
+    painter.add(egui::Shape::convex_polygon(flange, fill, stroke));
+    painter.line_segment([at(0.0, -1.0), at(0.0, 9.0)], stroke);
+}
+
+/// The one label style of a parameter, shared by the schema forms and the
+/// bespoke Aircraft controls: body size, regular weight, normal text colour
+/// while the value can be edited and the weak colour only when it cannot, so
+/// the difference tells the user something.
+pub fn field_label(text: &str, editable: bool) -> egui::RichText {
+    let label = egui::RichText::new(text);
+    if editable {
+        label
+    } else {
+        label.weak()
+    }
+}
+
+/// The interaction states of a field (a value box, a choice, a framed
+/// checkbox cell and the controls on its caption): the field fill in every
+/// state, the hover ring while the pointer is over it, the wider ring while
+/// it is pressed, open or has keyboard focus. egui fills a hovered or focused
+/// button-like widget with the accent tint, so the field that a resting
+/// pointer happened to be over after a scroll or a click read as selected;
+/// a field now shows only its ring, which leaves with the pointer or focus.
+pub fn field_states(visuals: &mut Visuals) {
+    let fill = visuals.widgets.inactive.weak_bg_fill;
+    let ring = visuals.widgets.active.bg_stroke;
+    let widgets = &mut visuals.widgets;
+    for state in [&mut widgets.hovered, &mut widgets.active, &mut widgets.open] {
+        state.weak_bg_fill = fill;
+        state.bg_fill = fill;
+    }
+    widgets.open.bg_stroke = ring;
+}
+
+/// Outer height of a button: the text plus the button padding, never below
+/// the interaction height. A text input beside a button takes this height so a
+/// row of controls shares top and bottom edges.
+pub fn control_height(ui: &Ui) -> f32 {
+    let spacing = ui.spacing();
+    spacing
+        .interact_size
+        .y
+        .max(ui.text_style_height(&egui::TextStyle::Button) + 2.0 * spacing.button_padding.y)
 }
 
 /// Return the attached surface for the compact navigation rail and its hover
@@ -164,146 +285,8 @@ pub fn close_icon_button(ui: &mut Ui, hover_text: impl Into<egui::WidgetText>) -
     response.on_hover_text(hover_text)
 }
 
-fn blend_color(from: Color32, to: Color32, amount: f32) -> Color32 {
-    let mix = |start: u8, end: u8| {
-        (f32::from(start) + (f32::from(end) - f32::from(start)) * amount).round() as u8
-    };
-    Color32::from_rgba_premultiplied(
-        mix(from.r(), to.r()),
-        mix(from.g(), to.g()),
-        mix(from.b(), to.b()),
-        mix(from.a(), to.a()),
-    )
-}
-
-fn selection_foreground(accent: Color32) -> Color32 {
-    if contrast_ratio(Color32::BLACK, accent) >= contrast_ratio(Color32::WHITE, accent) {
-        Color32::BLACK
-    } else {
-        Color32::WHITE
-    }
-}
-
-/// How far a hovered control's tint sits from the selected fill, toward the
-/// panel it floats on. Selected, hovered, pressed/focused and open were all
-/// drawn with one saturated accent, so an open menu, a hovered tab and the
-/// actually selected tab were indistinguishable.
-const HOVER_TINT_TOWARD_PANEL: f32 = 0.62;
-
-/// The same blend for a pressed, keyboard-focused or open control: stronger
-/// than hover, still clearly weaker than a selected fill, and additionally
-/// carrying the wider `active` ring.
-const PRESSED_TINT_TOWARD_PANEL: f32 = 0.40;
-
-/// The fill behind a *selected* control.
-///
-/// `apply_theme` sets `override_text_color` to the palette title colour, and
-/// egui resolves a plain or strong widget label through that override before
-/// any per-widget fallback (`RichText::get_text_color`,
-/// `Visuals::strong_text_color`). The foreground on a selected control is
-/// therefore the theme's own text colour - white in Dark and Grey, black in
-/// Light - and the fill has to clear WCAG 2.1 AA 4.5:1 against *that*, not
-/// against white everywhere. The palette accents did not: `#4f8cff` with white
-/// is 3.22:1 and `#6aa2ff` with white is 2.55:1.
-fn accent_fill(theme: AppTheme) -> Color32 {
-    match theme {
-        // White label text: 5.17:1.
-        AppTheme::Dark | AppTheme::Grey => Color32::from_rgb(0x25, 0x63, 0xEB),
-        // Black label text: 6.50:1, and 3.23:1 against the white page, so the
-        // filled control keeps a 1.4.11 boundary even without its stroke.
-        AppTheme::Light => Color32::from_rgb(0x5B, 0x8D, 0xEF),
-    }
-}
-
-/// The accent used for *text* and thin marks: section headings, the navigation
-/// rail, sparkline strokes and editor guide lines.
-///
-/// egui's default `hyperlink_color` is `#009bff`, which is 2.94:1 on white, so
-/// every accent section heading on the Light page failed AA. Each value below
-/// clears 4.5:1 against both the page background and the card surface of its
-/// own theme.
-fn accent_text(theme: AppTheme) -> Color32 {
-    match theme {
-        // 6.85:1 on #1e1e1e, 5.92:1 on #262a31.
-        AppTheme::Dark => Color32::from_rgb(0x5A, 0xAA, 0xFF),
-        // 5.67:1 on #3a3a3a, 4.80:1 on #41454c.
-        AppTheme::Grey => Color32::from_rgb(0x8F, 0xB8, 0xFF),
-        // 5.17:1 on #ffffff, 4.74:1 on #f4f5f7.
-        AppTheme::Light => Color32::from_rgb(0x25, 0x63, 0xEB),
-    }
-}
-
-/// Blend `accent` `amount` of the way into `surface`, then keep stepping
-/// toward the surface until `foreground` clears the AA body-text threshold on
-/// the result. Hover and pressed states are tints of the selected fill rather
-/// than copies of it, which is what makes the interaction states separable;
-/// the loop guarantees the label on them stays readable.
-fn accent_tint(accent: Color32, surface: Color32, foreground: Color32, amount: f32) -> Color32 {
-    let mut step = amount.clamp(0.0, 1.0);
-    let mut tint = blend_color(accent, surface, step);
-    while contrast_ratio(foreground, tint) < 4.5 && step < 1.0 {
-        step = (step + 0.02).min(1.0);
-        tint = blend_color(accent, surface, step);
-    }
-    tint
-}
-
-fn widget_border(theme: AppTheme, pal: &Palette) -> Color32 {
-    match theme {
-        // The print palette's pale rule is intentionally subtle. Interactive
-        // controls need a 3:1 boundary against the desktop panel instead.
-        AppTheme::Light => Color32::from_rgb(128, 128, 128),
-        AppTheme::Dark | AppTheme::Grey => hex_to_color32(pal.border),
-    }
-}
-
-fn input_fill(theme: AppTheme) -> Color32 {
-    match theme {
-        // Keep numeric fields visibly separate from the panel without turning
-        // the dense engineering forms into a collection of bright cards.
-        AppTheme::Dark => Color32::from_rgb(48, 53, 62),
-        AppTheme::Grey => Color32::from_rgb(54, 59, 68),
-        AppTheme::Light => Color32::from_rgb(255, 255, 255),
-    }
-}
-
-fn input_border(theme: AppTheme) -> Color32 {
-    match theme {
-        AppTheme::Dark => Color32::from_rgb(158, 166, 179),
-        AppTheme::Grey => Color32::from_rgb(202, 208, 218),
-        AppTheme::Light => Color32::from_rgb(107, 114, 128),
-    }
-}
-
-fn disabled_text_color(theme: AppTheme) -> Color32 {
-    match theme {
-        // Disabled controls remain deliberately subdued, but still meet the
-        // same text contrast threshold as small explanatory copy.
-        AppTheme::Dark => Color32::from_rgb(190, 198, 210),
-        AppTheme::Grey => Color32::from_rgb(222, 226, 232),
-        AppTheme::Light => Color32::from_rgb(72, 81, 96),
-    }
-}
-
-fn contrast_ratio(a: Color32, b: Color32) -> f32 {
-    fn luminance(color: Color32) -> f32 {
-        let channel = |value: u8| {
-            let value = f32::from(value) / 255.0;
-            if value <= 0.04045 {
-                value / 12.92
-            } else {
-                ((value + 0.055) / 1.055).powf(2.4)
-            }
-        };
-        0.2126 * channel(color.r()) + 0.7152 * channel(color.g()) + 0.0722 * channel(color.b())
-    }
-    let (lighter, darker) = if luminance(a) >= luminance(b) {
-        (luminance(a), luminance(b))
-    } else {
-        (luminance(b), luminance(a))
-    };
-    (lighter + 0.05) / (darker + 0.05)
-}
+mod colour;
+use colour::*;
 
 /// Apply the selected theme palette to an `egui::Context`.
 pub fn apply_theme(theme: AppTheme, ctx: &Context) {
@@ -406,10 +389,22 @@ pub fn apply_theme(theme: AppTheme, ctx: &Context) {
 
     let mut style = (*ctx.style()).clone();
     style.visuals = visuals;
+    // egui fades every new popup (selector lists, menus, tooltips) in over
+    // `animation_time`, multiplying the opacity of its frame and its text. The
+    // form underneath then shows through the list for the first frames, which
+    // on a page that takes a while to draw is what the user sees. Popups open
+    // fully opaque; widgets that animate pass their own duration.
+    style.animation_time = 0.0;
     style.spacing.item_spacing = vec2(12.0, 10.0);
     style.spacing.window_margin = egui::Margin::same(14.0);
     style.spacing.button_padding = vec2(11.0, 7.0);
     style.spacing.interact_size.y = 30.0;
+    // Room between a checkbox or radio glyph and its label.
+    style.spacing.icon_spacing = 8.0;
+    // Plain hover tooltips wrap at a readable measure, never at a word.
+    style.spacing.tooltip_width = 420.0;
+    // A field hint shows after a short rest of the pointer, not half a second.
+    style.interaction.tooltip_delay = 0.2;
     // Floating bars cover card strokes and the trailing part of input rows.
     // A solid bar reserves its own lane and leaves every card edge intact.
     style.spacing.scroll = egui::style::ScrollStyle::solid();
@@ -417,7 +412,7 @@ pub fn apply_theme(theme: AppTheme, ctx: &Context) {
     style.spacing.scroll.bar_outer_margin = 1.0;
     style
         .text_styles
-        .insert(TextStyle::Body, FontId::proportional(15.5));
+        .insert(TextStyle::Body, FontId::proportional(space::BODY_TEXT));
     style
         .text_styles
         .insert(TextStyle::Button, FontId::proportional(14.0));
@@ -475,6 +470,20 @@ fn install_engineering_fonts(ctx: &Context) {
         ],
     );
     ctx.set_fonts(fonts);
+}
+
+/// Style `ui` so selectable buttons added next form one segmented control:
+/// every segment (selected or not) has a filled, outlined body and the gap
+/// between segments is tight.
+pub fn segmented_style(ui: &mut Ui) {
+    let visuals = ui.visuals().clone();
+    let style = ui.style_mut();
+    style.spacing.item_spacing.x = 2.0;
+    let fill = visuals.faint_bg_color;
+    let stroke = visuals.widgets.noninteractive.bg_stroke;
+    style.visuals.widgets.inactive.weak_bg_fill = fill;
+    style.visuals.widgets.inactive.bg_fill = fill;
+    style.visuals.widgets.inactive.bg_stroke = stroke;
 }
 
 #[cfg(test)]

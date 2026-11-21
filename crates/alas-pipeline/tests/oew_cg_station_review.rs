@@ -90,6 +90,13 @@ fn empty_aircraft_stations_respect_the_systems_band_and_ground_equilibrium() {
         )
         .unwrap();
         let nose_x = stations.nose_gear.position_m[0];
+        let crew_x = stations
+            .flight_crew
+            .map_or(0.05 * design.fuselage_length_m, |crew| crew.position_m[0]);
+        assert!(
+            crew_x >= 1.5,
+            "{name}: flight crew at {crew_x} m from the nose"
+        );
         // The envelope reports its contact support in the airplane MAC
         // frame; a gear mass centroid is not the reaction reference point.
         let frame = report.airplane.mac_frame().expect("airplane MAC frame");

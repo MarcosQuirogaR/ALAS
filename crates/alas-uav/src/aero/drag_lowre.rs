@@ -1,8 +1,7 @@
 // SPDX-License-Identifier: AGPL-3.0-or-later
 // Copyright (C) 2026 Marcos Quiroga Rodriguez
 
-//! Low-Reynolds parasite drag build-up for the non-wing components
-//! (UAV-PLAN 3.1 item 5).  The transport path is NOT used: it assumes fully
+//! Low-Reynolds parasite drag build-up for the non-wing components.  The transport path is NOT used: it assumes fully
 //! turbulent skin friction and carries a Mach-dependent form factor that falls
 //! below 1 at UAV Mach (aero-drag finding DRG-07).
 //!

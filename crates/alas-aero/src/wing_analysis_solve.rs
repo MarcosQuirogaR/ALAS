@@ -34,7 +34,10 @@ const EMPENNAGE: [&str; 2] = ["Horizontal Stabilizer", "Vertical Stabilizer"];
 
 /// Lift-target iteration limit and its closure tolerance in lift coefficient.
 const LIFT_TARGET_ITERATIONS: usize = 8;
-const LIFT_TARGET_TOLERANCE: f64 = 1.0e-6;
+pub(super) const LIFT_TARGET_TOLERANCE: f64 = 1.0e-6;
+/// Largest lift-coefficient miss of the last iterate that is still reported
+/// as an angle for the target; such an angle is marked as not closed.
+const LIFT_TARGET_ACCEPTANCE: f64 = 1.0e-3;
 
 /// One analysable configuration: the selected surfaces with their reference
 /// quantities and the moment reference the lattice resolves moments about.
@@ -213,10 +216,11 @@ pub fn analyse(
         Ok((result, point, resolved))
     };
 
-    let (alpha_deg, from_target) = match inputs.condition.attitude {
-        AttitudeInput::AngleOfAttack(value) => (value, false),
+    let (alpha_deg, from_target, lift_target_residual) = match inputs.condition.attitude {
+        AttitudeInput::AngleOfAttack(value) => (value, false, None),
         AttitudeInput::LiftCoefficient(target) => {
-            (solve_for_lift(target, &solve_at, cancelled)?, true)
+            let (angle, residual) = solve_for_lift(target, &solve_at, cancelled)?;
+            (angle, true, Some(residual))
         }
     };
     if cancelled() {
@@ -272,6 +276,7 @@ pub fn analyse(
         stability,
         diagnostics: diagnostics(&result.solve_diagnostics, system.panel_count(), inputs),
         alpha_from_lift_target: from_target,
+        lift_target_residual,
     })
 }
 
@@ -287,11 +292,16 @@ fn span_efficiency(cl: f64, cd_induced: f64, aspect_ratio: f64) -> Option<f64> {
     value.is_finite().then_some(value)
 }
 
-/// The angle of attack that reaches `target` lift coefficient.
+/// The angle of attack that reaches `target` lift coefficient, and the
+/// lift-coefficient miss `|CL - target|` it was accepted with.
 ///
 /// The lattice is close to linear in angle but not exactly so: the freestream
 /// direction rotates with the angle, so this is a secant iteration seeded
-/// from two probe angles rather than a single division by a slope.
+/// from two probe angles rather than a single division by a slope. An
+/// iteration that ends on its limit returns its last angle when that misses
+/// the target by no more than [`LIFT_TARGET_ACCEPTANCE`]; the returned miss
+/// is then above [`LIFT_TARGET_TOLERANCE`], which is how a caller tells a
+/// closed solve from an accepted last iterate.
 fn solve_for_lift(
     target: f64,
     solve_at: &dyn Fn(
@@ -299,7 +309,7 @@ fn solve_for_lift(
     )
         -> Result<(VlmResult, OperatingPoint, ResolvedCondition), WingAnalysisError>,
     cancelled: &dyn Fn() -> bool,
-) -> Result<f64, WingAnalysisError> {
+) -> Result<(f64, f64), WingAnalysisError> {
     let mut low_angle = 0.0;
     let mut low_lift = solve_at(low_angle)?.0.cl_lift;
     let mut high_angle = 2.0;
@@ -322,11 +332,11 @@ fn solve_for_lift(
         high_angle = next_angle;
         high_lift = next_lift;
         if (high_lift - target).abs() <= LIFT_TARGET_TOLERANCE {
-            return Ok(high_angle);
+            return Ok((high_angle, (high_lift - target).abs()));
         }
     }
-    if (high_lift - target).abs() <= 1.0e-3 {
-        Ok(high_angle)
+    if (high_lift - target).abs() <= LIFT_TARGET_ACCEPTANCE {
+        Ok((high_angle, (high_lift - target).abs()))
     } else {
         Err(WingAnalysisError::UnreachableLift { target })
     }

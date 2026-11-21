@@ -48,7 +48,7 @@ fn output_enabled_pipeline_writes_the_cpacs35_interchange_artifact() {
     assert!(document.contains("<weightAndBalance>"));
     assert!(document.contains("<thrust00>467000</thrust00>"));
     assert!(!document.contains("<massBreakdown>"));
-    assert!(!document.contains("<toolspecific>"));
+    assert!(!document.contains("<propulsion"));
     let adapter_manifest = output.join("cpacs/adapter_manifest.json");
     assert!(adapter_manifest.is_file());
     let manifest = output.join("cpacs/run_manifest.json");

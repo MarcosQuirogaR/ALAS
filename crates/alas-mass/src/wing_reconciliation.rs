@@ -32,14 +32,18 @@ pub use support::{
     design_gross_mass_kg, primary_fits_complete_wing, structural_design_mass_kg,
     StructuralInventory,
 };
+mod sizing_cause;
+pub use sizing_cause::{
+    BoxMassComponent, ReconciliationBasis, StructuralMaterialRole, StructuralSizingCause,
+};
 
 /// Why a candidate's wing could not be reconciled.
-#[derive(Debug, Clone, Copy, PartialEq, Eq, thiserror::Error)]
+#[derive(Debug, Clone, Copy, PartialEq, thiserror::Error)]
 pub enum WingReconciliationError {
     /// The main wing could not be strength-sized, or the sized box was not a
-    /// physically admissible structure.
-    #[error("the main wing could not be strength-sized on this geometry")]
-    StructuralSizing,
+    /// physically admissible structure; the cause names the failed check.
+    #[error("the main wing could not be strength-sized on this geometry: {0}")]
+    StructuralSizing(StructuralSizingCause),
     /// The frozen reference aircraft's own mass buildup did not resolve.
     #[error("the reference aircraft's wing mass and coordinates did not resolve")]
     MassCoordinates,
@@ -119,7 +123,14 @@ pub fn reconcile_with_wing_mass(
     complete_wing_kg: f64,
 ) -> Result<WingReconciliation, WingReconciliationError> {
     let design_box = size_design_wing_box(config, design, plane)?;
-    reconcile_with_design_box(config, plane, reference, complete_wing_kg, design_box)
+    reconcile_with_design_box(
+        config,
+        design,
+        plane,
+        reference,
+        complete_wing_kg,
+        design_box,
+    )
 }
 
 /// [`reconcile_with_wing_mass`] for a box the caller already sized with
@@ -130,13 +141,14 @@ pub fn reconcile_with_wing_mass(
 /// The reference errors of [`reconcile`]; the sizing has already succeeded.
 pub fn reconcile_with_design_box(
     config: &AlasConfig,
+    design: &DesignVector,
     plane: &Airplane,
     reference: Option<ReferenceWingMass>,
     complete_wing_kg: f64,
     design_box: DesignWingBox,
 ) -> Result<WingReconciliation, WingReconciliationError> {
     let (feedback, reference, inventory, primary_declaration) =
-        reconcile_structural_wing(config, plane, reference, design_box)?;
+        reconcile_structural_wing(config, design, plane, reference, design_box)?;
     let inventory =
         inventory.checked_against_current_wing(feedback.primary_mass_kg, complete_wing_kg);
     Ok(WingReconciliation {
@@ -150,10 +162,12 @@ pub fn reconcile_with_design_box(
 mod geometry;
 mod ground_droop;
 mod non_optimum;
+mod tail_flexibility;
 pub use ground_droop::{
-    complete_wing_mass_kg, one_g_tip_rise_m, support_station_m, wing_ground_deflection,
-    GroundCondition, WingGroundResponse,
+    complete_wing_mass_kg, one_g_tip_rise_m, support_station_m, wing_box_stiffness,
+    wing_ground_deflection, GroundCondition, WingBoxStiffness, WingGroundResponse,
 };
+pub use tail_flexibility::{tail_flexibility, TailFlexibilityTable};
 mod reconcile;
 use reconcile::reconcile_structural_wing;
 pub use reconcile::{

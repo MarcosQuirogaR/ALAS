@@ -53,7 +53,7 @@ fn aerodynamic_stations(config: &AlasConfig, design: &DesignVector) -> [(f64, f6
 }
 
 /// The evaluated design's wing-proper semi-span: the design-vector span includes the sharklet
-/// reach on both sides for the A320 (`span_includes_device`, geometry phase 1), the box spans the
+/// reach on both sides for the A320 (`span_includes_device`), the box spans the
 /// planar wing.
 fn wing_semi_span_m(config: &AlasConfig, design: &DesignVector) -> f64 {
     config
@@ -147,7 +147,7 @@ fn nastran_deck_spans_the_evaluated_semi_span() {
         }
     }
     assert!(nodes > 100, "the deck has {nodes} grids");
-    // Re-pinned 2026-10-16 by probe (fix-beam-vs-fe, boxed product deck): the
+    // The
     // product deck keeps only the box between the outermost spars and drops
     // grids no element uses, so its outermost grid is the last box rib, not the
     // leading/trailing-edge grids of the geometric tip. Resized A320: 19.798 m

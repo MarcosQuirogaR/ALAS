@@ -13,6 +13,17 @@
 //! level with a 300 ft/min residual climb and step up as the aircraft
 //! lightens; this module flies that rule. The level choice depends on mass
 //! only, so a longer route (heavier start) never flies higher.
+//!
+//! Every planned level is a legal flight level: the initial level is the
+//! highest level of the ICAO table of cruising levels at or below both the
+//! configured level and the aircraft's capability (300 ft/min residual
+//! climb, 1.3 g to buffet onset, maximum-cruise thrust), and each step climb
+//! goes to the next level of the same direction of flight
+//! ([`legal_level_at_or_below_m`], [`next_same_direction_level_m`]). A step
+//! is taken where the next level qualifies and its specific air range is the
+//! higher one ([`step_climb_due`]). The same rule applies to every aircraft
+//! and every mission flown under the `OptimumStep` policy: the sizing
+//! closure's design mission, the payload-range corners and the route.
 
 use alas_mass::fuel_plan::FuelModelError;
 use alas_prop::system::PropulsionRating;
@@ -21,6 +32,15 @@ use alas_units::FOOT;
 use super::integrate::FlyError;
 use super::profile::{LegKind, ProfileGeometry, ProfilePlan, Segment, SegmentKind};
 use super::{deck_error, SegmentMissionModel};
+
+#[path = "flight_levels.rs"]
+mod flight_levels;
+
+#[cfg(test)]
+pub(super) use self::flight_levels::legal_level_spacing_m;
+pub(super) use self::flight_levels::{
+    configured_level_m, legal_level_at_or_below_m, next_same_direction_level_m, step_climb_due,
+};
 
 /// Minimum residual rate of climb at maximum-climb thrust that qualifies a
 /// cruise level, 300 ft/min in m/s. This is the thrust-limited "maximum
@@ -45,12 +65,21 @@ pub(crate) struct ClimbPoint {
     pub(crate) tas_m_s: f64,
 }
 
-/// Resolution of the initial-level search before the margin's zero is
-/// interpolated, m. The level is *not* rounded to a flight level: a 1,000 ft
-/// grid makes trip fuel jump with mass, and any jump can give the dispatch
-/// closure more than one root (measured with mass-dependent step climbs: two
-/// equivalent sizing modes of the B787-9 closed 30 kg apart), so the
-/// ceiling-limited level is kept continuous.
+/// Resolution of the capability search before the margin's zero is
+/// interpolated, m. The capability itself (the initial cruise altitude
+/// capability a datasheet quotes) stays continuous; the level a trip is
+/// *planned* at is the legal flight level at or below it
+/// ([`legal_level_at_or_below_m`]), so trip fuel is a step function of the
+/// planning mass: a heavier start can plan one level lower and burn more.
+/// A closure flying a plan frozen once at one mass (`frozen_plan`) does not
+/// see the step inside its solve, but a re-freeze that lands on another
+/// level does (the held-plan `SizingMapJump` of the sizing map), and so do
+/// the trips no plan covers: diversion legs and the unfrozen fallback of a
+/// re-freeze that cannot be made. The jump in fuel is upward with mass, so
+/// a dispatch map with a jump has fixed points on both sides of it and its
+/// root is not unique (two equivalent sizing modes of the B787-9 once closed
+/// 30 kg apart on a 1,000 ft grid); which one a solve returns depends on its
+/// bracket.
 pub(super) const LEVEL_RESOLUTION_M: f64 = 1.0;
 
 /// Spacing of the downward scan for the highest qualifying altitude, m: one
@@ -58,13 +87,6 @@ pub(super) const LEVEL_RESOLUTION_M: f64 = 1.0;
 /// A qualifying band thinner than a flight level between two failing grid
 /// altitudes is not a level that could be filed, so the scan may pass it.
 pub(super) const LEVEL_SCAN_STEP_M: f64 = 1_000.0 * FOOT;
-
-/// Same-direction level separation used for step climbs: 2,000 ft up to
-/// FL410 inside RVSM airspace and 4,000 ft above it (ICAO Annex 2, App. 3,
-/// table of cruising levels, RVSM and non-RVSM columns).
-const RVSM_STEP_M: f64 = 2_000.0 * FOOT;
-const ABOVE_RVSM_STEP_M: f64 = 4_000.0 * FOOT;
-const RVSM_CEILING_M: f64 = 41_000.0 * FOOT;
 
 /// Brake-release to top-of-climb mass ratio used to estimate the mass the
 /// initial level must be held at, 0.985: Raymer, "Aircraft Design: A
@@ -116,13 +138,12 @@ pub(super) struct CruiseOutcome {
     pub cruise_flown_m: f64,
 }
 
-/// The step separation above `altitude_m`.
-fn step_increment_m(altitude_m: f64) -> f64 {
-    if altitude_m + RVSM_STEP_M <= RVSM_CEILING_M + CRUISE_EPSILON_M {
-        RVSM_STEP_M
-    } else {
-        ABOVE_RVSM_STEP_M
-    }
+/// The step separation above `altitude_m`, m: the climb to
+/// [`next_same_direction_level_m`] (read by the tests; the planner and the
+/// frozen plan step to the level itself).
+#[cfg(test)]
+pub(super) fn step_increment_m(altitude_m: f64) -> f64 {
+    next_same_direction_level_m(altitude_m) - altitude_m
 }
 
 impl ProfilePlan {
@@ -170,8 +191,9 @@ impl ProfileGeometry<'_> {
         let scale = plan.envelope_scale;
         let mut levels = Vec::new();
         let mut altitude_m = plan.cruise_altitude_m;
+        let cap_m = configured_level_m(cap_m);
         loop {
-            let next_m = altitude_m + step_increment_m(altitude_m);
+            let next_m = next_same_direction_level_m(altitude_m);
             if next_m > cap_m + CRUISE_EPSILON_M {
                 return Ok(levels);
             }
@@ -209,7 +231,7 @@ impl SegmentMissionModel {
     /// [RESIDUAL_CLIMB_M_S] ([`Self::plan_residual_climb_m_s`]).
     ///
     /// The plan's cruise speed below the configured level is not the
-    /// constant-Mach speed: the rung is capped at `VC = VD / 1.25` in
+    /// constant-Mach speed: the rung is capped at VMO or the CS 25.335(b) VC in
     /// equivalent airspeed (or holds the equivalent airspeed without a
     /// declared `VD`), so a short route flown at a low operational level
     /// cruises far slower than `M a(h)`, and judging the criterion at
@@ -257,7 +279,7 @@ impl SegmentMissionModel {
         )
         .ok_or_else(|| {
             format!(
-                "no top-of-climb state at {altitude_m:.0} m for a {:.0} nmi trip: the plan does                  not fit or the deck or drag rejects it",
+                "no top-of-climb state at {altitude_m:.0} m for a {:.0} nmi trip: the plan does not fit or the deck or drag rejects it",
                 range_m / 1_852.0
             )
         })
@@ -281,7 +303,7 @@ impl SegmentMissionModel {
             .map(|point| point.rate_m_s)
     }
 
-    fn plan_residual_climb_point(
+    pub(super) fn plan_residual_climb_point(
         &self,
         geometry: &ProfileGeometry<'_>,
         leg: LegKind,
@@ -355,19 +377,23 @@ impl SegmentMissionModel {
     }
 
     /// Whether level flight at `altitude_m`, `tas_m_s` keeps the residual
-    /// climb margin at `mass_kg`. A deck or polar rejection is a no.
+    /// climb margin at `mass_kg` and lies under the thrust and buffet
+    /// ceilings. A deck or polar rejection is a no.
     pub(super) fn level_qualifies(&self, mass_kg: f64, altitude_m: f64, tas_m_s: f64) -> bool {
         self.residual_climb_m_s(mass_kg, altitude_m, tas_m_s)
             .is_ok_and(|rate| rate >= RESIDUAL_CLIMB_M_S)
             && self
                 .cruise_ceiling_assessment(mass_kg, altitude_m, tas_m_s)
                 .is_ok_and(|assessment| assessment.is_none_or(|a| a.flyable()))
+            && self.buffet_margin_m_s(mass_kg, altitude_m, tas_m_s) >= 0.0
     }
 
-    /// The initial cruise level for a leg from `mass_kg`: `cap_m` itself if
-    /// it qualifies at the estimated top-of-climb mass, otherwise the highest
-    /// altitude below it that does; the floor of the geometry when none does
-    /// (the integration then reports the typed shortfall).
+    /// The initial cruise level for a leg from `mass_kg`: the legal flight
+    /// level ([`legal_level_at_or_below_m`]) at or below the highest altitude
+    /// up to `cap_m` that qualifies at the estimated top-of-climb mass, i.e.
+    /// `min(configured, capability)` rounded down to a legal level; the
+    /// floor of the geometry when none qualifies (the integration then
+    /// reports the typed shortfall) or no legal level lies above the floor.
     ///
     /// The residual climb is not monotone in altitude: below the Mach
     /// crossover the cruise speed rises with altitude at the operating
@@ -389,6 +415,9 @@ impl SegmentMissionModel {
         cap_m: f64,
     ) -> f64 {
         let toc_mass_kg = mass_kg * CLIMB_MASS_FRACTION;
+        // A cap stored in rounded metres names a flight level (5,180 m is
+        // FL170): read it as that level before the legal level below it.
+        let cap_m = configured_level_m(cap_m);
         let floor_m = geometry.floor_cruise_m(leg).min(cap_m);
         // Residual-climb margin over the criterion, m/s, at the cruise speed
         // and at the speed the top climb rung arrives at (a calibrated
@@ -404,37 +433,58 @@ impl SegmentMissionModel {
                 .zip(ceiling)
                 .map_or(f64::NEG_INFINITY, |(climb, ceiling)| climb.min(ceiling))
         };
-        let mut high = (cap_m, margin(cap_m));
-        if high.1 >= 0.0 {
-            return cap_m;
+        let capability_m = highest_qualifying_m(floor_m, cap_m, &margin);
+        // The legal level below the capability; where the margin dips under
+        // the crossover a legal level may not qualify, so the next legal
+        // level down is tried until one does (the qualifying set still
+        // shrinks with mass, so the level never rises with it).
+        let mut level_m = legal_level_at_or_below_m(capability_m);
+        while level_m > floor_m && margin(level_m) < 0.0 {
+            level_m = legal_level_at_or_below_m(level_m - 1.0);
         }
-        // Highest qualifying grid altitude, scanning down from the cap.
-        let mut low = loop {
-            let below_m = (high.0 - LEVEL_SCAN_STEP_M).max(floor_m);
-            let below = (below_m, margin(below_m));
-            if below.1 >= 0.0 {
-                break below;
-            }
-            if below_m <= floor_m {
-                return floor_m;
-            }
-            high = below;
-        };
-        while high.0 - low.0 > LEVEL_RESOLUTION_M {
-            let middle_m = 0.5 * (low.0 + high.0);
-            let middle = (middle_m, margin(middle_m));
-            if middle.1 >= 0.0 {
-                low = middle;
-            } else {
-                high = middle;
-            }
+        level_m.max(floor_m)
+    }
+}
+
+/// The highest altitude in `[floor_m, cap_m]` whose `margin` is not negative:
+/// `cap_m` when it qualifies, else the zero of the margin inside the highest
+/// qualifying flight-level interval below it, `floor_m` when none qualifies
+/// (the scan of [`SegmentMissionModel::initial_cruise_level_m`]).
+pub(super) fn highest_qualifying_m(
+    floor_m: f64,
+    cap_m: f64,
+    mut margin: impl FnMut(f64) -> f64,
+) -> f64 {
+    let mut high = (cap_m, margin(cap_m));
+    if high.1 >= 0.0 {
+        return cap_m;
+    }
+    // Highest qualifying grid altitude, scanning down from the cap.
+    let mut low = loop {
+        let below_m = (high.0 - LEVEL_SCAN_STEP_M).max(floor_m);
+        let below = (below_m, margin(below_m));
+        if below.1 >= 0.0 {
+            break below;
         }
-        // Interpolate the zero of the margin inside the final bracket, so the
-        // level is a continuous function of mass within a grid interval.
-        if high.1.is_finite() {
-            low.0 + (high.0 - low.0) * low.1 / (low.1 - high.1)
+        if below_m <= floor_m {
+            return floor_m;
+        }
+        high = below;
+    };
+    while high.0 - low.0 > LEVEL_RESOLUTION_M {
+        let middle_m = 0.5 * (low.0 + high.0);
+        let middle = (middle_m, margin(middle_m));
+        if middle.1 >= 0.0 {
+            low = middle;
         } else {
-            low.0
+            high = middle;
         }
+    }
+    // Interpolate the zero of the margin inside the final bracket, so the
+    // level is a continuous function of mass within a grid interval.
+    if high.1.is_finite() {
+        low.0 + (high.0 - low.0) * low.1 / (low.1 - high.1)
+    } else {
+        low.0
     }
 }

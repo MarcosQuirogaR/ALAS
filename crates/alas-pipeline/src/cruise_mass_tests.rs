@@ -15,6 +15,7 @@ fn polar_from(cl: Vec<f64>, cd: Vec<f64>) -> PolarSweep {
     PolarSweep {
         alpha_deg: (0..n).map(|i| i as f64).collect(),
         geometric_alpha_deg: vec![0.0; n],
+        compressible_mach: None,
         cd_induced: vec![0.0; n],
         cd_wave: vec![0.0; n],
         cd_parasite: vec![0.0; n],
@@ -71,16 +72,16 @@ fn no_or_negative_fuel_cruises_at_the_takeoff_mass() {
 #[test]
 fn interpolation_reproduces_the_polar_inside_its_range() {
     let polar = parabolic_polar(0.02, 0.04);
+    // The sweep is exactly parabolic, so the bracket's parabola through three
+    // samples reproduces CD between them; a straight line
+    // would overstate it by k * (0.025 / 2)^2 * 2 at the midpoint.
+    let cd = polar_cd_at_cl(&polar, 0.51, 0.5).unwrap();
+    assert!((cd.value - (0.02 + 0.04 * 0.51 * 0.51)).abs() < 1e-12);
+    assert!(!cd.clamped);
     let lookup = polar_l_over_d_at_cl(&polar, 0.51, 0.5).unwrap();
-    // Linear between the 0.500 and 0.525 samples.
-    let (a, b) = (
-        parabolic_ld(0.02, 0.04, 0.5),
-        parabolic_ld(0.02, 0.04, 0.525),
-    );
-    assert!((lookup.value - (a + (b - a) * 0.4)).abs() < 1e-12);
-    assert!(!lookup.clamped);
-    let cd = polar_cd_at_cl(&polar, 0.5, 0.5).unwrap();
-    assert!((cd.value - (0.02 + 0.04 * 0.25)).abs() < 1e-15);
+    assert!((lookup.value / parabolic_ld(0.02, 0.04, 0.51) - 1.0).abs() < 1e-5);
+    let cd_at_node = polar_cd_at_cl(&polar, 0.5, 0.5).unwrap();
+    assert!((cd_at_node.value - (0.02 + 0.04 * 0.25)).abs() < 1e-15);
     assert!(polar_l_over_d_at_cl(&polar, f64::NAN, 0.5).is_none());
 }
 
@@ -104,13 +105,35 @@ fn a_non_monotonic_polar_uses_the_bracket_nearest_the_anchor() {
     let cl = vec![0.4, 0.8, 1.0, 0.8, 0.6];
     let cd = vec![0.4 / 20.0, 0.8 / 20.0, 1.0 / 10.0, 0.8 / 5.0, 0.6 / 4.0];
     let polar = polar_from(cl, cd);
+    // CD is interpolated by the parabola through the bracket and its outer
+    // neighbour (A1H m1), and L/D is cl / CD.
+    let lagrange = |pts: [(f64, f64); 3], x: f64| -> f64 {
+        (0..3)
+            .map(|i| {
+                let w: f64 = (0..3)
+                    .filter(|&j| j != i)
+                    .map(|j| (x - pts[j].0) / (pts[i].0 - pts[j].0))
+                    .product();
+                pts[i].1 * w
+            })
+            .sum()
+    };
     let attached = polar_l_over_d_at_cl(&polar, 0.7, 0.5).unwrap();
-    assert!((attached.value - 20.0).abs() < 1e-12, "{attached:?}");
-    let stalled = polar_l_over_d_at_cl(&polar, 0.7, 0.62).unwrap();
+    let cd_attached = lagrange([(0.4, 0.02), (0.8, 0.04), (1.0, 0.1)], 0.7);
     assert!(
-        (stalled.value - (4.0 + (5.0 - 4.0) * 0.5)).abs() < 1e-12,
+        (attached.value - 0.7 / cd_attached).abs() < 1e-12,
+        "{attached:?}"
+    );
+    let stalled = polar_l_over_d_at_cl(&polar, 0.7, 0.62).unwrap();
+    // The post-stall bracket is the last in the sweep, so it has no outer
+    // neighbour and keeps the straight line in CD.
+    let cd_stalled = 0.5 * (0.16 + 0.15);
+    assert!(
+        (stalled.value - 0.7 / cd_stalled).abs() < 1e-12,
         "{stalled:?}"
     );
+    // The two branches are still told apart.
+    assert!(attached.value > 1.5 * stalled.value);
     // Above the CL peak is out of range, clamped to the peak point.
     let above = polar_l_over_d_at_cl(&polar, 1.1, 0.5).unwrap();
     assert!(above.clamped && (above.value - 10.0).abs() < 1e-12);

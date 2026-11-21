@@ -401,7 +401,7 @@ pub fn figure_cabin_section(cabin: &CabinScene, theme: Option<&str>) -> Scene {
         draw_cargo(&mut scene, map, item, &ink);
     }
     for deck in &slice.decks {
-        draw_deck(&mut scene, map, deck, &ink);
+        draw_deck(&mut scene, map, deck, slice.liner.as_ref(), extent[0], &ink);
     }
     for window in &slice.windows {
         draw_window(&mut scene, map, window, slice.windows_projected, &ink);

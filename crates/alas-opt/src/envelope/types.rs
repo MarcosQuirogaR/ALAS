@@ -59,9 +59,14 @@ impl ModelCgLoadingState {
 /// state represents:
 /// - OEW and loading steps: ground only ([`Self::GROUND`]);
 /// - zero-fuel, mid-mission and reserve: landing trim forward, static-margin
-///   floor aft ([`Self::FLIGHT`]);
+///   floor aft ([`Self::FLIGHT`]); heavier than the design maximum landing
+///   mass, the static-margin floor aft alone ([`Self::EN_ROUTE_ABOVE_MLW`],
+///   see [`Self::for_state_at_mass`]);
 /// - takeoff: rotation forward, static-margin floor aft ([`Self::TAKEOFF`]);
 /// - landing: landing trim forward, static-margin floor aft ([`Self::LANDING`]).
+///
+/// Rotation (nose-wheel lift-off) is a ground take-off event: it bounds the
+/// take-off state alone, at that state's own mass and thrust.
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
 pub struct PhaseLimits {
     /// The nose-wheel liftoff (rotation) forward boundary applies.
@@ -70,6 +75,9 @@ pub struct PhaseLimits {
     pub landing_trim: bool,
     /// The static-margin floor (aerodynamic aft boundary) applies.
     pub static_margin: bool,
+    /// The clean climb-trim forward boundary (CS 25.161(c)(1), flaps
+    /// retracted) applies: every airborne state.
+    pub clean_trim: bool,
 }
 
 impl PhaseLimits {
@@ -78,18 +86,21 @@ impl PhaseLimits {
         rotation: false,
         landing_trim: false,
         static_margin: false,
+        clean_trim: false,
     };
     /// Takeoff: rotation forward and the static-margin floor aft.
     pub const TAKEOFF: Self = Self {
         rotation: true,
         landing_trim: false,
         static_margin: true,
+        clean_trim: true,
     };
     /// En-route flight: landing trim forward and the static-margin floor aft.
     pub const FLIGHT: Self = Self {
         rotation: false,
         landing_trim: true,
         static_margin: true,
+        clean_trim: true,
     };
     /// Landing: landing trim forward and the static-margin floor aft, since
     /// the approach is flown.
@@ -97,6 +108,17 @@ impl PhaseLimits {
         rotation: false,
         landing_trim: true,
         static_margin: true,
+        clean_trim: true,
+    };
+    /// En-route flight heavier than the maximum landing mass: the
+    /// static-margin floor aft and no landing or take-off forward mechanism.
+    /// The state cannot land (no landing trim) and is not on its take-off run
+    /// (no rotation); it is airborne, so the clean climb trim applies.
+    pub const EN_ROUTE_ABOVE_MLW: Self = Self {
+        rotation: false,
+        landing_trim: false,
+        static_margin: true,
+        clean_trim: true,
     };
 
     /// The mechanisms that apply to `state`.
@@ -109,6 +131,44 @@ impl PhaseLimits {
             | ModelCgLoadingState::OperationalReserve => Self::FLIGHT,
             ModelCgLoadingState::AnalyzedTakeoff => Self::TAKEOFF,
             ModelCgLoadingState::AnalyzedLanding => Self::LANDING,
+        }
+    }
+
+    /// The limits that bound `state` at `mass_kg`, against the maximum landing
+    /// mass `design_landing_mass_kg` (the declared MLW where there is one, see
+    /// [`ModelCgEnvelopeAssessment::design_landing_mass_kg`], so an analysed
+    /// landing state's presence moves no other state's scoping).
+    ///
+    /// The landing-trim boundary (Torenbeek eq. 6.2) is a landing condition.
+    /// An en-route state (zero fuel, mid-mission, reserve) at or below the MLW
+    /// may land and keeps it ([`Self::FLIGHT`]); one heavier than the MLW
+    /// cannot land, so it drops landing trim and stays bounded by its own
+    /// in-flight static-margin floor and the ground mechanisms at its own mass
+    /// ([`Self::EN_ROUTE_ABOVE_MLW`]). It gains no rotation boundary: rotation
+    /// is a ground take-off event and bounds the take-off state alone. The
+    /// OEW, take-off and landing states keep [`Self::for_state`] at any mass;
+    /// the analysed landing state is the landing flown.
+    ///
+    /// This scopes the limits only; which constraints a state carries is
+    /// still [`Self::for_state`] (`constraints::assess_loading_constraints`),
+    /// so an en-route state above the MLW keeps its forward-limit and
+    /// usable-range rows, gated against this scope's forward boundary.
+    #[must_use]
+    pub fn for_state_at_mass(
+        state: ModelCgLoadingState,
+        mass_kg: f64,
+        design_landing_mass_kg: f64,
+    ) -> Self {
+        let en_route = matches!(
+            state,
+            ModelCgLoadingState::AnalyzedZeroFuel
+                | ModelCgLoadingState::OperationalMidMission
+                | ModelCgLoadingState::OperationalReserve
+        );
+        if en_route && mass_kg > design_landing_mass_kg * (1.0 + 1e-9) {
+            Self::EN_ROUTE_ABOVE_MLW
+        } else {
+            Self::for_state(state)
         }
     }
 
@@ -142,14 +202,24 @@ impl PhaseLimits {
 pub struct ModelCgLoadingAssessment {
     /// Loading state identifier.
     pub state: ModelCgLoadingState,
+    /// The mechanisms [`Self::physical_limits`] is scoped to: this state's
+    /// phase at its mass ([`PhaseLimits::for_state_at_mass`]).
+    pub scope: PhaseLimits,
     /// Total mass in this state, in kilograms.
     pub mass_kg: f64,
     /// Longitudinal center of gravity from the model aircraft nose, in meters.
     pub cg_x_m: f64,
+    /// CG height above the ground plane at this state, m: the height the
+    /// state's tip-back limit station and angle are evaluated with.
+    pub h_cg_m: f64,
     /// Center of gravity in the built aerodynamic model's MAC frame.
     pub cg_pct_mac: f64,
     /// Static margin from the common modeled neutral point.
     pub static_margin: f64,
+    /// Static margin from the critical (most-forward) neutral point across the
+    /// clean, high-lift and elastic conditions: the quantity
+    /// [`ModelCgConstraint::StaticStabilityFloor`] gates on.
+    pub critical_static_margin: f64,
     /// Nose-gear reaction divided by this loading state's total weight.
     pub nose_gear_load_fraction: f64,
     /// Whether this state's ground reactions are inside the validity domain
@@ -171,7 +241,7 @@ pub struct ModelCgLoadingAssessment {
     /// This state's physical aft/forward CG boundaries and which mechanism
     /// governs each: weight/`h_cg` dependent, so reported per state rather
     /// than once for the design. The governing limits are scoped to this
-    /// state's phase ([`PhaseLimits::for_state`], see
+    /// state's phase at its mass ([`PhaseLimits::for_state_at_mass`], see
     /// [`PhysicalCgLimits::scoped`]); every mechanism's own boundary is still
     /// reported in the diagnostic fields.
     pub physical_limits: PhysicalCgLimits,
@@ -265,6 +335,12 @@ impl AftCgLimitGovernance {
 pub struct ModelCgEnvelopeAssessment {
     /// Loading states evaluated by the model.
     pub loading_states: Vec<ModelCgLoadingAssessment>,
+    /// The maximum landing mass, kg, that scopes every state and sets the
+    /// landing-trim speeds: `AlasConfig::landing_mass_limit_kg` at the
+    /// candidate MTOW (`requirements.mtow_kg`), the same MLW the mass model uses.
+    pub design_landing_mass_kg: f64,
+    /// Mean aerodynamic chord every `% MAC` quantity here is referred to, m.
+    pub mac_m: f64,
     /// Hard longitudinal-stability floor, as a fraction of MAC.
     pub minimum_physical_static_margin: f64,
     /// Aft aerodynamic boundary: the critical (most-forward) neutral point
@@ -284,7 +360,16 @@ pub struct ModelCgEnvelopeAssessment {
     pub configured_forward_limit_pct_mac: f64,
     /// Diagnostic only: the maximum-nose-load-handling forward boundary.
     pub max_nose_load_fwd_limit_pct_mac: f64,
-    /// Diagnostic only: the scissor-plot forward boundary estimate.
+    /// The landing-trim forward boundary, % MAC: the approach trim at
+    /// `1.23 V_SR0` with the stabiliser at its stop (and the flare) when the
+    /// airplane has a landing authority, else Torenbeek's eq. 6.2. It is the
+    /// landing law that governs; [`Self::configured_forward_limit_pct_mac`]
+    /// is the most aft of it, the rotation and the maximum nose load.
+    pub landing_trim_fwd_limit_pct_mac: f64,
+    /// Diagnostic only, reported beside the governing landing law: Torenbeek's
+    /// design rule, eq. 6.2 at `C_L,max,land` with `C_L,h = -0.80`
+    /// (*Advanced Aircraft Design*, Wiley, 2013, sec. 6.3.3, pp. 166-168).
+    /// Never a limit.
     pub scissor_plot_fwd_limit_pct_mac: f64,
     /// Effective main-gear longitudinal station in the built model's own MAC
     /// frame, % MAC; `NaN` when no station could be placed.
@@ -311,14 +396,38 @@ pub struct ModelCgEnvelopeAssessment {
     /// True when the sized nose/main tire is under-rated,
     /// declared basis or not.
     pub tire_overloaded: bool,
+    /// Weight the gear was sized at, `max(MRW, takeoff mass)`, kg.
+    pub gear_design_weight_kg: f64,
+    /// Total main-gear static reaction the gear was sized for, kg: the design
+    /// weight less the nose reaction at the ground aft design CG, which is
+    /// held at or above the minimum static nose share (so never above the
+    /// design weight).
+    pub gear_design_main_reaction_kg: f64,
+    /// True when the design aft CG lay behind the minimum-nose-load station
+    /// and the main reaction was held at the ground limit.
+    pub gear_aero_aft_limit_pulled_back: bool,
+    /// Nose reaction of the raw moment balance at the design aft CG, before
+    /// the minimum share is applied, kg; negative when the aerodynamic aft
+    /// limit lies behind the main gear.
+    pub gear_raw_aft_nose_reaction_kg: f64,
+    /// True when the raw design aft CG is the takeoff-state CG (it lies behind
+    /// the aerodynamic aft limit), false when the aerodynamic limit governs.
+    pub gear_raw_aft_cg_is_takeoff_state: bool,
     /// Required tip-back/rotation angle, degrees: `max(min_tip_back_deg,
     /// tail_scrape_angle_deg)`.
     pub required_tip_back_deg: f64,
-    /// Fuselage lower-contour scrape angle at the main gear, degrees, when
-    /// the built geometry could place one.
+    /// Fuselage lower-contour scrape angle at the main gear, degrees, on the
+    /// static ground plane, when the built geometry could place one. The
+    /// tail-scrape gate uses the gear-extended plane instead when
+    /// `LandingGearConfig::required_rotation_basis` is gear-extended or
+    /// state-unspecified.
     pub scrape_angle_deg: Option<f64>,
     /// Soft optimizer preference, reported without governing feasibility.
     pub target_static_margin: StaticMarginPreferenceAssessment,
+    /// The take-off trim model the rotation boundary used (a trimmable
+    /// stabiliser whose setting is derived), for validation against the
+    /// production inputs.
+    pub(crate) takeoff_trim: Option<super::ths_trim::TakeoffTrimModel>,
 }
 
 impl ModelCgEnvelopeAssessment {
@@ -331,7 +440,7 @@ impl ModelCgEnvelopeAssessment {
         self.loading_states
             .iter()
             .flat_map(|state| &state.constraints)
-            .filter(|constraint| !constraint.constraint.is_diagnostic())
+            .filter(|constraint| !constraint.is_diagnostic())
             .all(|constraint| !constraint.violated)
     }
 

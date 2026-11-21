@@ -105,9 +105,28 @@ fn render_spherical_image(svg: &mut String, data: &Value) -> Result<(), String> 
     if radius <= 0.0 {
         return Err("spherical image radius must be positive".to_owned());
     }
+    // A globe zoomed past its framing must not paint over the title and colour bar around it:
+    // the silhouette carries the same viewport clip as the texture layer.
+    let clip = data
+        .get("clip")
+        .and_then(Value::as_array)
+        .filter(|rect| rect.len() == 4)
+        .and_then(|rect| {
+            let value = |index: usize| rect.get(index).and_then(Value::as_f64);
+            Some([value(0)?, value(1)?, value(2)?, value(3)?])
+        });
+    if let Some([cx, cy, cw, ch]) = clip {
+        let id = format!("globe-clip-{cx:.0}-{cy:.0}-{cw:.0}-{ch:.0}");
+        svg.push_str(&format!(
+            "  <clipPath id=\"{id}\"><rect x=\"{cx:.2}\" y=\"{cy:.2}\" width=\"{cw:.2}\" height=\"{ch:.2}\"/></clipPath><g clip-path=\"url(#{id})\">"
+        ));
+    }
     svg.push_str(&format!(
         "  <circle cx=\"{x:.2}\" cy=\"{y:.2}\" r=\"{radius:.2}\" fill=\"#08213d\"><title>Embedded Earth texture is unavailable in headless SVG; globe silhouette retained</title></circle>"
     ));
+    if clip.is_some() {
+        svg.push_str("</g>");
+    }
     Ok(())
 }
 
@@ -185,7 +204,7 @@ fn render_text(svg: &mut String, data: &Value) -> Result<(), String> {
         field_number(data, "font_size")?,
         color_hex(color)?,
         color_alpha(color)?,
-        escape_xml(text),
+        alas_units::notation::svg_runs(text, escape_xml),
     ));
     Ok(())
 }
@@ -220,7 +239,7 @@ fn render_text_block(svg: &mut String, data: &Value) -> Result<(), String> {
         svg.push_str(&format!(
             "<tspan x=\"{:.2}\" y=\"{y:.2}\">{}</tspan>",
             point_number(data, "pos", 0)?,
-            escape_xml(line),
+            alas_units::notation::svg_runs(line, escape_xml),
         ));
     }
     svg.push_str("</text>");
@@ -286,10 +305,7 @@ fn render_image(svg: &mut String, data: &Value) -> Result<(), String> {
     let y = field_number(data, "y")?;
     let width = field_number(data, "width")?;
     let height = field_number(data, "height")?;
-    let Some(href) = image_href(source) else {
-        // No Earth texture configured (ALAS_EARTH_TEXTURE): keep the plain background.
-        return Ok(());
-    };
+    let href = image_href(source);
 
     let source_rect = match data.get("source_rect") {
         None | Some(Value::Null) => None,
@@ -325,12 +341,12 @@ fn render_image(svg: &mut String, data: &Value) -> Result<(), String> {
     Ok(())
 }
 
-fn image_href(source: &str) -> Option<String> {
+fn image_href(source: &str) -> String {
     if source == "embedded://nasa-blue-marble" {
-        let bytes = crate::earth_texture::earth_texture_png()?;
-        return Some(format!("data:image/png;base64,{}", encode_base64(bytes)));
+        let bytes = include_bytes!("../../../assets/textures/earth_blue_marble.png");
+        return format!("data:image/png;base64,{}", encode_base64(bytes));
     }
-    Some(escape_xml(source))
+    escape_xml(source)
 }
 
 fn encode_base64(bytes: &[u8]) -> String {
@@ -534,6 +550,30 @@ mod tests {
 
         let svg = render_scene_svg(&scene).unwrap_or_default();
         assert!(svg.contains("viewBox=\"0.25000000 0.00000000 0.50000000 1.00000000\""));
+    }
+
+    #[test]
+    fn a_clipped_globe_silhouette_carries_its_viewport_clip() {
+        let scene = json!({
+            "width": 100.0,
+            "height": 80.0,
+            "background": null,
+            "elements": [
+                {"SphericalImage": {"source": "embedded://nasa-blue-marble",
+                    "center": [50.0, 40.0], "radius": 300.0,
+                    "camera": {"azim_deg": 0.0, "elev_deg": 0.0},
+                    "mirror_longitude": false, "clip": [10.0, 20.0, 80.0, 50.0]}}
+            ]
+        });
+        let svg = render_scene_svg(&scene).unwrap_or_default();
+        assert!(
+            svg.contains("<clipPath id=\"globe-clip-10-20-80-50\">"),
+            "{svg}"
+        );
+        assert!(
+            svg.contains("clip-path=\"url(#globe-clip-10-20-80-50)\""),
+            "{svg}"
+        );
     }
 
     #[test]

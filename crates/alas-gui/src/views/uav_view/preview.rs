@@ -1,7 +1,7 @@
 // SPDX-License-Identifier: AGPL-3.0-or-later
 // Copyright (C) 2026 Marcos Quiroga Rodriguez
 
-//! Developer-only preview of the UAV studio scene (decision D3).
+//! Developer-only preview of the UAV studio scene.
 //!
 //! Compiled only with `debug_assertions`, so a release build contains no trace
 //! of it, and drawn only below the unchanged release block of the UAV page. It
@@ -205,12 +205,11 @@ pub(super) fn dev_preview(ui: &mut Ui) {
             .clone()
     });
     ui.add_space(8.0);
-    card(ui, "UAV preview (developer build only)", None, |ui| {
-        ui.colored_label(
-            ui.visuals().warn_fg_color,
-            tr("Preview: models not yet validated for this aircraft class"),
-        );
-        match &*data {
+    card(
+        ui,
+        "UAV preview (developer build only)",
+        None,
+        |ui| match &*data {
             Err(e) => {
                 ui.colored_label(ui.visuals().error_fg_color, e);
             }
@@ -240,8 +239,8 @@ pub(super) fn dev_preview(ui: &mut Ui) {
                     ui.weak(s);
                 }
             }
-        }
-    });
+        },
+    );
 }
 
 #[cfg(test)]

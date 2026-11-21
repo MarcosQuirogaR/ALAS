@@ -57,22 +57,44 @@
 
 mod aircraft;
 mod atr72_600_schedule_fix;
+mod c295;
+mod cabin_crew;
+pub use cabin_crew::{
+    minimum_cabin_crew, minimum_cabin_crew_with_doors, CrewDeck, MAX_SEATS_WITHOUT_CABIN_CREW,
+};
 mod cabin_sources;
 mod cg_envelope;
+mod clean_lift;
+mod design_range;
+mod usable_cg_range;
+pub use design_range::{
+    design_range_criterion, grade_band, reference_grade_bands, DesignRangeCriterion, GradeBand,
+    ReferenceGrade,
+};
 mod evidence;
 mod flap_effectiveness;
 mod gear_load;
+mod high_lift_chord;
+pub use high_lift_chord::flap_extension_at;
 mod high_lift_system;
 mod landing_reference;
+mod lj60;
 mod lower_holds;
-pub use lower_holds::declared_lower_holds;
+pub use lower_holds::{declared_lower_holds, declared_lower_uld};
 mod military;
 mod mission_evidence;
+mod operating_limits;
+pub mod planform_breaks;
+pub use operating_limits::{
+    default_landing_vfe_cas_m_s, LandingVfeSource, OperatingSpeedLimits,
+    SourcedHighSpeedProtection, LANDING_FLAP_DESIGN_SPEED_PER_VS0,
+};
 mod narrowbody;
 mod reference;
 mod regional;
 mod registry;
 mod speed_schedules;
+mod tail_ice;
 mod takeoff_reference;
 #[cfg(test)]
 mod tests;
@@ -80,9 +102,9 @@ mod widebody;
 mod widebody_exits;
 
 pub use aircraft::{
-    AircraftPreset, AircraftReferenceData, AircraftVariantIdentity, CertifiedExitLayout,
-    CertifiedExitPair, OperationalMissionDefaults, SourcedPlanningCabin, SourcedSeatClass,
-    UnknownAircraftPreset,
+    AircraftClass, AircraftPreset, AircraftReferenceData, AircraftVariantIdentity,
+    CertifiedExitLayout, CertifiedExitPair, OperationalMissionDefaults, SourcedPlanningCabin,
+    SourcedSeatClass, SpeedScheduleSource, UnknownAircraftPreset,
 };
 pub use cabin_sources::{
     atr72_600_baggage_holds, ATR72_600_BAGGAGE_COMPARTMENTS, ATR72_600_EXIT_LAYOUT,
@@ -93,15 +115,21 @@ pub use cg_envelope::{
     CgEnvelopeCondition, CgEnvelopeSource, CgEnvelopeVertex, CgLimits, PlanningCgEnvelope,
     PlanningMacReference,
 };
+pub use clean_lift::{published_clean_lift, PublishedCleanLift, SLATS_IN_CLEAN_OVER_COS_SWEEP};
 pub use evidence::{
-    CgEnvelopeEvidence, DesignMissionEvidence, DesignMissionReference, MissingDesignMissionDatum,
-    MissionEvidenceApplicability, PartialDesignMissionEvidence, PartialMissionEvidenceKind,
-    PayloadRangeDesignPoint, PublishedMissionLoadCase, PublishedRange, PublishedReserveContract,
+    CgEnvelopeEvidence, DesignMissionEvidence, DesignMissionReference, DesignPointCruise,
+    DesignPointReserve, MissingDesignMissionDatum, MissionEvidenceApplicability,
+    PartialDesignMissionEvidence, PartialMissionEvidenceKind, PayloadRangeDesignPoint,
+    PublishedMissionLoadCase, PublishedRange, PublishedReserveContract,
 };
 pub use gear_load::{AftCgNoseLoadPoint, PublishedAftCgNoseLoad};
+pub use high_lift_chord::{slat_declaration, SlatDeclaration};
 pub use high_lift_system::{
-    declared_system, declared_systems, preset_breakdown, DeclaredHighLift, HighLiftBreakdown,
-    HighLiftGeometry, TakeoffFlap, TrailingEdgeDevice,
+    approach_flap_drag_ratio, declared_system, declared_systems, declared_takeoff_flap,
+    preset_breakdown, takeoff_flap_settings, DeclaredHighLift, HighLiftBreakdown, HighLiftGeometry,
+    TakeoffFlap, TakeoffFlapSetting, TrailingEdgeDevice, DEFAULT_LANDING_FLAP_DEG,
+    DEFAULT_TAKEOFF_FLAP_DEG, FOWLER_CHORD_RATIO, OSWALD_GAIN_PER_FLAP_DEG_REAR_ENGINES,
+    OSWALD_GAIN_PER_FLAP_DEG_WING_ENGINES, SLAT_CHORD_RATIO,
 };
 pub use landing_reference::{
     published_landing_reference, published_landing_references, PublishedLandingReference,
@@ -111,9 +139,15 @@ pub use mission_evidence::{
     MissionEvidenceTier, MissionPromotionRefusal,
 };
 use registry::high_lift;
-pub use registry::{available, display_names, get, registry};
+pub use registry::{available, display_names, get, published_mzfw_kg, registry};
+pub(crate) use speed_schedules::apply_default_rule;
 pub use speed_schedules::atr72_600_takeoff_speed_m_s;
+pub use tail_ice::{SourcedTailIceProtection, TailIceProtection};
 pub use takeoff_reference::{
-    published_takeoff_reference, published_takeoff_references, PublishedTakeoffReference,
+    published_takeoff_reference, published_takeoff_references, v2_max_over_vs1g,
+    PublishedTakeoffReference, DEFAULT_V2_MAX_OVER_VS1G,
 };
-pub use widebody_exits::{A340_300_EXIT_LAYOUT, DC_10_30_EXIT_LAYOUT};
+pub use usable_cg_range::UsableCgRangeSource;
+pub use widebody_exits::{
+    A340_300_EXIT_LAYOUT, A350_900_EXIT_LAYOUT, A380_800_EXIT_LAYOUT, DC_10_30_EXIT_LAYOUT,
+};

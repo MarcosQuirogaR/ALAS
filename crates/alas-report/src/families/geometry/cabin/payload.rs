@@ -6,12 +6,7 @@ use super::*;
 pub(in super::super) fn item_color(item: &DeckItem) -> Color {
     match item.kind {
         ItemKind::SeatRow => match &item.meta {
-            ItemMeta::Seat(meta) => Color::from_hex(match meta.cls {
-                "First" => "#8e44ad",
-                "Business" => "#2980b9",
-                "Premium" => "#16a085",
-                _ => "#27ae60",
-            }),
+            ItemMeta::Seat(meta) => super::super::seat_class_color(meta.cls),
             _ => Color::from_hex("#27ae60"),
         },
         ItemKind::Uld => match &item.meta {
@@ -19,8 +14,8 @@ pub(in super::super) fn item_color(item: &DeckItem) -> Color {
             _ => Color::from_hex("#3498db"),
         },
         ItemKind::Galley => Color::from_hex("#e67e22"),
-        ItemKind::Lav => Color::from_hex("#5dade2"),
-        ItemKind::AccessibleLav => Color::from_hex("#2471a3"),
+        ItemKind::Lav => Color::from_hex("#26c6da"),
+        ItemKind::AccessibleLav => Color::from_hex("#ec407a"),
         ItemKind::WheelchairStowage => Color::from_hex("#f4d03f"),
         ItemKind::OverheadBin => match &item.meta {
             ItemMeta::OverheadBin(meta) => Color::from_hex(match meta.bin_type {
@@ -31,6 +26,8 @@ pub(in super::super) fn item_color(item: &DeckItem) -> Color {
         },
         ItemKind::Exit => Color::from_hex("#e74c3c"),
         ItemKind::Bag => Color::from_hex("#95a5a6"),
+        ItemKind::Zone => Color::from_hex("#d7bde2"),
+        ItemKind::PointMass => Color::from_hex("#c0392b"),
     }
 }
 
@@ -161,6 +158,22 @@ fn cargo_position_name(config: &AlasConfig) -> String {
     }
 }
 
+/// Why a layout has nothing to draw, from its own summary.
+pub(in super::super) fn empty_layout_reason(layout: &PayloadLayout) -> String {
+    match &layout.summary {
+        LayoutSummary::Cargo(summary) => format!(
+            "No payload layout: freighter case with {:.1} t requested, {:.1} t loaded, {} loading position(s) available",
+            summary.requested_net_payload_t,
+            summary.loaded_net_payload_t.max(0.0),
+            summary.n_slots
+        ),
+        LayoutSummary::Passenger(summary) => format!(
+            "No payload layout: no item placed for {} requested passenger(s)",
+            summary.total_pax
+        ),
+    }
+}
+
 /// Draw a plan view of every placed payload item over the actual fuselage.
 pub fn figure_cabin_payload(
     layout: &PayloadLayout,
@@ -170,7 +183,7 @@ pub fn figure_cabin_payload(
 ) -> Scene {
     let pal = get_palette(theme);
     if layout.items.is_empty() {
-        return empty(theme, "No payload layout available");
+        return empty(theme, &empty_layout_reason(layout));
     }
     let Ok(cabin) = CabinGeometry::new(
         plane,
@@ -204,7 +217,7 @@ pub fn figure_cabin_payload(
         let axes = Axes2D::new(rect, (u0, u1), (v0, v1));
         // The shared X label belongs to the bottom side-view panel. Repeating
         // it on every stacked deck panel collides with the panel below.
-        axes.draw_frame_with_labels(&mut scene, pal, "", "lateral Y [m]");
+        axes.draw_frame_with_labels(&mut scene, pal, "", "Lateral Y [m]");
         let fus = &plane.fuselages[0];
         let mut outline = Vec::with_capacity(fus.xsecs.len() * 2);
         outline.extend(
@@ -332,7 +345,7 @@ pub fn figure_cabin_payload(
     let ((sx0, sx1), (sz0, sz1)) =
         equal_aspect_ranges(x0, x1, side_rect.2, z0, z1, side_rect.3, 0.05);
     let side_axes = Axes2D::new(side_rect, (sx0, sx1), (sz0, sz1));
-    side_axes.draw_frame_with_labels(&mut scene, pal, "longitudinal X [m]", "height Z [m]");
+    side_axes.draw_frame_with_labels(&mut scene, pal, "Longitudinal X [m]", "Height Z [m]");
     let fus = &plane.fuselages[0];
     let mut side_outline = fus
         .xsecs

@@ -242,7 +242,7 @@ impl AlasConfig {
     /// [`Self::design_landing_mass_with_reserve_floor`] applies: the two
     /// design modes when they design the structure at the closure, and the
     /// legacy `SizedByMission` / `Unconstrained` sizing of a coupled design
-    /// (audit SIZ-03: the gear, the dispatch limit and the `landing_mass`
+    /// (the gear, the dispatch limit and the `landing_mass`
     /// residual then read one landing mass), never over an explicit
     /// `design_landing_mass_kg`.
     fn landing_reserve_floor_applies(&self) -> bool {
@@ -486,7 +486,7 @@ mod tests {
                 let sized =
                     config.at_sized_closure_mass_with_landing_floor(70_000.0, Some(65_000.0));
                 // The legacy sizing modes of a coupled design read the same
-                // floored landing mass (audit SIZ-03).
+                // floored landing mass.
                 let coupled_legacy = design_mode == DesignMode::CleanSheet
                     && matches!(
                         sizing,
@@ -522,7 +522,7 @@ mod tests {
 
     #[test]
     fn a_coupled_legacy_sizing_designs_the_gear_at_the_landing_mass_it_is_checked_against() {
-        // Audit SIZ-03: the gear (`at_sized_closure_mass_with_landing_floor`),
+        // The gear (`at_sized_closure_mass_with_landing_floor`),
         // the dispatch limit and the `landing_mass` residual (both
         // `design_landing_mass_with_reserve_floor`) read one landing mass, and
         // it is the closure fraction raised to the mission's own landing mass.

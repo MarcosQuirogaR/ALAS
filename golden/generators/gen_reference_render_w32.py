@@ -71,9 +71,11 @@ def capture(figure_id, factory, plane, theme):
         }
         plt.close(figure)
         return result
-    except Exception as error:
+    except BaseException:
+        # A failing factory is a defect in the reference or its environment;
+        # it must stop the generator, not be written into the fixture.
         plt.close("all")
-        return {"available": False, "reason": f"{type(error).__name__}: {error}"}
+        raise
 
 
 def main():

@@ -233,6 +233,7 @@ fn grouped_product_analysis_recloses_the_buildup_after_detailed_payload_layout()
         total_mass: direct.masses.payload - 1_000.0,
         cg_x: 18.0,
         cg_y: 0.0,
+        ..Default::default()
     };
     let (masses, _coordinates, _cg, grouped) = run_product_mass_analysis_with_groups(
         &plane,

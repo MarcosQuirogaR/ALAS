@@ -48,7 +48,7 @@ use super::MonitorNodes;
 
 /// Whether a solve produced a usable result.
 ///
-/// The three states of upstream's `status` string, as an enum so a caller
+/// The states of upstream's `status` string, as an enum so a caller
 /// branches on a variant rather than on `== "ok"`.
 #[derive(Debug, Clone, Copy, PartialEq, Eq, Default)]
 pub enum ResultStatus {
@@ -59,6 +59,9 @@ pub enum ResultStatus {
     Ok,
     /// The solve failed; `error` says why.
     Error,
+    /// The backend or tool that would produce this result is not installed or
+    /// does not provide the solution; `error` says which. Not a solver failure.
+    NotConfigured,
 }
 
 impl ResultStatus {
@@ -69,6 +72,7 @@ impl ResultStatus {
             Self::NotRun => "not_run",
             Self::Ok => "ok",
             Self::Error => "error",
+            Self::NotConfigured => "not_configured",
         }
     }
 }
@@ -139,6 +143,18 @@ pub struct ModesResult {
     /// The span stations the shapes are sampled at, ascending. `None` when the
     /// reader never got as far as building one.
     pub mode_shape_y_m: Option<Vec<f64>>,
+    /// Per mode, the raw (not peak-normalised) out-of-plane displacement `T3`
+    /// at the front-spar grids, at [`ModesResult::mode_shape_y_m`]. Eigenvector
+    /// amplitude in an arbitrary but common scale for the front and rear
+    /// spars. Empty when the solver reader does not export it.
+    pub spar_z_front: Vec<Vec<f64>>,
+    /// As [`ModesResult::spar_z_front`], at the rear-spar grids (the last spar
+    /// line of the mesh index) at the same stations.
+    pub spar_z_rear: Vec<Vec<f64>>,
+    /// Streamwise distance `x_rear - x_front`, m, at each station (positive
+    /// aft); the box width the front/rear difference is turned into a twist
+    /// with.
+    pub spar_chord_m: Option<Vec<f64>>,
 }
 
 /// What the two SOL 111 frequency-response solves reported.
@@ -174,4 +190,7 @@ pub struct NastranResults {
     pub modes: ModesResult,
     /// The two vibration solves.
     pub vibration: VibrationResult,
+    /// Whether these results came from the NASA NASTRAN-95 solver (including
+    /// when it ran as the fallback for an absent MSC installation).
+    pub solver_is_nastran95: bool,
 }

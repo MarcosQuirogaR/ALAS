@@ -50,7 +50,7 @@ pub(super) fn mesh_study(name: &str) -> Result<Value, String> {
             &report.airplane,
             AeroAnalysis::quarter_chord_sweep_deg(&report.airplane, dv.sweep_deg),
             Some(config.geometry.clone()),
-            Some(config.drag_model.clone()),
+            Some(config.resolved_drag_model()),
             Some(analysis),
         )
         .run_sweep(

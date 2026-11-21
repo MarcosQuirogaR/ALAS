@@ -149,7 +149,6 @@ const MAXIMUM_OPERATING_ALTITUDE_M: f64 = 7_620.0;
 /// CS 25.335(b) `V_D/V_C` envelope ratio applied to the cruise Mach.
 const MAXIMUM_MACH_OVER_CRUISE: f64 = 1.25;
 /// Passengers per cabin attendant (EASA ORO.CC.100).
-const PASSENGERS_PER_ATTENDANT: usize = 50;
 /// Integral wing tanks of the class (one per half-wing).
 const FUEL_TANK_COUNT: usize = 2;
 /// Wing incidence of the centre section, deg (ATR 42 entry, p. 300).
@@ -363,7 +362,7 @@ pub(super) fn seed(instance: &mut AlasConfig, brief: &AlasConfig, data: &Value) 
         t.design_range_nmi = Some(design_range_nmi);
     }
     let seats = usize::try_from(r.num_passengers.max(0)).unwrap_or(0);
-    t.flight_attendant_count = Some(seats.div_ceil(PASSENGERS_PER_ATTENDANT));
+    t.flight_attendant_count = Some(crate::systems_mass::minimum_cabin_crew(seats));
     t.fuel_tank_count = Some(FUEL_TANK_COUNT);
     t.maximum_fuel_capacity_kg = Some(class.fuel_fraction * r.mtow_kg);
     t.apu_installed = false;

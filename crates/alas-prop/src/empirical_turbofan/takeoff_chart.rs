@@ -12,7 +12,7 @@
 //! charts (Mach 0 to 0.4); sea level, 10,000 ft and 20,000 ft for BPR 3.0
 //! (Mach 0 to 0.6). These are the same book, engines and axes as the
 //! maximum-climb charts of [`super::max_climb`], so one engine model serves
-//! take-off, climb and cruise (owner decision 2026-10-14).
+//! take-off, climb and cruise.
 //!
 //! The numbers were read from the printed charts (PDF pages 218, 221, 224,
 //! 227 of the book, rendered at 4x, the axes calibrated on the printed tick
@@ -37,6 +37,21 @@
 //! 0.908, 0.822, 0.764, 0.706; at 5,000 and 10,000 ft the cap moves the
 //! chart by at most 0.03. The interpolation in bypass ratio is the linear
 //! blend used for the climb charts (nearest chart outside BPR 3-13).
+//!
+//! Check against manufacturer data. The Aircraft Noise and Performance (ANP)
+//! database v2.3 (EUROCONTROL/EASA; legacy archive
+//! <https://www.easa.europa.eu/en/downloads/138164/en>, file
+//! `ANP2.3_Jet_engine_coefficients.csv`) holds the manufacturers' installed
+//! corrected net thrust at the maximum take-off rating as
+//! `Fn / delta = E + F Vc` (lbf, `Vc` in knots CAS; ECAC Doc 29 4th ed.,
+//! Vol. 2, Eq. B-1). At sea level and Mach 0.22 (a V2 of 75 m/s) that thrust
+//! over the engine's rated static thrust is 0.77 to 0.85 for the eight rows
+//! of `the_charts_agree_with_the_manufacturers_installed_take_off_thrust`,
+//! and the chart blend is 0.80 to 0.81: the ratio of the two is 0.96 to
+//! 1.05 with a mean of 1.01. The deck is therefore already at the installed
+//! level of the manufacturers' take-off thrust at take-off speeds, with no
+//! bias to remove, and the engine-to-engine scatter (about 4 %) is larger
+//! than the bypass-ratio trend.
 
 use super::max_climb::{delta_at_feet, interpolate};
 
@@ -119,7 +134,7 @@ fn monotone_rows(index: usize) -> Vec<Row> {
 /// the Jenkinson charts above. The band is the largest of
 /// `|J - BY| / (J + BY)` (half-range over mean) over the whole fleet and the
 /// whole V2 domain, not over one aircraft: the bypass ratios of the catalogue
-/// engines (4.4 CF6-50 to 11.37 PW1500G, 11 values), pressure ratios 1.0, 0.85
+/// engines (4.3 CF6-50 to 11.37 PW1500G, 12 values), pressure ratios 1.0, 0.85
 /// and 0.70 (sea level to about 3,000 m aerodromes) and Mach 0.20, 0.25, 0.30
 /// (the V2 range of the transport presets). It is reached at BPR 8.5 (the
 /// Trent 900/970, on the high BPR 8 chart) and Mach 0.30 at sea level: 0.081.
@@ -215,8 +230,10 @@ pub fn takeoff_thrust_sources(bpr: f64, delta: f64, mach: f64) -> (f64, f64) {
 mod tests {
     use super::*;
 
-    /// Bypass ratios of the catalogue engines (`engines.json`), 4.4 to 11.37.
-    const FLEET_BPR: [f64; 11] = [4.4, 5.1, 5.5, 6.6, 8.5, 9.6, 10.0, 10.56, 11.0, 11.2, 11.37];
+    /// Bypass ratios of the catalogue engines (`engines.json`), 4.3 to 11.37.
+    const FLEET_BPR: [f64; 12] = [
+        4.3, 4.4, 5.1, 5.5, 6.6, 8.5, 9.6, 10.0, 10.56, 11.0, 11.2, 11.37,
+    ];
 
     #[test]
     fn the_table_reproduces_the_take_off_charts_at_their_nodes() {
@@ -259,6 +276,39 @@ mod tests {
             (chart / correlation - 1.0).abs() < 0.05,
             "{chart} {correlation}"
         );
+    }
+
+    /// ANP v2.3 `MaxTakeoff` rows: aircraft id, engine, bypass ratio, rated
+    /// static take-off thrust (ICAO Aircraft Engine Emissions Databank, kN),
+    /// `E` (lbf) and `F` (lbf/kt).
+    const ANP_MAX_TAKEOFF: [(&str, &str, f64, f64, f64, f64); 8] = [
+        ("A320-211", "CFM56-5A1", 6.0, 111.2, 23_652.9, -22.933_79),
+        ("A320-232", "V2527-A5", 4.8, 110.31, 24_746.2, -25.247_32),
+        ("737800", "CFM56-7B26", 5.1, 116.99, 26_089.1, -29.109_81),
+        ("A340-211", "CFM56-5C2", 6.6, 138.78, 29_929.8, -30.773_19),
+        ("DC1030", "CF6-50C2", 4.3, 230.4, 49_310.0, -42.42),
+        ("747400", "PW4056", 4.9, 252.4, 53_290.5, -53.434_03),
+        ("A380-841", "Trent 970-84", 8.5, 338.7, 71_176.1, -84.405_16),
+        ("A350-941", "Trent XWB-84", 9.01, 379.0, 84_912.8, -101.987),
+    ];
+
+    #[test]
+    fn the_charts_agree_with_the_manufacturers_installed_take_off_thrust() {
+        // Sea level, Mach 0.22: calibrated airspeed = true airspeed.
+        let mach = 0.22;
+        let knots = mach * 340.294 / 0.514_444;
+        let mut sum = 0.0;
+        for (aircraft, engine, bpr, rated_kn, e_lbf, f_lbf_kt) in ANP_MAX_TAKEOFF {
+            let anp = (e_lbf + f_lbf_kt * knots) * 4.448_222e-3 / rated_kn;
+            let ratio = anp / TakeoffTable::new(bpr).ratio(mach, 1.0);
+            assert!(
+                (ratio - 1.0).abs() < 0.05,
+                "{aircraft} {engine}: ANP {anp:.3} of the rating, ANP over chart {ratio:.3}"
+            );
+            sum += ratio;
+        }
+        let mean = sum / ANP_MAX_TAKEOFF.len() as f64;
+        assert!((mean - 1.0).abs() < 0.02, "mean ANP over chart {mean:.3}");
     }
 
     #[test]
@@ -318,8 +368,8 @@ mod tests {
         }
         // 0.082 was derived before the BPR 8 chart was capped; the recomputed
         // envelope is 0.039. The constant is kept (a wider band is the
-        // conservative reading of the thrust uncertainty) until the owner
-        // decides whether to narrow it.
+        // conservative reading of the thrust uncertainty) until a narrower
+        // band is justified.
         assert!(
             TAKEOFF_THRUST_SCATTER >= largest,
             "largest half-spread {largest}"

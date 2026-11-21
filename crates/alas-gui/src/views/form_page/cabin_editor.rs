@@ -9,10 +9,18 @@ use alas_config::{Entry, Field};
 use egui::{RichText, Ui};
 use serde_json::Value;
 
-use crate::views::form::{dynamic_form, FormEdit};
+use super::cabin_cards::{match_row_height, sub_heading};
+use crate::views::form::{dynamic_form, dynamic_form_at_help, FormEdit};
 use crate::views::tr;
 
 const CLASS_NAMES: [&str; 3] = ["first", "business", "economy"];
+
+/// Page width from which the four cargo groups stand side by side.
+const WIDE_CARGO_WIDTH: f32 = 1_100.0;
+/// From this width each of two halves holds a group's editors in several
+/// columns, so the groups pair up again.
+const WIDEST_CARGO_WIDTH: f32 = 1_800.0;
+
 const CARGO_GROUPS: [(&str, &[&str]); 4] = [
     (
         "Decks",
@@ -56,16 +64,26 @@ pub(super) fn render_cabin_editor(
         let Some(child) = child_values(values, field.name) else {
             continue;
         };
+        // The path form a search jump targets, below the `cabin` group.
+        let prefix = format!("::{}", field.name);
+        // A search jump to a field of this section opens it.
+        let forced = crate::search::focus_wants(ui.ctx(), &format!("cabin.{}", field.name));
         crate::theme::card_frame(ui).show(ui, |ui| {
             ui.set_min_width(ui.available_width());
-            let section = egui::CollapsingHeader::new(
-                RichText::new(alas_i18n::t(Some(field.label), lang)).strong(),
-            )
+            let mut header = egui::CollapsingHeader::new(crate::theme::card_title(
+                ui,
+                crate::views::form_label(field.label, lang),
+            ))
             .id_salt(format!("cabin::{}", field.name))
             .default_open(true)
-            .show(ui, |ui| match field.name {
+            .open(crate::perf_tour::force_open());
+            if forced {
+                header = header.open(Some(true));
+            }
+            let section = crate::theme::show_header(ui, header, |ui| match field.name {
                 "passenger" => render_passenger(
                     ui,
+                    &prefix,
                     &node.fields,
                     child,
                     error_fields,
@@ -76,6 +94,7 @@ pub(super) fn render_cabin_editor(
                 ),
                 "cargo" => render_cargo(
                     ui,
+                    &prefix,
                     &node.fields,
                     child,
                     error_fields,
@@ -83,13 +102,14 @@ pub(super) fn render_cabin_editor(
                     show_help,
                     &mut edits,
                 ),
-                _ => edits.extend(dynamic_form(
+                _ => edits.extend(dynamic_form_at_help(
                     ui,
                     &node.fields,
                     child,
                     error_fields,
                     lang,
                     show_help,
+                    &prefix,
                 )),
             });
             if !field.help.is_empty() {
@@ -107,6 +127,7 @@ pub(super) fn render_cabin_editor(
 #[allow(clippy::too_many_arguments)]
 fn render_passenger(
     ui: &mut Ui,
+    prefix: &str,
     fields: &[Field],
     values: &mut Value,
     error_fields: &HashSet<String>,
@@ -126,6 +147,7 @@ fn render_passenger(
             for (column, class) in columns.iter_mut().zip(&classes) {
                 render_class(
                     column,
+                    prefix,
                     class,
                     values,
                     error_fields,
@@ -133,6 +155,7 @@ fn render_passenger(
                     show_help,
                     custom_preset,
                     edits,
+                    true,
                 );
             }
         });
@@ -140,6 +163,7 @@ fn render_passenger(
         for class in classes {
             render_class(
                 ui,
+                prefix,
                 class,
                 values,
                 error_fields,
@@ -147,6 +171,7 @@ fn render_passenger(
                 show_help,
                 custom_preset,
                 edits,
+                false,
             );
             ui.add_space(4.0);
         }
@@ -159,13 +184,14 @@ fn render_passenger(
         .collect();
     if !remaining.is_empty() {
         ui.add_space(6.0);
-        edits.extend(dynamic_form(
+        edits.extend(dynamic_form_at_help(
             ui,
             &remaining,
             values,
             error_fields,
             lang,
             show_help,
+            prefix,
         ));
     }
 }
@@ -174,6 +200,7 @@ fn render_passenger(
 #[allow(clippy::too_many_arguments)]
 fn render_class(
     ui: &mut Ui,
+    prefix: &str,
     field: &Field,
     values: &mut Value,
     error_fields: &HashSet<String>,
@@ -181,9 +208,25 @@ fn render_class(
     show_help: bool,
     custom_preset: bool,
     edits: &mut Vec<FormEdit>,
+    // The three cards stand in one row: pad each to the tallest, so a
+    // disabled class does not leave a short card and an empty block.
+    equal_height: bool,
 ) {
     let Entry::Node(node) = &field.entry else {
         return;
+    };
+    // A class switched back on without a remembered share takes the mean share of
+    // the other present classes (the mix is normalised, only ratios matter).
+    let others: Vec<f64> = CLASS_NAMES
+        .iter()
+        .filter(|name| **name != field.name)
+        .filter_map(|name| values.get(*name)?.get("share_pct")?.as_f64())
+        .filter(|share| *share > 0.0)
+        .collect();
+    let fallback_share = if others.is_empty() {
+        100.0
+    } else {
+        others.iter().sum::<f64>() / others.len() as f64
     };
     let Some(class_values) = child_values(values, field.name) else {
         return;
@@ -199,25 +242,92 @@ fn render_class(
             }
         }
     }
-    crate::theme::card_frame(ui).show(ui, |ui| {
+    let enabled = class_values
+        .get("share_pct")
+        .and_then(Value::as_f64)
+        .is_some_and(|share| share > 0.0)
+        || class_values
+            .get("count")
+            .and_then(Value::as_i64)
+            .is_some_and(|count| count > 0);
+    let memory_id = egui::Id::new(("cabin_class_share", field.name));
+    let class_prefix = format!("{prefix}::{}", field.name);
+    let card = crate::theme::card_frame(ui).show(ui, |ui| {
         ui.set_min_width(ui.available_width());
-        ui.label(RichText::new(alas_i18n::t(Some(field.label), lang)).strong())
-            .on_hover_text(alas_i18n::t(Some(field.help), lang));
-        edits.extend(dynamic_form(
-            ui,
-            &fields,
-            class_values,
-            error_fields,
-            lang,
-            show_help,
-        ));
+        crate::theme::header_row(ui, |ui| {
+            ui.horizontal(|ui| {
+                let title =
+                    crate::theme::card_title(ui, crate::views::form_label(field.label, lang));
+                ui.label(title)
+                    .on_hover_text(alas_i18n::t(Some(field.help), lang));
+                ui.with_layout(egui::Layout::right_to_left(egui::Align::Center), |ui| {
+                    if !custom_preset {
+                        crate::theme::lock_icon(ui, &tr("Custom Cabin Only"));
+                    }
+                    let mut on = enabled;
+                    let toggled = ui
+                        .add_enabled_ui(custom_preset, |ui| {
+                            crate::checkbox::checkbox(ui, &mut on, tr("Enabled")).changed()
+                        })
+                        .inner;
+                    if toggled {
+                        let share = if on {
+                            ui.data(|data| data.get_temp::<f64>(memory_id))
+                                .unwrap_or(fallback_share)
+                        } else {
+                            let current = class_values
+                                .get("share_pct")
+                                .and_then(Value::as_f64)
+                                .unwrap_or(fallback_share);
+                            ui.data_mut(|data| data.insert_temp(memory_id, current));
+                            0.0
+                        };
+                        class_values["share_pct"] = Value::from(share);
+                        if !on {
+                            class_values["count"] = Value::from(0);
+                        }
+                        edits.push(FormEdit {
+                            label: tr("Enabled"),
+                            value: tr(if on { "On" } else { "Off" }),
+                        });
+                    }
+                });
+            })
+        });
+        if enabled {
+            edits.extend(dynamic_form_at_help(
+                ui,
+                &fields,
+                class_values,
+                error_fields,
+                lang,
+                show_help,
+                &class_prefix,
+            ));
+        } else {
+            ui.label(RichText::new(crate::views::tr_label("Class Disabled")).weak());
+        }
+        if equal_height {
+            let natural = ui.min_rect().height();
+            match_row_height(ui, egui::Id::new("cabin_class_row"), natural);
+        }
     });
+    // A disabled class draws no fields: the search pulses its card instead.
+    if !enabled {
+        let class_path = format!("cabin{}", class_prefix.replace("::", "."));
+        if let Some(focus) = crate::search::published_focus(ui.ctx()) {
+            if focus.path.starts_with(&class_path) {
+                crate::search::focus_anchor(ui, &focus.path, card.response.rect);
+            }
+        }
+    }
 }
 
 // Each argument is an independent editor input; a wrapper struct would only rename them.
 #[allow(clippy::too_many_arguments)]
 fn render_cargo(
     ui: &mut Ui,
+    prefix: &str,
     fields: &[Field],
     values: &mut Value,
     error_fields: &HashSet<String>,
@@ -225,25 +335,15 @@ fn render_cargo(
     show_help: bool,
     edits: &mut Vec<FormEdit>,
 ) {
-    if ui.available_width() >= 1_100.0 {
-        // Two similarly sized blocks use the wide page without stretching
-        // a single drop-down across the entire window.
-        ui.columns(2, |columns| {
-            for index in [0, 1] {
+    let width = ui.available_width();
+    if (WIDE_CARGO_WIDTH..WIDEST_CARGO_WIDTH).contains(&width) {
+        // One column per group: each group's editors take the width of one
+        // value box, so the row has no empty area beside any of them.
+        ui.columns(CARGO_GROUPS.len(), |columns| {
+            for (index, column) in columns.iter_mut().enumerate() {
                 render_cargo_group(
-                    &mut columns[0],
-                    index,
-                    fields,
-                    values,
-                    error_fields,
-                    lang,
-                    show_help,
-                    edits,
-                );
-            }
-            for index in [2, 3] {
-                render_cargo_group(
-                    &mut columns[1],
+                    column,
+                    prefix,
                     index,
                     fields,
                     values,
@@ -254,10 +354,31 @@ fn render_cargo(
                 );
             }
         });
+    } else if width >= 640.0 {
+        // Two rows of two blocks, so the sub-headings of a row start on one line: decks beside
+        // the door locations, then loading beside the CG trim.
+        for pair in [[0, 2], [1, 3]] {
+            ui.columns(2, |columns| {
+                for (column, index) in columns.iter_mut().zip(pair) {
+                    render_cargo_group(
+                        column,
+                        prefix,
+                        index,
+                        fields,
+                        values,
+                        error_fields,
+                        lang,
+                        show_help,
+                        edits,
+                    );
+                }
+            });
+        }
     } else {
         for index in 0..CARGO_GROUPS.len() {
             render_cargo_group(
                 ui,
+                prefix,
                 index,
                 fields,
                 values,
@@ -278,13 +399,14 @@ fn render_cargo(
         .cloned()
         .collect();
     if !remaining.is_empty() {
-        edits.extend(dynamic_form(
+        edits.extend(dynamic_form_at_help(
             ui,
             &remaining,
             values,
             error_fields,
             lang,
             show_help,
+            prefix,
         ));
     }
 }
@@ -293,6 +415,7 @@ fn render_cargo(
 #[allow(clippy::too_many_arguments)]
 fn render_cargo_group(
     ui: &mut Ui,
+    prefix: &str,
     index: usize,
     fields: &[Field],
     values: &mut Value,
@@ -310,7 +433,7 @@ fn render_cargo_group(
     if group.is_empty() {
         return;
     }
-    ui.label(RichText::new(tr(title)).strong());
+    sub_heading(ui, &tr(title));
     if index == 0 {
         // The checkbox is one line tall; put it above the paired ULD
         // selectors so their labels and editors line up with each other.
@@ -324,30 +447,33 @@ fn render_cargo_group(
             .filter(|field| field.name != "use_main_deck")
             .cloned()
             .collect();
-        edits.extend(dynamic_form(
+        edits.extend(dynamic_form_at_help(
             ui,
             &toggle,
             values,
             error_fields,
             lang,
             show_help,
+            prefix,
         ));
-        edits.extend(dynamic_form(
+        edits.extend(dynamic_form_at_help(
             ui,
             &selectors,
             values,
             error_fields,
             lang,
             show_help,
+            prefix,
         ));
     } else {
-        edits.extend(dynamic_form(
+        edits.extend(dynamic_form_at_help(
             ui,
             &group,
             values,
             error_fields,
             lang,
             show_help,
+            prefix,
         ));
     }
     ui.add_space(10.0);
@@ -383,6 +509,18 @@ mod tests {
         actual_sorted.sort_unstable();
         grouped_sorted.sort_unstable();
         assert_eq!(grouped_sorted, actual_sorted);
+    }
+
+    #[test]
+    fn a_class_that_is_off_shows_one_disabled_note_and_never_a_format_placeholder() {
+        let labels = rendered_positions(1_400.0);
+        assert!(
+            labels
+                .iter()
+                .any(|(text, _)| *text == crate::views::tr_label("Class Disabled")),
+            "{labels:?}"
+        );
+        assert!(labels.iter().all(|(text, _)| !text.contains("{2014}")));
     }
 
     fn rendered_positions(width: f32) -> Vec<(String, egui::Pos2)> {
@@ -442,7 +580,7 @@ mod tests {
     fn position(labels: &[(String, egui::Pos2)], name: &str) -> egui::Pos2 {
         labels
             .iter()
-            .find(|(text, _)| text == name)
+            .find(|(text, _)| text == name || *text == crate::views::label_case(name))
             .map(|(_, position)| *position)
             .unwrap_or_else(|| panic!("{name} was not painted: {labels:?}"))
     }
@@ -468,14 +606,17 @@ mod tests {
     fn cargo_inputs_align_with_their_related_controls() {
         let labels = rendered_positions(2_000.0);
         let schema = CargoDeckConfig::default().schema();
-        let field = |name| schema.field(name).expect("cargo field").label;
+        // The label as the English form shows it (acronyms restored).
+        let field = |name| {
+            crate::views::form_label(schema.field(name).expect("cargo field").label, Some("en"))
+        };
         let [main_uld, lower_uld] =
-            ["main_deck_uld", "lower_deck_uld"].map(|name| position(&labels, field(name)));
+            ["main_deck_uld", "lower_deck_uld"].map(|name| position(&labels, &field(name)));
         assert!((main_uld.y - lower_uld.y).abs() < 5.0);
         assert!(main_uld.x + 200.0 < lower_uld.x);
 
         let [main_door, forward_door, aft_door] = ["main_door_x_m", "fwd_door_x_m", "aft_door_x_m"]
-            .map(|name| position(&labels, field(name)));
+            .map(|name| position(&labels, &field(name)));
         assert!((main_door.y - forward_door.y).abs() < 5.0);
         assert!((main_door.y - aft_door.y).abs() < 5.0);
         assert!(main_door.x + 200.0 < forward_door.x);
@@ -483,8 +624,8 @@ mod tests {
         assert!(main_door.x > main_uld.x + 600.0);
 
         let narrow = rendered_positions(600.0);
-        let narrow_main_uld = position(&narrow, field("main_deck_uld"));
-        let narrow_main_door = position(&narrow, field("main_door_x_m"));
+        let narrow_main_uld = position(&narrow, &field("main_deck_uld"));
+        let narrow_main_door = position(&narrow, &field("main_door_x_m"));
         assert!((narrow_main_uld.x - narrow_main_door.x).abs() < 5.0);
         assert!(narrow_main_uld.y < narrow_main_door.y);
     }

@@ -11,7 +11,8 @@
 //! distinct, cheap (sizing-only, no FEM mesh, no NASTRAN) figure built
 //! directly from [`WingStructureGeometry`]/[`WingboxSizing`].
 
-use crate::scene::{Axes2D, Color, Scene, SceneElement, Stroke, TextAlign, TextBaseline};
+use crate::chart_kit::{draw_inline_legend, LegendMarker};
+use crate::scene::{Axes2D, Color, Scene, Stroke};
 use crate::theme::get_palette;
 use alas_geom::wing_structure::WingStructureGeometry;
 use alas_struct::sizing::WingboxSizing;
@@ -20,25 +21,64 @@ use super::{
     chord_bounds, draw_wing_outline, root_connected_spar_series, spar_line_series, SPAR_COLORS,
 };
 
+/// The canvas the planform is drawn on when the caller names none.
+pub const STRUCTURES_PREVIEW_CANVAS: (f64, f64) = (640.0, 420.0);
+
+/// The plot rectangle `(left, top, width, height)` for a canvas: room above for
+/// the spar key, left for the tick labels and the rotated title, below for the
+/// tick labels and the x title.
+pub fn structures_plot_rect(canvas: (f64, f64)) -> (f64, f64, f64, f64) {
+    let (left, top, right, bottom) = (84.0, 44.0, 20.0, 60.0);
+    (left, top, canvas.0 - left - right, canvas.1 - top - bottom)
+}
+
 /// Wingbox planform and spar traces without a secondary sizing summary.
 pub fn figure_structures_designer_preview(
     wsg: &WingStructureGeometry,
     sizing: &WingboxSizing,
     theme: Option<&str>,
 ) -> Scene {
-    let pal = get_palette(theme);
-    let mut scene = Scene::new(520.0, 430.0, Some(Color::from_hex(pal.bg)));
-    scene.title = Some("Structural Rib & Spar Grid Preview".to_owned());
-    scene.suppress_derived_title();
+    figure_structures_designer_preview_sized(wsg, sizing, theme, STRUCTURES_PREVIEW_CANVAS)
+}
 
+/// The scene size that draws the full planform (both wings, as seen from
+/// above) at one scale on both axes, no larger than `limit` (scene units):
+/// the width is used first, and the height follows from the geometry unless
+/// `limit` does not allow it, in which case the width shrinks to match.
+pub fn structures_true_aspect_canvas(y_max: f64, x_extent: f64, limit: (f64, f64)) -> (f64, f64) {
+    let (_, _, plot_w, plot_h) = structures_plot_rect(limit);
+    let margins = (limit.0 - plot_w, limit.1 - plot_h);
+    let scale = (plot_w / (2.0 * y_max.max(1e-6))).min(plot_h / x_extent.max(1e-6));
+    (
+        (2.0 * y_max * scale + margins.0).round(),
+        (x_extent * scale + margins.1).round(),
+    )
+}
+
+/// The planform on a `canvas` of the caller's choosing (scene units). The
+/// canvas is a limit: the drawing is made at one scale on both axes (the
+/// geometry's true aspect) and the scene is as large as that needs, never
+/// larger than `canvas`.
+pub fn figure_structures_designer_preview_sized(
+    wsg: &WingStructureGeometry,
+    sizing: &WingboxSizing,
+    theme: Option<&str>,
+    canvas: (f64, f64),
+) -> Scene {
+    let pal = get_palette(theme);
     let y = &sizing.y_stations;
     let le: Vec<f64> = sizing.eta_stations.iter().map(|&e| wsg.x_le(e)).collect();
     let te: Vec<f64> = le.iter().zip(&sizing.chord).map(|(&l, &c)| l + c).collect();
 
     let y_max = y.last().copied().unwrap_or(1.0).max(1e-6);
     let (x_lo, x_hi) = chord_bounds(&le, &te);
-    let rect = (60.0, 44.0, 420.0, 320.0);
-    let axes = Axes2D::new(rect, (0.0, y_max), (x_lo, x_hi));
+    let canvas = structures_true_aspect_canvas(y_max, x_hi - x_lo, canvas);
+    let mut scene = Scene::new(canvas.0, canvas.1, Some(Color::from_hex(pal.bg)));
+    scene.title = Some("Structural Rib & Spar Grid Preview".to_owned());
+    scene.suppress_derived_title();
+    let rect = structures_plot_rect(canvas);
+    // Both wings: the planform is symmetric about the centreline.
+    let axes = Axes2D::new(rect, (-y_max, y_max), (x_lo, x_hi)).with_tick_font(11.0);
     axes.draw_frame_with_labels(
         &mut scene,
         pal,
@@ -46,42 +86,35 @@ pub fn figure_structures_designer_preview(
         "Chordwise position X [m]",
     );
 
-    scene.add(SceneElement::Text {
-        text: "Wingbox planform".to_owned(),
-        pos: [rect.0, rect.1 - 6.0],
-        font_size: 11.0,
-        color: Color::from_hex(pal.title),
-        align: TextAlign::Left,
-        baseline: TextBaseline::Bottom,
-        angle_deg: 0.0,
-        bold: true,
-    });
+    let mirrored: Vec<f64> = y.iter().map(|value| -value).collect();
+    for side in [y.as_slice(), mirrored.as_slice()] {
+        draw_wing_outline(
+            &mut scene,
+            &axes,
+            side,
+            &le,
+            &te,
+            Color::from_hex(pal.title),
+            1.5,
+        );
+    }
 
-    draw_wing_outline(
-        &mut scene,
-        &axes,
-        y,
-        &le,
-        &te,
-        Color::from_hex(pal.title),
-        1.5,
-    );
-
+    // The spar key sits above the plot, outside the drawing: one swatch per
+    // spar in its own colour, labelled with its chord fraction.
+    let mut key = Vec::new();
     for (i, spar) in sizing.spars.iter().enumerate() {
         let (spar_y, spar_x) = root_connected_spar_series(wsg, y, spar.chord_fraction);
         let color = Color::from_hex(SPAR_COLORS[i % SPAR_COLORS.len()]);
-        spar_line_series(&axes, &mut scene, &spar_y, &spar_x, Stroke::new(color, 2.0));
-        scene.add(SceneElement::Text {
-            text: format!("x/c={:.2}", spar.chord_fraction),
-            pos: [rect.0 + rect.2 - 4.0, rect.1 + 4.0 + 12.0 * i as f64],
-            font_size: 8.0,
-            color,
-            align: TextAlign::Right,
-            baseline: TextBaseline::Top,
-            angle_deg: 0.0,
-            bold: false,
-        });
+        let spar_mirror: Vec<f64> = spar_y.iter().map(|value| -value).collect();
+        for side in [&spar_y, &spar_mirror] {
+            spar_line_series(&axes, &mut scene, side, &spar_x, Stroke::new(color, 2.0));
+        }
+        key.push((
+            format!("x/c = {:.2}", spar.chord_fraction),
+            LegendMarker::Line(Stroke::new(color, 2.4)),
+        ));
     }
+    draw_inline_legend(&mut scene, [rect.0, rect.1 * 0.5], &key, pal, 12.0);
 
     scene
 }
@@ -93,6 +126,7 @@ mod tests {
 
     use super::*;
     use crate::families::structures::true_spar_xy;
+    use crate::scene::SceneElement;
     use alas_config::{DesignVector, WingConfig};
     use alas_geom::aircraft::airfoil::Airfoil;
     use alas_struct::sizing::{MassBreakdown, SparSizing};
@@ -128,11 +162,15 @@ mod tests {
         WingboxSizing {
             y_stations: y,
             axis_cos: Vec::new(),
+            cover_shape: Vec::new(),
+            cover_depth_m: Vec::new(),
+            cover_shear_flow_n_per_m: Vec::new(),
             eta_stations: eta,
             chord,
             spar_fracs: vec![0.15, 0.65],
             spars: vec![spar(0.15), spar(0.65)],
             t_skin: 0.004,
+            skin_gauge_m: Vec::new(),
             num_ribs: 12,
             rib_spacing_m: 1.5,
             mass_breakdown_kg: MassBreakdown {
@@ -164,7 +202,9 @@ mod tests {
             .iter()
             .filter(|element| match element {
                 SceneElement::Polyline { points, .. } => points.iter().all(|point| {
-                    (60.0..=480.0).contains(&point[0]) && (44.0..=364.0).contains(&point[1])
+                    let rect = structures_plot_rect(STRUCTURES_PREVIEW_CANVAS);
+                    (rect.0..=rect.0 + rect.2).contains(&point[0])
+                        && (rect.1..=rect.1 + rect.3).contains(&point[1])
                 }),
                 _ => false,
             })
@@ -176,7 +216,7 @@ mod tests {
     }
 
     #[test]
-    fn the_positioned_planform_heading_replaces_the_derived_scene_title() {
+    fn the_scene_paints_no_second_title_and_keeps_the_spar_key_outside_the_plot() {
         let scene = figure_structures_designer_preview(&wsg(), &sample_sizing(), Some("dark"));
 
         assert_eq!(
@@ -185,19 +225,21 @@ mod tests {
         );
         assert!(!scene.render_title);
         assert!(crate::scene::visual_title(&scene).is_none());
-        let planform_headings = scene
-            .elements
-            .iter()
-            .filter_map(|element| match element {
-                SceneElement::Text { text, color, .. } if text == "Wingbox planform" => {
-                    Some(*color)
+        let rect = structures_plot_rect(STRUCTURES_PREVIEW_CANVAS);
+        let mut keys = 0;
+        for element in &scene.elements {
+            if let SceneElement::Text { text, pos, .. } = element {
+                assert_ne!(
+                    text, "Wingbox planform",
+                    "the page heading names the figure"
+                );
+                if text.starts_with("x/c = ") {
+                    keys += 1;
+                    assert!(pos[1] < rect.1, "spar key above the plot: {pos:?}");
                 }
-                _ => None,
-            })
-            .collect::<Vec<_>>();
-        assert_eq!(planform_headings.len(), 1);
-        let background = scene.background.expect("dark scene background");
-        assert!(planform_headings[0].contrast_against(background) >= 4.5);
+            }
+        }
+        assert_eq!(keys, 2);
     }
 
     #[test]
@@ -211,7 +253,6 @@ mod tests {
                 _ => None,
             })
             .collect();
-        assert!(texts.contains(&"Wingbox planform"));
         assert!(!texts
             .iter()
             .any(|text| text.starts_with("Governing load case:")));
@@ -232,21 +273,40 @@ mod tests {
             .collect();
         let scene = figure_structures_designer_preview(&geometry, &sizing, Some("light"));
 
+        // The planform shows both wings about the centreline, so the root
+        // (y = 0) is the horizontal centre of the plot rectangle of the
+        // scene actually drawn, and each spar has one trace per half-wing,
+        // each starting there.
+        let (left, _, width, _) = structures_plot_rect((scene.width, scene.height));
+        let centre = left + width / 2.0;
         for color_name in ["tab:blue", "tab:orange"] {
             let color = Color::from_hex(color_name);
-            let root_trace = scene.elements.iter().find_map(|element| match element {
-                SceneElement::Polyline { points, stroke }
-                    if stroke.color == color && points.len() >= 2 =>
-                {
-                    Some(points)
-                }
-                _ => None,
-            });
-            let points = root_trace.expect("each spar has a visible root-connected trace");
+            let traces: Vec<&Vec<[f64; 2]>> = scene
+                .elements
+                .iter()
+                .filter_map(|element| match element {
+                    SceneElement::Polyline { points, stroke }
+                        if stroke.color == color && points.len() >= 2 =>
+                    {
+                        Some(points)
+                    }
+                    _ => None,
+                })
+                .collect();
+            assert_eq!(traces.len(), 2, "{color_name}: one trace per half-wing");
+            let (a, b) = (traces[0], traces[1]);
+            for points in [a, b] {
+                assert!(
+                    (points[0][0] - centre).abs() < 1e-6,
+                    "{color_name} first point is {:?}, centreline x is {centre}",
+                    points[0]
+                );
+            }
+            // The halves leave the root in opposite directions.
+            let (last_a, last_b) = (a[a.len() - 1][0], b[b.len() - 1][0]);
             assert!(
-                (points[0][0] - 60.0).abs() < 1e-9,
-                "{color_name} first point is {:?}",
-                points[0]
+                (last_a - centre) * (last_b - centre) < 0.0,
+                "{color_name} halves end at {last_a} and {last_b}"
             );
         }
     }

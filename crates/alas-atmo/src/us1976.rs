@@ -7,38 +7,62 @@
 // Upstream: mission analysis model 2.5.2, LGPL-2.1 (relicensed under GPL-2.0-or-later per
 // LGPL-2.1 section 3; compatible with this program's AGPL-3.0-or-later).
 
-//! The U.S. Standard Atmosphere (1976), as mission analysis model's mission stack evaluates it.
+//! The U.S. Standard Atmosphere, 1976 (NOAA, NASA, USAF; NOAA-S/T 76-1562):
+//! the one atmosphere model of this program.
 //!
-//! Every mission analysis model mission segment attaches one of these to compute pressure,
-//! temperature and the gas properties the segment solver needs at whatever
-//! altitude it is currently integrating through. It is a different reference
-//! implementation from [`crate::isa`]: mission analysis model's break-point table rather than
-//! native aerodynamic model's, so the two are kept as separate submodules rather than
-//! merged into one "the" atmosphere: nothing here assumes agreement with
-//! `isa`, and a caller that needs mission analysis model parity must use this one.
+//! Every discipline reads pressure, temperature and the gas properties from
+//! here, through [`compute_values`] or through [`crate::Atmosphere`], which
+//! is the same evaluation behind an object. The arithmetic follows the
+//! upstream mission model's port of the standard line for line, so its
+//! parity fixture still holds.
 //!
-//! # A different lapse-rate sign convention from `isa`
+//! # The model
 //!
-//! [`crate::isa`]'s `lapse_rate_k_per_m` is positive where temperature
-//! *rises* with altitude. This module's `alpha` is the opposite: positive
-//! where temperature *falls*, because that is how
-//! `Analyses/Atmospheric/US_Standard_1976.py` defines it
-//! (`alpha = -(T[i+1] - T[i]) / (z[i+1] - z[i])`). The two are not unified,
-//! because unifying them would stop this module's arithmetic from matching
-//! mission analysis model's own line for line, and a reader who assumes the sign is shared
-//! between the two atmosphere models would get every adiabatic layer's
-//! pressure wrong.
+//! Temperature is piecewise linear in geopotential altitude `H` between the
+//! reference levels of the standard's Table 4 (0, 11, 20, 32, 47, 51, 71 and
+//! 84.852 km, with the gradients -6.5, 0, +1.0, +2.8, 0, -2.8 and -2.0 K/km;
+//! equation 23). Pressure follows from the hydrostatic equation and the
+//! perfect-gas law in each layer: a power law where the gradient is not zero
+//! (equation 33a), an exponential where it is (equation 33b). Density is the
+//! perfect-gas law (equation 42), the speed of sound is
+//! `sqrt(gamma R T)` with `gamma = 1.4` (equation 50) and the dynamic
+//! viscosity is Sutherland's law (equation 51). A layer from -2 km to 0 with
+//! the tropospheric gradient extends the table below sea level.
+//!
+//! # Altitude input
+//!
+//! [`compute_values`] takes the **geopotential** altitude `H`, in metres:
+//! the altitude of the layer table, and on a standard day the pressure
+//! altitude, so a flight level (FL370 = 37 000 ft = 11 277.6 m) is passed as
+//! it stands. A temperature deviation leaves the pressure of the level
+//! untouched: the input stays a pressure altitude on a warm or a cold day.
+//!
+//! A **geometric** altitude `Z` above mean sea level (a terrain or aerodrome
+//! elevation, a surveyed height) is converted first, by
+//! [`geopotential_from_geometric`] or [`values_at_geometric`]:
+//! `H = r0 Z / (r0 + Z)` with the effective Earth radius
+//! `r0 = 6 356 766 m` of the standard (equation 18). The two altitudes differ by 0.06 m at 610 m, 19.0 m at 11 km
+//! and 62.7 m at 20 km: 7e-6, 0.30 % and 0.99 % in pressure.
+//!
+//! # Lapse-rate sign
+//!
+//! `alpha` is positive where temperature *falls* with altitude
+//! (`alpha = -(T[i+1] - T[i]) / (z[i+1] - z[i])`), the opposite of the
+//! standard's `L`.
 
 use std::sync::LazyLock;
 
-/// Specific gas constant of air, in m^2/(s^2*K).
-///
-/// `mission analysis model.Attributes.Gases.Air.gas_specific_constant`. Independent of
-/// [`crate::isa::GAS_CONSTANT_AIR`], which native aerodynamic model derives instead from
-/// the universal gas constant and the molecular mass of air; the two agree to
-/// five significant figures but are not the same constant and are not
-/// unified here, for the same reason the lapse-rate sign is not unified (see
-/// the module documentation).
+mod bisection;
+
+pub use bisection::bisect_pressure_altitude_m;
+
+/// Specific gas constant of air, in J/(kg*K): the 287.052 87 J/(kg K) of
+/// the ICAO Standard Atmosphere (ICAO Doc 7488, 3rd edition, primary
+/// constants), `R* / M0` with the universal gas constant 8 314.32 J/(kmol K)
+/// and the sea-level molar mass 28.964 420 kg/kmol; the digits past the
+/// eighth are those of the upstream mission model. The U.S. Standard
+/// Atmosphere, 1976 rounds the molar mass to 28.9644 kg/kmol, which gives
+/// 287.0531, 7e-7 higher. The crate's single declaration.
 pub const GAS_CONSTANT_AIR: f64 = 287.052_874_2;
 
 /// Specific heat capacity of air at constant pressure, in J/(kg*K).
@@ -47,32 +71,26 @@ pub const GAS_CONSTANT_AIR: f64 = 287.052_874_2;
 /// Prandtl number.
 const SPECIFIC_HEAT_CAPACITY_AIR: f64 = 1006.0;
 
-/// Sutherland's law constant, in kg/(m*s*sqrt(K)).
-///
-/// `mission analysis model.Attributes.Gases.Air.compute_absolute_viscosity`, cited upstream to
-/// <https://www.cfd-online.com/Wiki/Sutherland's_law>. Numerically identical
-/// to [`crate::atmosphere`]'s private Sutherland constant, but kept as this module's
-/// own copy rather than shared: the two upstream projects each define it
-/// independently (`native aerodynamic model/atmosphere.py` and `mission analysis model/Attributes/Gases/
-/// Air.py` do not share code either), so one copy per translated source file
-/// is the more faithful port, not an oversight.
+/// Sutherland's law constant `beta`, in kg/(m*s*sqrt(K)) (U.S. Standard
+/// Atmosphere, 1976, equation 51).
 const SUTHERLAND_C1: f64 = 1.458e-6;
 
-/// Sutherland's law reference temperature, in Kelvin. See [`SUTHERLAND_C1`].
+/// Sutherland's constant `S`, in Kelvin. See [`SUTHERLAND_C1`].
 const SUTHERLAND_S: f64 = 110.4;
 
-/// Earth's mean radius, in metres. `mission analysis model.Attributes.Planets.Earth.mean_radius`.
+/// Effective Earth radius `r0`, in metres, of the geometric to geopotential
+/// altitude conversion (U.S. Standard Atmosphere, 1976, equation 18 and the
+/// definition of `r0` given with it): the radius at which an inverse-square gravity
+/// field reproduces sea-level gravity and its vertical gradient at latitude
+/// 45.5425 degrees. It is not the mean radius of the Earth (6 371 000 m).
 ///
-/// Used only to convert a geometric altitude into a geopotential one; mission analysis model's
-/// `compute_gravity` (a `g0 * (Re / (Re + H))^2` correction) is a separate,
-/// unrelated method on the same class that this module does not call, because
-/// `compute_values` itself never calls it either: gravity is held at
-/// [`SEA_LEVEL_GRAVITY`] throughout.
-const MEAN_RADIUS_M: f64 = 6.371e6;
+/// Gravity itself is held at [`SEA_LEVEL_GRAVITY`] throughout the model, as
+/// the geopotential formulation requires.
+pub const EFFECTIVE_EARTH_RADIUS_M: f64 = 6_356_766.0;
 
 /// Standard sea-level gravity, in m/s^2.
 /// `mission analysis model.Attributes.Planets.Earth.sea_level_gravity`.
-const SEA_LEVEL_GRAVITY: f64 = 9.80665;
+const SEA_LEVEL_GRAVITY: f64 = alas_units::STANDARD_GRAVITY;
 
 /// One row of the break-point table: mission analysis model's `self.breaks`, arrays indexed
 /// together.
@@ -235,28 +253,22 @@ pub struct Values {
 /// Why a checked US Standard Atmosphere evaluation was rejected.
 #[derive(Debug, Clone, Copy, PartialEq, thiserror::Error)]
 pub enum Us1976Error {
-    /// Geometric altitude or temperature deviation was not finite.
+    /// Altitude or temperature deviation was not finite.
     #[error(
         "US1976 inputs must be finite (altitude={altitude_m:?}, temperature deviation={temperature_deviation_k:?})"
     )]
     NonFiniteInput {
-        /// Geometric altitude in metres.
+        /// Geopotential altitude in metres.
         altitude_m: f64,
         /// Temperature offset in kelvin.
         temperature_deviation_k: f64,
-    },
-    /// Geometric-to-geopotential conversion is singular at `-R_earth`.
-    #[error("US1976 geometric altitude {altitude_m} m is singular at the Earth-radius conversion")]
-    GeometricAltitudeSingularity {
-        /// Geometric altitude at the singular conversion point.
-        altitude_m: f64,
     },
     /// Geopotential altitude lies outside the tabulated US1976 model band.
     #[error(
         "US1976 altitude {altitude_m} m lies outside the tabulated geopotential model [{min_m}, {max_m}] m"
     )]
     AltitudeOutsideModel {
-        /// Requested geometric altitude in metres.
+        /// Requested geopotential altitude in metres.
         altitude_m: f64,
         /// Lowest tabulated geopotential altitude in metres.
         min_m: f64,
@@ -268,26 +280,58 @@ pub enum Us1976Error {
     NonPhysicalState,
 }
 
-/// Compute atmospheric values at `altitude_m` (geometric altitude above mean
-/// sea level, in metres), with an optional temperature deviation.
+/// Geopotential altitude `H`, in metres, of the geometric altitude
+/// `geometric_altitude_m` above mean sea level: `H = r0 Z / (r0 + Z)` (U.S.
+/// Standard Atmosphere, 1976, equation 18) with `r0` =
+/// [`EFFECTIVE_EARTH_RADIUS_M`].
+pub fn geopotential_from_geometric(geometric_altitude_m: f64) -> f64 {
+    geometric_altitude_m / (1.0 + geometric_altitude_m / EFFECTIVE_EARTH_RADIUS_M)
+}
+
+/// Geometric altitude `Z`, in metres above mean sea level, of the
+/// geopotential altitude `geopotential_altitude_m`: `Z = r0 H / (r0 - H)`
+/// (U.S. Standard Atmosphere, 1976, equation 19), the inverse of
+/// [`geopotential_from_geometric`].
+pub fn geometric_from_geopotential(geopotential_altitude_m: f64) -> f64 {
+    geopotential_altitude_m / (1.0 - geopotential_altitude_m / EFFECTIVE_EARTH_RADIUS_M)
+}
+
+/// The band of geopotential altitude the layer table covers, in metres:
+/// `(lowest, highest)`.
+pub fn geopotential_band_m() -> (f64, f64) {
+    (BREAKS[0].altitude_m, BREAKS[BREAKS.len() - 1].altitude_m)
+}
+
+/// Compute atmospheric values at `altitude_m` (geopotential altitude, the
+/// pressure altitude of a standard day, in metres), with an optional
+/// temperature deviation.
 ///
-/// `altitude_m` is converted from geometric to geopotential internally
-/// (`z / (1 + z / R_earth)`, matching `compute_values`) and then clamped to
+/// `altitude_m` is clamped to
 /// the table's range, `[-2000, 84852]` m; a request outside that range is
 /// logged and clamped rather than extrapolated, matching upstream's
 /// `warnings.warn`-and-clamp behaviour (translated as [`tracing::warn!`],
 /// since library code here reports through `tracing` rather than printing,
 /// see `CONTRIBUTING.md`).
 pub fn compute_values(altitude_m: f64, temperature_deviation_k: f64) -> Values {
-    let geopotential_altitude_m = altitude_m / (1.0 + altitude_m / MEAN_RADIUS_M);
-    values_at_geopotential_altitude(geopotential_altitude_m, temperature_deviation_k)
+    values_at_geopotential_altitude(altitude_m, temperature_deviation_k)
+}
+
+/// Compute atmospheric values at the **geometric** altitude
+/// `geometric_altitude_m` above mean sea level, in metres (an aerodrome or
+/// terrain elevation): [`compute_values`] at
+/// [`geopotential_from_geometric`] of it.
+pub fn values_at_geometric(geometric_altitude_m: f64, temperature_deviation_k: f64) -> Values {
+    compute_values(
+        geopotential_from_geometric(geometric_altitude_m),
+        temperature_deviation_k,
+    )
 }
 
 /// Checked US Standard Atmosphere evaluation for product/mission boundaries.
 ///
 /// [`compute_values`] preserves the source-compatible clamping behavior used
-/// by frozen parity fixtures. This entry point rejects non-finite inputs, the
-/// geometric conversion singularity, and any resulting nonphysical state.
+/// by frozen parity fixtures. This entry point rejects non-finite inputs, an
+/// altitude outside the table, and any resulting nonphysical state.
 pub fn try_compute_values(
     altitude_m: f64,
     temperature_deviation_k: f64,
@@ -298,11 +342,7 @@ pub fn try_compute_values(
             temperature_deviation_k,
         });
     }
-    let denominator = 1.0 + altitude_m / MEAN_RADIUS_M;
-    if denominator.abs() <= f64::EPSILON {
-        return Err(Us1976Error::GeometricAltitudeSingularity { altitude_m });
-    }
-    let geopotential_altitude_m = altitude_m / denominator;
+    let geopotential_altitude_m = altitude_m;
     let min_m = BREAKS[0].altitude_m;
     let max_m = BREAKS[BREAKS.len() - 1].altitude_m;
     if geopotential_altitude_m < min_m || geopotential_altitude_m > max_m {
@@ -331,20 +371,23 @@ pub fn try_compute_values(
     Ok(values)
 }
 
-/// The part of [`compute_values`] that operates purely in geopotential
-/// altitude, split out so tests can probe the break-point table's own
-/// behaviour (clamping, segment selection, continuity) without also going
-/// through the geometric-to-geopotential conversion, which shifts a
-/// geometric input away from the geopotential value of the same number, so a
-/// test that wants to land exactly on a break has to reason about both at
-/// once unless they are separated like this.
-fn values_at_geopotential_altitude(
-    geopotential_altitude_m: f64,
-    temperature_deviation_k: f64,
-) -> Values {
+/// Pressure, in pascals, at `altitude_m` (geopotential altitude, metres):
+/// exactly [`compute_values`]`(altitude_m, _).pressure_pa`, which no
+/// temperature deviation changes, without the other properties. For a
+/// caller that needs pressure alone many times, such as the inversion of
+/// pressure altitude.
+pub fn pressure_pa(altitude_m: f64) -> f64 {
+    let clamped_altitude_m = clamped_to_table(altitude_m);
+    let segment = segment_for(clamped_altitude_m);
+    layer_pressure_pa(segment, clamped_altitude_m - segment.base_altitude_m)
+}
+
+/// `geopotential_altitude_m` clamped to the table's range, logging a request
+/// outside it (see [`compute_values`]).
+fn clamped_to_table(geopotential_altitude_m: f64) -> f64 {
     let z_min = BREAKS[0].altitude_m;
     let z_max = BREAKS[BREAKS.len() - 1].altitude_m;
-    let clamped_altitude_m = if geopotential_altitude_m < z_min {
+    if geopotential_altitude_m < z_min {
         tracing::warn!(
             requested_m = geopotential_altitude_m,
             floor_m = z_min,
@@ -360,19 +403,31 @@ fn values_at_geopotential_altitude(
         z_max
     } else {
         geopotential_altitude_m
-    };
+    }
+}
 
-    let segment = segment_for(clamped_altitude_m);
-    let dz = clamped_altitude_m - segment.base_altitude_m;
-
-    let pressure_pa = if segment.alpha_k_per_m == 0.0 {
+/// Standard pressure, in pascals, `dz` metres above the base of `segment`.
+fn layer_pressure_pa(segment: &Segment, dz: f64) -> f64 {
+    if segment.alpha_k_per_m == 0.0 {
         segment.base_pressure_pa
             * (-dz * SEA_LEVEL_GRAVITY / (GAS_CONSTANT_AIR * segment.base_temperature_k)).exp()
     } else {
         segment.base_pressure_pa
             * (1.0 - segment.alpha_k_per_m * dz / segment.base_temperature_k)
                 .powf(SEA_LEVEL_GRAVITY / (segment.alpha_k_per_m * GAS_CONSTANT_AIR))
-    };
+    }
+}
+
+/// The evaluation behind [`compute_values`]: clamping to the table, segment
+/// selection and the layer formulas, in geopotential altitude.
+fn values_at_geopotential_altitude(
+    geopotential_altitude_m: f64,
+    temperature_deviation_k: f64,
+) -> Values {
+    let clamped_altitude_m = clamped_to_table(geopotential_altitude_m);
+    let segment = segment_for(clamped_altitude_m);
+    let dz = clamped_altitude_m - segment.base_altitude_m;
+    let pressure_pa = layer_pressure_pa(segment, dz);
 
     let temperature_k =
         segment.base_temperature_k - dz * segment.alpha_k_per_m + temperature_deviation_k;
@@ -412,14 +467,14 @@ mod tests {
     }
 
     #[test]
-    fn checked_values_reject_nonfinite_and_geometric_singularity_inputs() {
+    fn checked_values_reject_nonfinite_out_of_table_and_nonphysical_inputs() {
         assert!(matches!(
             try_compute_values(f64::NAN, 0.0),
             Err(Us1976Error::NonFiniteInput { .. })
         ));
         assert!(matches!(
-            try_compute_values(-MEAN_RADIUS_M, 0.0),
-            Err(Us1976Error::GeometricAltitudeSingularity { .. })
+            try_compute_values(-EFFECTIVE_EARTH_RADIUS_M, 0.0),
+            Err(Us1976Error::AltitudeOutsideModel { .. })
         ));
         assert!(matches!(
             try_compute_values(0.0, -400.0),
@@ -434,8 +489,8 @@ mod tests {
 
     #[test]
     fn pressure_and_temperature_nearly_agree_either_side_of_every_segment_boundary() {
-        // Unlike `crate::isa`'s table, which chains the barometric formula
-        // layer by layer, mission analysis model's break-point table stores independently
+        // Unlike a table that chains the barometric formula
+        // layer by layer, this break-point table stores independently
         // published pressure and temperature constants at each break; they
         // are not derived from each other, so evaluating the segment below a
         // boundary at its own top does not reproduce the segment above's
@@ -509,13 +564,8 @@ mod tests {
 
     #[test]
     fn requests_outside_the_table_are_clamped_not_extrapolated() {
-        // `BREAKS[0].altitude_m`/`BREAKS[last].altitude_m` are geopotential
-        // values, not valid geometric input for `compute_values`, the
-        // conversion would shift them off the table's true edge (see
-        // `values_at_geopotential_altitude`'s documentation), so the
-        // reference values here are taken in geopotential space directly,
-        // and only the clamping behaviour itself is exercised through the
-        // public, geometric-altitude entry point.
+        // The reference values are the table's own edges; the clamping is
+        // exercised through the public entry point.
         let z_min = BREAKS[0].altitude_m;
         let z_max = BREAKS[BREAKS.len() - 1].altitude_m;
         let floor = values_at_geopotential_altitude(z_min, 0.0);
@@ -548,5 +598,22 @@ mod tests {
         let values = compute_values(3000.0, 0.0);
         let recovered_pressure = values.density_kg_m3 * GAS_CONSTANT_AIR * values.temperature_k;
         assert!((recovered_pressure - values.pressure_pa).abs() < 1e-9);
+    }
+
+    #[test]
+    fn pressure_alone_is_the_full_state_pressure_bit_for_bit() {
+        // Every layer, every break, and both clamped ends, on any day.
+        let breaks = BREAKS.iter().map(|row| row.altitude_m);
+        let sweep = (-60..=1_800).map(|step| f64::from(step) * 49.7);
+        for altitude_m in breaks.chain(sweep) {
+            for deviation_k in [0.0, -15.0, 20.0] {
+                let full = compute_values(altitude_m, deviation_k).pressure_pa;
+                assert_eq!(
+                    pressure_pa(altitude_m).to_bits(),
+                    full.to_bits(),
+                    "{altitude_m} m"
+                );
+            }
+        }
     }
 }

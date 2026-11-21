@@ -67,7 +67,39 @@ pub(super) fn record_sheet(scene: &mut Scene, data: &LoadTrimSheetData) {
     limit_edges(scene, "takeoff CG limit", &data.takeoff_limits);
     limit_edges(scene, "flight CG limit", &data.flight_limits);
     limit_edges(scene, "landing CG limit", &data.landing_limits);
+    if let Some(set) = &data.en_route_above_mlw {
+        limit_edges(scene, "en-route above-MLW CG limit", &set.vertices);
+    }
     limit_edges(scene, "zero-fuel CG limit", &data.zfw_limits);
+    for envelope in data.envelopes() {
+        limit_edges(
+            scene,
+            &format!("{} (to {})", envelope.kind.key(), envelope.label),
+            &envelope.vertices,
+        );
+    }
+    for line in &data.lines.mechanisms {
+        record(
+            scene,
+            &format!("{} CG limit", line.mechanism.label()),
+            SeriesKind::Line,
+            line.points.iter().map(|&(mass, pct)| (pct, mass)).collect(),
+            Vec::new(),
+        );
+    }
+    for line in &data.lines.published {
+        record(
+            scene,
+            &format!(
+                "published {} CG limit: {}",
+                if line.forward { "forward" } else { "aft" },
+                line.reference
+            ),
+            SeriesKind::Line,
+            line.points.iter().map(|&(mass, pct)| (pct, mass)).collect(),
+            Vec::new(),
+        );
+    }
     let potato = |pick: fn(&super::PotatoLevel) -> f64| -> Vec<(f64, f64)> {
         data.potato.iter().map(|l| (pick(l), l.mass_kg)).collect()
     };
@@ -85,6 +117,38 @@ pub(super) fn record_sheet(scene: &mut Scene, data: &LoadTrimSheetData) {
         potato(|l| l.aft_pct_mac),
         Vec::new(),
     );
+    for curve in &data.loading_curves {
+        let name = match curve.kind {
+            super::CurveKind::Cargo => "cargo loading curve".to_owned(),
+            super::CurveKind::Seats {
+                front_to_back,
+                window_first,
+            } => format!(
+                "seat loading curve: {}, {}",
+                if window_first {
+                    "window first"
+                } else {
+                    "aisle first"
+                },
+                if front_to_back {
+                    "front to back"
+                } else {
+                    "back to front"
+                },
+            ),
+        };
+        record(
+            scene,
+            &name,
+            SeriesKind::Line,
+            curve
+                .points
+                .iter()
+                .map(|&(mass, pct)| (pct, mass))
+                .collect(),
+            Vec::new(),
+        );
+    }
     record(
         scene,
         "fuel curve",

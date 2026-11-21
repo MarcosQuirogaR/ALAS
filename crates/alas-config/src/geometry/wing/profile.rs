@@ -17,7 +17,14 @@
 //! root-kink-tip blend would give at its station; the multiplier is linear
 //! between stations and constant beyond the first and last.
 //!
-//! Both lists are empty by default, which leaves the wing exactly as the
+//! Where the section shape itself changes along the span (a published set of
+//! drawn stations), a [`WingSectionStation`] names the section at its
+//! station. The loft then blends linearly in span between consecutive named
+//! sections, with the root airfoil at the centreline and the tip airfoil at
+//! the tip as the end sections, in place of the root-kink-tip blend; the
+//! thickness stations multiply that blend.
+//!
+//! All three lists are empty by default, which leaves the wing exactly as the
 //! root/break/tip scaffold describes it.
 //!
 //! Frame: `span_fraction` is the distance from the centreline over the
@@ -52,6 +59,15 @@ pub struct WingThicknessStation {
     pub span_fraction: f64,
     /// Multiplier on the section thickness (t/c) of the root-kink-tip blend.
     pub thickness_scale: f64,
+}
+
+/// The section the loft carries at an interior span station.
+#[derive(Debug, Clone, PartialEq, Serialize, Deserialize)]
+pub struct WingSectionStation {
+    /// Distance from the centreline over the semispan, strictly in `(0, 1)`.
+    pub span_fraction: f64,
+    /// Airfoil name resolved through the shared airfoil library.
+    pub airfoil: String,
 }
 
 /// Why a spanwise profile cannot be lofted.
@@ -128,9 +144,10 @@ impl WingConfig {
     ///
     /// [`WingProfileError`] naming the first offending station.
     pub fn validate_profiles(&self, kink_span_fraction: f64) -> Result<(), WingProfileError> {
-        let sob = self
-            .side_of_body_chord_ratio
-            .and(self.side_of_body_span_fraction);
+        // The product builder lofts the side-of-body section whenever the
+        // station is declared (pinned chord or not), so it anchors the spacing
+        // rule like the kink: a station just off it would mesh a sliver panel.
+        let sob = self.side_of_body_span_fraction;
         let too_close = |fraction: f64| -> Option<&'static str> {
             let near = |anchor: f64| {
                 let gap = (fraction - anchor).abs();
@@ -233,6 +250,34 @@ impl WingConfig {
             }
             previous = Some(station.span_fraction);
         }
+        previous = None;
+        for (index, station) in self.section_stations.iter().enumerate() {
+            let list = "section";
+            if !station.span_fraction.is_finite() {
+                let (field, value) = ("span_fraction", station.span_fraction);
+                return Err(WingProfileError::NonFinite {
+                    list,
+                    index,
+                    field,
+                    value,
+                });
+            }
+            if !(station.span_fraction > 0.0 && station.span_fraction < 1.0) {
+                let value = station.span_fraction;
+                return Err(WingProfileError::SpanOutOfRange { list, index, value });
+            }
+            if let Some(anchor) = too_close(station.span_fraction) {
+                return Err(WingProfileError::TooCloseToStation {
+                    list,
+                    index,
+                    anchor,
+                });
+            }
+            if previous.is_some_and(|p| station.span_fraction <= p) {
+                return Err(WingProfileError::InvalidOrder { list, index });
+            }
+            previous = Some(station.span_fraction);
+        }
         Ok(())
     }
 
@@ -261,13 +306,14 @@ impl WingConfig {
     }
 
     /// Span fractions, ascending, at which the profiles need a loft station
-    /// of their own: every dihedral station and every thickness station
-    /// strictly inside `(0, 1)`.
+    /// of their own: every dihedral and section station and every thickness
+    /// station strictly inside `(0, 1)`.
     pub fn profile_span_fractions(&self) -> Vec<f64> {
         let mut fractions: Vec<f64> = self
             .dihedral_stations
             .iter()
             .map(|s| s.span_fraction)
+            .chain(self.section_stations.iter().map(|s| s.span_fraction))
             .chain(
                 self.thickness_stations
                     .iter()

@@ -30,12 +30,14 @@ mod schema;
 
 pub mod airport_dataset;
 pub mod airport_io;
+pub mod airport_obstacles;
 pub mod airports;
 pub mod analysis;
 pub mod cabin;
 pub mod clean_sheet;
 pub mod control_surfaces;
 mod cruise_speed;
+pub mod design_speeds;
 pub mod design_variables;
 pub mod downstream;
 pub mod engines;
@@ -49,24 +51,30 @@ pub mod landing_mass_ratio;
 pub mod mass;
 pub mod mass_architecture;
 pub mod materials;
+mod max_operating;
 pub mod mission;
 pub mod mses;
 pub mod oew_reference;
 pub mod optimizer;
 pub mod performance;
+mod performance_high_lift;
 pub mod performance_presets;
 mod performance_speed_rule;
 pub mod physics;
+pub mod preset_control_surfaces;
 pub mod preset_flops;
 pub mod preset_fuel_tanks;
 pub mod preset_policy;
 pub mod preset_structures;
 pub mod presets;
+mod registered_mission;
 pub mod propulsion;
 pub mod pylon_mass;
 pub mod requirements;
 pub mod settings;
 pub mod sizing_basis;
+#[doc(hidden)]
+pub mod static_text;
 pub use sizing_basis::MassSizingBasis;
 mod cabin_method;
 mod retired_keys;
@@ -83,7 +91,7 @@ pub use leaf::Leaf;
 pub use overlay::{overlay, OverlayError};
 pub use schema::{
     Entry, Field, Kind, LeafField, Node, Number, OptionSource, OptionalValueKind, ReadonlyUnless,
-    TranslatedEntry, TranslatedField, TranslatedNode, ZeroMeaning,
+    TranslatedEntry, TranslatedField, TranslatedNode, VisibleIf, ZeroMeaning,
 };
 
 pub use airport_dataset::{
@@ -95,15 +103,17 @@ pub use cabin::{
     BaggagePolicy, CabinConfig, CargoDeckConfig, FreightHoldConfig, HoldCompartmentConfig,
     HoldDeck, PassengerCabinConfig, SeatClassConfig,
 };
-pub use cabin_method::CabinEquipmentMethod;
+#[path = "cabin/payload_items.rs"]
+mod payload_items;
+pub use cabin_method::{CabinEquipmentMethod, ExecutiveCabinDeclaration};
 pub use control_surfaces::ControlSurfacesConfig;
 pub use design_variables::{
     DesignVariableSpec, DesignVector, DesignVectorError, SPECS as DESIGN_VARIABLE_SPECS,
 };
 pub use downstream::DownstreamConfig;
 pub use engines::{
-    NacelleParamSource, NacelleShapeV2, PropulsionTechnology, TurbofanEngineSpec,
-    TurbofanOffDesignSpec, TurbopropEngineSpec,
+    NacelleDrawnOutline, NacelleParamSource, NacelleShapeV2, PropulsionTechnology,
+    TurbofanEngineSpec, TurbofanOffDesignSpec, TurbopropEngineSpec,
 };
 pub use fidelity_presets::{FidelityPreset, UnknownFidelityPreset};
 pub use flops_structure::{
@@ -117,30 +127,42 @@ pub use fuel_tanks::{
 };
 pub use geometry::loft;
 pub use geometry::{
-    embedded_loft, embedded_loft_ids, parse_loft_spec, preset_loft_id, ActiveEngineModel,
-    AftBodyStation, AirfoilClass, BodyFuselageExtent, BodyStation, CentreEngineInstallation,
-    DeviceStation, EmpennageConfig, EngineBindingError, EngineConfig, FuselageConfig,
-    FuselageSection, FuselageSectionError, GeometryConfig, InboardAerodynamicStation, LoftRef,
-    LoftSpec, LoftSpecError, LongitudinalStationFrame, MacFrame, MainWingPanel, MainWingStation,
-    MainWingStationKind, NacelleModel, ProfileSpline, PublishedReference, ReferenceTrapezoid,
-    ReferenceWingConfig, ReferenceWingMode, RegisteredBasis, TailSizing, TransportPlanform,
-    TransportPlanformError, UpperDeck, UpperDeckHump, WingConfig, WingDihedralStation, WingHeights,
-    WingProfileError, WingProfileInterpolation, WingSection, WingSectionError, WingShape,
-    WingThicknessStation, WingtipDevice, WingtipDeviceError, WingtipDeviceKind,
-    DEFAULT_HUMP_FAIRING_EXPONENT, HUMP_FAIRING_EXPONENT_RANGE, HUMP_MAIN_DECK_FLOOR_FRACTION,
-    MAX_FLIGHT_TIP_RISE_SEMISPAN_FRACTION, PUBLISHED_AREA_TOLERANCE,
+    embedded_loft, embedded_loft_ids, parse_loft_spec, preset_loft_id, validate_tail_edge_stations,
+    ActiveEngineModel, AftBodyStation, AftFuselageEngineInstallation, AirfoilClass,
+    BodyFuselageExtent, BodyStation, CabinSectionConfig, CabinWidthsConfig,
+    CentreEngineInstallation, CentrePodStrut, DeviceStation, DivergenceRelation, DragDivergenceLaw,
+    EmpennageConfig, EngineBindingError, EngineConfig, EngineScaleError, FinAftFairing,
+    FuselageConfig, FuselageSection, FuselageSectionError, GeometryConfig, HoldSectionConfig,
+    InboardAerodynamicStation, LoftRef, LoftSpec, LoftSpecError, LongitudinalStationFrame,
+    MacFrame, MainWingPanel, MainWingStation, MainWingStationKind, NacelleModel, ProfileSpline,
+    PublishedReference, ReferenceTrapezoid, ReferenceWingConfig, ReferenceWingMode,
+    RegisteredBasis, SizedEngine, TailEdgeStation, TailEdgeStationError, TailSizing,
+    TransportPlanform, TransportPlanformError, UpperDeck, UpperDeckHump, VentralFinStation,
+    WingConfig, WingDihedralStation, WingEdgeStation, WingHeights, WingProfileError,
+    WingProfileInterpolation, WingSection, WingSectionError, WingSectionStation, WingShape,
+    WingThicknessStation, WingtipDevice, WingtipDeviceError, WingtipDeviceKind, WingtipPathStation,
+    WingtipTeFlare, DEFAULT_HUMP_FAIRING_EXPONENT, ENGINE_DIAMETER_EXPONENT,
+    ENGINE_LENGTH_EXPONENT, ENGINE_SCALE_SEARCH_BRACKET, ENGINE_SCALE_VALIDITY_FRACTION,
+    HUMP_FAIRING_EXPONENT_RANGE, HUMP_MAIN_DECK_FLOOR_FRACTION, MAX_EDGE_STATIONS,
+    MAX_FLIGHT_TIP_RISE_SEMISPAN_FRACTION, PROPELLER_DIAMETER_POWER_EXPONENT,
+    PUBLISHED_AREA_TOLERANCE, SECTION_DEPTH_SHARE, STATION_SPAN_TOLERANCE,
 };
 pub use landing_gear::{
-    effective_main_gear_station, DerivedMainGearStation, EffectiveGearStationExt,
-    EffectiveMainGearStation, GearStationRejection, LandingGearConfig, LandingGearStationPositions,
-    MainGearFallbackRefusal, ValidGearStation, WingMountedGearDomain,
+    effective_main_gear_station, rotation_pivot_station, DerivedMainGearStation,
+    EffectiveGearStationExt, EffectiveMainGearStation, GearStationRejection, LandingGearConfig,
+    LandingGearStationPositions, MainGearFallbackRefusal, RotationAngleBasis, ValidGearStation,
+    WingMountedGearDomain,
 };
 pub use mass::MassModelConfig;
 pub(crate) use mass_architecture::legacy_mass_model_schema_version;
 pub use mass_architecture::{
     MassArchitecture, MassArchitectureMigration, MASS_MODEL_SCHEMA_VERSION,
 };
-pub use mission::{resolve_true_airspeed_m_s, MissionConfig, MissionProfileConfig, SpeedReference};
+pub use mission::{
+    resolve_true_airspeed_m_s, CruiseExtent, EventAction, EventTime, MissionConfig, MissionPlan,
+    MissionProfileConfig, PlanError, PlanStage, RaymerProfile, SpeedReference, StageEvent,
+    StageKind, TakeoffField, TemplateInputs, CATEGORY_I_DECISION_HEIGHT_FT,
+};
 pub use mses::MsesConfig;
 pub use oew_reference::{
     InclusionStatus, OewApplicability, OewCaseAnchor, OewInclusionList, OewReference,
@@ -150,10 +172,12 @@ pub use optimizer::{
     AerodromeReferenceCode, DesignMission, DesignMode, DesignPayloadSource, DesignRange,
     DesignSpaceConfig, MtowPlan, MtowSizing, ObjectiveConfig, ObjectiveKind, ObjectiveWeights,
     OptimizerConfig, SolverSettings, StageBudget, StructuralBasis, VariableEnvelope,
-    DEFAULT_MTOW_BAND_FRACTION, DEFAULT_REPRODUCIBLE_EVALUATIONS, DEFAULT_SEED,
-    LEGACY_METHOD_TOKENS,
+    DEFAULT_MTOW_BAND_FRACTION, DEFAULT_REFINEMENT_EVALUATIONS, DEFAULT_REPRODUCIBLE_EVALUATIONS,
+    DEFAULT_SEED, LEGACY_METHOD_TOKENS, WING_POSITION_VARIABLE,
 };
+pub use payload_items::*;
 pub use performance::PerformanceConfig;
+pub use performance_high_lift::{FlapSlotKind, HighLiftChordExtension};
 pub use performance_presets::{PerformancePreset, UnknownPerformancePreset};
 pub use performance_speed_rule::{TakeoffSpeedRatios, V2_MIN_OVER_VMC};
 pub use physics::DragModelConfig;
@@ -161,24 +185,26 @@ pub use presets::{
     applicability_label, datum_label, AftCgNoseLoadPoint, AircraftPreset, AircraftReferenceData,
     AircraftVariantIdentity, CertifiedExitLayout, CertifiedExitPair, CgEnvelopeCondition,
     CgEnvelopeEvidence, CgEnvelopeSource, CgEnvelopeVertex, CgLimits, DesignMissionEvidence,
-    DesignMissionProvenanceSet, DesignMissionReference, MissingDesignMissionDatum,
-    MissionDatumProvenance, MissionEvidenceApplicability, MissionEvidenceTier,
-    MissionPromotionRefusal, PartialDesignMissionEvidence, PartialMissionEvidenceKind,
-    PayloadRangeDesignPoint, PlanningCgEnvelope, PlanningMacReference, PublishedAftCgNoseLoad,
-    PublishedMissionLoadCase, PublishedRange, PublishedReserveContract, SourcedPlanningCabin,
-    SourcedSeatClass, UnknownAircraftPreset,
+    DesignMissionProvenanceSet, DesignMissionReference, DesignPointCruise, DesignPointReserve,
+    MissingDesignMissionDatum, MissionDatumProvenance, MissionEvidenceApplicability,
+    MissionEvidenceTier, MissionPromotionRefusal, PartialDesignMissionEvidence,
+    PartialMissionEvidenceKind, PayloadRangeDesignPoint, PlanningCgEnvelope, PlanningMacReference,
+    PublishedAftCgNoseLoad, PublishedMissionLoadCase, PublishedRange, PublishedReserveContract,
+    SourcedPlanningCabin, SourcedSeatClass, SourcedTailIceProtection, TailIceProtection,
+    UnknownAircraftPreset, UsableCgRangeSource,
 };
 pub use propulsion::PropulsionCycleConfig;
 pub use pylon_mass::PylonMassMethod;
-pub use requirements::{DesignRequirements, RequirementsError};
+pub use requirements::{DepartureTrackLeg, DesignRequirements, RequirementsError};
 pub use retired_keys::{
-    LegacySolverBudget, RetiredKeysDropped, RETIRED_BUDGET_KEYS, RETIRED_DRAG_MODEL_KEYS,
-    RETIRED_OBJECTIVE_KEYS, RETIRED_PROPULSION_CYCLE_KEYS, RETIRED_SOLVER_KEYS,
-    RETIRED_WEIGHT_KEYS,
+    LegacySolverBudget, RetiredKeysDropped, RETIRED_BUDGET_KEYS, RETIRED_DESIGN_SPACE_KEYS,
+    RETIRED_DRAG_MODEL_KEYS, RETIRED_OBJECTIVE_KEYS, RETIRED_PROPULSION_CYCLE_KEYS,
+    RETIRED_SOLVER_KEYS, RETIRED_WEIGHT_KEYS,
 };
 pub use settings::{legacy_mission_disabled, AlasConfig, ConfigLoadNotes, WORKSPACE_ENVELOPE_KEY};
 pub use solver_presets::{SolverPreset, UnknownSolverPreset};
 pub use structures::StructuresConfig;
+pub use systems_mass::minimum_cabin_crew;
 pub use systems_mass::{
     CargoHoldLoading, FlopsInputEvidence, FlopsInputProvenance, FlopsTransportConfig,
     FlopsTransportProvenance, OperatingHaulClass, SystemsMassMethod,

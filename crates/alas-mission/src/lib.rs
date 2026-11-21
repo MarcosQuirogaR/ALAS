@@ -34,17 +34,24 @@
 //! because a mission segment is where the analyses are actually *evaluated*
 //! rather than merely constructed.
 
+mod envelope;
+pub use envelope::ENVELOPE_TOLERANCE;
+pub mod events;
 pub mod numerics;
+mod point_memo;
+pub mod preset_load;
 pub mod profile;
 pub mod segments;
 pub mod solve;
 pub mod vehicle;
 
+pub use events::MassChange;
 pub use numerics::Numerics;
+pub use point_memo::PointMemo;
 pub use profile::{
     build_mission_request, check_profile_for_route, configure_cruise_legs,
-    propose_profile_for_route, route_cruise_altitude_m, MissionProfileProposal,
-    MissionProfileRouteCheck, MissionRequest,
+    minimum_cruise_time_for_step_s, propose_profile_for_route, route_cruise_altitude_m,
+    MissionProfileProposal, MissionProfileRouteCheck, MissionRequest, CRUISE_LEVEL_INTERVAL_M,
 };
 pub use segments::{
     Conditions, Initials, MissionAnalyses, Segment, SegmentError, SegmentKind, SegmentSpec,

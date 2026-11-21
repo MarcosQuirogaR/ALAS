@@ -2,7 +2,11 @@
 
 An add-on is a small calculator you can add or edit without rebuilding ALAS:
 for example a mini Raymer wing-weight calculator whose result goes into the
-design. Open **Setup > Add-ons**. Two kinds exist.
+design. Open **Setup > Add-ons**: a list of add-ons on the left, and for the
+selected one a **Run** tab (inputs, progress, outputs) and a **Files** tab (the
+add-on's folder as a tree with a read-only code viewer, coloured for Python, Rhai,
+TOML and JSON, and **Open in editor**, which uses your system's editor; on Windows
+the registered Edit action, else Notepad; it never runs the file). Two kinds exist.
 
 | | `script` | `process` |
 |---|---|---|
@@ -32,7 +36,7 @@ author = "You"
 description = "What it does and where the method comes from (cite the source)."
 kind = "script"               # "script" or "process"
 entry = "main.rhai"           # relative to this folder
-timeout_s = 10.0              # optional, default 10, at most 120
+timeout_s = 10.0              # optional, default 10; at most 120 (script) or 43200 = 12 h (process)
 
 [[inputs]]
 name = "wing_area_m2"         # identifier: letters, digits, underscore
@@ -47,7 +51,9 @@ description = "Wing mass"
 target = "design_vector.span_m"   # optional, see below
 ```
 
-At least one output is required. Unknown keys are rejected.
+A script add-on needs at least one output; a process add-on may declare none and
+return only texts, files or a configuration overlay (below). Unknown keys are
+rejected.
 
 ### Targets
 
@@ -100,11 +106,55 @@ and reads one JSON object from stdout:
 {"outputs": {"wing_mass_kg": 5896.8}, "messages": ["optional text"]}
 ```
 
-stderr is kept as the add-on log. A non-zero exit, a timeout (the process is
+stderr is kept as the add-on log and is shown line by line while the add-on runs.
+A non-zero exit, a timeout (the process is
 killed together with every process it started: `taskkill /F /T` on Windows, a signal to its process group on Unix), output over 1 MiB, invalid JSON,
 or a missing or non-finite declared output is an error. Undeclared outputs are
 ignored. `main.py` of the bundled `raymer_wing_weight_py` example is a complete
 program.
+
+### Additions to protocol 1 (existing programs keep working unchanged)
+
+**Long runs, progress and Cancel.** A process add-on may set `timeout_s` up to
+12 hours. While it runs the panel shows a progress view and a **Cancel** button;
+Cancel (like the timeout) kills the process and everything it started. To report
+progress, print lines to stdout that start with `ALAS-PROGRESS`, optionally
+followed by a percentage (0 to 100) and a text:
+
+```
+ALAS-PROGRESS 40 meshing the section
+ALAS-PROGRESS solving the polar
+```
+
+These lines are not part of the reply: the reply is the rest of stdout, as one
+JSON object. Flush stdout after each progress line.
+
+**Environment.** Besides your own environment, the program receives
+`ALAS_EXE` (the running ALAS executable), `ALAS_MSES_DIR` (the resolved MSES
+folder, when MSES is set up on the External Tools page) and `ALAS_OSMAP` (the
+configured `osmapDP.dat`, when one is set). A variable that is not known is not
+set; test for it.
+
+**More results.** Next to `outputs` and `messages` the reply may contain:
+
+```json
+{"outputs": {}, "texts": {"summary": "converged in 41 iterations"},
+ "files": [{"label": "Polar plot", "path": "out/polar.png"}],
+ "config_overlay": "out/overlay.json"}
+```
+
+- `texts`: named strings, shown in the outputs table (display only).
+- `files`: links shown in the panel; a click opens the file with the system's
+  default program. A relative path is relative to the add-on folder. Programs and
+  scripts (`.exe`, `.bat`, `.ps1`, `.sh`, ...) are never opened from a link.
+- `config_overlay`: a JSON file (up to 1 MiB) mapping targets to numbers, with the
+  same target syntax as a manifest output:
+  `{"mass_model.systems_mass_fraction": 0.11, "design_vector.span_m": 60.0}`.
+  It is not applied by itself: **Preview changes** lists every field with its
+  before and after value, **Apply to design** validates the candidate design
+  exactly as for a targeted output (nothing changes if it is refused), and the
+  values are recorded as set by the add-on in the run log and
+  `addon-provenance.json`.
 
 ## The design summary
 

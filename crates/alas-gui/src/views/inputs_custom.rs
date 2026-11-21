@@ -9,22 +9,18 @@
 //! for every design.
 
 use alas_config::{DesignVector, FuselageSection, MainWingStationKind, WingSection};
-use egui::{DragValue, RichText, Ui};
+use egui::{RichText, Ui};
 use serde_json::Value;
 
 use crate::state::AppState;
 use crate::views::tr;
 
+#[path = "inputs_custom_cells.rs"]
+mod cells;
+use cells::{airfoil_cell, station_buttons, station_cell, station_heading};
+
 /// Render the wing station editor inside a Sandbox Discipline Window.
 pub(crate) fn show_custom_wing_sections(state: &mut AppState, ui: &mut Ui) {
-    ui.label(RichText::new(tr("Wing stations")).strong());
-    ui.label(
-        RichText::new(tr(
-            "NAME | SPAN (%) | LE X [m] | CHORD [m] | Z [m] | TWIST [deg] | AIRFOIL",
-        ))
-        .weak()
-        .small(),
-    );
     let mut sections = state
         .config_values
         .get("geometry")
@@ -40,59 +36,73 @@ pub(crate) fn show_custom_wing_sections(state: &mut AppState, ui: &mut Ui) {
     // scalar/design values below.
     let mut generated = generated_wing_sections(state);
     let generated_before = generated.clone();
-    for index in 0..generated.len() {
-        let (span_min, span_max) = generated_wing_span_bounds(&generated, index);
-        let (kind, section) = &mut generated[index];
-        show_generated_wing_section(ui, *kind, section, span_min, span_max);
-        if matches!(
-            kind,
-            MainWingStationKind::SideOfBody | MainWingStationKind::Kink
-        ) {
-            section.span_fraction = section.span_fraction.clamp(span_min, span_max);
-        }
-    }
-    if !generated.is_empty() {
-        ui.separator();
-        ui.label(
-            RichText::new(tr("Additional sandbox sections"))
-                .strong()
-                .small(),
-        );
-    }
     let mut changed = false;
     let mut remove = None;
-    for (index, section) in sections.iter_mut().enumerate() {
-        ui.horizontal_wrapped(|ui| {
-            ui.label(format!("{} {}", tr("Section"), index + 1));
-            changed |= ui
-                .add(
-                    DragValue::new(&mut section.span_fraction)
-                        .range(0.001..=0.999)
-                        .speed(0.01),
-                )
-                .changed();
-            changed |= ui
-                .add(DragValue::new(&mut section.leading_edge_x_m).speed(0.05))
-                .changed();
-            changed |= ui
-                .add(
-                    DragValue::new(&mut section.chord_m)
-                        .range(0.01..=100.0)
-                        .speed(0.05),
-                )
-                .changed();
-            changed |= ui
-                .add(DragValue::new(&mut section.z_m).speed(0.05))
-                .changed();
-            changed |= ui
-                .add(DragValue::new(&mut section.twist_deg).speed(0.1))
-                .changed();
-            changed |= ui.text_edit_singleline(&mut section.airfoil).changed();
+    // A narrow window scrolls the table sideways instead of squashing it.
+    egui::ScrollArea::horizontal()
+        .id_salt("wing_stations_scroll")
+        .auto_shrink([false, true])
+        .show(ui, |ui| {
+            egui::Grid::new("wing_stations_grid")
+                .num_columns(8)
+                .spacing(crate::theme::space::GRID_SPACING)
+                .striped(true)
+                .show(ui, |ui| {
+                    for heading in [
+                        "Station",
+                        "Span fraction",
+                        "LE x (m)",
+                        "Chord (m)",
+                        "Z (m)",
+                        "Twist (deg)",
+                        "Airfoil",
+                    ] {
+                        station_heading(ui, heading);
+                    }
+                    ui.end_row();
+                    for index in 0..generated.len() {
+                        let (span_min, span_max) = generated_wing_span_bounds(&generated, index);
+                        let (kind, section) = &mut generated[index];
+                        show_generated_wing_section(ui, *kind, section, span_min, span_max);
+                        ui.end_row();
+                        if matches!(
+                            kind,
+                            MainWingStationKind::SideOfBody | MainWingStationKind::Kink
+                        ) {
+                            section.span_fraction = section.span_fraction.clamp(span_min, span_max);
+                        }
+                    }
+                    if !generated.is_empty() {
+                        ui.label(
+                            RichText::new(tr("Additional sandbox sections"))
+                                .strong()
+                                .small(),
+                        );
+                        ui.end_row();
+                    }
+                    for (index, section) in sections.iter_mut().enumerate() {
+                        ui.label(format!("{} {}", tr("Section"), index + 1));
+                        changed |= station_cell(
+                            ui,
+                            &mut section.span_fraction,
+                            Some(0.001..=0.999),
+                            0.01,
+                            true,
+                        );
+                        changed |=
+                            station_cell(ui, &mut section.leading_edge_x_m, None, 0.05, true);
+                        changed |=
+                            station_cell(ui, &mut section.chord_m, Some(0.01..=100.0), 0.05, true);
+                        changed |= station_cell(ui, &mut section.z_m, None, 0.05, true);
+                        changed |= station_cell(ui, &mut section.twist_deg, None, 0.1, true);
+                        changed |= airfoil_cell(ui, &mut section.airfoil, true);
+                        if ui.small_button(tr("Remove this wing section")).clicked() {
+                            remove = Some(index);
+                        }
+                        ui.end_row();
+                    }
+                });
         });
-        if ui.small_button(tr("Remove this wing section")).clicked() {
-            remove = Some(index);
-        }
-    }
     if let Some(index) = remove {
         sections.remove(index);
         changed = true;
@@ -110,35 +120,15 @@ pub(crate) fn show_custom_wing_sections(state: &mut AppState, ui: &mut Ui) {
         apply_generated_wing_sections(state, &generated_before, &generated);
         state.on_config_modified();
     }
-    ui.horizontal(|ui| {
-        if ui
-            .add_sized(
-                [ui.available_width() * 0.5 - 3.0, 24.0],
-                egui::Button::new(tr("Create wing section")),
-            )
-            .clicked()
-        {
-            if let Some(span_fraction) = next_wing_span_available(state, &sections) {
-                let section = interpolated_wing_section(state, span_fraction, &sections)
-                    .unwrap_or_else(|| default_wing_section(state, span_fraction));
-                sections.push(section);
-                sections.sort_by(|left, right| left.span_fraction.total_cmp(&right.span_fraction));
-                set_custom_sections(
-                    state,
-                    "wing",
-                    serde_json::to_value(&sections).unwrap_or(Value::Array(Vec::new())),
-                );
-                state.on_config_modified();
-            }
-        }
-        if ui
-            .add_sized(
-                [ui.available_width(), 24.0],
-                egui::Button::new(tr("Remove last wing section")),
-            )
-            .clicked()
-            && sections.pop().is_some()
-        {
+    ui.add_space(4.0);
+    let (create, remove_last) =
+        station_buttons(ui, "Create wing section", "Remove last wing section");
+    if create {
+        if let Some(span_fraction) = next_wing_span_available(state, &sections) {
+            let section = interpolated_wing_section(state, span_fraction, &sections)
+                .unwrap_or_else(|| default_wing_section(state, span_fraction));
+            sections.push(section);
+            sections.sort_by(|left, right| left.span_fraction.total_cmp(&right.span_fraction));
             set_custom_sections(
                 state,
                 "wing",
@@ -146,17 +136,19 @@ pub(crate) fn show_custom_wing_sections(state: &mut AppState, ui: &mut Ui) {
             );
             state.on_config_modified();
         }
-    });
+    }
+    if remove_last && sections.pop().is_some() {
+        set_custom_sections(
+            state,
+            "wing",
+            serde_json::to_value(&sections).unwrap_or(Value::Array(Vec::new())),
+        );
+        state.on_config_modified();
+    }
 }
 
 /// Render the fuselage station editor inside a Sandbox Discipline Window.
 pub(crate) fn show_custom_fuselage_sections(state: &mut AppState, ui: &mut Ui) {
-    ui.label(RichText::new(tr("Fuselage stations")).strong());
-    ui.label(
-        RichText::new(tr("NAME | X (%) | WIDTH [m] | HEIGHT [m] | Z [m] | SHAPE"))
-            .weak()
-            .small(),
-    );
     let mut sections = state
         .config_values
         .get("geometry")
@@ -171,65 +163,66 @@ pub(crate) fn show_custom_fuselage_sections(state: &mut AppState, ui: &mut Ui) {
     // fields and the fuselage preview handles.
     let mut generated = generated_fuselage_sections(state);
     let generated_before = generated.clone();
-    if !generated.is_empty() {
-        ui.label(RichText::new(tr("Preset stations")).weak().small())
-            .on_hover_text(tr(
-                "Preset/generated stations (edit Body parameters or drag the preview points)",
-            ));
-        for (index, section) in generated.iter_mut().enumerate() {
-            show_generated_fuselage_section(ui, index, section);
-        }
-        ui.separator();
-        ui.label(
-            RichText::new(tr("Additional sandbox sections"))
-                .strong()
-                .small(),
-        );
-    }
     let mut changed = false;
     let mut remove = None;
-    for (index, section) in sections.iter_mut().enumerate() {
-        ui.horizontal_wrapped(|ui| {
-            ui.label(format!("{} {}", tr("Section"), index + 1));
-            changed |= ui
-                .add(
-                    DragValue::new(&mut section.x_fraction)
-                        .range(0.001..=0.999)
-                        .speed(0.01),
-                )
-                .changed();
-            changed |= ui
-                .add(
-                    DragValue::new(&mut section.width_m)
-                        .range(0.01..=100.0)
-                        .speed(0.05),
-                )
-                .changed();
-            changed |= ui
-                .add(
-                    DragValue::new(&mut section.height_m)
-                        .range(0.01..=100.0)
-                        .speed(0.05),
-                )
-                .changed();
-            changed |= ui
-                .add(DragValue::new(&mut section.z_m).speed(0.05))
-                .changed();
-            changed |= ui
-                .add(
-                    DragValue::new(&mut section.shape)
-                        .range(1.0..=50.0)
-                        .speed(0.1),
-                )
-                .changed();
+    egui::ScrollArea::horizontal()
+        .id_salt("fuselage_stations_scroll")
+        .auto_shrink([false, true])
+        .show(ui, |ui| {
+            egui::Grid::new("fuselage_stations_grid")
+                .num_columns(7)
+                .spacing(crate::theme::space::GRID_SPACING)
+                .striped(true)
+                .show(ui, |ui| {
+                    for heading in [
+                        "Station",
+                        "Position (fraction of length)",
+                        "Width (m)",
+                        "Height (m)",
+                        "Z (m)",
+                        "Shape",
+                    ] {
+                        station_heading(ui, heading);
+                    }
+                    ui.end_row();
+                    for (index, section) in generated.iter_mut().enumerate() {
+                        show_generated_fuselage_section(ui, index, section);
+                        ui.end_row();
+                    }
+                    if !generated.is_empty() {
+                        ui.label(
+                            RichText::new(tr("Additional sandbox sections"))
+                                .strong()
+                                .small(),
+                        );
+                        ui.end_row();
+                    }
+                    for (index, section) in sections.iter_mut().enumerate() {
+                        ui.label(format!("{} {}", tr("Section"), index + 1));
+                        changed |= station_cell(
+                            ui,
+                            &mut section.x_fraction,
+                            Some(0.001..=0.999),
+                            0.01,
+                            true,
+                        );
+                        changed |=
+                            station_cell(ui, &mut section.width_m, Some(0.01..=100.0), 0.05, true);
+                        changed |=
+                            station_cell(ui, &mut section.height_m, Some(0.01..=100.0), 0.05, true);
+                        changed |= station_cell(ui, &mut section.z_m, None, 0.05, true);
+                        changed |=
+                            station_cell(ui, &mut section.shape, Some(1.0..=50.0), 0.1, true);
+                        if ui
+                            .small_button(tr("Remove this fuselage section"))
+                            .clicked()
+                        {
+                            remove = Some(index);
+                        }
+                        ui.end_row();
+                    }
+                });
         });
-        if ui
-            .small_button(tr("Remove this fuselage section"))
-            .clicked()
-        {
-            remove = Some(index);
-        }
-    }
     if let Some(index) = remove {
         sections.remove(index);
         changed = true;
@@ -247,43 +240,26 @@ pub(crate) fn show_custom_fuselage_sections(state: &mut AppState, ui: &mut Ui) {
         set_generated_fuselage_sections(state, &generated);
         state.on_config_modified();
     }
-    ui.horizontal(|ui| {
-        if ui
-            .add_sized(
-                [ui.available_width() * 0.5 - 3.0, 24.0],
-                egui::Button::new(tr("Create fuselage section")),
-            )
-            .clicked()
-        {
-            if let Some(x_fraction) = next_fuselage_fraction_available(state, &sections) {
-                sections.push(
-                    interpolated_fuselage_section(state, x_fraction, &sections).unwrap_or(
-                        FuselageSection {
-                            x_fraction,
-                            width_m: 6.0,
-                            height_m: 6.0,
-                            z_m: 0.0,
-                            shape: 2.0,
-                        },
-                    ),
-                );
-                sections.sort_by(|left, right| left.x_fraction.total_cmp(&right.x_fraction));
-                set_custom_sections(
-                    state,
-                    "fuselage",
-                    serde_json::to_value(&sections).unwrap_or(Value::Array(Vec::new())),
-                );
-                state.on_config_modified();
-            }
-        }
-        if ui
-            .add_sized(
-                [ui.available_width(), 24.0],
-                egui::Button::new(tr("Remove last fuselage section")),
-            )
-            .clicked()
-            && sections.pop().is_some()
-        {
+    ui.add_space(4.0);
+    let (create, remove_last) = station_buttons(
+        ui,
+        "Create fuselage section",
+        "Remove last fuselage section",
+    );
+    if create {
+        if let Some(x_fraction) = next_fuselage_fraction_available(state, &sections) {
+            sections.push(
+                interpolated_fuselage_section(state, x_fraction, &sections).unwrap_or(
+                    FuselageSection {
+                        x_fraction,
+                        width_m: 6.0,
+                        height_m: 6.0,
+                        z_m: 0.0,
+                        shape: 2.0,
+                    },
+                ),
+            );
+            sections.sort_by(|left, right| left.x_fraction.total_cmp(&right.x_fraction));
             set_custom_sections(
                 state,
                 "fuselage",
@@ -291,7 +267,15 @@ pub(crate) fn show_custom_fuselage_sections(state: &mut AppState, ui: &mut Ui) {
             );
             state.on_config_modified();
         }
-    });
+    }
+    if remove_last && sections.pop().is_some() {
+        set_custom_sections(
+            state,
+            "fuselage",
+            serde_json::to_value(&sections).unwrap_or(Value::Array(Vec::new())),
+        );
+        state.on_config_modified();
+    }
 }
 
 /// Convert the resolved transport planform into the rows shown for the
@@ -332,7 +316,10 @@ fn generated_wing_sections(state: &AppState) -> Vec<(MainWingStationKind, WingSe
                     wing.break_twist_deg,
                     wing.root_airfoil.clone(),
                 ),
-                MainWingStationKind::Tip | MainWingStationKind::TipRake => {
+                MainWingStationKind::Tip
+                | MainWingStationKind::TipRake
+                | MainWingStationKind::TeBreak
+                | MainWingStationKind::EdgeStation => {
                     (wing.tip_z_m, design.tip_twist_deg, wing.tip_airfoil.clone())
                 }
             };
@@ -388,56 +375,48 @@ fn show_generated_wing_section(
         MainWingStationKind::Root => tr("Root (preset)"),
         MainWingStationKind::SideOfBody => tr("Side of body (preset)"),
         MainWingStationKind::Kink => tr("Kink (preset)"),
-        MainWingStationKind::Tip | MainWingStationKind::TipRake => tr("Tip (preset)"),
+        MainWingStationKind::Tip
+        | MainWingStationKind::TipRake
+        | MainWingStationKind::TeBreak
+        | MainWingStationKind::EdgeStation => tr("Tip (preset)"),
     };
-    ui.horizontal_wrapped(|ui| {
-        ui.label(label);
-        match kind {
-            MainWingStationKind::Root | MainWingStationKind::Tip | MainWingStationKind::TipRake => {
-                ui.label(format!("{:.3}", section.span_fraction));
-            }
-            MainWingStationKind::SideOfBody | MainWingStationKind::Kink => {
-                ui.add(
-                    DragValue::new(&mut section.span_fraction)
-                        .range(span_min..=span_max)
-                        .speed(0.01),
-                );
-            }
-        }
-        if kind == MainWingStationKind::Kink {
-            ui.add(
-                DragValue::new(&mut section.leading_edge_x_m)
-                    .range(-100.0..=100.0)
-                    .speed(0.05),
-            );
-        } else {
-            ui.label(format!("{:.3}", section.leading_edge_x_m));
-        }
-        ui.add(
-            DragValue::new(&mut section.chord_m)
-                .range(0.01..=100.0)
-                .speed(0.05),
-        );
-        let derived_from_endpoints = kind == MainWingStationKind::SideOfBody;
-        ui.add_enabled(
-            !derived_from_endpoints,
-            DragValue::new(&mut section.z_m)
-                .range(-50.0..=50.0)
-                .speed(0.05),
-        );
-        ui.add_enabled(
-            !derived_from_endpoints,
-            DragValue::new(&mut section.twist_deg)
-                .range(-30.0..=30.0)
-                .speed(0.1),
-        );
-        let editable_airfoil = matches!(kind, MainWingStationKind::Root | MainWingStationKind::Tip);
-        if editable_airfoil {
-            ui.add(egui::TextEdit::singleline(&mut section.airfoil).desired_width(110.0));
-        } else {
-            ui.label(format!("{} {}", section.airfoil, tr("(shared)")));
-        }
-    });
+    ui.label(label);
+    let span_editable = matches!(
+        kind,
+        MainWingStationKind::SideOfBody | MainWingStationKind::Kink
+    );
+    station_cell(
+        ui,
+        &mut section.span_fraction,
+        Some(span_min..=span_max),
+        0.01,
+        span_editable,
+    );
+    station_cell(
+        ui,
+        &mut section.leading_edge_x_m,
+        Some(-100.0..=100.0),
+        0.05,
+        kind == MainWingStationKind::Kink,
+    );
+    station_cell(ui, &mut section.chord_m, Some(0.01..=100.0), 0.05, true);
+    let derived_from_endpoints = kind == MainWingStationKind::SideOfBody;
+    station_cell(
+        ui,
+        &mut section.z_m,
+        Some(-50.0..=50.0),
+        0.05,
+        !derived_from_endpoints,
+    );
+    station_cell(
+        ui,
+        &mut section.twist_deg,
+        Some(-30.0..=30.0),
+        0.1,
+        !derived_from_endpoints,
+    );
+    let editable_airfoil = matches!(kind, MainWingStationKind::Root | MainWingStationKind::Tip);
+    airfoil_cell(ui, &mut section.airfoil, editable_airfoil);
 }
 
 /// Write generated wing row edits back to the scalar/design values that own
@@ -522,7 +501,10 @@ fn apply_generated_wing_sections(
                     );
                 }
             }
-            MainWingStationKind::Tip | MainWingStationKind::TipRake => {
+            MainWingStationKind::Tip
+            | MainWingStationKind::TipRake
+            | MainWingStationKind::TeBreak
+            | MainWingStationKind::EdgeStation => {
                 set_generated_design_value(state, "tip_chord_m", edited.chord_m);
                 set_generated_config_value(
                     state,
@@ -627,30 +609,12 @@ fn generated_fuselage_sections(state: &AppState) -> Vec<FuselageSection> {
 }
 
 fn show_generated_fuselage_section(ui: &mut Ui, index: usize, section: &mut FuselageSection) {
-    ui.horizontal_wrapped(|ui| {
-        ui.label(format!("{} {}", tr("Preset station"), index + 1));
-        ui.label(format!("{:.3}", section.x_fraction));
-        ui.add(
-            DragValue::new(&mut section.width_m)
-                .range(0.01..=100.0)
-                .speed(0.05),
-        );
-        ui.add(
-            DragValue::new(&mut section.height_m)
-                .range(0.01..=100.0)
-                .speed(0.05),
-        );
-        ui.add(
-            DragValue::new(&mut section.z_m)
-                .range(-50.0..=50.0)
-                .speed(0.05),
-        );
-        ui.add(
-            DragValue::new(&mut section.shape)
-                .range(1.0..=50.0)
-                .speed(0.1),
-        );
-    });
+    ui.label(format!("{} {}", tr("Preset station"), index + 1));
+    station_cell(ui, &mut section.x_fraction, None, 0.01, false);
+    station_cell(ui, &mut section.width_m, Some(0.01..=100.0), 0.05, true);
+    station_cell(ui, &mut section.height_m, Some(0.01..=100.0), 0.05, true);
+    station_cell(ui, &mut section.z_m, Some(-50.0..=50.0), 0.05, true);
+    station_cell(ui, &mut section.shape, Some(1.0..=50.0), 0.1, true);
 }
 
 fn set_generated_fuselage_sections(state: &mut AppState, sections: &[FuselageSection]) {
@@ -756,7 +720,10 @@ fn interpolated_wing_section(
                     wing.break_twist_deg,
                     wing.root_airfoil.clone(),
                 ),
-                MainWingStationKind::Tip | MainWingStationKind::TipRake => {
+                MainWingStationKind::Tip
+                | MainWingStationKind::TipRake
+                | MainWingStationKind::TeBreak
+                | MainWingStationKind::EdgeStation => {
                     (wing.tip_z_m, design.tip_twist_deg, wing.tip_airfoil.clone())
                 }
             };

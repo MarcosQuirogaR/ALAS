@@ -37,7 +37,7 @@ pub const UPPER: &str = "upper";
 pub const LOWER: &str = "lower";
 
 /// Whether the interior was laid out as a cabin or as a freight deck.
-#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+#[derive(serde::Serialize, serde::Deserialize, Debug, Clone, Copy, PartialEq, Eq)]
 pub enum Mode {
     /// Seats, monuments, exits and checked baggage.
     Passenger,
@@ -56,7 +56,7 @@ impl Mode {
 }
 
 /// What one placed item is.
-#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+#[derive(serde::Serialize, serde::Deserialize, Debug, Clone, Copy, PartialEq, Eq)]
 pub enum ItemKind {
     /// One transverse row of seats.
     SeatRow,
@@ -76,6 +76,10 @@ pub enum ItemKind {
     Exit,
     /// Checked baggage or belly freight in a lower hold.
     Bag,
+    /// A declared furnished floor zone (office, bedroom, operations room).
+    Zone,
+    /// A declared point mass (equipment rack, store, releasable load).
+    PointMass,
 }
 
 impl ItemKind {
@@ -91,22 +95,26 @@ impl ItemKind {
             Self::OverheadBin => "overhead_bin",
             Self::Exit => "exit",
             Self::Bag => "bag",
+            Self::Zone => "zone",
+            Self::PointMass => "point_mass",
         }
     }
 }
 
 /// A seat row's `meta`: what it seats and how the row is divided.
-#[derive(Debug, Clone, PartialEq)]
+#[derive(serde::Serialize, serde::Deserialize, Debug, Clone, PartialEq)]
 pub struct SeatMeta {
     /// Which class this row belongs to.
-    pub cls: &'static str,
+    #[serde(deserialize_with = "alas_config::static_text::text")]
+    pub cls: alas_config::static_text::Text,
     /// Seats the row would hold at this station's floor width.
     pub abreast: i64,
     /// Seats actually occupied, which is fewer in the row that exhausts a
     /// class's count or runs into the exit-derived capacity ceiling.
     pub filled: i64,
     /// Which deck the row is on, repeated inside the item as upstream does.
-    pub deck: &'static str,
+    #[serde(deserialize_with = "alas_config::static_text::text")]
+    pub deck: alas_config::static_text::Text,
     /// One aisle or two.
     pub aisles: i64,
     /// Seats per lateral block, outboard to outboard.
@@ -115,13 +123,23 @@ pub struct SeatMeta {
     pub seat_w: f64,
     /// The aisle width the row was laid out against.
     pub aisle_w: f64,
+    /// Height of the row's occupants' centre of gravity above the datum, m: on a
+    /// body held to the physical envelope the floor plus
+    /// `occupant_row_cg_above_floor_m` (the seated body at
+    /// `SEATED_OCCUPANT_CG_ABOVE_SEAT_M`, ANSUR II and Winter's segment parameters,
+    /// and the carry-on in the overhead bin); on the frozen reference frame the
+    /// centroid of the row box.
+    pub cg_z: f64,
+    /// Height of the floor the row stands on, m.
+    pub floor_z: f64,
 }
 
 /// An emergency exit's `meta`: its regulatory class and minimum cutout.
-#[derive(Debug, Clone, Copy, PartialEq)]
+#[derive(serde::Serialize, serde::Deserialize, Debug, Clone, Copy, PartialEq)]
 pub struct ExitMeta {
     /// The FAR/CS-25.807 exit type letter.
-    pub exit_type: &'static str,
+    #[serde(deserialize_with = "alas_config::static_text::text")]
+    pub exit_type: alas_config::static_text::Text,
     /// The type's minimum door width.
     pub door_w: f64,
     /// The type's minimum door height.
@@ -129,21 +147,23 @@ pub struct ExitMeta {
 }
 
 /// A containerised load's `meta`: which container, and how full.
-#[derive(Debug, Clone, Copy, PartialEq)]
+#[derive(serde::Serialize, serde::Deserialize, Debug, Clone, Copy, PartialEq)]
 pub struct ContainerMeta {
     /// The container's IATA code.
-    pub uld: &'static str,
+    #[serde(deserialize_with = "alas_config::static_text::text")]
+    pub uld: alas_config::static_text::Text,
     /// Fraction of the container's net capacity used.
     pub fill: f64,
     /// The colour the deck plan draws this container family in.
-    pub color: &'static str,
+    #[serde(deserialize_with = "alas_config::static_text::text")]
+    pub color: alas_config::static_text::Text,
     /// Net load inside the container, excluding its tare. Recorded only for
     /// freighter containers; a hold full of checked bags does not carry it.
     pub net: Option<f64>,
 }
 
 /// The two overhead-stowage architectures represented by the cabin model.
-#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+#[derive(serde::Serialize, serde::Deserialize, Debug, Clone, Copy, PartialEq, Eq)]
 pub enum OverheadBinType {
     /// Pivot bin following the curved sidewall crown.
     Sidewall,
@@ -162,14 +182,14 @@ impl OverheadBinType {
 }
 
 /// Type-specific information for one overhead-bin run.
-#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+#[derive(serde::Serialize, serde::Deserialize, Debug, Clone, Copy, PartialEq, Eq)]
 pub struct OverheadBinMeta {
     /// Whether this is a sidewall pivot bin or a centre hinge bin.
     pub bin_type: OverheadBinType,
 }
 
 /// The kind-specific extras upstream carries in `DeckItem.meta`.
-#[derive(Debug, Clone, PartialEq)]
+#[derive(serde::Serialize, serde::Deserialize, Debug, Clone, PartialEq)]
 pub enum ItemMeta {
     /// A galley or lavatory, which records nothing.
     None,
@@ -183,6 +203,25 @@ pub enum ItemMeta {
     OverheadBin(OverheadBinMeta),
     /// The loose bulk block that carries whatever the containers could not.
     BulkBag,
+    /// A declared zone or point mass.
+    Declared(DeclaredMeta),
+}
+
+/// What a declared zone or point mass records beyond its footprint.
+#[derive(serde::Serialize, serde::Deserialize, Debug, Clone, PartialEq)]
+pub struct DeclaredMeta {
+    /// The point mass's stable id, or the zone's name.
+    pub id: String,
+    /// Payload or operating-empty equipment.
+    pub category: alas_config::MassCategory,
+    /// The zone kind, for a zone; `None` for a point mass.
+    pub zone_kind: Option<alas_config::ZoneKind>,
+    /// Whether a mission event may release it.
+    pub releasable: bool,
+    /// Parasite drag area while carried, m2.
+    pub drag_area_m2: Option<f64>,
+    /// Principal inertias about its own centre, kg m2.
+    pub inertia_kgm2: Option<[f64; 3]>,
 }
 
 /// One physical payload element placed in the aircraft.
@@ -191,12 +230,13 @@ pub enum ItemMeta {
 /// x, `width` along y, `height` along z. `mass` is zero for the monuments and
 /// exits, which occupy floor and are accounted for in the furnishings weight
 /// rather than here.
-#[derive(Debug, Clone, PartialEq)]
+#[derive(serde::Serialize, serde::Deserialize, Debug, Clone, PartialEq)]
 pub struct DeckItem {
     /// What this item is.
     pub kind: ItemKind,
     /// Which deck it sits on: [`MAIN`], [`UPPER`] or [`LOWER`].
-    pub deck: &'static str,
+    #[serde(deserialize_with = "alas_config::static_text::text")]
+    pub deck: alas_config::static_text::Text,
     /// Longitudinal centre in aircraft body axes, m (positive aft).
     pub x: f64,
     /// Lateral centre in aircraft body axes, m (positive starboard).
@@ -218,7 +258,7 @@ pub struct DeckItem {
 }
 
 /// The passenger cabin's summary line.
-#[derive(Debug, Clone, PartialEq)]
+#[derive(serde::Serialize, serde::Deserialize, Debug, Clone, PartialEq)]
 pub struct PassengerSummary {
     /// Seats asked for, across every class.
     pub total_pax: i64,
@@ -227,7 +267,8 @@ pub struct PassengerSummary {
     /// Requested passengers that have no seat in this layout.
     pub unseated_pax: i64,
     /// Seats placed per class, in cabin order.
-    pub classes: Vec<(&'static str, i64)>,
+    #[serde(deserialize_with = "alas_config::static_text::pairs")]
+    pub classes: Vec<(alas_config::static_text::Text, i64)>,
     /// Lavatories installed.
     pub lavatories: i64,
     /// Galleys installed.
@@ -236,12 +277,17 @@ pub struct PassengerSummary {
     pub accessible_lavatories: i64,
     /// Dedicated wheelchair stowage positions installed.
     pub wheelchair_stowages: i64,
+    /// Monuments the section could not hold, dropped from the layout.
+    pub dropped_monuments: Vec<String>,
     /// Which FAR/CS-25.807 exit type the fuselage takes.
-    pub exit_type: &'static str,
+    #[serde(deserialize_with = "alas_config::static_text::text")]
+    pub exit_type: alas_config::static_text::Text,
     /// Exit pairs installed, summed over the passenger decks.
     pub exit_pairs: i64,
     /// What those pairs are rated to evacuate.
     pub exit_capacity: i64,
+    /// Minimum cabin crew for the seats placed, deck by deck (ORO.CC.100(b)).
+    pub min_cabin_crew: i64,
     /// The effective capacity ceiling after geometry and any source cap.
     pub max_certifiable_capacity: i64,
     /// The geometry and exit-derived floor capacity before a source cap.
@@ -252,9 +298,11 @@ pub struct PassengerSummary {
     ///
     /// This is an evidence label such as `C-III-C`, not a certification
     /// result produced by the layout engine.
-    pub source_exit_layout: Option<&'static str>,
+    #[serde(deserialize_with = "alas_config::static_text::optional")]
+    pub source_exit_layout: Option<alas_config::static_text::Text>,
     /// Which ceiling bound the row allocation reached.
-    pub capacity_binding: &'static str,
+    #[serde(deserialize_with = "alas_config::static_text::text")]
+    pub capacity_binding: alas_config::static_text::Text,
     /// Total payload, tonnes.
     pub payload_t: f64,
     /// Occupants and their carry-on, tonnes.
@@ -269,6 +317,8 @@ pub struct PassengerSummary {
     pub hold_used_t: f64,
     /// Containers used in the holds.
     pub hold_ulds: i64,
+    /// What the holds are built to take, whatever this load put in them.
+    pub hold_capacity: crate::cargo::CargoCapacity,
     /// Share of the net hold mass in compartments ahead of the wing box, 0 to
     /// 1. Zero when the holds are empty.
     pub forward_hold_baggage_fraction: f64,
@@ -284,7 +334,8 @@ pub struct PassengerSummary {
     /// The most aisles any row needed.
     pub n_aisles: i64,
     /// Floor length used, per deck, as a percentage.
-    pub deck_utilization: Vec<(&'static str, f64)>,
+    #[serde(deserialize_with = "alas_config::static_text::pairs")]
+    pub deck_utilization: Vec<(alas_config::static_text::Text, f64)>,
     /// Where the payload's centre of gravity landed, as a percentage of MAC.
     pub cg_pct_mac: f64,
     /// Whether the body has two passenger decks.
@@ -292,7 +343,7 @@ pub struct PassengerSummary {
 }
 
 /// The freighter deck's summary line.
-#[derive(Debug, Clone, PartialEq)]
+#[derive(serde::Serialize, serde::Deserialize, Debug, Clone, PartialEq)]
 pub struct CargoSummary {
     /// Gross carried cargo mass, tonnes, including ULD tare.
     pub payload_t: f64,
@@ -318,18 +369,27 @@ pub struct CargoSummary {
     pub fill_pct: f64,
     /// Nominal internal volume of every position, loaded or not.
     pub volume_m3: f64,
+    /// What the decks and holds are built to take, whatever this load put in them.
+    pub installed: crate::cargo::CargoCapacity,
     /// Which container the lower holds ended up taking, after the fit check.
-    pub lower_uld: &'static str,
+    #[serde(deserialize_with = "alas_config::static_text::text")]
+    pub lower_uld: alas_config::static_text::Text,
     /// The centre of gravity asked for, as a percentage of MAC.
     pub target_cg_pct_mac: f64,
     /// The one the trim reached.
     pub achieved_cg_pct_mac: f64,
     /// Which loading strategy produced this.
     pub strategy: String,
+    /// The gross structural payload limit (maximum zero-fuel weight less
+    /// operating empty weight, unit load devices included), kg, that held
+    /// the load below the request: `Some` only when the requested freight
+    /// with its tare exceeded it and the loader lowered the net load to fit.
+    #[serde(default)]
+    pub held_to_structural_limit_kg: Option<f64>,
 }
 
 /// The summary line, whichever engine produced the layout.
-#[derive(Debug, Clone, PartialEq)]
+#[derive(serde::Serialize, serde::Deserialize, Debug, Clone, PartialEq)]
 pub enum LayoutSummary {
     /// A passenger cabin.
     Passenger(Box<PassengerSummary>),
@@ -338,7 +398,7 @@ pub enum LayoutSummary {
 }
 
 /// The complete interior layout and its mass properties.
-#[derive(Debug, Clone, PartialEq)]
+#[derive(serde::Serialize, serde::Deserialize, Debug, Clone, PartialEq)]
 pub struct PayloadLayout {
     /// Which engine produced it.
     pub mode: Mode,
@@ -352,49 +412,19 @@ pub struct PayloadLayout {
     pub cg_y: f64,
     /// The summary line.
     pub summary: LayoutSummary,
+    /// What the payload auto-balance did, when the declared items had movable
+    /// ones to balance.
+    pub balance: Option<crate::declared_items::BalanceOutcome>,
+    /// The passengers the shell carries all-coach at 34 in pitch, exit-capped
+    /// (NASA CR-151970 `Np`, [`ALL_COACH_PITCH_M`]); `None` without a cabin.
+    #[serde(skip)]
+    pub all_coach_capacity: Option<usize>,
 }
 
-/// Total mass and the two centre-of-gravity coordinates of a set of items:
-/// computed as a function so a builder can obtain them
-/// before it has a summary to construct the layout with.
-///
-/// Only items with positive mass contribute, so the monuments and exits place
-/// themselves without moving the balance.
-pub fn mass_properties(items: &[DeckItem]) -> (f64, f64, f64) {
-    let mut mass = 0.0;
-    let mut moment_x = 0.0;
-    let mut moment_y = 0.0;
-    for item in items {
-        if item.mass > 0.0 {
-            mass += item.mass;
-            moment_x += item.mass * item.x;
-            moment_y += item.mass * item.y;
-        }
-    }
-    if mass > 0.0 {
-        (mass, moment_x / mass, moment_y / mass)
-    } else {
-        (mass, 0.0, 0.0)
-    }
-}
-
-impl PayloadLayout {
-    /// Every item on one deck, in placement order.
-    pub fn by_deck(&self, deck: &str) -> Vec<&DeckItem> {
-        self.items.iter().filter(|it| it.deck == deck).collect()
-    }
-
-    /// The decks this layout uses, in the order items first appear on them.
-    pub fn decks(&self) -> Vec<&'static str> {
-        let mut seen: Vec<&'static str> = Vec::new();
-        for item in &self.items {
-            if !seen.contains(&item.deck) {
-                seen.push(item.deck);
-            }
-        }
-        seen
-    }
-}
+pub(crate) mod all_coach;
+mod mass;
+pub use all_coach::ALL_COACH_PITCH_M;
+pub use mass::mass_properties;
 
 #[cfg(test)]
 mod tests {
@@ -452,6 +482,8 @@ mod tests {
             total_mass: 0.0,
             cg_x: 0.0,
             cg_y: 0.0,
+            balance: None,
+            all_coach_capacity: None,
             summary: LayoutSummary::Cargo(Box::new(CargoSummary {
                 payload_t: 0.0,
                 requested_net_payload_t: 0.0,
@@ -464,10 +496,12 @@ mod tests {
                 capacity_t: 0.0,
                 fill_pct: 0.0,
                 volume_m3: 0.0,
+                installed: crate::cargo::CargoCapacity::default(),
                 lower_uld: "",
                 target_cg_pct_mac: 0.0,
                 achieved_cg_pct_mac: 0.0,
                 strategy: String::new(),
+                held_to_structural_limit_kg: None,
             })),
         };
         assert_eq!(layout.decks(), vec![MAIN, LOWER, UPPER]);

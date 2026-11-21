@@ -34,6 +34,9 @@ pub(super) fn dispatch_flags_of(sized: &alas_opt::SizedCandidate) -> Vec<QuickFl
             code: "Dispatch".to_owned(),
             blocking: true,
             message: dispatch_status_text(other),
+            actual: None,
+            limit: None,
+            unit: String::new(),
         }),
     }
     if sized.dispatch.landing_mass_exceeds_mlw {
@@ -41,6 +44,9 @@ pub(super) fn dispatch_flags_of(sized: &alas_opt::SizedCandidate) -> Vec<QuickFl
             code: "LandingMassLimit".to_owned(),
             blocking: true,
             message: "destination landing mass exceeds the landing mass limit".to_owned(),
+            actual: None,
+            limit: None,
+            unit: String::new(),
         });
     }
     if sized.dispatch.zero_fuel_mass_exceeds_mzfw {
@@ -48,16 +54,24 @@ pub(super) fn dispatch_flags_of(sized: &alas_opt::SizedCandidate) -> Vec<QuickFl
             code: "ZeroFuelMassLimit".to_owned(),
             blocking: true,
             message: "zero-fuel mass exceeds the maximum zero-fuel mass".to_owned(),
+            actual: None,
+            limit: None,
+            unit: String::new(),
         });
     }
     if !sized.sizing_closed {
         flags.push(QuickFlag {
             code: "SizingNotClosed".to_owned(),
-            blocking: false,
+            // An unclosed closure publishes its last, unsettled iterate: the
+            // full analysis and the search both treat it as a failure.
+            blocking: true,
             message: format!(
                 "takeoff-mass closure stopped after {} iterations",
                 sized.sizing_iterations
             ),
+            actual: None,
+            limit: None,
+            unit: String::new(),
         });
     }
     flags

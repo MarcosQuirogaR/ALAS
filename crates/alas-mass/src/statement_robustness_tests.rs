@@ -24,6 +24,7 @@ fn itemized_payload_must_close_to_the_component_payload() {
         mass_kg: masses.payload - 100.0,
         position_m: [18.0, 0.0, 0.0],
         extent_m: [10.0, 3.0, 1.0],
+        seats: None,
     }];
     assert!(matches!(
         build(&items),

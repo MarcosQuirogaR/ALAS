@@ -293,9 +293,31 @@ pub struct DataTrace {
     pub texts: Vec<TraceText>,
     /// Legend rows.
     pub legend: Vec<TraceLegend>,
+    /// Name for the next polygon recorded (see [`Self::name_next_polygon`]).
+    #[serde(skip)]
+    pub(crate) next_polygon_name: Option<String>,
+    /// Name for the next line series recorded (see [`Self::name_next_line`]).
+    #[serde(skip)]
+    pub(crate) next_line_name: Option<String>,
 }
 
 impl DataTrace {
+    /// Name the next polygon recorded, for figures whose shapes are labelled
+    /// objects (control surfaces), so a consumer need not identify them from
+    /// legend colours or SVG text.
+    /// Name the next line series recorded.
+    pub(crate) fn name_next_line(&mut self, name: String) {
+        if is_active() {
+            self.next_line_name = Some(name);
+        }
+    }
+
+    pub(crate) fn name_next_polygon(&mut self, name: String) {
+        if is_active() {
+            self.next_polygon_name = Some(name);
+        }
+    }
+
     /// Whether nothing was recorded.
     pub fn is_empty(&self) -> bool {
         self.panels.is_empty() && self.texts.is_empty() && self.legend.is_empty()
@@ -387,7 +409,9 @@ impl DataTrace {
         color: &crate::scene::Color,
     ) {
         if is_active() && !pts.is_empty() {
-            let series = TraceSeries::from_pairs(SeriesKind::Line, Some(color.to_hex_rgb()), pts);
+            let mut series =
+                TraceSeries::from_pairs(SeriesKind::Line, Some(color.to_hex_rgb()), pts);
+            series.name = self.next_line_name.take();
             self.panel_mut(&AxesRecord::from(axes)).series.push(series);
         }
     }

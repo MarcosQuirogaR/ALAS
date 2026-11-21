@@ -11,6 +11,8 @@ publish = false
 # actual test items; a line grep can hide production items following tests.
 syn = { workspace = true, features = ["visit"] }
 proc-macro2 = { workspace = true, features = ["span-locations"] }
+# Renders field types and token trees into text for the capability map.
+quote = { workspace = true }
 # Reads `cargo metadata` to find the workspace packages and their dependencies.
 serde_json = { workspace = true }
 

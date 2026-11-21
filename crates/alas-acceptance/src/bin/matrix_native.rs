@@ -40,7 +40,7 @@ mod summary;
 
 use budget::BudgetTable;
 
-/// Total thread budget of the host shared with other lanes: `P x W` is capped
+/// Total thread budget of the host shared with other processes: `P x W` is capped
 /// here (16 logical cores, one left for the OS and the runner).
 const MAX_THREADS: u64 = 15;
 

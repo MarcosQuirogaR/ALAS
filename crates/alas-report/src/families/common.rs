@@ -81,7 +81,8 @@ pub(crate) fn load_case_color(name: &str) -> &'static str {
 pub(crate) fn structural_unavailable_message(
     result: Option<&alas_pipeline::structural::StructuralAnalysisResult>,
 ) -> Option<String> {
-    const NOT_RUN: &str = "Structural analysis was not run for this design (Advanced Settings -> Structural Analysis).";
+    const NOT_RUN: &str =
+        "Structural analysis was not run for this design (Analyses > Advanced > Structures).";
     match result {
         None => Some(NOT_RUN.to_owned()),
         Some(r) if r.status == "not_run" => Some(NOT_RUN.to_owned()),

@@ -122,6 +122,7 @@ impl AppState {
         let values = full_config_values(&config);
         if values != self.config_values {
             self.config_values = values;
+            self.bump_config_revision();
         }
         if write.is_none() {
             if commit == BriefCommit::RunStart && self.clean_sheet_brief_fingerprint.is_none() {
@@ -188,7 +189,11 @@ impl AppState {
             return;
         }
         let nominal = self.current_design().unwrap_or_default();
-        for variable in config.optimizer.design_space.envelope(&nominal) {
+        for variable in config
+            .optimizer
+            .design_space
+            .envelope_for(&nominal, config.aircraft_class())
+        {
             self.bounds
                 .insert(variable.name.to_owned(), (variable.lower, variable.upper));
             if variable.fixed {
@@ -235,7 +240,7 @@ impl AppState {
     /// `alas_opt::canonicalize_design`'s config clone, payload case load,
     /// and fuselage sizing except when something actually changed.
     pub fn enforce_design_space_fixed_variables(&mut self) {
-        let config_fingerprint = crate::state::state_memo::config_fingerprint(&self.config_values);
+        let config_fingerprint = self.config_fingerprint_now();
         let design_fingerprint = self.enforced_design_fingerprint();
         if self.design_space_enforcement_memo == Some((config_fingerprint, design_fingerprint)) {
             return;
@@ -260,7 +265,11 @@ impl AppState {
                     .insert("fuselage_length_m".to_owned(), nominal.fuselage_length_m);
             }
         }
-        for variable in config.optimizer.design_space.envelope(&nominal) {
+        for variable in config
+            .optimizer
+            .design_space
+            .envelope_for(&nominal, config.aircraft_class())
+        {
             if variable.fixed {
                 self.design_values
                     .insert(variable.name.to_owned(), variable.nominal);

@@ -8,6 +8,7 @@
 //! implemented checks is preliminary-design evidence, not aircraft
 //! certification.
 
+mod design_mission;
 mod evaluate;
 mod format;
 mod model_audit;
@@ -22,27 +23,30 @@ pub const MIN_PLAUSIBLE_L_OVER_D: f64 = 8.0;
 /// as exercised. A smoke gate on the scene count, not a content check.
 pub const MIN_FIGURE_SCENES: usize = 8;
 
+pub use design_mission::DesignMissionGrade;
 pub use evaluate::{evaluate_preset, generate_scenes_for_preset};
 pub use format::{format_matrix_json, format_matrix_report};
 pub use model_audit::PresetModelAudit;
 
 use alas_config::presets;
-use alas_config::DesignMissionEvidence;
 use alas_pipeline::{
     CruiseEquilibriumAssessment, FindingCode, FuelCapacityEvidence, PhysicalFinding,
     PlanningCgStatus,
 };
 
-/// Evidence-aware result of validating a preset's design mission.
+/// Result of flying a preset's design mission (see [`DesignMissionGrade`]).
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
 pub enum PresetDesignMissionStatus {
-    /// The registered preset has no complete, revision-locked mission source.
+    /// No preset record, or the evaluation failed before a report existed.
     Unverified,
-    /// Source evidence exists, but the exact design mission was not evaluated.
+    /// The preset registers no design mission (no charted design point).
     NotEvaluated,
-    /// The source-backed design mission passed its physical checks.
+    /// The design mission was flown: the closure converged, the fuel is
+    /// feasible with sourced reserves, and the flown range at the design
+    /// payload meets the range cell's band (or a notional requirement).
     Passed,
-    /// The source-backed design mission failed at least one physical check.
+    /// The design mission was flown (or attempted) and missed at least one of
+    /// the three requirements.
     Failed,
 }
 
@@ -121,8 +125,11 @@ pub struct PresetAcceptanceResult {
     pub cruise_equilibrium: Option<CruiseEquilibriumAssessment>,
     /// Provenance of the usable tank capacity applied to this load case.
     pub fuel_capacity_evidence: FuelCapacityEvidence,
-    /// Evidence-aware design-mission verdict for this aircraft preset.
+    /// Design-mission verdict for this aircraft preset.
     pub design_mission_status: PresetDesignMissionStatus,
+    /// The flown design mission behind the verdict; `None` when the
+    /// evaluation produced no report.
+    pub design_mission: Option<DesignMissionGrade>,
     /// Whether the built reference area respects the preset's configured cap.
     pub wing_area_within_limit: bool,
     /// End-to-end execution and finite-output verdict.
@@ -146,7 +153,8 @@ pub struct AcceptanceMatrixReport {
     pub all_passed: bool,
     /// Whether every preset passed the implemented physical checks.
     pub all_physical_passed: bool,
-    /// Whether every preset has a source-backed, evaluated design mission.
+    /// Whether every preset's design mission was flown and graded (passed or
+    /// failed); acceptance further needs every one passed.
     pub all_design_missions_verified: bool,
 }
 
@@ -162,10 +170,13 @@ pub fn run_acceptance_matrix() -> AcceptanceMatrixReport {
             PresetDesignMissionStatus::Passed | PresetDesignMissionStatus::Failed
         )
     });
+    let all_design_missions_passed = results
+        .iter()
+        .all(|result| result.design_mission_status == PresetDesignMissionStatus::Passed);
     let all_passed = combined_acceptance(
         all_executed,
         all_physical_passed,
-        all_design_missions_verified,
+        all_design_missions_passed,
     );
 
     AcceptanceMatrixReport {
@@ -174,13 +185,6 @@ pub fn run_acceptance_matrix() -> AcceptanceMatrixReport {
         all_passed,
         all_physical_passed,
         all_design_missions_verified,
-    }
-}
-
-fn assess_design_mission_status(evidence: &DesignMissionEvidence) -> PresetDesignMissionStatus {
-    match evidence {
-        DesignMissionEvidence::Unverified => PresetDesignMissionStatus::Unverified,
-        DesignMissionEvidence::SourceBacked(_) => PresetDesignMissionStatus::NotEvaluated,
     }
 }
 
@@ -193,6 +197,8 @@ fn is_mission_finding(code: FindingCode) -> bool {
         code,
         FindingCode::MissionUnavailable
             | FindingCode::MissionNotConverged
+            | FindingCode::MissionPathFlownLevel
+            | FindingCode::MissionFirstClimbRefused
             | FindingCode::InvalidMissionFuelBurn
             | FindingCode::MissionFuelShortfall
     )
@@ -201,15 +207,15 @@ fn is_mission_finding(code: FindingCode) -> bool {
 fn combined_acceptance(
     all_executed: bool,
     all_physical_passed: bool,
-    all_design_missions_verified: bool,
+    all_design_missions_passed: bool,
 ) -> bool {
-    all_executed && all_physical_passed && all_design_missions_verified
+    all_executed && all_physical_passed && all_design_missions_passed
 }
 
 fn format_design_mission_status(status: PresetDesignMissionStatus) -> &'static str {
     match status {
-        PresetDesignMissionStatus::Unverified => "UNVERIFIED - no source-backed mission registered",
-        PresetDesignMissionStatus::NotEvaluated => "NOT EVALUATED",
+        PresetDesignMissionStatus::Unverified => "UNVERIFIED - no report to fly the mission on",
+        PresetDesignMissionStatus::NotEvaluated => "NOT EVALUATED - no design mission registered",
         PresetDesignMissionStatus::Passed => "PASS",
         PresetDesignMissionStatus::Failed => "FAIL",
     }
@@ -274,25 +280,6 @@ mod tests {
         };
 
         assert!(!finding_governs_preset(&finding));
-    }
-
-    #[test]
-    fn source_registration_alone_is_not_a_design_mission_verdict() {
-        let evidence =
-            DesignMissionEvidence::SourceBacked(Box::new(alas_config::DesignMissionReference {
-                range_m: 1_000_000.0,
-                payload_kg: 10_000.0,
-                profile: alas_config::MissionProfileConfig::default(),
-                required_reserve_fuel_kg: 2_000.0,
-                departure_airport: None,
-                arrival_airport: None,
-                source: "revision-locked payload-range definition",
-            }));
-
-        assert_eq!(
-            assess_design_mission_status(&evidence),
-            PresetDesignMissionStatus::NotEvaluated
-        );
     }
 
     #[test]

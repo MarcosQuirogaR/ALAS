@@ -193,6 +193,7 @@ fn uld_definition(uld: &'static cargo::UldType) -> UldDefinition {
             ContourFidelity::Authoritative => "authoritative",
             ContourFidelity::ConservativeEnvelope => "conservative_envelope",
             ContourFidelity::VisualizationOnly => "visualization_only",
+            ContourFidelity::PublishedStandard => "published_standard",
         }
         .into(),
         mirrorable: uld.contour.mirrorable,

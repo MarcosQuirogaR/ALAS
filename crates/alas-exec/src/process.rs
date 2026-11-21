@@ -40,10 +40,10 @@
 //! which is why [`NewProcessGroup::new_process_group`] and
 //! [`kill_process_tree`] are one pair of things rather than two.
 
-use std::collections::HashMap;
+use std::collections::{HashMap, VecDeque};
 use std::io::Read;
 use std::path::{Path, PathBuf};
-use std::process::{Child, Command, ExitStatus};
+use std::process::{Child, Command, ExitStatus, Stdio};
 use std::sync::{Arc, Mutex, MutexGuard, OnceLock, PoisonError};
 use std::thread::{self, JoinHandle, ThreadId};
 use std::time::{Duration, Instant};
@@ -220,11 +220,7 @@ pub fn kill_process_tree(pid: u32) {
     };
     // The kill is itself a spawn, and a console window flashing up because a
     // solve timed out would be the second-worst thing about that solve.
-    let taskkill_succeeded = command
-        .no_window()
-        .output()
-        .map(|output| output.status.success())
-        .unwrap_or(false);
+    let taskkill_succeeded = run_killer(&mut command);
     if cfg!(windows) && !taskkill_succeeded {
         // Some Windows hosts deny taskkill even for a child this process owns.
         // PowerShell's process API can still stop it, so use the same built-in
@@ -241,8 +237,50 @@ pub fn kill_process_tree(pid: u32) {
             "-Command",
             &script,
         ]);
-        let _ = fallback.no_window().output();
+        let _ = run_killer(&mut fallback);
     }
+}
+
+/// How long a tree-kill helper (`taskkill`, `kill`, the PowerShell fallback) may
+/// run. The kill is on the timeout path of someone else's deadline, so a hung
+/// helper must not turn that deadline into a hang.
+const KILLER_DEADLINE: Duration = Duration::from_secs(20);
+
+/// Run a tree-kill helper with no console window and null stdio, giving up on
+/// it (killing the helper itself) after [`KILLER_DEADLINE`]. True when it exited
+/// successfully in time.
+fn run_killer(command: &mut Command) -> bool {
+    command
+        .stdin(Stdio::null())
+        .stdout(Stdio::null())
+        .stderr(Stdio::null())
+        .no_window();
+    let Ok(mut child) = command.spawn() else {
+        return false;
+    };
+    let deadline = Instant::now() + KILLER_DEADLINE;
+    loop {
+        match child.try_wait() {
+            Ok(Some(status)) => return status.success(),
+            Ok(None) if Instant::now() < deadline => thread::sleep(POLL_INTERVAL),
+            _ => {
+                let _ = child.kill();
+                let _ = child.wait();
+                return false;
+            }
+        }
+    }
+}
+
+/// Reap a program the user keeps (a viewer, the file manager) once it exits.
+///
+/// Such a program is deliberately not supervised, but dropping its `Child`
+/// without waiting leaves a zombie on Unix for as long as ALAS runs. A detached
+/// thread waits for it; the program itself is never signalled.
+pub fn reap_in_background(mut child: Child) {
+    thread::spawn(move || {
+        let _ = child.wait();
+    });
 }
 
 /// Kill `child` and its descendants, then reap it.
@@ -309,13 +347,27 @@ pub fn drain<R: Read + Send + 'static>(stream: Option<R>) -> JoinHandle<Vec<u8>>
     let handle = thread::spawn(move || {
         if let Some(mut stream) = stream {
             let mut chunk = [0_u8; 8192];
+            // Past `DRAIN_HEAD_BYTES` only a rolling tail is kept, so an
+            // endless stream cannot grow memory without bound.
+            let mut tail: VecDeque<u8> = VecDeque::new();
             // A read error truncates a diagnostic tail; the exit status and
             // the produced artifacts remain the success criteria.
             while let Ok(count) = stream.read(&mut chunk) {
                 if count == 0 {
                     break;
                 }
-                lock_ignoring_poison(&thread_shared).extend_from_slice(&chunk[..count]);
+                let mut head = lock_ignoring_poison(&thread_shared);
+                let room = DRAIN_HEAD_BYTES.saturating_sub(head.len());
+                let (to_head, to_tail) = chunk[..count].split_at(room.min(count));
+                head.extend_from_slice(to_head);
+                drop(head);
+                tail.extend(to_tail.iter().copied());
+                while tail.len() > DRAIN_TAIL_BYTES {
+                    tail.pop_front();
+                }
+            }
+            if !tail.is_empty() {
+                lock_ignoring_poison(&thread_shared).extend(tail);
             }
         }
         std::mem::take(&mut *lock_ignoring_poison(&thread_shared))
@@ -325,6 +377,11 @@ pub fn drain<R: Read + Send + 'static>(stream: Option<R>) -> JoinHandle<Vec<u8>>
     lock_ignoring_poison(live_buffers()).insert(handle.thread().id(), shared);
     handle
 }
+
+/// Largest prefix of a child's output kept by [`drain`].
+const DRAIN_HEAD_BYTES: usize = 64 * 1024 * 1024;
+/// Length of the tail kept after the prefix is full.
+const DRAIN_TAIL_BYTES: usize = 4 * 1024 * 1024;
 
 /// How long [`drained_text`] waits for a reader to finish after its process
 /// has exited or been killed. A reader normally finishes within milliseconds;
@@ -477,18 +534,39 @@ mod tests {
 
     #[test]
     fn heavy_piped_output_does_not_stall_a_supervised_child() {
-        // About 1 MB on stdout and a little on stderr, far above any OS pipe
-        // buffer; without concurrent draining the child blocks on its write
-        // and the wait ends as a timeout.
+        // About 1 MB on stdout, far above any OS pipe buffer; without
+        // concurrent draining the child blocks on its write and the wait ends
+        // as a timeout. The child copies a file in bulk (a handful of large
+        // writes): a shell loop of 20,000 `echo` lines needs a scheduler
+        // hand-off per line and took over the 120 s deadline on a machine
+        // oversubscribed with other processes, which is host load, not a stall.
+        // Removed when the test ends, also when an assertion fails.
+        struct Scratch(std::path::PathBuf);
+        impl Drop for Scratch {
+            fn drop(&mut self) {
+                let _ = std::fs::remove_file(&self.0);
+            }
+        }
+        let scratch = Scratch(std::env::temp_dir().join(format!(
+            "alas_exec_heavy_output_{}_{:?}.txt",
+            std::process::id(),
+            std::thread::current().id()
+        )));
+        let line = "0123456789012345678901234567890123456789012345678\n";
+        std::fs::write(&scratch.0, line.repeat(20_000)).expect("the scratch file is writable");
         #[cfg(windows)]
-        let script =
-            "for /L %i in (1,1,20000) do @echo 0123456789012345678901234567890123456789012345678";
+        let mut command = {
+            let mut command = Command::new("cmd");
+            command.args(["/C", "type"]).arg(&scratch.0);
+            command
+        };
         #[cfg(not(windows))]
-        let script = "i=0; while [ $i -lt 20000 ]; do echo 0123456789012345678901234567890123456789012345678; i=$((i+1)); done";
-        let (program, mut args) = shell();
-        args.push(script);
-        let mut child = Command::new(program)
-            .args(&args)
+        let mut command = {
+            let mut command = Command::new("cat");
+            command.arg(&scratch.0);
+            command
+        };
+        let mut child = command
             .stdout(std::process::Stdio::piped())
             .stderr(std::process::Stdio::piped())
             .no_window()
@@ -624,5 +702,73 @@ mod tests {
     #[cfg(not(windows))]
     fn shell() -> (&'static str, Vec<&'static str>) {
         ("sh", vec!["-c"])
+    }
+}
+
+/// Why Windows refused to run (or finish loading) a child process, decoded
+/// from its exit status. These are NTSTATUS values the loader or code
+/// integrity returns as the process exit code; ALAS only reports them and
+/// does not try to get around the block.
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub enum WindowsLoadFailure {
+    /// Code integrity, Smart App Control or an application-control policy
+    /// refused an unsigned or untrusted image (0xC0E9xxxx, 0xC0000428,
+    /// 0xC0000603).
+    BlockedByApplicationControl,
+    /// The loader could not bring up the program: missing DLL, bad image,
+    /// missing entry point, DLL initialisation failure.
+    LoaderFailure,
+}
+
+/// Classify a Windows exit code, or `None` when it is an ordinary exit.
+pub fn windows_load_failure(code: i32) -> Option<WindowsLoadFailure> {
+    let code = code as u32;
+    match code {
+        0xC000_0428 | 0xC000_0603 => Some(WindowsLoadFailure::BlockedByApplicationControl),
+        c if c & 0xFFFF_0000 == 0xC0E9_0000 => {
+            Some(WindowsLoadFailure::BlockedByApplicationControl)
+        }
+        0xC000_0135 | 0xC000_0139 | 0xC000_007B | 0xC000_0142 | 0xC000_0143 => {
+            Some(WindowsLoadFailure::LoaderFailure)
+        }
+        _ => None,
+    }
+}
+
+/// Plain-words explanation of a Windows loader or code-integrity exit code of
+/// the tool `program` (file name or path), or `None` for an ordinary exit.
+pub fn explain_windows_exit(program: &str, code: i32) -> Option<String> {
+    let name = Path::new(program)
+        .file_name()
+        .map_or_else(|| program.to_owned(), |n| n.to_string_lossy().into_owned());
+    let hex = format!("0x{:08X}", code as u32);
+    match windows_load_failure(code)? {
+        WindowsLoadFailure::BlockedByApplicationControl => Some(format!(
+            "{name} was blocked by Windows application control (Smart App Control or a code-integrity policy refused an unsigned or untrusted file it needed; exit status {hex}). ALAS does not bypass this: allow the tool in Windows Security, or use a signed build of it."
+        )),
+        WindowsLoadFailure::LoaderFailure => Some(format!(
+            "{name} could not be started by Windows because a required file failed to load (exit status {hex}). Check that the tool and its DLLs are installed completely."
+        )),
+    }
+}
+
+#[cfg(test)]
+#[allow(clippy::unwrap_used)]
+mod windows_exit_tests {
+    use super::*;
+
+    #[test]
+    fn code_integrity_codes_are_explained_with_the_exe_name() {
+        let text =
+            explain_windows_exit(r"C:\of\bin\gmshToFoam.exe", 0xC0E9_0002_u32 as i32).unwrap();
+        assert!(text.contains("gmshToFoam.exe was blocked by Windows application control"));
+        assert!(text.contains("0xC0E90002"));
+        assert!(explain_windows_exit("x.exe", 0xC000_0428_u32 as i32).is_some());
+        assert_eq!(
+            windows_load_failure(0xC000_0135_u32 as i32),
+            Some(WindowsLoadFailure::LoaderFailure)
+        );
+        assert!(explain_windows_exit("x.exe", 1).is_none());
+        assert!(explain_windows_exit("x.exe", 0).is_none());
     }
 }

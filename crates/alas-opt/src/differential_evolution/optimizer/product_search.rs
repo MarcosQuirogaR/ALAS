@@ -13,9 +13,14 @@ use crate::search::{elite, screening};
 use crate::search_methods::product_de::Termination;
 use crate::search_methods::{restoration, ScoredPoint};
 use crate::{BaselineComparison, StageRejections, StageSummary, SEARCH_SCOPE};
+use plan::{elite_members_kept, native_elite_cap, replay_pilot_prefix};
 
+mod calibration;
+mod guide;
+mod plan;
 mod screen;
 mod seeding;
+mod support;
 
 /// Share of the refinement's initial population filled from the screening
 /// elite; the baseline takes one member and coupled anchor draws the rest
@@ -47,6 +52,21 @@ struct Screened {
     trace: crate::EvaluationTrace,
     /// The exact scores, when the refinement evaluates with the same model.
     cache: Option<EvaluationCache>,
+    /// Best feasible cost after each generation of the exploration kernel,
+    /// on the screening model; empty when the stage only scanned.
+    best_by_generation: Vec<Option<f64>>,
+    /// What the margin calibration measured, for the run log.
+    calibration: Option<String>,
+}
+
+/// What the calibration analyses of the refinement model leave for the
+/// refinement stage: their exact scores and their accounting.
+struct Calibrated {
+    cache: EvaluationCache,
+    analyses: usize,
+    busy: Duration,
+    feasible: usize,
+    trace: crate::EvaluationTrace,
 }
 
 /// The run's shared inputs.
@@ -89,7 +109,12 @@ impl DesignOptimizer {
         let solver = &self.config.optimizer.solver;
         let started = Instant::now();
         let mut progress_callback = progress_callback;
+        // A supervisor's live progress record, if it registered one.
+        let progress = crate::search_progress::progress_for(cancel);
         let mut report = |line: &str| {
+            if let Some(progress) = &progress {
+                progress.line(line);
+            }
             if let Some(callback) = progress_callback.as_mut() {
                 callback(line);
             }
@@ -119,15 +144,73 @@ impl DesignOptimizer {
         if objective.honors_deadline() {
             product_de::configure_native_population(&mut ceiling_settings);
         }
-        let mut elite_size = elite_members_kept(ceiling_settings.population);
-        if objective.honors_deadline() {
+        // A staged search (a distinct screening model) has explored: its
+        // refinement starts from the promoted candidates alone.
+        let staged = matches!(screening_model, ScreeningModel::Separate(_));
+        let mut elite_size = elite_members_kept(ceiling_settings.population, staged);
+        if objective.honors_deadline() && !staged {
             elite_size = elite_size.min(native_elite_cap(run.baseline.is_some()));
+        }
+        let mut calibrated: Option<Calibrated> = None;
+        let search_engine_start = std::cell::Cell::new((None, None));
+        if let Some(progress) = &progress {
+            let planned = u64::try_from(solver.screening.max_evaluations).unwrap_or(0);
+            progress.enter(crate::search_progress::SearchStage::Screening, planned);
         }
         let screened = match screening_model {
             _ if dimension == 0 => None,
             ScreeningModel::Skip => None,
-            ScreeningModel::Same => Some(self.screen(&run, &mut *objective, elite_size, true)),
-            ScreeningModel::Separate(model) => Some(self.screen(&run, model, elite_size, false)),
+            ScreeningModel::Same => {
+                Some(self.screen(&run, &mut *objective, elite_size, true, None))
+            }
+            ScreeningModel::Separate(model) => {
+                // The refinement model's analyses of the calibration points.
+                let search_engine_start = &search_engine_start;
+                let mut calibrate = |points: &[Vec<f64>]| {
+                    let mut evaluator = BatchEvaluator::new(
+                        &mut *objective,
+                        run.workers,
+                        bounds,
+                        run.pre_gate,
+                        cancel,
+                    );
+                    evaluator.baseline = run.baseline.as_deref();
+                    // Later calls continue the first one's cache and counts.
+                    let first = calibrated.is_none();
+                    let mut earlier = 0;
+                    if let Some(done) = calibrated.take() {
+                        earlier = done.analyses;
+                        evaluator.cache = done.cache;
+                        evaluator.busy = done.busy;
+                        evaluator.feasible = done.feasible;
+                        evaluator.trace = done.trace;
+                    }
+                    let before = evaluator.analyses();
+                    evaluator.evaluate_block(points);
+                    if first {
+                        search_engine_start.set(calibration::start_engine(&mut evaluator, points));
+                    }
+                    let margins = points
+                        .iter()
+                        .map(|values| {
+                            evaluator
+                                .cache
+                                .row(values)
+                                .and_then(|row| evaluator.objective.margins(row))
+                                .map(<[_]>::to_vec)
+                        })
+                        .collect();
+                    calibrated = Some(Calibrated {
+                        analyses: earlier + evaluator.analyses() - before,
+                        busy: evaluator.busy,
+                        feasible: evaluator.feasible,
+                        trace: std::mem::take(&mut evaluator.trace),
+                        cache: evaluator.cache,
+                    });
+                    margins
+                };
+                Some(self.screen(&run, model, elite_size, false, Some(&mut calibrate)))
+            }
         };
         let mut screening_throughput = None;
         let mut stages = Vec::new();
@@ -135,8 +218,10 @@ impl DesignOptimizer {
         let mut elite_members = Vec::new();
         let mut cache = None;
         let mut trace = crate::EvaluationTrace::default();
+        let mut exploration_best = Vec::new();
         if let Some(screened) = screened {
             trace = screened.trace;
+            exploration_best = screened.best_by_generation;
             report(&format!(
                 "screening | evaluations {} | rejected {} | feasible {} | elite {} | termination {} | wall_s {:.3}",
                 screened.summary.evaluations,
@@ -146,6 +231,9 @@ impl DesignOptimizer {
                 screened.summary.termination,
                 screened.summary.wall_time_s
             ));
+            if let Some(line) = &screened.calibration {
+                report(line);
+            }
             stages.push(screened.summary);
             rejections.push(screened.rejections);
             if screened.cancelled {
@@ -188,7 +276,17 @@ impl DesignOptimizer {
         if let Some(cache) = cache {
             evaluator.cache = cache;
         }
-        let before = evaluator.analyses();
+        let mut before = evaluator.analyses();
+        // The calibration analyses are refinement-model analyses of this
+        // stage: its cache, its counts and its trace start from them.
+        let calibration_analyses = calibrated.as_ref().map_or(0, |done| done.analyses);
+        if let Some(done) = calibrated {
+            before -= done.analyses;
+            evaluator.cache = done.cache;
+            evaluator.busy = done.busy;
+            evaluator.feasible = done.feasible;
+            evaluator.trace = done.trace;
+        }
         let (_, _, stage_limit) =
             product_de::stage_limits(&solver.refinement, solver.stop_on_evaluations_only);
         let search_limit = stage_limit
@@ -202,13 +300,14 @@ impl DesignOptimizer {
         // planned 1.4-2x what the time afforded (A320-200, 32 threads). The
         // screening's own model reuses its scores and its throughput.
         let busy = evaluator.busy;
+        let pilot_before = evaluator.analyses();
         let pilot_prefix = if dimension > 0 && screening_throughput.is_some() {
             let points = replay_pilot_prefix(&run, &seeds, &solver.refinement);
             evaluator.evaluate_block(points).len()
         } else {
             0
         };
-        let piloted = evaluator.analyses() - before;
+        let piloted = evaluator.analyses() - pilot_before;
         let rate = screening_throughput.map(|(analysed, wall_s, utilization)| {
             if piloted > 0 {
                 let lane_s = evaluator.busy.saturating_sub(busy).as_secs_f64() / piloted as f64;
@@ -231,8 +330,13 @@ impl DesignOptimizer {
             refinement.population = 1;
         }
         let search_budget = refinement.max_evaluations;
+        let polls = plan::reserve_staged_work(
+            &mut refinement,
+            staged && dimension > 0,
+            calibration_analyses,
+        );
         let kept = (usize::from(run.baseline.is_some())
-            + elite_members_kept(refinement.population))
+            + elite_members_kept(refinement.population, staged))
         .max(pilot_prefix);
         seeds.truncate(kept);
         seeding::top_up(&run, &evaluator, &mut seeds, refinement.population);
@@ -240,7 +344,12 @@ impl DesignOptimizer {
             "refinement | population {} | budget {} | seed {} | workers {}",
             refinement.population, refinement.max_evaluations, run.seed, run.workers
         ));
+        if let Some(progress) = &progress {
+            let planned = u64::try_from(refinement.max_evaluations).unwrap_or(0);
+            progress.enter(crate::search_progress::SearchStage::Refinement, planned);
+        }
         let hits_before = evaluator.cache.hits;
+        let mut refined: Vec<ScoredPoint> = Vec::new();
         let mut outcome = product_de::run(
             bounds,
             &seeds,
@@ -248,7 +357,11 @@ impl DesignOptimizer {
             stage_started,
             &scope,
             Some(&|values| run.admits(values)),
-            &mut |points: &[Vec<f64>]| evaluator.evaluate_block(points),
+            &mut |points: &[Vec<f64>]| {
+                let scores = evaluator.evaluate_block(points);
+                refined.extend(scores.iter().cloned());
+                scores
+            },
         );
         let kernel_evaluations = outcome.evaluations;
         let limits = restoration::Limits {
@@ -264,6 +377,25 @@ impl DesignOptimizer {
         evaluator.stage = crate::TraceStage::Restoration;
         let restoration =
             feasibility_restoration::run(bounds, &mut outcome, limits, &scope, &mut evaluator);
+        let restoration_evaluations = outcome.evaluations - kernel_evaluations;
+        evaluator.stage = crate::TraceStage::Refinement;
+        let supported = if polls && outcome.termination != Termination::Cancelled {
+            support::check(
+                &run,
+                &mut evaluator,
+                &mut refined,
+                &mut outcome,
+                support::NEIGHBOURS * support::MAX_ROUNDS,
+            )
+        } else {
+            support::Support::default()
+        };
+        if supported.rounds > 0 {
+            report(&format!(
+                "support | polls {} | evaluations {} | isolated designs flagged {}",
+                supported.rounds, supported.evaluations, supported.flagged
+            ));
+        }
         trace.append(std::mem::take(&mut evaluator.trace));
         evaluator.objective.set_deadline(None);
         let wall = stage_started.elapsed().as_secs_f64();
@@ -280,7 +412,7 @@ impl DesignOptimizer {
             time_limit_s: solver.refinement.time_limit_s,
             time_limited: refinement.time_limit.is_some(),
             evaluations: outcome.evaluations,
-            restoration_evaluations: outcome.evaluations - kernel_evaluations,
+            restoration_evaluations,
             generations: outcome.generations_completed,
             elite_size: outcome.population_initial,
             termination: termination.to_owned(),
@@ -322,7 +454,14 @@ impl DesignOptimizer {
             });
         let diagnostics = SearchDiagnostics {
             restoration,
-            converged: outcome.termination == Termination::Converged,
+            // A search with no free design variable has evaluated its whole
+            // design space: its one point is the answer, and there is no
+            // convergence criterion left to miss. Reporting it as not
+            // converged blocked the delivery of a completed fixed-design
+            // evaluation (`RunCompletion::of_search`), which a fixed design
+            // analysed without a search does not suffer.
+            converged: outcome.termination == Termination::Converged
+                || (dimension == 0 && outcome.termination != Termination::Cancelled),
             analysis_evaluations,
             cache_hits: evaluator.cache.hits - hits_before,
             poll_iterations: outcome.generations_completed,
@@ -339,11 +478,23 @@ impl DesignOptimizer {
                 .map(|first| (first - outcome.winner.cost) / first.abs().max(1e-12)),
             feasible_fraction: outcome.feasible_fraction,
             epsilon_level: outcome.epsilon_final,
+            engine_start: search_engine_start.get().0,
+            engine_slope: search_engine_start.get().1,
             stages,
             rejections,
             baseline: baseline_comparison,
             winner_history_row: winner_row,
             evaluation_trace: trace,
+            plan_completed: dimension == 0
+                || matches!(
+                    outcome.termination,
+                    Termination::Converged | Termination::Stagnated | Termination::EvaluationBudget
+                ),
+            convergence: Some(crate::ConvergenceIndicator::of(
+                &exploration_best,
+                &outcome.best_by_generation,
+                outcome.spread_final,
+            )),
             ..SearchDiagnostics::default()
         };
         let winner = MethodOutcome {
@@ -353,78 +504,6 @@ impl DesignOptimizer {
         let history = evaluator.objective.history();
         self.finish(&run, history, winner, termination, started, diagnostics)
     }
-
-    /// The result, with the diagnostics every exit reports.
-    fn finish(
-        &self,
-        run: &Run<'_>,
-        history: &OptimizationHistory,
-        outcome: MethodOutcome,
-        termination: &str,
-        started: Instant,
-        mut diagnostics: SearchDiagnostics,
-    ) -> OptimizationResult {
-        let screening = diagnostics.stages.iter().find(|s| s.stage == "screening");
-        diagnostics.screening_evaluations = screening.map_or(0, |s| s.evaluations);
-        diagnostics.screening_feasible = screening.map_or(0, |s| s.feasible);
-        diagnostics.scan_wall_time_s = screening.map_or(0.0, |s| s.wall_time_s);
-        diagnostics.workers = run.workers;
-        diagnostics.seed = Some(run.seed);
-        diagnostics.baseline_clamped = run.baseline_clamped;
-        diagnostics.scope = SEARCH_SCOPE.to_owned();
-        let mut result = result_from_method(
-            outcome,
-            product_de::METHOD,
-            product_de::STRATEGY,
-            termination,
-            history,
-            started.elapsed().as_secs_f64(),
-        );
-        result.search_diagnostics = Some(diagnostics);
-        result
-    }
-}
-
-/// Screening elite members an initial population of `population` keeps
-/// beside the baseline ([`ELITE_POPULATION_FRACTION`]).
-fn elite_members_kept(population: usize) -> usize {
-    (population.saturating_sub(1) as f64 * ELITE_POPULATION_FRACTION) as usize
-}
-
-/// Screening elite members a native refinement keeps: the refinement pilot
-/// (baseline plus elite) is then one whole lane wave
-/// ([`product_de::NATIVE_LANE_QUANTUM`]) and fits inside the smallest
-/// native population, so it neither leaves lanes idle in a second partial
-/// wave nor forces the population off a whole number of waves.
-fn native_elite_cap(has_baseline: bool) -> usize {
-    product_de::NATIVE_LANE_QUANTUM - usize::from(has_baseline)
-}
-
-/// A replay ending inside the pilot requests the same admitted prefix.
-/// Every started pilot seed is retained, so its cached initial population
-/// gives the kernel precisely that recorded count when the deadline expires.
-fn replay_pilot_prefix<'a>(
-    run: &Run<'_>,
-    seeds: &'a [Vec<f64>],
-    stage: &alas_config::StageBudget,
-) -> &'a [Vec<f64>] {
-    let Some(recorded) = stage
-        .replay_evaluations
-        .and_then(|value| usize::try_from(value).ok())
-    else {
-        return seeds;
-    };
-    let remaining = recorded.saturating_sub(product_de::restoration_replay(stage).unwrap_or(0));
-    let mut admitted = 0;
-    for (index, values) in seeds.iter().enumerate() {
-        if run.admits(values) {
-            if admitted >= remaining {
-                return &seeds[..index];
-            }
-            admitted += 1;
-        }
-    }
-    seeds
 }
 
 // A test asserts on values it built here, so a failed expect is the
@@ -711,7 +790,7 @@ mod tests {
 
     #[test]
     fn the_default_settings_reproduce_the_same_search_at_one_and_many_workers() {
-        // Audit SIZ-06/SIZ-07 (decision D6): with no seed or stop rule
+        // With no seed or stop rule
         // configured, the search is seeded with `DEFAULT_SEED` and stops on
         // its evaluation budgets, so every run and every worker count give
         // one result. Only the budgets are shrunk, for a tiny problem.
@@ -825,11 +904,13 @@ mod tests {
         solver.seed = Some(11);
         solver.workers = 1;
         solver.stop_on_evaluations_only = false;
-        solver.screening.max_evaluations = 64;
+        // The scan alone (no exploration rounds, so no margin calibration
+        // analyses on the refinement model before the pilot).
+        solver.screening.max_evaluations = screen::EXPLORATION_SAMPLE as i64;
         solver.refinement.max_evaluations = 1_200;
         solver.refinement.time_limit_s = 0.1;
         let population = product_de::refinement_settings(solver, 6, 11, 1_200).population;
-        let allowance = elite_members_kept(population);
+        let allowance = elite_members_kept(population, false);
         let execute = |config: AlasConfig| {
             let mut screening = Timed(OptimizationHistory::new(), 0);
             let mut objective = PilotPrefix {
@@ -851,7 +932,7 @@ mod tests {
         assert_eq!(stages[1].evaluations, allowance);
         assert_eq!(stages[1].feasible, allowance);
         assert!(limited.best_valid);
-        assert!(allowance > elite_members_kept(stages[1].elite_size));
+        assert!(allowance > elite_members_kept(stages[1].elite_size, false));
         let replay = replay_of(&config, stages);
         for workers in [1, 8] {
             let replayed = execute(with_workers(&replay, workers));
@@ -983,7 +1064,7 @@ mod tests {
         let (screened, refined) = (&stages[0], &stages[1]);
         assert_eq!(refined.planned_evaluations, 240);
         let search_budget = refined.max_evaluations - refined.reserved_evaluations;
-        assert!(screened.elite_size > elite_members_kept(refined.elite_size));
+        assert!(screened.elite_size > elite_members_kept(refined.elite_size, false));
         assert!(refined.analysis_evaluations > refined.planned_evaluations);
         assert!(
             refined.analysis_evaluations <= search_budget,
@@ -994,11 +1075,15 @@ mod tests {
         assert_eq!(refined.cancelled_unstarted, 0);
     }
 
-    /// Always closed but infeasible by `1 + |span - 0.97 span_0|`. A batch of
-    /// more than two candidates sleeps `.1` ms, so the kernel's time guard
-    /// stops it with a fixed fraction of a batch left, which restoration's
-    /// polls (two points, then one, free) then use.
-    struct Infeasible(OptimizationHistory, u32);
+    /// Always closed but infeasible by `1 + |span - 0.97 span_0|`. Two ways to
+    /// leave a remainder for restoration's polls (two points, then one, free):
+    /// with a count-bounded run the kernel stops at its own cap, the budget
+    /// less the 10 % infeasible reserve (`infeasible_reserve`), and restoration
+    /// uses that reserve; with a time-bounded run it sleeps `stall` in the
+    /// third non-empty batch (the refinement's initial population; the first two
+    /// are the screening: the baseline, then its 23 points) so the kernel's time guard stops it before its first
+    /// generation, however loaded the machine is: the sleep only lengthens.
+    struct Infeasible(OptimizationHistory, Option<Duration>, usize);
 
     impl SearchObjective for Infeasible {
         fn evaluate(&mut self, design: &[f64]) -> f64 {
@@ -1008,8 +1093,11 @@ mod tests {
             &self.0
         }
         fn evaluate_batch(&mut self, designs: &[Vec<f64>], _workers: usize) -> Vec<(f64, bool)> {
-            if designs.len() > 2 {
-                std::thread::sleep(Duration::from_millis(u64::from(self.1)));
+            if !designs.is_empty() {
+                self.2 += 1;
+                if let Some(stall) = self.1.filter(|_| self.2 == 3) {
+                    std::thread::sleep(stall);
+                }
             }
             designs
                 .iter()
@@ -1038,45 +1126,49 @@ mod tests {
         }
     }
 
-    fn infeasible_run(config: &AlasConfig, workers: i64) -> OptimizationResult {
+    fn infeasible_run(
+        config: &AlasConfig,
+        workers: i64,
+        stall: Option<Duration>,
+    ) -> OptimizationResult {
         let (_, bounds) = span_box(0.9, 1.0);
-        let mut objective = Infeasible(OptimizationHistory::new(), 100);
+        let mut objective = Infeasible(OptimizationHistory::new(), stall, 0);
         let config = with_workers(config, workers);
         search(config, &bounds, &mut objective, ScreeningModel::Same)
     }
 
-    #[test]
-    fn a_run_that_enters_restoration_replays_each_phase_bit_identically_at_1_and_8_workers() {
-        let mut config = AlasConfig::default();
-        config.optimizer.solver.seed = Some(13);
-        config.optimizer.solver.screening.time_limit_s = 0.1;
-        config.optimizer.solver.stop_on_evaluations_only = false;
-        config.optimizer.solver.refinement.time_limit_s = 0.3;
-        config.optimizer.solver.convergence_stagnation_generations = 1_000_000;
-        let limited = infeasible_run(&config, 1);
+    /// Runs `config` (stalled once if `stall`), checks the run entered
+    /// restoration and ended as `termination`, then replays its recorded
+    /// counts: the combined count alone is a different run, and the combined
+    /// plus the restoration count is bit-identical at 1 and 8 workers.
+    fn assert_restoration_replays(config: &AlasConfig, stall: Option<Duration>, termination: &str) {
+        let limited = infeasible_run(config, 1, stall);
         let diagnostics = diagnostics_of(&limited);
         let refined = &diagnostics.stages[1];
-        assert_eq!(refined.termination, "time_budget");
+        assert_eq!(refined.termination, termination);
         assert!(
             refined.restoration_evaluations > 0,
             "restoration did not run"
         );
+        // Every restoration score counted as an evaluation was either
+        // analysed or answered from the cache (a step clamped onto a point
+        // already scored): the 6 against 5 that once looked like a timing
+        // flake was one such cache hit.
+        let restoration = diagnostics.restoration.as_ref().expect("restoration ran");
         assert_eq!(
-            Some(refined.restoration_evaluations),
-            diagnostics
-                .restoration
-                .as_ref()
-                .map(|restoration| restoration.analysis_evaluations)
+            refined.restoration_evaluations,
+            restoration.analysis_evaluations + restoration.cache_hits
         );
-        let mut replay = replay_of(&config, &diagnostics.stages);
-        // The combined count alone lets the kernel run on into the
-        // restoration's share: a different run.
-        assert_ne!(bits(&infeasible_run(&replay, 1)), bits(&limited));
+        let mut replay = replay_of(config, &diagnostics.stages);
+        // The combined count alone stops the kernel at the recorded total
+        // and leaves restoration no share (`restoration_replay` is zero):
+        // a different run.
+        assert_ne!(bits(&infeasible_run(&replay, 1, None)), bits(&limited));
         let refinement = &mut replay.optimizer.solver.refinement;
         refinement.replay_restoration_evaluations =
             i64::try_from(refined.restoration_evaluations).ok();
         for workers in [1, 8] {
-            let replayed = infeasible_run(&replay, workers);
+            let replayed = infeasible_run(&replay, workers, None);
             assert_eq!(bits(&replayed), bits(&limited), "{workers} workers");
             let stages = &diagnostics_of(&replayed).stages;
             assert_eq!(stages[1].evaluations, refined.evaluations);
@@ -1085,6 +1177,38 @@ mod tests {
                 refined.restoration_evaluations
             );
         }
+    }
+
+    /// Bounded by evaluation counts only: nothing depends on the clock.
+    #[test]
+    fn a_run_that_enters_restoration_replays_each_phase_bit_identically_at_1_and_8_workers() {
+        let mut config = AlasConfig::default();
+        config.optimizer.solver.seed = Some(13);
+        config.optimizer.solver.screening.max_evaluations = 24;
+        config.optimizer.solver.stop_on_evaluations_only = true;
+        config.optimizer.solver.refinement.max_evaluations = 83;
+        config.optimizer.solver.convergence_stagnation_generations = 1_000_000;
+        assert_restoration_replays(&config, None, "evaluation_budget");
+    }
+
+    /// The refinement's time guard ends the kernel below its cap and the
+    /// recorded restoration share replays after it. Load-independent: the
+    /// initial population stalls S = 0.5 s and the effective kernel limit is
+    /// 0.8 x 1.2 s = 0.96 s, so S < limit < 2 S: the guard
+    /// (`elapsed + last generation >= limit`) trips before generation 1 at any
+    /// load (delays only add), and restoration's count-limited polls take far
+    /// less than the 0.46 s left.
+    #[test]
+    fn a_time_stopped_kernel_and_its_restoration_replay_bit_identically_at_1_and_8_workers() {
+        let mut config = AlasConfig::default();
+        config.optimizer.solver.seed = Some(13);
+        config.optimizer.solver.screening.max_evaluations = 24;
+        config.optimizer.solver.screening.time_limit_s = 600.0;
+        config.optimizer.solver.stop_on_evaluations_only = false;
+        config.optimizer.solver.refinement.max_evaluations = 83;
+        config.optimizer.solver.refinement.time_limit_s = 1.2;
+        config.optimizer.solver.convergence_stagnation_generations = 1_000_000;
+        assert_restoration_replays(&config, Some(Duration::from_millis(500)), "time_budget");
     }
 
     #[test]

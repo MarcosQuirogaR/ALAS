@@ -76,7 +76,7 @@ const NODES: usize = 7;
 const MACH_MARGIN: f64 = crate::gust::MACH_MARGIN_C_TO_D;
 /// Fraction of the nacelle length from its inlet to the engine centre of
 /// gravity (declared geometric assumption: mid-nacelle).
-const ENGINE_CG_NACELLE_FRACTION: f64 = 0.5;
+pub(crate) const ENGINE_CG_NACELLE_FRACTION: f64 = 0.5;
 
 /// One wing-mounted engine of the modelled semi-wing.
 #[derive(Debug, Clone, Copy, PartialEq)]
@@ -87,12 +87,21 @@ pub struct EngineInstallation {
     pub mass_kg: f64,
     /// Distance of the centre of gravity ahead of the wing leading edge, m.
     pub cg_ahead_of_le_m: f64,
-    /// Engine centreline height `z` in the aircraft frame (up positive; an
-    /// under-wing engine is negative), m. The arm of the thrust couple is the
-    /// wing's `z` at the pylon station less this.
+    /// Engine centreline height above the wing at this station, as the
+    /// nacelle builder places it (up positive; an under-wing engine is
+    /// negative), m. The arm of the thrust couple is its negative.
     pub z_m: f64,
     /// Take-off thrust, N (zero for a shaft-power engine).
     pub thrust_n: f64,
+}
+
+impl EngineInstallation {
+    /// Arm of the thrust couple about the wing at this station, m. The engine
+    /// is placed from the wing at its own station, so the arm does not read how
+    /// high dihedral or the wing position carry that station.
+    pub fn thrust_arm_m(&self) -> f64 {
+        -self.z_m
+    }
 }
 
 /// The trailing-edge flap of the configuration.
@@ -100,6 +109,8 @@ pub struct EngineInstallation {
 pub struct FlapSystem {
     /// Inboard and outboard end, fractions of the semispan.
     pub eta: (f64, f64),
+    /// The band the inboard aileron cuts out of the flap run, if any.
+    pub gap: Option<(f64, f64)>,
     /// Flap chord over wing chord.
     pub chord_fraction: f64,
     /// Deflection, rad.
@@ -165,13 +176,9 @@ impl TorqueSources {
             .map(|(&(index, y), &(_, mass))| EngineInstallation {
                 y_m: y,
                 mass_kg: mass,
-                cg_ahead_of_le_m: engine_cfg.inlet_x_offset_m
+                cg_ahead_of_le_m: engine_cfg.inlet_x_offset_for_engine_m(index)
                     - ENGINE_CG_NACELLE_FRACTION * nacelle_length,
-                z_m: engine_cfg
-                    .z_per_engine_m
-                    .get(index)
-                    .copied()
-                    .unwrap_or(engine_cfg.z_m),
+                z_m: engine_cfg.z_for_engine_m(index),
                 thrust_n,
             })
             .collect();
@@ -179,6 +186,7 @@ impl TorqueSources {
         let flap = (c.flap_span_end_frac > c.flap_span_start_frac && c.flap_chord_fraction > 0.0)
             .then_some(FlapSystem {
                 eta: (c.flap_span_start_frac, c.flap_span_end_frac),
+                gap: c.flap_gap(),
                 chord_fraction: c.flap_chord_fraction,
                 deflection_rad: config.mass_model.flap_deflection_angle_deg.to_radians(),
                 eas_m_s: config.mass_model.max_airspeed_for_flaps_ms,
@@ -254,13 +262,19 @@ impl PreparedTorque {
                 ..Self::default()
             };
         }
-        let v_c = crate::sizing::envelope::CRUISE_TO_DIVE_SPEED_RATIO * v_d;
-        let atmosphere = Atmosphere::isa(req.cruise_altitude_m);
+        let v_c = crate::sizing::envelope::design_cruise_eas_m_s(req);
+        let atmosphere = Atmosphere::new(req.cruise_altitude_m);
         let a = atmosphere.speed_of_sound();
         let nu = atmosphere.kinematic_viscosity();
-        let cruise = section_table(wsg, y, Self::q_of_eas(v_c), req.cruise_mach, a, nu);
+        // The node sections are the same for every speed: their coordinates
+        // are sampled once and each is fitted at most once.
+        let sections: Vec<NodeSection> = (0..NODES)
+            .map(|k| NodeSection::new(wsg, k as f64 / (NODES - 1) as f64))
+            .collect();
+        let nodes = (wsg, sections.as_slice());
+        let cruise = section_table(nodes, y, Self::q_of_eas(v_c), req.cruise_mach, a, nu);
         let dive = section_table(
-            wsg,
+            nodes,
             y,
             Self::q_of_eas(v_d),
             (req.cruise_mach + MACH_MARGIN).min(0.95),
@@ -268,10 +282,10 @@ impl PreparedTorque {
             nu,
         );
         let flap = sources.flap.and_then(|f| {
-            let sea = Atmosphere::isa(0.0);
+            let sea = Atmosphere::new(0.0);
             let a0 = sea.speed_of_sound();
             section_table(
-                wsg,
+                nodes,
                 y,
                 Self::q_of_eas(f.eas_m_s),
                 f.eas_m_s / a0,
@@ -281,7 +295,7 @@ impl PreparedTorque {
         });
         let v_a = sources.aileron.map(|ail| {
             let area = crate::gust::GustWing::from_geometry(wsg).area_m2;
-            let n1 = req.ultimate_load_factor / 1.5;
+            let n1 = req.design_ultimate_load_factor() / 1.5;
             let v_s1 =
                 (2.0 * req.mtow_kg * req.gravity_m_s2 / (RHO0 * area * ail.cl_max_clean)).sqrt();
             (v_s1 * n1.max(1.0).sqrt()).min(v_c)
@@ -310,16 +324,79 @@ fn section_coordinates(wsg: &WingStructureGeometry, eta: f64) -> Vec<(f64, f64)>
     coords
 }
 
-/// Zero-lift `Cm0` (about c/4) and lift slope of the section at `eta`, from
-/// NeuralFoil at the chord Reynolds number and Mach number.
-fn section_aero(
-    wsg: &WingStructureGeometry,
-    eta: f64,
-    mach: f64,
-    reynolds: f64,
-) -> Option<(f64, f64)> {
-    let airfoil = Airfoil::from_coordinates("torque-section", section_coordinates(wsg, eta));
-    let prepared = PreparedAirfoil::prepare(&airfoil).ok()?;
+/// The section at one spanwise node: its sampled contour and, once a speed
+/// needs it, its fitted airfoil (`None` when the fit fails).
+struct NodeSection {
+    coordinates: Vec<(f64, f64)>,
+    prepared: std::cell::OnceCell<Option<PreparedAirfoil>>,
+}
+
+impl NodeSection {
+    fn new(wsg: &WingStructureGeometry, eta: f64) -> Self {
+        Self {
+            coordinates: section_coordinates(wsg, eta),
+            prepared: std::cell::OnceCell::new(),
+        }
+    }
+
+    fn prepared(&self) -> Option<&PreparedAirfoil> {
+        self.prepared
+            .get_or_init(|| {
+                let airfoil = Airfoil::from_coordinates("torque-section", self.coordinates.clone());
+                PreparedAirfoil::prepare(&airfoil).ok()
+            })
+            .as_ref()
+    }
+}
+
+/// Section results kept per thread, enough for the cruise, dive and flap
+/// tables of two wings.
+const SECTION_MEMO_CAPACITY: usize = 6 * NODES;
+
+/// Zero-lift `Cm0` (about c/4) and lift slope of a section, from NeuralFoil
+/// at the chord Reynolds number and Mach number.
+///
+/// The result is a pure function of the contour, the Mach number and the
+/// Reynolds number. A mass closure re-sizes the box of one geometry at
+/// several masses, so the latest results are kept per thread and returned
+/// when all three match bit for bit.
+fn section_aero(section: &NodeSection, mach: f64, reynolds: f64) -> Option<(f64, f64)> {
+    type Key = (Vec<u64>, u64, u64);
+    type Memo = std::collections::VecDeque<(Key, Option<(f64, f64)>)>;
+    thread_local! {
+        static MEMO: std::cell::RefCell<Memo> =
+            const { std::cell::RefCell::new(std::collections::VecDeque::new()) };
+    }
+    let key: Key = (
+        section
+            .coordinates
+            .iter()
+            .flat_map(|&(x, z)| [x.to_bits(), z.to_bits()])
+            .collect(),
+        mach.to_bits(),
+        reynolds.to_bits(),
+    );
+    if let Some(hit) = MEMO.with(|memo| {
+        memo.borrow()
+            .iter()
+            .find(|(held, _)| *held == key)
+            .map(|(_, value)| *value)
+    }) {
+        return hit;
+    }
+    let value = solve_section_aero(section, mach, reynolds);
+    MEMO.with(|memo| {
+        let mut memo = memo.borrow_mut();
+        if memo.len() >= SECTION_MEMO_CAPACITY {
+            memo.pop_front();
+        }
+        memo.push_back((key, value));
+    });
+    value
+}
+
+fn solve_section_aero(section: &NodeSection, mach: f64, reynolds: f64) -> Option<(f64, f64)> {
+    let prepared = section.prepared()?;
     let alphas = [-4.0, -2.0, 0.0, 2.0, 4.0];
     let conditions: Vec<Conditions> = alphas
         .iter()
@@ -355,7 +432,7 @@ fn section_aero(
 }
 
 fn section_table(
-    wsg: &WingStructureGeometry,
+    (wsg, sections): (&WingStructureGeometry, &[NodeSection]),
     y: &[f64],
     q_pa: f64,
     mach: f64,
@@ -367,7 +444,7 @@ fn section_table(
         .map(|k| {
             let eta = k as f64 / (NODES - 1) as f64;
             let reynolds = (tas * wsg.local_chord(eta) / nu).clamp(1.0e5, 5.0e7);
-            section_aero(wsg, eta, mach, reynolds).map(|(cm, cla)| (eta, cm, cla))
+            section_aero(&sections[k], mach, reynolds).map(|(cm, cla)| (eta, cm, cla))
         })
         .collect::<Option<_>>()?;
     let at = |eta: f64, pick: fn(&(f64, f64, f64)) -> f64| {
@@ -446,6 +523,79 @@ pub const fn aileron_max_deflection_rad() -> f64 {
 #[cfg(test)]
 mod tests {
     use super::*;
+
+    fn preset_named(name: &str) -> AlasConfig {
+        AlasConfig::from_value(&serde_json::json!({ "preset": name }))
+            .unwrap_or_else(|error| panic!("{name} is a registered preset: {error}"))
+    }
+
+    #[test]
+    fn held_section_results_equal_a_fresh_fit_and_sweep_bit_for_bit() {
+        let contour = |thickness: f64| -> Vec<(f64, f64)> {
+            let xs: Vec<f64> = (0..=40).map(|k| f64::from(k) / 40.0).collect();
+            let z = |x: f64| thickness * x.sqrt() * (1.0 - x);
+            let mut coordinates: Vec<(f64, f64)> = xs
+                .iter()
+                .rev()
+                .map(|&x| (x, z(x) + 0.02 * x * (1.0 - x)))
+                .collect();
+            coordinates.extend(
+                xs.iter()
+                    .skip(1)
+                    .map(|&x| (x, -z(x) + 0.02 * x * (1.0 - x))),
+            );
+            coordinates
+        };
+        let section = |thickness: f64| NodeSection {
+            coordinates: contour(thickness),
+            prepared: std::cell::OnceCell::new(),
+        };
+        let bits = |value: Option<(f64, f64)>| value.map(|(a, b)| (a.to_bits(), b.to_bits()));
+        for (thickness, mach, reynolds) in
+            [(0.30, 0.3, 6.0e6), (0.30, 0.6, 2.0e7), (0.20, 0.3, 6.0e6)]
+        {
+            // One fit and sweep with no shared state.
+            let fresh = solve_section_aero(&section(thickness), mach, reynolds);
+            assert!(fresh.is_some(), "{thickness} {mach} {reynolds}");
+            let shared = section(thickness);
+            let first = section_aero(&shared, mach, reynolds);
+            let held = section_aero(&section(thickness), mach, reynolds);
+            assert_eq!(bits(first), bits(fresh));
+            assert_eq!(bits(held), bits(fresh));
+        }
+        // More distinct sections than the store holds: evicted entries are
+        // recomputed to the same bits.
+        let reference = bits(solve_section_aero(&section(0.30), 0.3, 6.0e6));
+        for k in 0..=SECTION_MEMO_CAPACITY {
+            let _ = section_aero(&section(0.30), 0.3, 1.0e6 + 1.0e4 * k as f64);
+        }
+        assert_eq!(bits(section_aero(&section(0.30), 0.3, 6.0e6)), reference);
+    }
+
+    #[test]
+    fn each_engine_reads_its_own_inlet_and_height_and_the_arm_reads_the_offset() {
+        // The B747-400 staggers its inboard and outboard inlets.
+        let config = preset_named("B747-400");
+        let engine = &config.geometry.engine;
+        let sources = TorqueSources::from_config(&config, &config.requirements);
+        let spread = sources.engines.iter().map(|e| e.cg_ahead_of_le_m);
+        let (lo, hi) = spread.fold((f64::MAX, f64::MIN), |(l, h), v| (l.min(v), h.max(v)));
+        assert!(
+            engine.inlet_x_per_engine_m.is_empty() || hi > lo,
+            "per-engine inlets must reach the torque: {lo} {hi}"
+        );
+        let mut built = sources.engines[0];
+        built.z_m = -2.5;
+        assert_eq!(built.thrust_arm_m(), 2.5);
+    }
+
+    #[test]
+    fn rear_fuselage_engines_put_no_inertia_or_thrust_on_the_wing() {
+        let config = preset_named("LJ60");
+        assert!(config.geometry.engine.aft_fuselage.is_some());
+        let sources = TorqueSources::from_config(&config, &config.requirements);
+        assert!(sources.engines.is_empty());
+    }
 
     #[test]
     fn the_chart_tables_reproduce_their_own_nodes_and_stay_monotone() {

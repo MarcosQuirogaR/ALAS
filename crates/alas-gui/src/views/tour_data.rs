@@ -55,7 +55,7 @@ pub const TOUR_STEPS: &[TourStep] = &[
     },
     TourStep {
         title: "Set your requirements",
-        body: "On the Inputs page pick a preset aircraft or enter the sandbox mode, then edit the mission requirements and design variables. Which variables you can edit depends on the mode: preset geometry stays protected, and the optimizer may only vary its design variables inside a bounded envelope around the preset. Every field is validated live.",
+        body: "On the Aircraft page pick a preset aircraft or enter the sandbox mode, then edit the mission requirements and design variables. Which variables you can edit depends on the mode: preset geometry stays protected, and the optimizer may only vary its design variables inside a bounded envelope around the preset. Every field is validated live.",
         page: Some("inputs"),
         target: Some(TourTarget::AircraftConfig),
     },
@@ -73,7 +73,7 @@ pub const TOUR_STEPS: &[TourStep] = &[
     },
     TourStep {
         title: "Discipline previews",
-        body: "Each Modeling page pairs its form with a discipline preview: Cabin & Cargo switches the Live Preview to the interior, Mass shows the CG envelope, Aerodynamics the drag-versus-Mach curve, Structures the wingbox planform and Propulsion the engine installation, all recomputed as you edit.",
+        body: "Each Modeling page pairs its form with a discipline preview: Cabin switches the Live Preview to the interior, Mass shows the CG envelope, Aerodynamics the drag-versus-Mach curve, Structures the wingbox planform and Propulsion the engine installation, all recomputed as you edit.",
         page: Some("cabin"),
         target: Some(TourTarget::Content),
     },
@@ -91,7 +91,7 @@ pub const TOUR_STEPS: &[TourStep] = &[
     },
     TourStep {
         title: "Choose your analyses",
-        body: "Setup > Analyses lists what a full run performs. Core aerodynamics, weight & balance, propulsion and field performance always run; native mission, MSES 2-D airfoil analysis, wingbox structures and its solver cases, baseline comparison, OpenVSP, VSPAERO, AVL, FLOWUnsteady, NASTRAN and Patran are configurable here. External-tool paths live under Advanced Settings > External Tools.",
+        body: "Analyses lists what a full run performs. Core aerodynamics, weight & balance, propulsion and field performance always run; native mission, MSES 2-D airfoil analysis, wingbox structures and its solver cases, baseline comparison, OpenVSP, VSPAERO, AVL, FLOWUnsteady, NASTRAN and Patran are configurable here. External-tool paths live under External Tools.",
         page: Some("setup_analyses"),
         target: Some(TourTarget::Content),
     },
@@ -183,13 +183,13 @@ mod tests {
             "The left navigation tree switches the content panel. Click any leaf to open it. You can also pin the sidebar."
         );
         assert!(TOUR_STEPS[2].body.starts_with(
-            "On the Inputs page pick a preset aircraft or enter the sandbox mode, then edit the mission requirements and design variables."
+            "On the Aircraft page pick a preset aircraft or enter the sandbox mode, then edit the mission requirements and design variables."
         ));
         assert_eq!(TOUR_STEPS[3].title, "Sandbox mode");
         assert_eq!(TOUR_STEPS[3].page, Some("inputs"));
         assert!(TOUR_STEPS[4].body.contains("when in the standard mode"));
         assert!(TOUR_STEPS[6].body.contains("Hover a field label"));
-        // Setup > Analyses (`analyses_view.rs`) locks exactly these four
+        // Analyses (`analyses_view.rs`) locks exactly these four
         // disciplines as "always runs"; native mission is an optional
         // per-run toggle, not part of that always-run set.
         assert!(TOUR_STEPS[8].body.contains(

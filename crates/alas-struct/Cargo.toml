@@ -24,11 +24,21 @@ alas-exec = { path = "../alas-exec" }
 # surface) off `WingStructureGeometry`, exactly as
 # `alas/physics/structural_sizing.py` does.
 alas-geom = { path = "../alas-geom" }
+# The product strength law sizes its spanwise stations, which are independent
+# at a fixed rib pitch, on a shared helper pool (`sizing::product_strength`).
+rayon = { workspace = true }
 # `mesh` reports the two mesh defects that make a deck unsolvable as an error
 # enum, the same way every other fallible constructor in the workspace does.
 thiserror = { workspace = true }
 
+# The frozen parity law (`size_wingbox_reference_compatibility`) is compiled
+# only with this feature. The package enables it for its own tests through the
+# dev-dependency below, so product builds of other crates cannot name it.
+[features]
+parity-reference = []
+
 [dev-dependencies]
+alas-struct = { path = ".", features = ["parity-reference"] }
 alas-testkit = { path = "../alas-testkit" }
 serde = { workspace = true }
 serde_json = { workspace = true }

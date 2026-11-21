@@ -12,7 +12,9 @@
 
 use alas_config::MacFrame;
 
+use super::landing_download::LandingTrimCondition;
 use super::rotation::{longitudinal_force_moment_m, rotation_cg_offset_m};
+use super::support::{most_aft, most_forward};
 use super::PhaseLimits;
 
 /// Which physical mechanism governs the aft CG boundary.
@@ -33,10 +35,8 @@ pub enum ForwardLimitGovernance {
     /// Maximum nose-gear load fraction for handling/steering.
     MaxNoseLoadHandling,
     /// Scissor-plot (trim/controllability) estimate at landing `CL_max`.
-    /// A diagnostic-only variant: [`physical_cg_limits`] never selects it as
-    /// the governing mechanism, which comes from the physically derived
-    /// [`Self::RotationNoseWheelLiftoff`] and
-    /// [`Self::LandingTrimGroundEffect`] criteria; see
+    /// A report-only variant: [`physical_cg_limits`] never selects it; the
+    /// same construction governs as [`Self::LandingTrimDesignRule`]; see
     /// `scissor_plot_fwd_pct_mac` on [`PhysicalCgLimits`].
     ScissorPlotEstimate,
     /// Nose-wheel lift-off (rotation) moment-balance criterion at `V_R`
@@ -44,13 +44,46 @@ pub enum ForwardLimitGovernance {
     /// sec. 9.6.2 and 12.6): the most-forward CG at which the tail download
     /// at full up-elevator can still supply the wing-body moment, the
     /// required pitch acceleration of the inertia about the main-gear
-    /// contact, and the weight moment about that contact.
+    /// contact, and the weight moment about that contact. A trimmable
+    /// stabiliser stands at its nose-up stop, the tail's maximum downlift of
+    /// Roskam's take-off rotation check.
     RotationNoseWheelLiftoff,
-    /// Landing trim/flare criterion (Torenbeek/Roskam scissor
-    /// construction with a ground-effect knockdown on tail authority): the
-    /// most-forward CG at which the tail can still trim `CL_max,landing`
-    /// in ground effect.
-    LandingTrimGroundEffect,
+    /// Take-off trim: CS 25.161(c)(1) (Amdt 28, read in the Easy Access text;
+    /// 14 CFR 25.161(c)(1) is the same clause) requires longitudinal trim in a
+    /// climb at maximum continuous power at a speed not more than 1.3 V_SR1,
+    /// gear retracted, flaps retracted and in the take-off position. The model
+    /// trims at `1.3 V_SR1`, the speed the clause sets (the aeroplane need not
+    /// trim at a lower one), elevator neutral, take-off flaps, out of ground
+    /// effect, with the all-engine rotation thrust moment (not the lower
+    /// maximum continuous power: a stated approximation), and takes the
+    /// stabiliser at its nose-up stop as the limit (the `super::ths_trim`
+    /// balance validated against Airbus Safety First #09).
+    TakeoffTrimStabiliserStop,
+    /// Clean climb trim: the flaps-retracted half of CS 25.161(c)(1), trim in
+    /// a climb at `1.3 V_SR1` with gear and flaps retracted, at the
+    /// stabiliser's nose-up stop with the elevator neutral (a fixed
+    /// stabiliser: the elevator its trim tab holds), capped at the tail's
+    /// stall (`super::clean_trim`); or, where more restrictive, the stall
+    /// reach of CS 25.103(b)(5) and 25.201(b)(1): from that trim the elevator
+    /// alone must reach `CL_max,clean` at the forward CG. Applies to every
+    /// airborne state.
+    CleanClimbTrim,
+    /// Landing trim at `CL_max,land` by the forward-limit design rule of
+    /// Torenbeek, *Advanced Aircraft Design*, Wiley, 2013, sec. 6.3.3,
+    /// eq. 6.2 (p. 168): the tail at its design lift coefficient
+    /// `C_L,h = -0.80` with the paired `q_h / q`, against the landing
+    /// wing-body moment of the configured flaps and slats. The iced-tail
+    /// margin (Obert, *Aerodynamic Design of Transport Aircraft*, 2009,
+    /// p. 406) is reported beside it, not governing
+    /// (`iced_tail_fwd_pct_mac` on [`PhysicalCgLimits`]).
+    LandingTrimDesignRule,
+    /// Landing trim at `CL_max,land` by the same balance (Torenbeek 2013, eq. 6.2)
+    /// with the tail lift coefficient the airplane's declared trim travel
+    /// allows: the stabiliser nose-up stop and elevator up travel from the
+    /// type certificate data sheet (`super::landing_download`), in place of the
+    /// design constant. A fixed stabiliser takes its built incidence and the
+    /// elevator's up travel alone.
+    LandingTrimSourcedTravel,
 }
 
 /// Every input [`physical_cg_limits`] needs, all in the primary aircraft
@@ -67,9 +100,9 @@ pub struct PhysicalCgLimitsInput {
     pub clean_np_x_m: f64,
     /// Hard longitudinal-stability floor, fraction of MAC.
     pub min_physical_static_margin: f64,
-    /// Effective main-gear longitudinal station.
+    /// Effective (reaction) main-gear station: nose/main split and rotation balance.
     pub x_main_gear_m: f64,
-    /// Most-aft main-gear axle station (the tip-back pivot).
+    /// Rotation pivot, the tip-back axle (`LandingGearStationPositions::rotation_pivot_x_m`).
     pub x_mlg_aft_axle_m: f64,
     /// `x_main_gear_m - x_nose_gear_m`.
     pub wheelbase_m: f64,
@@ -89,25 +122,31 @@ pub struct PhysicalCgLimitsInput {
     /// Maximum nose-load fraction of current weight for handling.
     pub pct_load_nlg_max_handling: f64,
     /// Wing-body aerodynamic centre, as a fraction of MAC aft of LEMAC
-    /// (`x_ac,wb / c`); the quarter-chord point (`0.25`) absent a
-    /// fuselage-corrected wing-body AC of its own.
+    /// (`x_ac,wb / c`): the wing's quarter chord moved by the fuselage
+    /// (`alas_opt::envelope::support::wing_body_ac_frac`).
     pub x_ac_wb_frac: f64,
     /// Landing-configuration wing-body pitching moment about its own AC,
-    /// dimensionless; an *estimate* of the flap increment (Torenbeek order
-    /// of magnitude for a single-slotted flap, negative/nose-down), not a
-    /// measured value.
+    /// dimensionless, nose-down negative: the section moment, the
+    /// landing-flap increment and the fuselage moment at the wing's
+    /// zero-lift attitude (`alas_opt::envelope::support::landing_cm_ac_wb`).
     pub cm_ac_wb_landing: f64,
     /// Landing maximum lift coefficient (`config.performance.cl_max_land`).
     pub cl_max_landing: f64,
-    /// Tail dynamic-pressure efficiency, dimensionless; a declared estimate
-    /// (Torenbeek order-of-magnitude for a low tail, `0.9`), not measured.
+    /// Tail dynamic-pressure ratio `q_h / q`, dimensionless: Torenbeek's
+    /// paired input by tail type (`support::tail_efficiency`).
     pub eta: f64,
     /// Horizontal-tail volume coefficient `S_h * l_h / (S * c)`.
     pub tail_volume_coefficient: f64,
-    /// Maximum (most negative) tail lift coefficient available to trim the
-    /// landing nose-down moment; an adjustable-stabiliser estimate (Torenbeek),
-    /// not a measured value. Negative (downward tail lift).
+    /// Torenbeek's tail-sizing design value of the tail lift coefficient at
+    /// `CL_max,land` (eq. 6.2, 2013, p. 168), paired with his `q_h / q`.
+    /// Negative (downward tail lift). Used for the landing-trim boundary when
+    /// [`Self::landing_authority`] is `None`, else a scissor diagnostic.
     pub cl_h_max: f64,
+    /// The landing trim authority from the preset's declared stabiliser and
+    /// elevator travel (`super::landing_download`; the elevator alone on a
+    /// fixed stabiliser); `None` (no tail or no finite terms) keeps the design
+    /// rule.
+    pub landing_authority: Option<super::landing_download::LandingTrimAuthority>,
     /// Configured CG range, `%MAC`, now interpreted as the *minimum usable*
     /// range the physical boundaries must admit (see [`PhysicalCgLimits::usable_range_pct_mac`]),
     /// never as a forward limit.
@@ -120,13 +159,13 @@ pub struct PhysicalCgLimitsInput {
     /// Horizontal-tail reference area over the wing reference area
     /// (`S_h / S`), `0.0` with no tail.
     pub tail_area_ratio: f64,
-    /// Wieselsberger-style ground-effect knockdown on the tail's maximum
-    /// download authority for the landing-trim criterion, dimensionless in
-    /// `(0, 1]`; `1.0` = no correction
-    /// (`alas_opt::envelope::support::tail_ground_effect_factor`). The
-    /// rotation criterion does not use it: its ground effect acts through
-    /// the wing downwash in [`Self::rotation_tail_lift_coefficient`].
-    pub tail_ground_effect_factor: f64,
+    /// Most negative tail lift coefficient, on the tail's own area, that the
+    /// stabiliser may be trimmed to (elevator neutral) at the landing
+    /// reference speed and keep the iced-tail margin
+    /// (`super::iced_tail::landing_trim_tail_lift_coefficient`); positive
+    /// when the manoeuvre alone reaches the iced stall angle. Non-finite
+    /// disables the iced-tail check; it never governs.
+    pub landing_trim_cl_h: f64,
     /// Horizontal-tail lift coefficient at rotation with full up-elevator,
     /// on the tail's own area, negative (download), derived from the tail
     /// geometry, the downwash in ground effect and the elevator
@@ -134,9 +173,8 @@ pub struct PhysicalCgLimitsInput {
     /// mechanism.
     pub rotation_tail_lift_coefficient: f64,
     /// Wing-body lift coefficient at the ground (pre-rotation) attitude at
-    /// `V_R`, dimensionless; a declared estimate
-    /// (`config.landing_gear.cl_ground_attitude_frac_of_cl_max_to * CL_max,TO`,
-    /// Torenbeek order of magnitude), not a measured value.
+    /// `V_R`, dimensionless: the takeoff lift at zero fuselage angle of
+    /// attack (`alas_opt::envelope::support::takeoff_ground_lift`).
     pub cl_ground_attitude: f64,
     /// The "apparent" lift coefficient implied by weight support alone at
     /// `V_R` (`CL_max,TO / (V_R/V_S1,TO)^2`), dimensionless: the rotation
@@ -145,9 +183,9 @@ pub struct PhysicalCgLimitsInput {
     /// pressure, or wing-area input.
     pub cl_r_rotation: f64,
     /// Wing-body pitching moment about its own AC in the takeoff
-    /// configuration, dimensionless; a declared Torenbeek order-of-magnitude
-    /// estimate (`alas_opt::envelope::support::ROTATION_CM_AC_WB_TAKEOFF`),
-    /// not a measured value.
+    /// configuration, dimensionless, nose-down negative: the section moment
+    /// and the takeoff-flap increment, the landing rule at the takeoff flap
+    /// setting (`alas_opt::envelope::support::takeoff_cm_ac_wb`).
     pub cm_ac_wb_takeoff: f64,
     /// Pitch radius of gyration about the centre of gravity, m: from the
     /// mass ledger's takeoff `I_yy`, else Raymer's jet-transport radius
@@ -173,6 +211,15 @@ pub struct PhysicalCgLimitsInput {
     /// Tire rolling-friction coefficient during the takeoff roll,
     /// dimensionless (`config.landing_gear.rotation_rolling_friction_coefficient`).
     pub rotation_rolling_friction_coefficient: f64,
+    /// The trimmable stabiliser's takeoff-trim model. When present the
+    /// tail lift at rotation is its maximum downlift, the stabiliser at its
+    /// nose-up stop with full up-elevator
+    /// ([`super::ths_trim::TakeoffTrimModel::rotation_lift_coefficient_at_stop`]),
+    /// in place of [`Self::rotation_tail_lift_coefficient`].
+    pub takeoff_trim: Option<super::ths_trim::TakeoffTrimModel>,
+    /// The clean climb-trim model (`super::clean_trim`); `None` disables
+    /// that boundary (no tail or no finite terms).
+    pub clean_trim: Option<super::clean_trim::CleanTrimModel>,
 }
 
 /// The physical aft/forward CG boundaries this state's weight and geometry
@@ -198,12 +245,30 @@ pub struct PhysicalCgLimits {
     pub fwd_limit_governance: ForwardLimitGovernance,
     /// Diagnostic only: the maximum-nose-load-fraction forward boundary.
     pub max_nose_load_fwd_pct_mac: f64,
-    /// Diagnostic only: the scissor-plot controllability estimate, reported
-    /// but never a governance candidate.
+    /// Diagnostic only: the scissor-plot construction at `CL_max,land`, on the
+    /// flapped wing-body with a landing authority; without one it is
+    /// [`Self::landing_trim_fwd_pct_mac`] when a tail station exists.
     pub scissor_plot_fwd_pct_mac: f64,
     /// Diagnostic and governance candidate: the rotation (nose-wheel
     /// liftoff) moment-balance boundary.
     pub rotation_fwd_pct_mac: f64,
+    /// Diagnostic and governance candidate (take-off phase): the most-forward
+    /// CG at which the aeroplane can still be trimmed at `V2` with the elevator
+    /// neutral and the stabiliser at its nose-up stop; `-inf` (never the most
+    /// aft candidate) without a trimmable stabiliser model or stop.
+    pub takeoff_trim_fwd_pct_mac: f64,
+    /// Diagnostic and governance candidate (airborne phases): the most
+    /// forward CG at which the clean climb of CS 25.161(c)(1) (flaps
+    /// retracted, `1.3 V_SR1`) can be trimmed with the tail's authority
+    /// (`super::clean_trim`); `-inf` without a model.
+    pub clean_trim_fwd_pct_mac: f64,
+    /// Diagnostic: the landing approach-trim limit (stabiliser at its stop,
+    /// elevator neutral; CS 25.161(c)(2)) alone, `-inf` without a sourced
+    /// trim travel.
+    pub landing_approach_fwd_pct_mac: f64,
+    /// Diagnostic: the landing-flare limit (elevator alone from that trim, in
+    /// ground effect) alone, `-inf` without a sourced trim travel.
+    pub landing_flare_fwd_pct_mac: f64,
     /// Diagnostic only: the thrust and rolling-friction moment about the
     /// main-gear contact over `W c`, signed so that negative is nose-up,
     /// `%MAC`. The rotation boundary is nonlinear in its moments (the pitch
@@ -213,9 +278,31 @@ pub struct PhysicalCgLimits {
     /// Diagnostic only: the tail lift coefficient at rotation the boundary
     /// used ([`PhysicalCgLimitsInput::rotation_tail_lift_coefficient`]).
     pub rotation_tail_lift_coefficient: f64,
-    /// Diagnostic and governance candidate: the landing trim/flare boundary
-    /// in ground effect.
+    /// Diagnostic only: the nose-up stabiliser setting the rotation check
+    /// took, deg: the stop (`None` for a fixed stabiliser, a user-set
+    /// setting, or no stop).
+    pub rotation_stabilizer_nose_up_deg: Option<f64>,
+    /// Diagnostic and governance candidate: the landing-trim boundary of
+    /// Torenbeek's eq. 6.2 ([`ForwardLimitGovernance::LandingTrimDesignRule`]).
     pub landing_trim_fwd_pct_mac: f64,
+    /// Diagnostic only: the iced-tail landing-trim check (Obert 2009,
+    /// p. 406; `super::iced_tail`), trimmed at `V_REF` with the elevator
+    /// neutral, on the flapped wing-body, the stabiliser carrying the ice
+    /// accretion of its protection; never a governance candidate (the reason
+    /// is in `super::iced_tail`, "Why reported and not governing").
+    pub iced_tail_fwd_pct_mac: f64,
+    /// Diagnostic only: the tail lift coefficient the landing-trim boundary
+    /// used ([`PhysicalCgLimitsInput::cl_h_max`]).
+    pub landing_tail_lift_coefficient: f64,
+    /// Diagnostic only: whether the trim authority (not the tail's stall)
+    /// limits it.
+    pub landing_tail_trim_limited: bool,
+    /// Whether the landing tail lift came from declared trim travel (selects
+    /// the governance label).
+    pub landing_tail_sourced: bool,
+    /// Diagnostic only: the landing condition that set the landing-trim
+    /// boundary (`design rule` without declared trim travel).
+    pub landing_trim_condition: &'static str,
     /// `aft_limit_pct_mac - fwd_limit_pct_mac`: the usable CG range these
     /// physical boundaries admit at this state.
     pub usable_range_pct_mac: f64,
@@ -230,12 +317,13 @@ const ALL_PHASES: PhaseLimits = PhaseLimits {
     rotation: true,
     landing_trim: true,
     static_margin: true,
+    clean_trim: true,
 };
 
 impl PhysicalCgLimits {
     /// The governing forward boundary among the mechanisms `phase` admits:
-    /// the maximum nose load always, rotation and landing trim when scoped
-    /// in. `NaN` candidates are skipped.
+    /// the maximum nose load always, rotation, take-off trim, clean climb trim
+    /// and landing trim when scoped in. `NaN` candidates are skipped.
     #[must_use]
     pub fn fwd_for(&self, phase: PhaseLimits) -> (f64, ForwardLimitGovernance) {
         most_aft([
@@ -252,12 +340,32 @@ impl PhysicalCgLimits {
                 ForwardLimitGovernance::RotationNoseWheelLiftoff,
             ),
             (
+                if phase.rotation {
+                    self.takeoff_trim_fwd_pct_mac
+                } else {
+                    f64::NAN
+                },
+                ForwardLimitGovernance::TakeoffTrimStabiliserStop,
+            ),
+            (
+                if phase.clean_trim {
+                    self.clean_trim_fwd_pct_mac
+                } else {
+                    f64::NAN
+                },
+                ForwardLimitGovernance::CleanClimbTrim,
+            ),
+            (
                 if phase.landing_trim {
                     self.landing_trim_fwd_pct_mac
                 } else {
                     f64::NAN
                 },
-                ForwardLimitGovernance::LandingTrimGroundEffect,
+                if self.landing_tail_sourced {
+                    ForwardLimitGovernance::LandingTrimSourcedTravel
+                } else {
+                    ForwardLimitGovernance::LandingTrimDesignRule
+                },
             ),
         ])
     }
@@ -302,22 +410,6 @@ impl PhysicalCgLimits {
     }
 }
 
-fn most_forward(candidates: [(f64, AftLimitGovernance); 3]) -> (f64, AftLimitGovernance) {
-    candidates
-        .into_iter()
-        .filter(|(value, _)| value.is_finite())
-        .min_by(|left, right| left.0.total_cmp(&right.0))
-        .unwrap_or((f64::NAN, AftLimitGovernance::Aerodynamic))
-}
-
-fn most_aft(candidates: [(f64, ForwardLimitGovernance); 3]) -> (f64, ForwardLimitGovernance) {
-    candidates
-        .into_iter()
-        .filter(|(value, _)| value.is_finite())
-        .max_by(|left, right| left.0.total_cmp(&right.0))
-        .unwrap_or((f64::NAN, ForwardLimitGovernance::MaxNoseLoadHandling))
-}
-
 /// The physical aft and forward CG boundaries for one loading state.
 ///
 /// # Aft boundary
@@ -342,16 +434,19 @@ fn most_aft(candidates: [(f64, ForwardLimitGovernance); 3]) -> (f64, ForwardLimi
 ///   is quadratic in the CG station; see `rotation::rotation_cg_offset_m`.
 ///   Drag is omitted (about 1 %MAC; see `super::rotation`). The takeoff
 ///   `Cm_ac,wb = -0.15` and `x_ac,wb = 0.25` remain declared estimates.
-/// - **Landing trim in ground effect**: the same scissor-plot construction
-///   as the diagnostic-only estimate below, with a ground-effect knockdown
-///   on the tail's available download coefficient.
+/// - **Clean climb trim** (CS 25.161(c)(1), flaps retracted; airborne
+///   phases): `super::clean_trim`.
+/// - **Landing trim** (Torenbeek, *Advanced Aircraft Design*, 2013,
+///   sec. 6.3.3, eq. 6.2, p. 168):
+///   `x_cg,fwd/c = x_ac,wb/c - Cm_ac,wb,landing/CL_max,landing + eta*(S_h l_h/(S c))*CL_h,max/CL_max,landing`
+///   with Torenbeek's design `CL_h,max = -0.80` and paired `eta`, and the
+///   landing moment of the configured flaps and slats
+///   (`super::support::landing_cm_ac_wb`). A conceptual-design rule, not a
+///   measured trim solve. Without a tail station it is not a candidate.
 ///
-/// The scissor-plot estimate itself
-/// (`x_cg,fwd/c = x_ac,wb/c - Cm_ac,wb,landing/CL_max,landing + eta*(S_h l_h/(S c))*CL_h,max/CL_max,landing`,
-/// a Torenbeek/Roskam controllability construction, an estimate not a
-/// measured trim/rotation solve) is reported only as a diagnostic
-/// ([`PhysicalCgLimits::scissor_plot_fwd_pct_mac`]); it is not a
-/// governance candidate.
+/// The iced-tail landing-trim check (Obert 2009, p. 406, trimmed at `V_REF`)
+/// is reported beside it ([`PhysicalCgLimits::iced_tail_fwd_pct_mac`]); it
+/// is not a governance candidate.
 #[must_use]
 pub fn physical_cg_limits(input: &PhysicalCgLimitsInput) -> PhysicalCgLimits {
     let frame = input.mac_frame;
@@ -360,39 +455,53 @@ pub fn physical_cg_limits(input: &PhysicalCgLimitsInput) -> PhysicalCgLimits {
         pct_mac(frame, input.critical_np_x_m) - 100.0 * input.min_physical_static_margin;
     let ground_aft_x_m = input.x_main_gear_m - input.pct_load_nlg_min * input.wheelbase_m;
     let ground_aft_pct_mac = pct_mac(frame, ground_aft_x_m);
-    let required_tip_back_deg = input.min_tip_back_deg.max(
-        input
-            .scrape_angle_deg
-            .filter(|angle| angle.is_finite())
-            .unwrap_or(0.0),
+    let required_tip_back_deg = alas_perf::landing_gear::geometry::required_tip_back_deg(
+        input.min_tip_back_deg,
+        input.scrape_angle_deg,
     );
-    let tip_back_aft_x_m = if input.h_cg_m.is_finite() && input.h_cg_m > 0.0 {
-        input.x_mlg_aft_axle_m - input.h_cg_m * required_tip_back_deg.to_radians().tan()
-    } else {
-        f64::NAN
-    };
+    let tip_back_aft_x_m = alas_perf::landing_gear::geometry::tip_back_limit_x_m(
+        input.x_mlg_aft_axle_m,
+        input.h_cg_m,
+        required_tip_back_deg,
+    );
     let tip_back_aft_pct_mac = pct_mac(frame, tip_back_aft_x_m);
 
     let max_nose_load_fwd_x_m =
         input.x_main_gear_m - input.pct_load_nlg_max_handling * input.wheelbase_m;
     let max_nose_load_fwd_pct_mac = pct_mac(frame, max_nose_load_fwd_x_m);
     let cl_max = input.cl_max_landing.max(1.0e-6);
-    // Diagnostic-only scissor-plot estimate: no ground-effect knockdown,
-    // never a governance candidate.
-    let scissor_plot_fwd_frac = input.x_ac_wb_frac - input.cm_ac_wb_landing / cl_max
-        + input.eta * input.tail_volume_coefficient * input.cl_h_max / cl_max;
-    let scissor_plot_fwd_pct_mac = scissor_plot_fwd_frac * 100.0;
+    let (x_ac, cm) = (input.x_ac_wb_frac, input.cm_ac_wb_landing);
+    let tail_term = input.eta * input.tail_volume_coefficient;
+    // Torenbeek's eq. 6.2 at CL_max,land (the scissor plot: reported, and the landing-trim
+    // candidate without sourced trim travel) and the iced-tail balance below stand on the
+    // landing trims' flapped wing-body when the airplane has one.
+    let (x_ac_l, cm_l, tail_l) = input
+        .landing_authority
+        .map_or((x_ac, cm, tail_term), |a| a.flapped(x_ac, cm, tail_term));
+    let scissor_plot_fwd_pct_mac =
+        100.0 * (x_ac_l - cm_l / cl_max + tail_l * input.cl_h_max / cl_max);
+    let authority_limit = input.landing_authority.and_then(|authority| {
+        let (x, condition) = authority.forward_limit(x_ac, cm, tail_term)?;
+        Some((
+            x * 100.0,
+            condition,
+            authority.tail_lift_at(condition, x_ac, x, cm, tail_term),
+        ))
+    });
+    let landing_trim_fwd_pct_mac = if !input.x_h_ac_m.is_finite() {
+        f64::NAN
+    } else if let Some((pct, _, _)) = authority_limit {
+        pct
+    } else {
+        scissor_plot_fwd_pct_mac
+    };
 
-    // Landing trim in ground effect: the same construction, with the tail's
-    // download coefficient knocked down by the Wieselsberger-style ground
-    // effect factor.
-    let landing_trim_fwd_frac = input.x_ac_wb_frac - input.cm_ac_wb_landing / cl_max
-        + input.eta
-            * input.tail_ground_effect_factor
-            * input.tail_volume_coefficient
-            * input.cl_h_max
-            / cl_max;
-    let landing_trim_fwd_pct_mac = landing_trim_fwd_frac * 100.0;
+    // Iced-tail check, reported only: the same moment balance at the landing
+    // reference speed, the stabiliser trimmed (elevator neutral) to the most
+    // negative tail lift that keeps the iced-tail margin.
+    let cl_ref = cl_max / super::iced_tail::REFERENCE_SPEED_OVER_STALL.powi(2);
+    let iced_tail_fwd_pct_mac =
+        100.0 * (x_ac_l - cm_l / cl_ref + tail_l * input.landing_trim_cl_h / cl_ref);
 
     // Rotation (nose-wheel lift-off): the moment balance about the main-gear
     // contact at V_R (Sadraey 2012, eqs. 9.36-9.54a; see `super::rotation`),
@@ -405,30 +514,80 @@ pub fn physical_cg_limits(input: &PhysicalCgLimitsInput) -> PhysicalCgLimits {
     let x_ac_wb_m = frame.leading_edge_x_m + input.x_ac_wb_frac * mac_m;
     let wing_lift_m = (input.cl_ground_attitude / cl_r) * (x_mg_m - x_ac_wb_m);
     let pitching_moment_m = input.cm_ac_wb_takeoff / cl_r * mac_m;
-    // Tail lift over the wing-referenced lift coefficient: negative
-    // (download) at a station aft of the contact, so a nose-up moment.
-    let tail_lift_coefficient =
-        input.rotation_tail_lift_coefficient * input.eta * input.tail_area_ratio;
-    let tail_lift_m = (tail_lift_coefficient / cl_r) * (x_mg_m - input.x_h_ac_m);
-    // The lift that unloads the wheels is the same wing and tail lift.
-    let lift_over_weight = (input.cl_ground_attitude + tail_lift_coefficient) / cl_r;
-    let longitudinal_force_m = longitudinal_force_moment_m(
-        input.h_cg_m,
-        input.rotation_thrust_to_weight,
-        input.rotation_thrust_line_height_m,
-        input.rotation_rolling_friction_coefficient,
-        lift_over_weight,
-    );
-    let available_m = wing_lift_m + pitching_moment_m + tail_lift_m + longitudinal_force_m;
-    let cg_offset_m = rotation_cg_offset_m(
-        available_m,
-        input.pitch_radius_of_gyration_m,
-        input.h_cg_m,
-        input.rotation_angular_accel_deg_s2,
-        input.gravity_m_s2.max(1.0e-6),
-    );
-    let rotation_fwd_pct_mac = pct_mac(frame, x_mg_m - cg_offset_m);
+    // The rotation balance for a tail lift coefficient `cl_h` (negative,
+    // on the tail's own area): the CG offset forward of the main-gear
+    // contact it admits, and the longitudinal-force term.
+    let offset_for = |cl_h: f64| -> (f64, f64) {
+        // Tail lift over the wing-referenced lift coefficient: negative
+        // (download) at a station aft of the contact, so a nose-up moment.
+        let tail_lift_coefficient = cl_h * input.eta * input.tail_area_ratio;
+        let tail_lift_m = (tail_lift_coefficient / cl_r) * (x_mg_m - input.x_h_ac_m);
+        // The lift that unloads the wheels is the same wing and tail lift.
+        let lift_over_weight = (input.cl_ground_attitude + tail_lift_coefficient) / cl_r;
+        let longitudinal_force_m = longitudinal_force_moment_m(
+            input.h_cg_m,
+            input.rotation_thrust_to_weight,
+            input.rotation_thrust_line_height_m,
+            input.rotation_rolling_friction_coefficient,
+            lift_over_weight,
+        );
+        let available_m = wing_lift_m + pitching_moment_m + tail_lift_m + longitudinal_force_m;
+        let offset_m = rotation_cg_offset_m(
+            available_m,
+            input.pitch_radius_of_gyration_m,
+            input.h_cg_m,
+            input.rotation_angular_accel_deg_s2,
+            input.gravity_m_s2.max(1.0e-6),
+        );
+        (offset_m, longitudinal_force_m)
+    };
+    // With a trimmable stabiliser the check takes the tail at its maximum
+    // downlift, the stabiliser at its nose-up stop and full up-elevator,
+    // within the tail's stall (Roskam's take-off rotation check, *Airplane
+    // Design*): the most forward CG the tail can still rotate. The crew's
+    // V2 trim for the CG tested is not that setting; a boundary solved
+    // through it is a fixed point whose loop gain sits near one for any CG
+    // schedule (0.9 on the A340), so it would follow the schedule rather
+    // than the tail. The V2 trim keeps its own limit (the stop, below).
+    let cl_h = input
+        .takeoff_trim
+        .map_or(input.rotation_tail_lift_coefficient, |trim| {
+            trim.rotation_lift_coefficient_at_stop()
+        });
+    let (cg_offset_m, longitudinal_force_m) = offset_for(cl_h);
+    let stabilizer_nose_up_deg = input.takeoff_trim.and_then(|trim| trim.max_nose_up_deg);
+    // A trimmed tail lift that does not resolve is no boundary: fail closed at
+    // +infinity %MAC (a NaN would pass), violating the forward-limit and
+    // usable-range rows.
+    let unresolved = input.takeoff_trim.is_some() && !cl_h.is_finite();
+    // A boundary that does not resolve to a finite station fails closed the same way,
+    // with or without a trimmable stabiliser (non-finite inputs); only an aeroplane
+    // with no tail station at all (NaN) has no rotation mechanism to resolve.
+    let solved_pct_mac = pct_mac(frame, x_mg_m - cg_offset_m);
+    let has_tail = input.x_h_ac_m.is_finite();
+    let rotation_fwd_pct_mac = if unresolved || (has_tail && !solved_pct_mac.is_finite()) {
+        f64::INFINITY
+    } else {
+        solved_pct_mac
+    };
 
+    // Take-off trim limit: the unclamped climb-trim setting (1.3 V_SR1) is
+    // linear in the CG station; the limit is where it equals the stabiliser stop.
+    let takeoff_trim_fwd_pct_mac = input
+        .takeoff_trim
+        .and_then(|trim| trim.stop_limited_cg_x_m())
+        .map_or(f64::NEG_INFINITY, |x_m| pct_mac(frame, x_m));
+    let clean_trim_fwd_pct_mac = input
+        .clean_trim
+        .and_then(|trim| trim.forward_limit_x_m())
+        .map_or(f64::NEG_INFINITY, |x_m| pct_mac(frame, x_m));
+    let (landing_approach_fwd_pct_mac, landing_flare_fwd_pct_mac) = input
+        .landing_authority
+        .and_then(|authority| authority.candidates(x_ac, cm, tail_term))
+        .map_or(
+            (f64::NEG_INFINITY, f64::NEG_INFINITY),
+            |((a, _), (b, _))| (100.0 * a, 100.0 * b),
+        );
     let limits = PhysicalCgLimits {
         aft_limit_pct_mac: f64::NAN,
         aft_limit_governance: AftLimitGovernance::Aerodynamic,
@@ -440,10 +599,30 @@ pub fn physical_cg_limits(input: &PhysicalCgLimitsInput) -> PhysicalCgLimits {
         fwd_limit_governance: ForwardLimitGovernance::MaxNoseLoadHandling,
         max_nose_load_fwd_pct_mac,
         scissor_plot_fwd_pct_mac,
+        landing_approach_fwd_pct_mac,
+        landing_flare_fwd_pct_mac,
+        takeoff_trim_fwd_pct_mac,
+        clean_trim_fwd_pct_mac,
         rotation_fwd_pct_mac,
         rotation_longitudinal_force_shift_pct_mac: -100.0 * longitudinal_force_m / mac_m,
-        rotation_tail_lift_coefficient: input.rotation_tail_lift_coefficient,
+        rotation_tail_lift_coefficient: cl_h,
+        rotation_stabilizer_nose_up_deg: stabilizer_nose_up_deg,
         landing_trim_fwd_pct_mac,
+        iced_tail_fwd_pct_mac,
+        landing_tail_lift_coefficient: authority_limit.map_or(input.cl_h_max, |(_, _, cl_h)| cl_h),
+        landing_tail_trim_limited: authority_limit.is_some_and(|(_, condition, _)| {
+            !matches!(
+                condition,
+                LandingTrimCondition::ApproachTailStall
+                    | LandingTrimCondition::FlareTailStall
+                    | LandingTrimCondition::StallReachTailStall
+            )
+        }),
+        landing_tail_sourced: authority_limit.is_some(),
+        landing_trim_condition: authority_limit.map_or(
+            "design-rule (no sourced trim travel)",
+            |(_, condition, _)| condition.label(),
+        ),
         usable_range_pct_mac: f64::NAN,
     };
     limits.scoped(ALL_PHASES)
@@ -452,6 +631,7 @@ pub fn physical_cg_limits(input: &PhysicalCgLimitsInput) -> PhysicalCgLimits {
 #[cfg(test)]
 mod tests {
     use super::*;
+    use crate::envelope::ths_trim::TakeoffTrimModel;
 
     fn base_input() -> PhysicalCgLimitsInput {
         PhysicalCgLimitsInput {
@@ -473,10 +653,11 @@ mod tests {
             eta: 0.9,
             tail_volume_coefficient: 1.0,
             cl_h_max: -0.8,
+            landing_authority: None,
             cg_range_pct_mac: 30.0,
             x_h_ac_m: 30.0,
             tail_area_ratio: 0.25,
-            tail_ground_effect_factor: 0.9,
+            landing_trim_cl_h: -0.4,
             rotation_tail_lift_coefficient: -1.3,
             cl_ground_attitude: 0.6,
             cl_r_rotation: 1.3,
@@ -487,7 +668,66 @@ mod tests {
             rotation_thrust_to_weight: 0.30,
             rotation_thrust_line_height_m: 1.8,
             rotation_rolling_friction_coefficient: 0.02,
+            takeoff_trim: None,
+            clean_trim: None,
         }
+    }
+
+    /// A rotation tail lift that does not resolve (here a non-finite tail
+    /// slope at the stabiliser stop) is not a boundary: it must fail closed.
+    /// The unresolved boundary is +infinity %MAC and must win the
+    /// forward-limit selection (a filter on finiteness dropped it, so the
+    /// physical forward-limit and usable-range rows passed).
+    #[test]
+    fn an_unresolved_rotation_boundary_governs_the_forward_limit() {
+        let mut input = base_input();
+        input.takeoff_trim = Some(TakeoffTrimModel {
+            cl_v2: 1.6,
+            cl_ground_attitude: 0.6,
+            cl_climb_trim: 1.3,
+            cl_zero_alpha_free_air: 0.55,
+            cm_ac_wb_free_air: -0.15,
+            wing_lift_curve_slope_per_rad: 5.0,
+            wing_aspect_ratio: 9.0,
+            tail_lift_curve_slope_per_rad: f64::NAN,
+            tail_area_ratio: 0.25,
+            eta: 0.9,
+            x_ac_wb_m: 12.0,
+            x_h_ac_m: 30.0,
+            mac_m: 4.0,
+            cm_ac_wb: -0.15,
+            thrust_to_weight: 0.30,
+            thrust_arm_m: 1.2,
+            built_incidence_rad: 0.0,
+            max_nose_up_deg: Some(4.0),
+            rotation_downwash_rad: 0.0,
+            rotation_elevator_term_rad: -0.3,
+            rotation_section_cap: 1.3,
+        });
+        let limits = physical_cg_limits(&input);
+        assert_eq!(limits.rotation_fwd_pct_mac, f64::INFINITY);
+        assert_eq!(limits.fwd_limit_pct_mac, f64::INFINITY);
+        assert_eq!(
+            limits.fwd_limit_governance,
+            ForwardLimitGovernance::RotationNoseWheelLiftoff
+        );
+        // Any finite CG lies forward of it, and the usable range is negative.
+        assert!(30.0 < limits.fwd_limit_pct_mac);
+        assert!(limits.usable_range_pct_mac < 0.0);
+    }
+
+    #[test]
+    fn only_a_nan_candidate_is_dropped_from_the_forward_selection() {
+        let (value, governance) = most_aft([
+            (10.0, ForwardLimitGovernance::MaxNoseLoadHandling),
+            (
+                f64::INFINITY,
+                ForwardLimitGovernance::RotationNoseWheelLiftoff,
+            ),
+            (f64::NAN, ForwardLimitGovernance::LandingTrimDesignRule),
+        ]);
+        assert_eq!(value, f64::INFINITY);
+        assert_eq!(governance, ForwardLimitGovernance::RotationNoseWheelLiftoff);
     }
 
     /// Hand-computed thrust and rolling-friction term against
@@ -737,24 +977,20 @@ mod tests {
         }
     }
 
-    /// Hand-computed landing-trim-in-ground-effect criterion: the scissor
-    /// construction with the tail's download knocked down by
-    /// `tail_ground_effect_factor`.
+    /// Hand-computed landing-trim criterion without a declared trim travel:
+    /// Torenbeek's eq. 6.2 at `CL_max,land` with the design tail lift
+    /// `C_L,h = -0.8` (the iced-tail balance at `V_REF` is a reported
+    /// diagnostic, not the governing candidate).
     #[test]
-    fn the_landing_trim_criterion_matches_a_hand_computed_scissor_construction_with_ground_effect()
-    {
+    fn the_landing_trim_criterion_matches_a_hand_computed_balance_at_the_reference_speed() {
         let limits = physical_cg_limits(&base_input());
-        let expected_frac = 0.25 - (-0.20 / 2.6) + 0.9 * 0.9 * 1.0 * (-0.8) / 2.6;
+        let expected_frac = 0.25 - (-0.20 / 2.6) + 0.9 * 1.0 * (-0.8) / 2.6;
         assert!(
             (limits.landing_trim_fwd_pct_mac - expected_frac * 100.0).abs() < 1.0e-9,
             "{} against {}",
             limits.landing_trim_fwd_pct_mac,
             expected_frac * 100.0
         );
-        // Ground effect (factor < 1) must make landing trim strictly less
-        // permissive (more aft, larger %MAC) than the diagnostic scissor
-        // estimate that carries no such knockdown.
-        assert!(limits.landing_trim_fwd_pct_mac > limits.scissor_plot_fwd_pct_mac);
     }
 
     /// A non-finite tail station (no horizontal tail) disables both the
@@ -766,10 +1002,24 @@ mod tests {
         input.x_h_ac_m = f64::NAN;
         let limits = physical_cg_limits(&input);
         assert!(limits.rotation_fwd_pct_mac.is_nan());
-        // Landing trim does not depend on x_h_ac_m (it uses the tail-volume
-        // coefficient, not the raw tail station), so it stays finite.
-        assert!(limits.landing_trim_fwd_pct_mac.is_finite());
+        // Without a tail station the landing-trim balance is not a candidate
+        // either (see the forward-boundary note above): NaN, and the other
+        // mechanisms still bound the forward limit.
+        assert!(limits.landing_trim_fwd_pct_mac.is_nan());
         assert!(limits.fwd_limit_pct_mac.is_finite());
+    }
+
+    /// Without a trimmable stabiliser a rotation boundary that cannot be resolved
+    /// from non-finite inputs fails closed too: +infinity %MAC
+    /// governs the forward limit, it is not dropped as a NaN.
+    #[test]
+    fn a_non_finite_rotation_input_without_a_trim_model_fails_closed() {
+        let mut input = base_input();
+        input.takeoff_trim = None;
+        input.cl_ground_attitude = f64::NAN;
+        let limits = physical_cg_limits(&input);
+        assert_eq!(limits.rotation_fwd_pct_mac, f64::INFINITY);
+        assert_eq!(limits.fwd_limit_pct_mac, f64::INFINITY);
     }
 
     #[test]

@@ -79,7 +79,7 @@ pub struct ConstraintResidual {
 /// design), and every other quantity in the table carries at least that
 /// much numerical noise; a candidate is not infeasible for a violation an
 /// order of magnitude below any model's fidelity.
-const NUMERICAL_SLACK: f64 = 1.0e-5;
+pub(crate) const NUMERICAL_SLACK: f64 = 1.0e-5;
 
 mod external;
 mod fuel;
@@ -91,6 +91,10 @@ pub use fuel::{CandidateDrag, CandidateFuelArtifacts, DeckKey, SizingControls, S
 /// One design candidate closed against the sizing mission.
 #[derive(Debug, Clone, PartialEq)]
 pub struct SizedCandidate {
+    /// Slope of the clean-sheet engine sizing's map from the installed to
+    /// the aimed factor measured by its last two closures; `None` with fewer
+    /// than two closures or a held engine.
+    pub engine_slope: Option<f64>,
     /// Physical analysis takeoff mass, kg. Hard MTOW carries the maximum
     /// fuel the weight and volume budgets admit; other modes use dispatch.
     pub takeoff_mass_kg: f64,
@@ -169,6 +173,9 @@ pub struct SizedCandidate {
     /// whatever limit the dispatch met; [`Self::sizing_closed`] also
     /// requires a converged dispatch.
     pub takeoff_mass_settled: bool,
+    /// The jump of the takeoff-mass map the closure met: settled on the
+    /// heavier side's held plan, or the reason the mass did not settle.
+    pub sizing_map_jump: Option<super::SizingMapJump>,
     /// Re-trims after the first, each triggered by a CG shift beyond the
     /// configured re-trim tolerance (a mass change alone never re-trims:
     /// the drag table spans the lift range).
@@ -259,7 +266,7 @@ impl ProductStateProvenance {
 /// infeasible. Carrying the state itself makes the two comparable, and the
 /// provenance keeps it explicit that these numbers are the search's, not a
 /// second opinion.
-#[derive(Debug, Clone, Copy, PartialEq)]
+#[derive(Debug, Clone, PartialEq)]
 pub struct ResolvedProductState {
     /// The design vector this state was actually evaluated on.
     ///
@@ -283,6 +290,11 @@ pub struct ResolvedProductState {
     /// (`alas_config::LandingGearConfig::derived_main_gear`); `None` keeps
     /// the configured stations. A replay writes it into its configuration.
     pub main_gear_placement: Option<alas_config::DerivedMainGearStation>,
+    /// The engine a clean-sheet sizing scaled to the closed design's thrust
+    /// requirements (`alas_config::SizedEngine`); `None` keeps the configured
+    /// engine. A replay writes it into its configuration, replacing the
+    /// engine rather than scaling it again.
+    pub sized_engine: Option<alas_config::SizedEngine>,
     /// Component masses at the closed takeoff mass, kg.
     pub masses: MassBreakdown,
     /// Component centroids the balance was evaluated at, m.
@@ -389,9 +401,42 @@ pub(crate) struct PayloadCapacity {
 /// see `crate::objective`), which is what lets the differential-evolution
 /// reject-reason grouping read a mission-sized failure the same way as a
 /// weighted-penalty one.
-#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+///
+/// `detail` is what the label cannot say: the quantity, its value, its limit and
+/// the input to change, read by a person when a single declared aircraft stops
+/// on the failure. The search groups by `reason` alone, so a detail costs a
+/// formatted string only where the failure is built.
+#[derive(Debug, Clone, PartialEq, Eq)]
 pub(crate) struct CandidateFailure {
     pub reason: &'static str,
+    pub detail: Option<std::sync::Arc<str>>,
+}
+
+impl CandidateFailure {
+    /// A failure with its label alone.
+    pub(crate) const fn new(reason: &'static str) -> Self {
+        Self {
+            reason,
+            detail: None,
+        }
+    }
+
+    /// A failure with its label and what stopped the candidate.
+    pub(crate) fn with_detail(reason: &'static str, detail: impl Into<String>) -> Self {
+        Self {
+            reason,
+            detail: Some(detail.into().into()),
+        }
+    }
+}
+
+impl std::fmt::Display for CandidateFailure {
+    fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
+        match &self.detail {
+            Some(detail) => write!(f, "{}: {detail}", self.reason),
+            None => f.write_str(self.reason),
+        }
+    }
 }
 
 // The tests construct every polar they assert on, so a failed `expect` is

@@ -175,6 +175,13 @@ declaration. The macro refuses to compile a public field that has neither
 metadata nor an explicit `skip`, which enforces the rule that anything a user
 might reasonably tune is a visible, labelled configuration field.
 
+`help` is the tooltip summary and stays within 180 characters (a test enforces
+it); the full explanation, with its sources and derivations, goes in
+`long_help`, which the tooltip's "Docs" link opens and the serialized schema
+carries as `help`. `visible_if(path = "...", equals = "...")` (or `any_of =
+[...]`) hides a field unless the value at that dotted configuration path
+matches, for settings that do not apply to the selected engine or airframe.
+
 ### 3. Figures are scenes, not drawings
 
 A figure produces a backend-neutral description (polylines, polygons, text,

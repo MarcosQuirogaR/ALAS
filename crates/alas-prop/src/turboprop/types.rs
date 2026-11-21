@@ -22,7 +22,8 @@ pub enum Pw127mRating {
 }
 
 impl Pw127mRating {
-    /// Rated free-turbine output power in watts.
+    /// Rated output-shaft power in watts, at the reduction-gearbox output
+    /// that drives the propeller.
     ///
     /// Take-off/continuous values follow the PW127M certification basis; the
     /// 2,192 shp climb and 2,132 shp cruise installation limits are from the
@@ -96,11 +97,46 @@ pub struct Pw127m568fModel {
     pub governed_propeller_speed_rpm: f64,
     /// Propeller diameter, m.
     pub propeller_diameter_m: f64,
-    /// Gearbox mechanical output/input power ratio.
+    /// Propeller power over the rated shaft power left after accessory
+    /// extraction: 1 when the rating is quoted at the reduction-gearbox
+    /// output, as the PW100 type certificate quotes it.
     pub gearbox_efficiency: f64,
     /// Per-engine baseline mechanical accessory extraction, W.
     pub accessory_power_w: f64,
     /// Per-engine residual core exhaust thrust kept outside propeller thrust, N.
+    ///
+    /// **Declared zero for the ATR installation: open (task T-JET), not a
+    /// finding that the jet thrust is nil.** A turboprop's exhaust gives
+    /// a small but not negligible net thrust (Torenbeek, *Advanced Aircraft
+    /// Design*, 2013, Sec. 3.3.1, pp. 67-68: "small but not negligible";
+    /// Sadraey, *Aircraft Design*, 2013, Sec. 8.6, p. 426: "only about 10 % of
+    /// the total thrust"; Raymer, *Aircraft Design*, Sec. 13.5: "as much as
+    /// 20 %"), and the PSFC this model burns on is on shaft power, so the jet
+    /// thrust would come at no extra fuel. No PW127M exhaust mass flow or
+    /// velocity is in the project's references, so no magnitude is invented
+    /// here. It is a **candidate** cause of the ATR 72-600 climb deficit, not
+    /// an established one: at sea level, 170 KCAS and the drag of the mission
+    /// run under test, the propeller thrust is about 5 % short of what the
+    /// factsheet's 1,355 ft/min needs (`examples/turboprop_climb_budget.rs`),
+    /// but that is one altitude, the drag is the run's own, the
+    /// factsheet's speed and configuration are unknown, the run is not at full
+    /// power, ram drag cuts the jet share at climb speed below the generic
+    /// 10 %, and the result depends on how the lapse form (M3) resolves.
+    /// Open task T-JET: PW127M/PW120 exhaust data, then Torenbeek's
+    /// corrected-parameter form (Eq. 3.35) with its speed dependence, accepted
+    /// only with the budget at FL100 and FL170 on the mission's drag and
+    /// throttle trace.
+    ///
+    /// Needs data: PW127M/PW120 exhaust gas data (gross jet thrust
+    /// `f_T` and airflow `f_m` against N/sqrt(theta), M) and the manufacturer
+    /// residual ESHP-SHP, neither on disk. Torenbeek (Advanced Aircraft
+    /// Design, p. 68) states "1 kW SHP gives 15 N jet thrust" for static
+    /// conditions; applied to a ~2.4 MW class engine that is ~36 kN per engine,
+    /// which is not physical for a free-turbine exhaust, so it is not used.
+    /// Raymer (2018) sec. 13 gives residual thrust as up to ~20 % of total
+    /// thrust, with forward ESHP from Eq. (13.17) at eta_p = 0.80. Until the
+    /// exhaust data land, residual jet thrust is 0 and the propeller carries
+    /// all the thrust.
     pub residual_jet_thrust_n: f64,
     /// The published maximum-cruise fuel flow per unit of sea-level
     /// maximum-cruise rating, kg/(kW h): a **validation datum**, not a model
@@ -142,7 +178,9 @@ pub struct Pw127m568fModel {
     /// to reproduce the ATR's 762 kg/h, which is only a validation point.
     /// The PW127M is a later variant and is probably a few percent better;
     /// no primary PW127M figure was retrieved, so that is a known
-    /// conservative bias rather than a correction.
+    /// conservative bias rather than a correction. This is the PW127M
+    /// default; a catalogue record maps its own value and evidence
+    /// (`TurbopropEngineSpec::psfc_source`).
     pub psfc_reference_kg_kwh: f64,
     /// Ambient static temperature of [`Self::psfc_reference_kg_kwh`], K:
     /// the -23.5 C SAT of Majeed (2009) Tab. 3.3.
@@ -228,9 +266,61 @@ pub struct Pw127m568fModel {
     /// `P_CR / P_TO = 0.9 sigma^0.728`; Ruijgrok (1996, via Nita Tab. 3.2)
     /// gives 0.75 for the class. The PW100-family fit is used because it is
     /// the same engine family.
+    ///
+    /// Needs data: Nita (2008) and the ATR FCOM/TCDS IM.E.041
+    /// rating-vs-altitude data are not on disk. The PW127M lapse form
+    /// is interim and must be replaced by the sourced
+    /// ITT/torque-per-rating schedule.
     pub power_lapse_density_exponent: f64,
     /// Lower bound on the available rated-power fraction at very low density.
     pub minimum_power_lapse_fraction: f64,
+    /// Exponent `k` of the ram factor `(1 + 0.2 M^2)^k` on the
+    /// thermodynamically limited shaft power; 0 switches the factor off.
+    ///
+    /// Torenbeek, Advanced Aircraft Design (1st ed., 2013), eq. 3.30, p. 69,
+    /// gives the turboprop's corrected shaft power `P / (delta sqrt(theta))`
+    /// as a function of corrected speed and flight Mach number, and
+    /// Torenbeek, Synthesis of Subsonic Airplane Design (1982), eq. 5-70,
+    /// p. 165, states the density lapse "for a given rating and Mach number",
+    /// with shaft power rising with M by ram unless a structural or thermal
+    /// limit applies. At a fixed corrected operating point the engine-face
+    /// total conditions would scale the power by `delta_t sqrt(theta_t) /
+    /// (delta sqrt(theta)) = (1 + 0.2 M^2)^(3.5 + 0.5)`, so 4 is the ideal
+    /// upper bound; a record takes its value from engine data. The rating
+    /// stays the cap: ram lifts the lapsed power, never the rated power.
+    pub ram_power_exponent: f64,
+    /// True airspeed, m/s, of the speed schedule the density-lapse fit was
+    /// made on; 0 when the fit is static.
+    ///
+    /// A fit made at a fixed true airspeed already holds the ram of that
+    /// schedule, which grows with altitude as the speed of sound falls. With
+    /// [`Self::ram_power_exponent`] above zero, the ram factor is taken
+    /// relative to that schedule, normalised at ISA sea level, so the fit's
+    /// own ram is not counted twice.
+    pub power_lapse_fit_reference_true_airspeed_m_s: f64,
+    /// Ambient static temperature, K, above which no rating is granted at
+    /// its full value whatever the density; 0 is no such limit.
+    ///
+    /// For an engine whose certificate states its ratings at one ambient
+    /// temperature and prints no flat-rating temperature, the density corner
+    /// alone would hold the rating on a hot day at sea level as far as it
+    /// holds it at altitude. Above this temperature the lapse uses
+    /// `(T_limit / T)^n`, the density ratio at the ambient pressure, the same
+    /// form the sea-level corner uses.
+    pub rating_temperature_limit_k: f64,
+    /// Thermodynamic (gas-generator) shaft power at the power-lapse reference
+    /// density, W; 0 when the record states none.
+    ///
+    /// A flat-rated engine holds each rating while the power its gas
+    /// generator can make, lapsing with density, still exceeds that rating,
+    /// and follows the thermodynamic line beyond (Torenbeek, Synthesis of
+    /// Subsonic Airplane Design (1982), Sec. 4.4, Fig. 4-41, p. 134). With
+    /// this power stated, every rating takes its own corner, the density at
+    /// which `P_thermo (rho / rho_ref)^n` falls to the rating, so a climb or
+    /// cruise rating below maximum continuous is held to a higher altitude
+    /// than maximum continuous. With 0 the corners are the flat-rating
+    /// temperatures, and climb and cruise share the maximum-continuous one.
+    pub thermodynamic_power_w: f64,
     /// Fraction of the available take-off power at and above which the PSFC
     /// is flat (the part-power multiplier is 1): 0.46, the lower end of the
     /// 46-100 % band over which Majeed (2009) Tab. 4.1 gives ESFC flat to
@@ -253,7 +343,9 @@ pub struct Pw127m568fModel {
     pub tip_mach_critical: f64,
     /// Coefficient `c` of the quadratic tip-Mach efficiency loss
     /// `1 - c (M_h - M_crit)^2`. **A flagged class assumption** with no
-    /// retrieved source; it is inert below [`Self::tip_mach_critical`].
+    /// retrieved source; it is inert below [`Self::tip_mach_critical`]. A
+    /// propeller whose catalogue entry states its own measured class (the
+    /// FH386's NASA TM-82891 thin-blade value) replaces it.
     pub tip_mach_loss_coefficient: f64,
     /// Generic propeller coefficient surface and pitch bounds.
     pub surrogate: PropellerSurrogate,
@@ -269,7 +361,12 @@ impl Default for Pw127m568fModel {
             maximum_cruise_power_w: Pw127mRating::MaximumCruise.shaft_power_w(),
             governed_propeller_speed_rpm: 1_200.0,
             propeller_diameter_m: 3.93,
-            gearbox_efficiency: 0.98,
+            // S: EASA TCDS IM.E.041 Issue 07: the PW100 is a free-turbine engine
+            // "and a reduction gearbox" (p. 9), limited by output torque at a
+            // 1,212 rpm output shaft speed, the propeller's (pp. 13, 15). The
+            // rating is already propeller-shaft power, so the gearbox loss is
+            // inside it.
+            gearbox_efficiency: 1.0,
             accessory_power_w: 25_000.0,
             residual_jet_thrust_n: 0.0,
             // ATR's published 762 kg/h two-engine flow at maximum cruise power
@@ -295,6 +392,16 @@ impl Default for Pw127m568fModel {
             power_lapse_reference_density_kg_m3: 1.225,
             power_lapse_density_exponent: 0.728,
             minimum_power_lapse_fraction: 0.15,
+            // The PW100-family exponent is a fit at the 275 kt cruise
+            // schedule (Nita 2008 eq. 3.5.11), so it already holds that
+            // schedule's ram; no separate ram factor.
+            ram_power_exponent: 0.0,
+            power_lapse_fit_reference_true_airspeed_m_s: 0.0,
+            // The PW127M corners are sea-level temperature limits already.
+            rating_temperature_limit_k: 0.0,
+            // No PW127M thermodynamic power is on file: the corners are its
+            // TCDS flat-rating temperatures.
+            thermodynamic_power_w: 0.0,
             part_power_knee_fraction: 0.46,
             part_power_psfc_exponent: 0.667,
             tip_mach_critical: 0.89,

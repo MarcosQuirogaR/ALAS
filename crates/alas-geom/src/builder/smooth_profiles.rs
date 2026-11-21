@@ -21,6 +21,7 @@
 //! User-defined custom sections are data: their nodes are left untouched.
 //! Frame: `eta = y / semispan`, `z` metres up, `twist` degrees (nose up).
 
+use super::section_law::Sections;
 use super::{AircraftBuilder, BuildError};
 use crate::aircraft::airfoil::Airfoil;
 use crate::aircraft::wing::Wing;
@@ -47,7 +48,7 @@ impl AircraftBuilder {
         dv: &DesignVector,
         planform: &TransportPlanform,
         heights: &WingHeights,
-        (root_section, tip_airfoil): (&Airfoil, &Airfoil),
+        (root_section, tip_airfoil, law): Sections<'_>,
         wing: &mut Wing,
     ) -> Result<(), BuildError> {
         let cfg = &self.geometry.wing;
@@ -57,15 +58,18 @@ impl AircraftBuilder {
         let semispan = planform.tip.y_m;
         let z_profile = heights.profile_spline(planform);
         let twist_profile = cfg.twist_spline(planform, dv.tip_twist_deg);
-        // t/c of the root-kink-tip blend the thickness stations multiply.
+        // t/c of the blend the thickness stations multiply: the section law's
+        // own where the wing names sections, else the root-kink-tip line.
         let max_tc = |a: &Airfoil| {
             let ys = a.coordinates.iter().map(|c| c.1);
             ys.clone().fold(f64::MIN, f64::max) - ys.fold(f64::MAX, f64::min)
         };
         let (tc_root, tc_tip) = (max_tc(root_section), max_tc(tip_airfoil));
         let kink = planform.kink.span_fraction;
-        let base_tc =
-            |eta: f64| tc_root + (tc_tip - tc_root) * ((eta - kink) / (1.0 - kink)).clamp(0.0, 1.0);
+        let base_tc = |eta: f64| match law {
+            Some(law) => law.max_tc_at(eta),
+            None => tc_root + (tc_tip - tc_root) * ((eta - kink) / (1.0 - kink)).clamp(0.0, 1.0),
+        };
         let thickness_profile = cfg.thickness_spline(base_tc);
         let custom_y: Vec<f64> = cfg
             .custom_sections
@@ -179,8 +183,10 @@ mod tests {
         {
             assert_eq!(a.xyz_le, b.xyz_le);
             assert_eq!(a.twist.to_bits(), b.twist.to_bits());
+            // The sections inboard of the side of body copy its station.
+            let side_of_body_eta = g.wing.side_of_body_span_fraction.unwrap_or(0.0);
             // Polyline of root, stations, kink, tip, computed independently.
-            let eta = a.xyz_le[1] / planform.tip.y_m;
+            let eta = (a.xyz_le[1] / planform.tip.y_m).max(side_of_body_eta);
             let mut nodes = vec![
                 (0.0, heights.root_z_m),
                 (planform.kink.span_fraction, heights.break_z_m),
@@ -213,11 +219,20 @@ mod tests {
             // Planform (x, y, chord) identical; only z, twist and thickness move.
             assert_eq!(a.xyz_le[0].to_bits(), b.xyz_le[0].to_bits());
             assert_eq!(a.xyz_le[1].to_bits(), b.xyz_le[1].to_bits());
-            assert_eq!(a.chord.to_bits(), b.chord.to_bits());
+            // The centreline chord is measured in the section plane, which the C2 profile tilts by
+            // about 1e-4 m of height over the side-of-body carry-through: 6e-6 relative.
+            assert!(
+                (a.chord - b.chord).abs() <= 1.0e-5 * a.chord,
+                "y {} chord {} vs {}",
+                a.xyz_le[1],
+                a.chord,
+                b.chord
+            );
             max_dz = max_dz.max((a.xyz_le[2] - b.xyz_le[2]).abs());
             let eta = a.xyz_le[1] / semispan;
             // Stations: the section built at a station is a node and equal.
-            for s in [0.0, 0.2, 0.37, 0.6, 1.0] {
+            // Not the centreline: that section copies the side-of-body station.
+            for s in [0.2, 0.37, 0.6, 1.0] {
                 if (eta - s).abs() < 1.0e-9 {
                     assert!((a.xyz_le[2] - b.xyz_le[2]).abs() < 1.0e-9, "z at {s}");
                     if [0.0, 0.37, 1.0].contains(&s) {
@@ -351,17 +366,59 @@ mod tests {
             let plane = AircraftBuilder::new(Some(geometry))
                 .build(Some(&preset.design_vector), false)
                 .expect("builds");
-            let tc: Vec<f64> = plane.wings[0]
-                .xsecs
-                .iter()
-                .map(|x| thickness(&x.airfoil))
-                .collect();
-            for pair in tc.windows(2) {
+            // The drawn stations of the A380-800 are not monotone: t/c falls
+            // to 0.085 at the kink and rises again to 0.092 at the tip. The shape-preserving
+            // spline cannot be shape-preserving there. Its overshoot beyond the two stations that
+            // bracket a section (the station t/c being the stationless wing's t/c there times the
+            // station's scale) stays below 10 % of the t/c range of the drawn stations; the
+            // A380-800 dips 3.4 % of that range between its kink and mid-span stations.
+            let mut plain_geometry = preset.geometry.clone();
+            plain_geometry.wing.thickness_stations.clear();
+            plain_geometry.wing.wing_profile_interpolation = WingProfileInterpolation::C2Spline;
+            let plain = AircraftBuilder::new(Some(plain_geometry))
+                .build(Some(&preset.design_vector), false)
+                .expect("builds");
+            let semispan = plane.wings[0].xsecs.last().expect("tip").xyz_le[1];
+            let plain_tc_at = |eta: f64| {
+                let pair = plain.wings[0]
+                    .xsecs
+                    .windows(2)
+                    .find(|pair| eta * semispan <= pair[1].xyz_le[1])
+                    .expect("inside the span");
+                let t =
+                    (eta * semispan - pair[0].xyz_le[1]) / (pair[1].xyz_le[1] - pair[0].xyz_le[1]);
+                let (a, b) = (thickness(&pair[0].airfoil), thickness(&pair[1].airfoil));
+                a + t * (b - a)
+            };
+            let stations = &preset.geometry.wing.thickness_stations;
+            let station_tc =
+                |i: usize| plain_tc_at(stations[i].span_fraction) * stations[i].thickness_scale;
+            let side_of_body = preset
+                .geometry
+                .wing
+                .side_of_body_span_fraction
+                .unwrap_or(0.0);
+            let tc_range = (0..stations.len()).map(station_tc).fold(f64::MIN, f64::max)
+                - (0..stations.len()).map(station_tc).fold(f64::MAX, f64::min);
+            let allowance = 0.10 * tc_range + 1.0e-4;
+            for built in &plane.wings[0].xsecs {
+                let eta = built.xyz_le[1] / semispan;
+                // The sections inboard of the side of body copy its station.
+                if eta < side_of_body - 1.0e-9 {
+                    continue;
+                }
+                let Some(upper) = stations.iter().position(|s| s.span_fraction >= eta) else {
+                    continue;
+                };
+                let (lo, hi) = if upper == 0 {
+                    (station_tc(0), station_tc(0))
+                } else {
+                    (station_tc(upper - 1), station_tc(upper))
+                };
+                let tc = thickness(&built.airfoil);
                 assert!(
-                    pair[1] <= pair[0] + 1.0e-4,
-                    "{name}: t/c rises {} to {}",
-                    pair[0],
-                    pair[1]
+                    tc >= lo.min(hi) - allowance && tc <= lo.max(hi) + allowance,
+                    "{name}: t/c {tc} at eta {eta:.3} outside [{lo}, {hi}]"
                 );
             }
         }

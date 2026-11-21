@@ -2,7 +2,11 @@
 // Copyright (C) 2026 Marcos Quiroga Rodriguez
 
 //! Mass statement: items, totals, CG, inertia about the CG, load cases,
-//! calibration and the ballast solve (UAV-PLAN 3.7).
+//!
+//! Status: a design-study library exercised by the airframe tests; the UAV
+//! generator takes fixed tail geometry and `estimate_trim_setup`, so the sizing
+//! routines here are not called by the product pipeline.
+//! calibration and the ballast solve.
 
 use std::collections::BTreeMap;
 

@@ -11,7 +11,13 @@ and differing numbers mean the port diverges.
 
 The geometry comes from ``export_airplane_geometry``, not from rebuilding a
 preset in Python, so both codes panel exactly the same cross-sections,
-chords, twists and airfoil coordinates. Only the solver differs.
+chords, twists and airfoil coordinates of the lifting surfaces. Fuselages are
+not exported, so the AeroSandbox airplane has none: a fuselage contribution
+in an ALAS run is not mirrored here. Only the solver differs for the wings.
+
+The output is a CSV with a ``status`` column (``ok`` or ``error``), the error
+text in its own quoted ``error`` column and the AeroSandbox version in every
+row.
 
 Usage::
 
@@ -20,11 +26,13 @@ Usage::
 
 from __future__ import annotations
 
+import csv
 import json
 import os
 import sys
 import time
 
+import aerosandbox
 import numpy as np
 from aerosandbox.aerodynamics.aero_3D.vortex_lattice_method import VortexLatticeMethod
 from aerosandbox.atmosphere import Atmosphere
@@ -94,9 +102,10 @@ def main() -> int:
         (len(wing["xsecs"]) - 1) * (2 if wing["symmetric"] else 1)
         for wing in data["wings"]
     )
-
-    rows = ["preset,span_res,chord_res,panels,solve_s,cl_lift,cd_drag,cm_pitch"]
-    print(rows[0])
+    version = aerosandbox.__version__
+    header = ["preset", "span_res", "chord_res", "panels", "solve_s", "cl_lift", "cd_drag", "cm_pitch", "status", "error", "aerosandbox_version"]
+    rows = []
+    print(",".join(header[:9]))
     for span in SPANWISE:
         for chord in CHORDWISE:
             if strips * span * chord > PANEL_CAP:
@@ -121,19 +130,23 @@ def main() -> int:
                 )
                 result = method.run()
                 panels = int(np.size(method.vortex_strengths))
-                row = (
-                    f"{data['preset']},{span},{chord},{panels},"
-                    f"{time.perf_counter() - started:.3f},"
-                    f"{float(result['CL']):.6f},{float(result['CD']):.6f},"
-                    f"{float(result['Cm']):.6f}"
-                )
+                row = [
+                    data["preset"], span, chord, panels,
+                    f"{time.perf_counter() - started:.3f}",
+                    f"{float(result['CL']):.6f}", f"{float(result['CD']):.6f}",
+                    f"{float(result['Cm']):.6f}", "ok", "", version,
+                ]
             except Exception as error:  # noqa: BLE001 - the failure is the datum
-                row = f"{data['preset']},{span},{chord},,,ERROR,{type(error).__name__}: {error}"
-            print(row, flush=True)
+                row = [
+                    data["preset"], span, chord, "", "", "", "", "",
+                    "error", f"{type(error).__name__}: {error}", version,
+                ]
             rows.append(row)
-
-    with open(destination, "w", encoding="utf-8", newline="\n") as handle:
-        handle.write("\n".join(rows) + "\n")
+            print(",".join(str(v) for v in row[:9]), flush=True)
+    with open(destination, "w", encoding="utf-8", newline="") as handle:
+        writer = csv.writer(handle, lineterminator="\n")
+        writer.writerow(header)
+        writer.writerows(rows)
     return 0
 
 

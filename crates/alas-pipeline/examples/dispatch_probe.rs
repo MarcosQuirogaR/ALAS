@@ -2,7 +2,7 @@
 // Copyright (C) 2026 Marcos Quiroga Rodriguez
 
 //! Diagnostic: the dispatch of a preset's configured route at its declared
-//! MTOW, printing the closure's iterates (the kappa lane's A380 baseline
+//! MTOW, printing the closure's iterates (the kappa work's A380 baseline
 //! flyability NotConverged case).
 //!
 //! Usage: `dispatch_probe PRESET`
@@ -34,13 +34,27 @@ fn main() {
         .nth(2)
         .and_then(|text| text.parse::<f64>().ok())
     {
-        config.drag_model.viscous_margin = margin;
+        config.drag_model.viscous_margin = Some(margin);
     }
     let quiet = std::env::args().nth(3).is_some();
+    // Probe: fly the design cruise level (set DISPATCH_CRUISE_M) instead of the
+    // optimum-step level, so a level can be held at any margin.
+    if std::env::var("DISPATCH_CRUISE_M").is_ok() {
+        config.mission.profile.cruise_altitude_policy =
+            alas_config::mission::CruiseAltitudePolicy::Design;
+    }
     let report = FullAnalysis::new(config.clone())
         .run(&preset.design_vector, true)
         .expect("report");
     let model = report_mission_model(&config, &report).expect("model");
+    // Probe: hold the design cruise level (m) of the mission model.
+    let model = match std::env::var("DISPATCH_CRUISE_M")
+        .ok()
+        .and_then(|text| text.parse::<f64>().ok())
+    {
+        Some(level_m) => model.with_design_cruise_altitude_m(level_m),
+        None => model,
+    };
     let capacity_kg = assess_fuel_capacity(&config, &report.design, &report)
         .capacity_kg
         .expect("capacity");
@@ -151,6 +165,24 @@ fn main() {
             solution.takeoff_mass_kg,
             solution.plan.takeoff_fuel_kg()
         );
+        if std::env::var("DISPATCH_PLAN").is_ok() {
+            println!("{:#?}", solution.plan);
+            if let Ok(flown) = model.fly_trip(solution.takeoff_mass_kg, range_m) {
+                println!(
+                    "trip: fuel {:.1} kg time {:.0} s cruise {:.1} m final {:.1} m adapted {} climb {:.1} kg {:.0} s climb footprint {:.0} m descent footprint {:.0} m steps {:?}",
+                    flown.leg.fuel_kg,
+                    flown.leg.time_s,
+                    flown.cruise_altitude_m,
+                    flown.final_cruise_altitude_m,
+                    flown.adapted,
+                    flown.climb_fuel_kg,
+                    flown.climb_time_s,
+                    flown.climb_footprint_m,
+                    flown.descent_footprint_m,
+                    flown.step_positions
+                );
+            }
+        }
         for (index, iterate) in solution.iterates.iter().enumerate().filter(|_| !quiet) {
             println!(
                 "  it {index:2}: tow {:.1} required fuel {:.1} change {:+.2}",

@@ -1,66 +1,104 @@
 // SPDX-License-Identifier: AGPL-3.0-or-later
 // Copyright (C) 2026 Marcos Quiroga Rodriguez
 
-//! Setup > Analyses: one place to choose which analysis disciplines a Run
+//! Analyses: one place to choose which analysis disciplines a Run
 //! performs. The
 //! toggles write the same configuration flags the analysis stages own.
 
-use egui::{Frame, RichText, ScrollArea, Ui};
+use egui::{vec2, Frame, RichText, ScrollArea, TextStyle, Ui};
 use serde_json::Value;
 
 use crate::state::AppState;
-use crate::views::tr;
+use crate::views::{tr, tr_label};
 
 /// Keep a whole analysis group readable in each column, including the long
 /// structural-stage labels. Two columns balance the structural detail against
 /// the core and downstream groups; smaller windows stack them vertically.
 const MIN_ANALYSIS_COLUMN_WIDTH: f32 = 480.0;
+/// Page width per column from which the three-column layout is used.
+const WIDE_ANALYSIS_COLUMN_WIDTH: f32 = 620.0;
 
 /// Render the Analyses page.
 pub fn show_analyses_view(state: &mut AppState, ui: &mut Ui) {
-    ui.horizontal_wrapped(|ui| {
-        ui.heading(tr("Analyses")).on_hover_text(tr(
-            "Choose which analysis disciplines a Run performs. Everything is on by default; \
-             disabling an optional discipline skips its pipeline stage. Fine-grained settings \
-             live under Advanced Settings; external-tool paths under Advanced Settings > External Tools.",
-        ));
-        if ui
-            .button(tr("Open Airfoil CFD"))
-            .on_hover_text(tr(
-                "Open the standalone 2-D OpenFOAM study for any database airfoil.",
-            ))
-            .clicked()
-        {
-            state.cfd.window_open = true;
-            state.cfd.tab = crate::cfd::CfdTab::Study;
-        }
-    });
-    ui.add_space(6.0);
-
     ScrollArea::vertical()
         .auto_shrink([false, false])
-        .show(ui, |ui| {
-            ui.set_min_width(ui.available_width());
-            let width = ui.available_width();
-            if width >= 2.0 * MIN_ANALYSIS_COLUMN_WIDTH {
-                ui.columns(2, |columns| {
-                    core_section(&mut columns[0]);
-                    columns[0].add_space(8.0);
-                    downstream_section(state, &mut columns[0]);
-                    optional_section(state, &mut columns[1]);
-                });
-            } else {
-                core_section(ui);
-                ui.add_space(8.0);
-                optional_section(state, ui);
-                ui.add_space(8.0);
-                downstream_section(state, ui);
+        .show(ui, |ui| show_analyses_body(state, ui));
+}
+
+/// The Analyses page content without its own scroll area, for the flow page frame.
+pub(crate) fn show_analyses_body(state: &mut AppState, ui: &mut Ui) {
+    ui.heading(tr_label("Analyses")).on_hover_text(tr_label(
+        "Choose which analysis disciplines a Run performs. Everything is on by default; \
+         disabling an optional discipline skips its pipeline stage. Fine-grained settings \
+         are in the Advanced sections of each page; external-tool paths are on the External Tools page.",
+    ));
+    ui.add_space(6.0);
+    // The check box and the lock of a fixed row are one width, so every row's
+    // label starts at the same x.
+    ui.spacing_mut().icon_width = 16.0;
+    let width = ui.available_width();
+    if width >= 3.0 * WIDE_ANALYSIS_COLUMN_WIDTH {
+        // Very wide windows: Core | Downstream tools on the left two thirds
+        // with the run options under them, Optional (the tall group) on the
+        // right, so no column leaves a hole under it.
+        let total = ui.available_width();
+        let left = (total * 2.0 / 3.0).round();
+        let right = total - left - 14.0;
+        ui.horizontal_top(|ui| {
+            ui.spacing_mut().item_spacing.x = 14.0;
+            ui.allocate_ui_with_layout(
+                vec2(left, ui.available_height()),
+                egui::Layout::top_down(egui::Align::Min),
+                |ui| {
+                    ui.set_width(left);
+                    ui.columns(2, |columns| {
+                        core_section(&mut columns[0]);
+                        downstream_section(state, &mut columns[1], 0.0);
+                    });
+                    ui.add_space(8.0);
+                    crate::views::inputs_view::show_run_options_card(state, ui);
+                },
+            );
+            ui.allocate_ui_with_layout(
+                vec2(right, ui.available_height()),
+                egui::Layout::top_down(egui::Align::Min),
+                |ui| {
+                    ui.set_width(right);
+                    optional_section(state, ui, 0.0);
+                },
+            );
+        });
+        return;
+    } else if width >= 2.0 * MIN_ANALYSIS_COLUMN_WIDTH {
+        // The two columns end at one bottom: the last row of the shorter
+        // column stretches to the longer one.
+        let set = egui::Id::new("analyses_columns");
+        ui.columns(2, |columns| {
+            let pads =
+                [0, 1].map(|column| crate::theme::column_padding(&columns[column], set, column));
+            let top = columns[0].min_rect().top();
+            core_section(&mut columns[0]);
+            columns[0].add_space(8.0);
+            downstream_section(state, &mut columns[0], pads[0]);
+            optional_section(state, &mut columns[1], pads[1]);
+            for (column, pad) in pads.into_iter().enumerate() {
+                let height = columns[column].min_rect().bottom() - top;
+                crate::theme::record_column_end(&columns[column], set, column, height, pad);
             }
         });
+    } else {
+        core_section(ui);
+        ui.add_space(8.0);
+        optional_section(state, ui, 0.0);
+        ui.add_space(8.0);
+        downstream_section(state, ui, 0.0);
+    }
+    ui.add_space(8.0);
+    crate::views::inputs_view::show_run_options_card(state, ui);
 }
 
 fn core_section(ui: &mut Ui) {
-    ui.label(RichText::new(tr("Core (every run)")).strong());
+    crate::views::focus_card::group_heading(ui, "Core (every run)");
     locked_row(
         ui,
         "Aerodynamics: VLM + drag build-up",
@@ -88,16 +126,19 @@ fn core_section(ui: &mut Ui) {
     );
 }
 
-fn optional_section(state: &mut AppState, ui: &mut Ui) {
-    ui.label(RichText::new(tr("Optional (toggle per run)")).strong());
+/// The optional analyses; `pad` lengthens the last row (see
+/// [`crate::theme::column_padding`]).
+fn optional_section(state: &mut AppState, ui: &mut Ui, pad: f32) {
+    crate::views::focus_card::group_heading(ui, "Optional (toggle per run)");
     toggle_row(
         state,
         ui,
         "mission",
-        "Mission analysis (native)",
+        "Mission analysis",
         "Flies the full route natively: fuel burn, flight profile, aero coefficient \
          histories and the 3D route globe. Degrades gracefully when the environment is \
          missing.",
+        None,
     );
     toggle_row(
         state,
@@ -105,22 +146,53 @@ fn optional_section(state: &mut AppState, ui: &mut Ui) {
         "mses",
         "2-D airfoil analysis (MSES)",
         "High-fidelity viscous/transonic polar and pressure/Mach-contour analysis of the \
-         optimized root section. Sweep settings under Advanced Settings > MSES Analysis.",
+         optimized root section. Sweep settings are in the MSES Analysis section of Advanced.",
+        Some(airfoil_cfd_button),
     );
-    toggle_row(
+    toggle_field_row_with(
         state,
         ui,
-        "structures",
+        ("structures", "enabled"),
         "Structures (wingbox FEM)",
         "Sizes a generic wingbox from strength requirements, always available \
-         analytically; add a NASTRAN path under Advanced Settings > External Tools for a real solve.",
+         analytically; add a NASTRAN path on the External Tools page for a real solve.",
+        Some(structures_details),
+        pad,
     );
-    structures_case_rows(state, ui);
-    structures_external_rows(state, ui);
 }
 
-fn downstream_section(state: &mut AppState, ui: &mut Ui) {
-    ui.label(RichText::new(tr("External downstream tools")).strong());
+/// The standalone 2-D OpenFOAM study belongs with the other 2-D airfoil
+/// analysis, so it opens from that row instead of from the page title.
+fn airfoil_cfd_button(state: &mut AppState, ui: &mut Ui) {
+    if ui
+        .add(
+            egui::Button::new(tr("Open airfoil CFD\u{2026}"))
+                .min_size(egui::vec2(0.0, crate::theme::control_height(ui))),
+        )
+        .on_hover_text(tr(
+            "Open the standalone 2-D OpenFOAM study for any database airfoil.",
+        ))
+        .clicked()
+    {
+        crate::native_viewport::raise(ui.ctx(), "airfoil_cfd");
+        state.cfd.window_open = true;
+        state.cfd.tab = crate::cfd::CfdTab::Study;
+    }
+}
+
+/// The structural solver cases and external stages, inside the Structures row
+/// and indented to its label.
+fn structures_details(state: &mut AppState, ui: &mut Ui) {
+    ui.indent("structures_details", |ui| {
+        structures_case_rows(state, ui);
+        structures_external_rows(state, ui);
+    });
+}
+
+/// The external downstream tools; `pad` lengthens the last row (see
+/// [`crate::theme::column_padding`]).
+fn downstream_section(state: &mut AppState, ui: &mut Ui, pad: f32) {
+    crate::views::focus_card::group_heading(ui, "External downstream tools");
     toggle_field_row(
         state,
         ui,
@@ -154,26 +226,18 @@ fn downstream_section(state: &mut AppState, ui: &mut Ui) {
         "avl",
         "AVL comparison",
         "Runs Athena Vortex Lattice's take-off sweep and retains its SI deck for comparison. \
-         The Aerodynamic results selector under Advanced Settings must include AVL.",
+         The Aerodynamic results selector in the Advanced run options must include AVL.",
     );
-    toggle_field_row(
+    toggle_field_row_with(
         state,
         ui,
-        "downstream",
-        "flowunsteady",
+        ("downstream", "flowunsteady"),
         "FLOWUnsteady analysis",
         "Runs the FLOWUnsteady adapter and retains its request, result and solver logs. Set \
-         ALAS_FLOWUNSTEADY_EXE before enabling a real external solve.",
+         the FLOWUnsteady executable under External tools before enabling a real external solve.",
+        None,
+        pad,
     );
-    ui.add_enabled_ui(state.run_options.optimize, |ui| {
-        run_option_row(
-            state,
-            ui,
-            "Baseline comparison",
-            "Re-evaluates the baseline aircraft alongside the current design, adding a direct \
-             reference to the results without changing the optimizer's selected design.",
-        );
-    });
 }
 
 /// Solver-case selection for the structural analysis, kept on Analyses next
@@ -187,27 +251,21 @@ fn structures_case_rows(state: &mut AppState, ui: &mut Ui) {
         .and_then(Value::as_bool)
         .unwrap_or(true);
     ui.add_enabled_ui(enabled, |ui| {
-        ui.indent("structures_cases", |ui| {
-            ui.label(
-                RichText::new(tr("Structural solver cases"))
-                    .strong()
-                    .small(),
-            );
-            for (name, label) in crate::views::form_page::placement::STRUCTURES_CASES {
-                let mut checked = state
-                    .config_values
-                    .get("structures")
-                    .and_then(|g| g.get(name))
-                    .and_then(Value::as_bool)
-                    .unwrap_or(false);
-                if ui.checkbox(&mut checked, tr(label)).changed() {
-                    if let Some(values) = state.config_values.get_mut("structures") {
-                        crate::views::form_page::placement::toggle_bool(values, name, checked);
-                    }
-                    state.on_config_modified();
+        ui.label(RichText::new(tr_label("Structural solver cases")).strong());
+        for (name, label) in crate::views::form_page::placement::STRUCTURES_CASES {
+            let mut checked = state
+                .config_values
+                .get("structures")
+                .and_then(|g| g.get(name))
+                .and_then(Value::as_bool)
+                .unwrap_or(false);
+            if crate::checkbox::checkbox(ui, &mut checked, tr_label(label)).changed() {
+                if let Some(values) = state.config_values.get_mut("structures") {
+                    crate::views::form_page::placement::toggle_bool(values, name, checked);
                 }
+                state.on_config_modified();
             }
-        });
+        }
     });
 }
 
@@ -221,32 +279,25 @@ fn structures_external_rows(state: &mut AppState, ui: &mut Ui) {
         .and_then(Value::as_bool)
         .unwrap_or(true);
     ui.add_enabled_ui(structures_enabled, |ui| {
-        ui.indent("structures_external", |ui| {
-            ui.label(
-                RichText::new(tr("Structural external stages"))
-                    .strong()
-                    .small(),
-            );
-            let mut run_nastran = structure_bool(state, "run_nastran");
-            if ui
-                .checkbox(
-                    &mut run_nastran,
-                    tr("NASTRAN solve / NASTRAN-95 comparison"),
-                )
+        ui.label(RichText::new(tr_label("Structural external stages")).strong());
+        let mut run_nastran = structure_bool(state, "run_nastran");
+        if crate::checkbox::checkbox(
+            ui,
+            &mut run_nastran,
+            tr_label("NASTRAN solve / NASTRAN-95 comparison"),
+        )
+        .changed()
+        {
+            set_structure_bool(state, "run_nastran", run_nastran);
+        }
+        let run_static = structure_bool(state, "run_sol_static");
+        ui.add_enabled_ui(run_nastran && run_static, |ui| {
+            let mut run_patran = structure_bool(state, "run_patran_export");
+            if crate::checkbox::checkbox(ui, &mut run_patran, tr_label("Patran deformation export"))
                 .changed()
             {
-                set_structure_bool(state, "run_nastran", run_nastran);
+                set_structure_bool(state, "run_patran_export", run_patran);
             }
-            let run_static = structure_bool(state, "run_sol_static");
-            ui.add_enabled_ui(run_nastran && run_static, |ui| {
-                let mut run_patran = structure_bool(state, "run_patran_export");
-                if ui
-                    .checkbox(&mut run_patran, tr("Patran deformation export"))
-                    .changed()
-                {
-                    set_structure_bool(state, "run_patran_export", run_patran);
-                }
-            });
         });
     });
 }
@@ -267,22 +318,66 @@ fn set_structure_bool(state: &mut AppState, name: &str, enabled: bool) {
     state.on_config_modified();
 }
 
+/// The frame of one analysis row: the card fill and border of the cards on
+/// the page (Run options, the settings sections), at row size.
+fn row_frame(ui: &Ui) -> Frame {
+    crate::theme::card_frame(ui)
+        .inner_margin(egui::Margin::symmetric(12.0, 6.0))
+        .rounding(egui::Rounding::same(8.0))
+}
+
+/// A row that cannot be switched off: the same card, check box and label as a
+/// toggle row, so every row of a section sits on one grid.
 fn locked_row(ui: &mut Ui, title: &str, desc: &str) {
-    Frame::group(ui.style()).show(ui, |ui| {
+    row_frame(ui).show(ui, |ui| {
         ui.set_min_width(ui.available_width());
-        ui.horizontal(|ui| {
-            let mut checked = true;
-            ui.add_enabled(false, egui::Checkbox::new(&mut checked, ""))
-                .on_hover_text(tr(desc));
-            ui.label(RichText::new(tr(title)).strong())
-                .on_hover_text(tr(desc));
-            ui.label(RichText::new(tr("always runs")).weak().small());
+        row_line(ui, |ui| {
+            // A fixed-on row, not a disabled control: a lock, the label in the
+            // normal text colour and the weak tag. The lock sits where a check
+            // box would and the label has a check box label's font; the tag
+            // stands at the row's right edge, where a toggle row's button does.
+            ui.spacing_mut().item_spacing.x = ui.spacing().icon_spacing;
+            crate::lock_icon::lock_icon(ui, &tr_label("always runs"));
+            ui.label(
+                RichText::new(tr_label(title))
+                    .strong()
+                    .text_style(TextStyle::Button),
+            )
+            .on_hover_text(tr_label(desc));
+            ui.with_layout(egui::Layout::right_to_left(egui::Align::Center), |ui| {
+                ui.label(RichText::new(tr_label("always runs")).weak());
+            });
         });
     });
 }
 
-fn toggle_row(state: &mut AppState, ui: &mut Ui, group: &str, title: &str, desc: &str) {
-    toggle_field_row(state, ui, group, "enabled", title, desc);
+/// The line of an analysis row, one height for every row: a button's height
+/// (the tallest control a row holds), its content centred in it.
+fn row_line(ui: &mut Ui, add: impl FnOnce(&mut Ui)) {
+    let size = vec2(ui.available_width(), crate::theme::control_height(ui));
+    ui.allocate_ui_with_layout(
+        size,
+        egui::Layout::left_to_right(egui::Align::Center),
+        |ui| {
+            ui.set_min_size(size);
+            add(ui);
+        },
+    );
+}
+
+/// Extra content of a row: drawn right-aligned beside the check box, or below
+/// it, by the row function that takes it.
+type RowExtra = fn(&mut AppState, &mut Ui);
+
+fn toggle_row(
+    state: &mut AppState,
+    ui: &mut Ui,
+    group: &str,
+    title: &str,
+    desc: &str,
+    extra: Option<RowExtra>,
+) {
+    toggle_field_row_with(state, ui, (group, "enabled"), title, desc, extra, 0.0);
 }
 
 fn toggle_field_row(
@@ -293,45 +388,63 @@ fn toggle_field_row(
     title: &str,
     desc: &str,
 ) {
-    Frame::group(ui.style()).show(ui, |ui| {
-        ui.set_min_width(ui.available_width());
-        ui.horizontal(|ui| {
-            let mut enabled = state
-                .config_values
-                .get(group)
-                .and_then(|g| g.get(field))
-                .and_then(Value::as_bool)
-                .unwrap_or(true);
-            let toggled = ui
-                .checkbox(&mut enabled, RichText::new(tr(title)).strong())
-                .on_hover_text(tr(desc))
-                .changed();
-            if toggled {
-                if let Some(obj) = state
-                    .config_values
-                    .get_mut(group)
-                    .and_then(Value::as_object_mut)
-                {
-                    obj.insert(field.to_owned(), Value::Bool(enabled));
-                }
-                state.on_config_modified();
-            }
-        });
-    });
+    toggle_field_row_with(state, ui, (group, field), title, desc, None, 0.0);
 }
 
-/// A transient Run option that belongs alongside the optional downstream
-/// disciplines but is not part of the persistent aircraft configuration.
-fn run_option_row(state: &mut AppState, ui: &mut Ui, title: &str, desc: &str) {
-    Frame::group(ui.style()).show(ui, |ui| {
+/// A row with a check box for the flag `field` of `group`; `pad` lengthens
+/// the row at its bottom (the last row of a column, see
+/// [`crate::theme::column_padding`]).
+fn toggle_field_row_with(
+    state: &mut AppState,
+    ui: &mut Ui,
+    (group, field): (&str, &str),
+    title: &str,
+    desc: &str,
+    extra: Option<RowExtra>,
+    pad: f32,
+) {
+    row_frame(ui).show(ui, |ui| {
         ui.set_min_width(ui.available_width());
-        ui.horizontal(|ui| {
-            ui.checkbox(
-                &mut state.run_options.compare_baseline,
-                RichText::new(tr(title)).strong(),
+        let mut enabled = state
+            .config_values
+            .get(group)
+            .and_then(|g| g.get(field))
+            .and_then(Value::as_bool)
+            .unwrap_or(true);
+        let mut toggled = false;
+        row_line(ui, |ui| {
+            toggled = crate::checkbox::checkbox(
+                ui,
+                &mut enabled,
+                RichText::new(tr_label(title)).strong(),
             )
-            .on_hover_text(tr(desc));
+            .on_hover_text(tr_label(desc))
+            .changed();
+            // The button of a 2-D airfoil row sits at the right edge; the
+            // structures details are a block below the row.
+            if let (Some(extra), "mses") = (extra, group) {
+                ui.with_layout(egui::Layout::right_to_left(egui::Align::Center), |ui| {
+                    extra(state, ui);
+                });
+            }
         });
+        if toggled {
+            if let Some(obj) = state
+                .config_values
+                .get_mut(group)
+                .and_then(Value::as_object_mut)
+            {
+                obj.insert(field.to_owned(), Value::Bool(enabled));
+            }
+            state.on_config_modified();
+        }
+        if let (Some(extra), "structures") = (extra, group) {
+            extra(state, ui);
+        }
+        if pad > 0.0 {
+            // Exactly `pad`: the spacing a cursor advance adds would not count.
+            ui.expand_to_include_y(ui.min_rect().bottom() + pad);
+        }
     });
 }
 
@@ -366,7 +479,11 @@ mod tests {
                 .shapes
                 .iter()
                 .find_map(|shape| match &shape.shape {
-                    egui::Shape::Text(text) if text.galley.job.text == label => Some(text.pos),
+                    egui::Shape::Text(text)
+                        if text.galley.job.text == crate::views::tr_label(label) =>
+                    {
+                        Some(text.pos)
+                    }
                     _ => None,
                 })
                 .unwrap_or_else(|| panic!("missing section: {label}"))
@@ -375,13 +492,12 @@ mod tests {
 
     #[test]
     fn analysis_groups_use_the_available_width_and_stack_on_small_windows() {
-        let [core, optional, downstream, baseline, patran] = text_positions(
-            2_000.0,
+        let [core, optional, downstream, patran] = text_positions(
+            1_500.0,
             [
                 "Core (every run)",
                 "Optional (toggle per run)",
                 "External downstream tools",
-                "Baseline comparison",
                 "Patran deformation export",
             ],
         );
@@ -389,7 +505,21 @@ mod tests {
         assert!((core.x - downstream.x).abs() < 1.0);
         assert!((core.y - optional.y).abs() < 1.0);
         assert!(downstream.y > core.y);
-        assert!((baseline.y - patran.y).abs() < 200.0);
+        assert!(patran.y > core.y);
+
+        // Very wide: Core | Downstream tools | Optional on one row.
+        let [core, optional, downstream] = text_positions(
+            2_600.0,
+            [
+                "Core (every run)",
+                "Optional (toggle per run)",
+                "External downstream tools",
+            ],
+        );
+        assert!(downstream.x > core.x + 400.0);
+        assert!(optional.x > downstream.x + 400.0);
+        assert!((core.y - downstream.y).abs() < 1.0);
+        assert!((core.y - optional.y).abs() < 1.0);
 
         let [core, optional, downstream] = text_positions(
             700.0,
@@ -402,6 +532,54 @@ mod tests {
         assert!((core.x - optional.x).abs() < 1.0);
         assert!((optional.x - downstream.x).abs() < 1.0);
         assert!(core.y < optional.y && optional.y < downstream.y);
+    }
+
+    /// Every row label of the page, fixed or switchable, starts at one x and
+    /// is set in one font size.
+    #[test]
+    fn core_and_optional_rows_share_one_label_font_and_indent() {
+        let context = egui::Context::default();
+        let mut state = AppState::default();
+        let mut output = None;
+        for _ in 0..2 {
+            output = Some(context.run(
+                egui::RawInput {
+                    screen_rect: Some(egui::Rect::from_min_size(
+                        egui::Pos2::ZERO,
+                        egui::vec2(700.0, 1_800.0),
+                    )),
+                    ..egui::RawInput::default()
+                },
+                |ctx| {
+                    egui::CentralPanel::default().show(ctx, |ui| {
+                        show_analyses_view(&mut state, ui);
+                    });
+                },
+            ));
+        }
+        let output = output.expect("rendered analyses page");
+        let find = |label: &str| {
+            output
+                .shapes
+                .iter()
+                .find_map(|shape| match &shape.shape {
+                    egui::Shape::Text(text)
+                        if text.galley.job.text == crate::views::tr_label(label) =>
+                    {
+                        let size = text.galley.job.sections[0].format.font_id.size;
+                        Some((text.pos.x, size))
+                    }
+                    _ => None,
+                })
+                .unwrap_or_else(|| panic!("missing row: {label}"))
+        };
+        let core = find("Field performance");
+        let optional = find("Mission analysis");
+        let external = find("OpenVSP geometry export");
+        assert!((core.0 - optional.0).abs() < 1.0, "{core:?} {optional:?}");
+        assert!((core.0 - external.0).abs() < 1.0, "{core:?} {external:?}");
+        assert!((core.1 - optional.1).abs() < 0.01, "{core:?} {optional:?}");
+        assert!((core.1 - external.1).abs() < 0.01, "{core:?} {external:?}");
     }
 
     #[test]
@@ -436,11 +614,13 @@ mod tests {
             "VSPAERO analysis",
             "AVL comparison",
             "FLOWUnsteady analysis",
-            "Baseline comparison",
             "NASTRAN solve / NASTRAN-95 comparison",
             "Patran deformation export",
         ] {
-            assert!(labels.contains(&label), "missing optional stage: {label}");
+            assert!(
+                labels.contains(&crate::views::tr_label(label).as_str()),
+                "missing optional stage: {label}"
+            );
         }
     }
 }

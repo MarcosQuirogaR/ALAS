@@ -15,21 +15,6 @@ const MIN_WORKFLOW_TAB_WIDTH: f32 = 156.0;
 /// Capping the row at three tabs keeps labels easy to scan at wide sizes.
 const MAX_WORKFLOW_TAB_COLUMNS: usize = 3;
 
-/// Persistent notice above every UAV page state: the outputs are preliminary
-/// and no measured flight data supports them yet.
-pub(super) fn preliminary_banner(ui: &mut Ui) {
-    card_frame(ui).show(ui, |ui| {
-        ui.set_min_width(ui.available_width());
-        ui.colored_label(
-            ui.visuals().warn_fg_color,
-            RichText::new(tr(
-                "Preliminary: not validated against measured flight data",
-            ))
-            .strong(),
-        );
-    });
-}
-
 /// Render the page identity and its responsive task navigation.
 pub(super) fn workflow_header(state: &mut UavWorkflowState, ui: &mut Ui) {
     card_frame(ui).show(ui, |ui| {

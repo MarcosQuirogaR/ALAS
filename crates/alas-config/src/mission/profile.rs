@@ -74,11 +74,15 @@ pub enum CruiseAltitudePolicy {
     /// Fly the design cruise altitude, with the same route-fit and
     /// level-flight lowering as `Declared`.
     Design,
-    /// Start at the highest flight level at or below the declared altitude
-    /// with a maximum-climb residual rate of climb of at least 300 ft/min at
-    /// the estimated top-of-climb mass, and step up by the same-direction
-    /// level separation whenever the next level meets the same criterion and
-    /// improves the specific air range.
+    /// Start at the highest legal flight level of the ICAO table of cruising
+    /// levels (ICAO Annex 2, Appendix 3, table a) at or below the declared
+    /// altitude with a maximum-climb residual rate of climb of at least
+    /// 300 ft/min at the estimated top-of-climb mass (Jenkinson, Simpkin and
+    /// Rhodes, "Civil Jet Aircraft Design", Arnold, 1999, Sec. 10.5, p. 268),
+    /// and step up to the next level of the same direction whenever it meets
+    /// the same criterion and improves the specific air range (stepped
+    /// cruise/climb: Torenbeek, "Advanced Aircraft Design", Wiley, 2013,
+    /// Sec. 12.6, p. 384).
     #[default]
     OptimumStep,
 }
@@ -116,6 +120,8 @@ pub const CAS_SPEED_SUBDIVISIONS: usize = 8;
 /// altitude and descending at once, with no level segment, is not a flown
 /// mission. The native schedule and the optimizer's mission model both fit
 /// the altitude against it so they plan the same footprint.
+// Needs data: no source is cited for the 0.20 share, and the root
+// PDFs were not searched for it in this sprint.
 pub const MIN_CRUISE_ROUTE_FRACTION: f64 = 0.20;
 
 /// True airspeed to fly for a configured takeoff/climb/descent/landing speed
@@ -186,7 +192,8 @@ pub struct MissionProfileConfig {
     /// [`SpeedReference`].
     #[serde(skip_serializing_if = "is_true_airspeed")]
     #[config(
-        help = "Whether the takeoff/climb/descent/landing air speeds below are true airspeeds (legacy default) or calibrated airspeeds resolved against the real ambient pressure and temperature at each leg's altitude. Cruise legs are never affected by this."
+        help = "Whether the takeoff, climb, descent and landing airspeeds are true airspeeds (legacy default) or calibrated airspeeds resolved at each leg's altitude.",
+        long_help = "Whether the takeoff/climb/descent/landing air speeds below are true airspeeds (legacy default) or calibrated airspeeds resolved against the real ambient pressure and temperature at each leg's altitude. Cruise legs are never affected by this."
     )]
     pub climb_descent_speed_reference: SpeedReference,
 
@@ -214,21 +221,55 @@ pub struct MissionProfileConfig {
     /// Maximum operating calibrated airspeed, VMO.
     #[serde(skip_serializing_if = "is_unset")]
     #[config(
-        help = "Maximum operating calibrated airspeed (VMO) from the type certificate data sheet; no climb or descent leg is flown faster. Zero: not declared."
+        help = "Maximum operating calibrated airspeed (VMO) from the type certificate data sheet [m/s]; no leg flies faster. Zero: undeclared (jet cruise held to the VC of VD).",
+        long_help = "Maximum operating calibrated airspeed (VMO) from the type certificate data sheet; no climb, cruise or descent leg is flown faster. Zero: not declared (a jet cruise is then held to the VC that CS 25.335(b) gives for VD). A preset that declares it derives VD from it (CS 25.335(b) upset criterion, VC = VMO by CS 25.1505)."
     )]
     pub max_operating_cas_m_s: f64,
+
+    /// VMO against pressure altitude, `(m, m/s calibrated)`, where the type
+    /// certificate states it by altitude band.
+    #[serde(skip_serializing_if = "Vec::is_empty")]
+    #[config(
+        advanced,
+        columns = ["pressure altitude [m]", "VMO [m/s CAS]"],
+        label = "VMO by pressure altitude",
+        help = "VMO by altitude from the type certificate: pairs of pressure altitude [m] and VMO [m/s CAS], linear between rows. Replaces the single VMO when set.", long_help = "VMO from the type certificate data sheet where it varies with altitude: pairs of pressure altitude [m] and VMO [m/s calibrated], straight lines between rows, a step as two rows at one altitude. Replaces the single VMO when set."
+    )]
+    pub vmo_schedule: Vec<(f64, f64)>,
+
+    /// MMO against pressure altitude, `(m, Mach)`, where the type certificate
+    /// states it by altitude band.
+    #[serde(skip_serializing_if = "Vec::is_empty")]
+    #[config(
+        advanced,
+        columns = ["pressure altitude [m]", "MMO"],
+        label = "MMO by pressure altitude",
+        help = "MMO by altitude from the type certificate: pairs of pressure altitude [m] and MMO, linear between rows. Replaces the single MMO when set.", long_help = "MMO from the type certificate data sheet where it varies with altitude: pairs of pressure altitude [m] and MMO, straight lines between rows, a step as two rows at one altitude. Replaces the single MMO when set."
+    )]
+    pub mmo_schedule: Vec<(f64, f64)>,
+
+    /// Landing-flap VFE, m/s calibrated.
+    #[serde(skip_serializing_if = "is_unset")]
+    #[config(
+        advanced,
+        help = "Landing-flap VFE from the type certificate [m/s CAS]; the approach and landing are flown at or below it. Zero: not declared.",
+        long_help = "Maximum flap-extended speed (VFE) of the landing flap from the type certificate data sheet [m/s calibrated]. The approach rung (descent 4) and the landing are flown at or below it, so the aircraft has slowed below VFE before the landing configuration is extended. Zero: not declared."
+    )]
+    pub vfe_landing_cas_m_s: f64,
 
     /// Take-off ground-roll time, s.
     #[serde(skip_serializing_if = "is_default_takeoff_roll")]
     #[config(
-        help = "Time from brake release to lift-off flown at take-off rating, which the segment model adds to the trip as a labelled fuel and time allowance (default: the 42 s ICAO LTO take-off mode time, ICAO Annex 16 Vol II). Zero disables it."
+        help = "Time from brake release to lift-off flown at take-off rating [s], added to the trip as a labelled fuel and time allowance.",
+        long_help = "Time from brake release to lift-off flown at take-off rating, which the segment model adds to the trip as a labelled fuel and time allowance (default: the 42 s ICAO LTO take-off mode time, ICAO Annex 16 Vol II). Zero disables it."
     )]
     pub takeoff_roll_time_s: f64,
 
     /// Which cruise flight level(s) a trip is flown at.
     #[serde(skip_serializing_if = "is_default_cruise_policy")]
     #[config(
-        help = "Cruise level rule: the declared altitude, the design altitude, or the optimum initial level (300 ft/min residual climb at top-of-climb mass) with step climbs as the aircraft lightens."
+        help = "Cruise level rule: declared altitude, design altitude, or optimum initial level (300 ft/min residual climb at top of climb) with step climbs.",
+        long_help = "Cruise level rule: the declared altitude, the design altitude, or the optimum initial level (300 ft/min residual climb at top-of-climb mass) with step climbs as the aircraft lightens."
     )]
     pub cruise_altitude_policy: CruiseAltitudePolicy,
 
@@ -396,6 +437,9 @@ impl Default for MissionProfileConfig {
             descent_mach: 0.0,
             max_operating_mach: 0.0,
             max_operating_cas_m_s: 0.0,
+            vmo_schedule: Vec::new(),
+            mmo_schedule: Vec::new(),
+            vfe_landing_cas_m_s: 0.0,
             takeoff_roll_time_s: ICAO_LTO_TAKEOFF_TIME_S,
             cruise_altitude_policy: CruiseAltitudePolicy::OptimumStep,
             // Takeoff configuration (TOGA, high-lift drag) to 1,500 ft above

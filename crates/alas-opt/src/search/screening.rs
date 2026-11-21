@@ -51,6 +51,13 @@ use super::planform_projection::PlanformProjection;
 /// (engineering choice).
 pub(crate) const BATCH_SIZE: usize = 64;
 
+/// Spanwise wing strips per semispan of the exploration model.
+pub const EXPLORATION_WING_STRIPS: i64 = 12;
+/// Spanwise strips per empennage semispan of the exploration model.
+pub const EXPLORATION_EMPENNAGE_STRIPS: i64 = 6;
+/// Spanwise strips per empennage semispan of the refinement model.
+pub const REFINEMENT_EMPENNAGE_STRIPS: i64 = 12;
+
 /// What the screening model changes relative to the full in-loop
 /// evaluation. `None` in a field means "as configured".
 #[derive(Debug, Clone, Copy, PartialEq, Default)]
@@ -73,6 +80,42 @@ pub struct ScreeningFidelity {
     /// failed fits retain the full adaptive refinement and error threshold.
     /// Full evaluation independently checks interior CL states as well.
     pub reduced_induced_checks: bool,
+    /// Spanwise strips per semispan of the main-wing lattice
+    /// (`geometry.wing.n_subdivisions`). Never refines the configured mesh.
+    pub wing_subdivisions: Option<i64>,
+    /// Spanwise strips per half of each empennage surface's lattice
+    /// (`geometry.empennage.n_subdivisions`). Never refines the configured
+    /// mesh.
+    pub empennage_subdivisions: Option<i64>,
+    /// Hold the configured engine instead of sizing it to its thrust
+    /// requirements (`DesignSpaceConfig::engine_sized_by_requirements`):
+    /// one sizing closure per clean-sheet candidate instead of the two to
+    /// six of the rubber-engine iteration, with the requirement reported as
+    /// the diagnostic margin of a held engine and thrust sufficiency still a
+    /// hard row. The refinement model sizes the engine of every candidate
+    /// it promotes. No effect on a run that holds its engine anyway.
+    pub held_engine: bool,
+    /// Hold the clean-sheet fuselage at the length of the vector handed in
+    /// (the nominal's cabin-derived length) instead of solving it from the
+    /// cabin for every candidate (`DesignSpaceConfig::fuselage_sized_by_cabin`):
+    /// the cabin solve builds the airframe some thirty times per candidate.
+    /// The refinement model solves the fuselage of every candidate it
+    /// promotes. No effect on a run that does not size its fuselage.
+    pub held_fuselage: bool,
+    /// Factor on the selected engine a clean-sheet engine sizing starts from
+    /// (`SizingControls::initial_engine_factor`): a study control, `None` in
+    /// every shipped model (the staged search sets its own start).
+    pub engine_start: Option<f64>,
+    /// First-update slope of that sizing
+    /// (`SizingControls::initial_engine_slope`): a study control, `None` in
+    /// every shipped model.
+    pub engine_slope: Option<f64>,
+    /// Trim the drag table's nodes on the design trim's lattice with the
+    /// stabilizer incidence applied as a rotation of the tail normals
+    /// (`AnalysisConfig::rotated_tail_nodes`): one lattice per curve instead
+    /// of one per trial incidence. Search models only; the reporting
+    /// analysis verifies every finalist on the exact lattice.
+    pub rotated_tail_nodes: bool,
 }
 
 impl ScreeningFidelity {
@@ -85,12 +128,26 @@ impl ScreeningFidelity {
             steps_per_segment: None,
             sizing_budget: None,
             reduced_induced_checks: false,
+            wing_subdivisions: None,
+            empennage_subdivisions: None,
+            held_engine: false,
+            held_fuselage: false,
+            engine_start: None,
+            engine_slope: None,
+            rotated_tail_nodes: false,
         }
     }
 
-    /// The shipped screening model: a four-panel chordwise mesh, six-state
-    /// induced-fit checks and frozen mission plans refined from two steps
-    /// per segment instead of four. Full-model residuals decide validity.
+    /// The shipped exploration model: a four-panel chordwise mesh on
+    /// [`EXPLORATION_WING_STRIPS`] wing strips and
+    /// [`EXPLORATION_EMPENNAGE_STRIPS`] empennage strips per semispan,
+    /// six-state induced-fit checks and frozen mission plans refined from
+    /// two steps per segment instead of four, with the engine held at its
+    /// configured rating ([`Self::held_engine`]) and the clean-sheet fuselage
+    /// at the nominal's cabin-derived length ([`Self::held_fuselage`]). Its
+    /// verdicts are provisional:
+    /// the refinement model re-scores every candidate it promotes and the
+    /// reporting analysis verifies the finalists.
     ///
     /// The shipping rule is a ranking-key Spearman rho of at least 0.95 and
     /// a top-k overlap of at least 90 % against the full model on every
@@ -103,6 +160,24 @@ impl ScreeningFidelity {
             chordwise_resolution: Some(4),
             steps_per_segment: Some(2),
             reduced_induced_checks: true,
+            wing_subdivisions: Some(EXPLORATION_WING_STRIPS),
+            empennage_subdivisions: Some(EXPLORATION_EMPENNAGE_STRIPS),
+            held_engine: true,
+            held_fuselage: true,
+            rotated_tail_nodes: true,
+            ..Self::full()
+        }
+    }
+
+    /// The refinement model of a staged search: the configured in-loop
+    /// model on [`REFINEMENT_EMPENNAGE_STRIPS`] empennage strips per
+    /// semispan. Candidates it accepts are verified by the reporting
+    /// analysis before any is delivered.
+    #[must_use]
+    pub const fn refinement() -> Self {
+        Self {
+            empennage_subdivisions: Some(REFINEMENT_EMPENNAGE_STRIPS),
+            rotated_tail_nodes: true,
             ..Self::full()
         }
     }
@@ -119,6 +194,28 @@ impl ScreeningFidelity {
             let analysis = &mut screening.analysis;
             analysis.chordwise_resolution = analysis.chordwise_resolution.min(panels);
         }
+        // The spanwise counts stay at or above the validated floor of four
+        // strips (`alas_config` validation, `MIN_SPANWISE_PANELS`).
+        if let Some(strips) = self.wing_subdivisions.filter(|&strips| strips >= 4) {
+            let wing = &mut screening.geometry.wing;
+            wing.n_subdivisions = wing.n_subdivisions.min(strips);
+        }
+        if let Some(strips) = self.empennage_subdivisions.filter(|&strips| strips >= 4) {
+            let empennage = &mut screening.geometry.empennage;
+            empennage.n_subdivisions = empennage.n_subdivisions.min(strips);
+        }
+        if self.held_engine {
+            screening
+                .optimizer
+                .design_space
+                .engine_sized_by_requirements = false;
+        }
+        if self.held_fuselage {
+            screening.optimizer.design_space.fuselage_sized_by_cabin = false;
+        }
+        if self.rotated_tail_nodes {
+            screening.analysis.rotated_tail_nodes = true;
+        }
         screening
     }
 
@@ -131,6 +228,10 @@ impl ScreeningFidelity {
             initial_takeoff_mass_kg: None,
             steps_per_segment: self.steps_per_segment,
             screening_drag_table: self.reduced_induced_checks,
+            initial_engine_factor: self.engine_start,
+            engine_aim_band: None,
+            initial_engine_slope: self.engine_slope,
+            predicts_engine_scale: false,
         }
     }
 }
@@ -703,5 +804,18 @@ mod tests {
             ..ScreeningFidelity::full()
         };
         assert_eq!(finer.configure(&config), config);
+    }
+
+    #[test]
+    fn the_exploration_model_holds_a_sized_engine_and_fuselage_and_refinement_sizes_them() {
+        let mut config = AlasConfig::default();
+        config.optimizer.design_space.engine_sized_by_requirements = true;
+        config.optimizer.design_space.fuselage_sized_by_cabin = true;
+        let explored = ScreeningFidelity::shipped().configure(&config);
+        assert!(!explored.optimizer.design_space.engine_sized_by_requirements);
+        assert!(!explored.optimizer.design_space.fuselage_sized_by_cabin);
+        let refined = ScreeningFidelity::refinement().configure(&config);
+        assert!(refined.optimizer.design_space.engine_sized_by_requirements);
+        assert!(refined.optimizer.design_space.fuselage_sized_by_cabin);
     }
 }

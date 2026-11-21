@@ -89,6 +89,73 @@ pub enum CabinEquipmentMethod {
     /// figure, not a fitted threshold. Shaft-power aircraft of 40 t or more
     /// keep the LTH selection.
     RegionalTurbopropV1,
+    /// Torenbeek's furnishing-and-equipment group for transport and executive
+    /// aircraft, item by item, with the occupant operating items of the same
+    /// book: E. Torenbeek, *Synthesis of Subsonic Airplane Design* (1982),
+    /// Table 8-12 (p. 291), the executive seats of Table 3-2 (p. 76) and
+    /// Table 8-13 (p. 292). It replaces FLOPS equation 110 (furnishings) and
+    /// equation 124 (passenger service) and nothing else.
+    ///
+    /// Selected by the declared aircraft class, never by name: a preset that
+    /// declares [`crate::presets::AircraftClass::BusinessJet`] takes it. FLOPS
+    /// prices every passenger as an airline tourist seat (44 lb, eq. 110) with
+    /// an airline service allowance (eq. 124); its fit population contains no
+    /// executive cabin. The interior it prices is declared in
+    /// [`ExecutiveCabinDeclaration`]; without one the evaluation is refused.
+    ExecutiveJetV1,
+}
+
+/// The installed executive interior that
+/// [`CabinEquipmentMethod::ExecutiveJetV1`] prices: published internal
+/// dimensions and declared monuments, never a mass.
+///
+/// Every field is a Torenbeek (1982) Table 8-12 / 8-13 input: `S_cf`, `V_pc`
+/// and `V_ch` and the galley, toilet, oxygen and overwater categories.
+///
+/// `S_cf` and `V_pc` are published for one cabin length,
+/// [`Self::passenger_compartment_length_m`]; the method scales both with the
+/// built passenger-compartment length (constant cabin section), so a design or
+/// optimisation run that moves the fuselage moves them too, and a baseline
+/// whose built cabin is the published one reads them unchanged.
+#[derive(Debug, Clone, Copy, PartialEq, Serialize, Deserialize)]
+#[serde(deny_unknown_fields)]
+pub struct ExecutiveCabinDeclaration {
+    /// Cabin floor area, galleys and toilets included, flight deck excluded,
+    /// m^2 (Torenbeek `S_cf`), at [`Self::passenger_compartment_length_m`].
+    pub cabin_floor_area_m2: f64,
+    /// Passenger cabin volume, galleys and toilets included, flight deck
+    /// excluded, m^3 (Torenbeek `V_pc`), at
+    /// [`Self::passenger_compartment_length_m`].
+    pub passenger_cabin_volume_m3: f64,
+    /// Cabin length, flight deck excluded, that the published floor area and
+    /// volume describe, m.
+    pub passenger_compartment_length_m: f64,
+    /// Total baggage and cargo compartment volume, m^3 (Torenbeek `V_ch`).
+    pub cargo_hold_volume_m3: f64,
+    /// The part of [`Self::cargo_hold_volume_m3`] that is a baggage
+    /// compartment inside the published passenger cabin volume (pressurised
+    /// and accessible in flight), m^3. It is removed from `V_pc` so that
+    /// `V_pc + V_ch` counts it once. `None` when the source places such a
+    /// compartment inside the cabin volume but does not publish its share;
+    /// the linings term then counts that share twice (an upper bound).
+    #[serde(default)]
+    pub in_cabin_baggage_volume_m3: Option<f64>,
+    /// Maximum passenger count for certification: Torenbeek's `N_pax` of the
+    /// Table 8-12 oxygen row, not the installed seat count.
+    pub certified_passenger_count: u32,
+    /// Main-meal galleys installed.
+    pub main_meal_galleys: u32,
+    /// Snack pantries (refreshment centres) installed.
+    pub snack_pantries: u32,
+    /// Coffee bars installed.
+    pub coffee_bars: u32,
+    /// Toilets (water closets) installed, Torenbeek `N_wc`.
+    pub lavatories: u32,
+    /// Certified maximum operating altitude, m. Above 7,620 m (25,000 ft)
+    /// Table 8-12 prices the high-altitude oxygen system.
+    pub maximum_operating_altitude_m: f64,
+    /// Whether the aircraft is equipped for extended overwater flights.
+    pub extended_overwater: bool,
 }
 
 impl CabinEquipmentMethod {
@@ -97,6 +164,7 @@ impl CabinEquipmentMethod {
         "flops_transport_v1",
         "lth_civil_transport_v1",
         "regional_turboprop_v1",
+        "executive_jet_v1",
     ];
 
     /// Stable serialized name.
@@ -105,6 +173,7 @@ impl CabinEquipmentMethod {
             Self::FlopsTransportV1 => "flops_transport_v1",
             Self::LthCivilTransportV1 => "lth_civil_transport_v1",
             Self::RegionalTurbopropV1 => "regional_turboprop_v1",
+            Self::ExecutiveJetV1 => "executive_jet_v1",
         }
     }
 

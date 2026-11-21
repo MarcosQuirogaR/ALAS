@@ -116,8 +116,8 @@ struct Fixture {
 /// height, tall enough that a lower hold cuts it down and a main deck does not.
 const PROBE_HEIGHT: f64 = 1.25;
 
-/// The wing frame (MAC, aerodynamic centre and leading edge of MAC, metres) the geometry phase 1
-/// wing fits moved, per fixture case: `(frozen Python value, current value)` of
+/// The wing frame (MAC, aerodynamic centre and leading edge of MAC, metres) the fitted
+/// wing moves, per fixture case: `(frozen Python value, current value)` of
 /// `(mac, x_wing_ac, x_lemac)`. The A320 and its thick-wall variant carry the drawn Yehudi
 /// planform (aerodynamic centre 17.0232 -> 16.8752 m, -0.87 %); the B787-9 and A380 frames move by
 /// 0.003 % to 0.06 %. The percent-MAC conversions below are checked against the Python formula on
@@ -236,8 +236,11 @@ fn the_source_corrected_a380_frame_uses_the_current_length_and_finite_mac() {
     let input = serde_json::json!({"preset": "A380-800"});
     let geometry = cabin_geometry_with_source_corrections(&input, true);
 
-    assert_eq!(geometry.fus_len, 72.73);
-    assert_eq!(geometry.x_max - geometry.x_min, 72.73);
+    // The preset body ends at the printed 70.40 m tail cut (Airbus A380 AC,
+    // section 2-2-0); the 72.73 m outline length runs to the fin tip, which
+    // is not the body.
+    assert_eq!(geometry.fus_len, 70.4);
+    assert_eq!(geometry.x_max - geometry.x_min, 70.4);
     assert!(geometry.mac.is_finite() && geometry.mac > 0.0);
     assert!(geometry.x_lemac.is_finite());
     assert!(geometry.x_wing_ac.is_finite());

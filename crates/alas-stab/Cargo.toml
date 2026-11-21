@@ -8,6 +8,8 @@ authors.workspace = true
 rust-version.workspace = true
 
 [dependencies]
+# The partial-run report cache (`alas --only`) stores report types.
+serde = { workspace = true }
 # `stability.py` constructs operating points and atmospheres and runs a
 # vortex-lattice solve; `alas-aero::vlm::run` and
 # `operating_point::OperatingPoint` are that solve and that flight state.

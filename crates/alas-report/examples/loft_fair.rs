@@ -1,7 +1,7 @@
 // SPDX-License-Identifier: AGPL-3.0-or-later
 // Copyright (C) 2026 Marcos Quiroga Rodriguez
 
-//! Study harness (never committed): Rust validator and sampled fairness of loft JSON files.
+//! Diagnostic: Rust validator and sampled fairness of loft JSON files.
 //!
 //! usage: loft_fair <file.json>...   -> one JSON object per line.
 

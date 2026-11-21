@@ -39,6 +39,9 @@ pub(super) const PID_SEC_RIB: i64 = 5;
 pub(super) const PID_TE_STRIP: i64 = 6;
 pub(super) const PID_WEB_BASE: i64 = 100;
 pub(super) const PID_CAP_BASE: i64 = 10_000;
+/// Skin strips between consecutive skin ribs take one property each from here
+/// when the sizing records a spanwise skin gauge (above every cap property).
+pub(super) const PID_SKIN_STRIP_BASE: i64 = 50_000;
 
 /// The spar caps' orientation vector, and the offset convention their `CBAR`
 /// elements are written with.
@@ -85,7 +88,9 @@ pub(super) fn add_tria(deck: &mut Deck, eid: &mut i64, corners: [i64; 3], pid: i
 
 /// Skin panels between two consecutive skin ribs, bridging any difference in
 /// their chordwise point counts with a fan of triangles: `_zipper_skin_strip`.
-/// With `boxed` the strip covers only each rib's spar window.
+/// With `boxed` the strip covers only each rib's spar window. Its shells take
+/// property `pid`.
+#[allow(clippy::too_many_arguments)] // The strip, its surface and its property.
 pub(super) fn zipper_skin_strip(
     deck: &mut Deck,
     eid: &mut i64,
@@ -94,6 +99,7 @@ pub(super) fn zipper_skin_strip(
     pair: &[usize],
     surface: Surface,
     boxed: bool,
+    pid: i64,
 ) {
     let (current, next) = (pair[0], pair[1]);
     let full_len = |rib: usize| match surface {
@@ -112,6 +118,7 @@ pub(super) fn zipper_skin_strip(
     let at_current = |j: usize| nodes.at(current, start_current + j, surface);
     let at_next = |j: usize| nodes.at(next, start_next + j, surface);
     let shortest = len_current.min(len_next);
+    let first_eid = *eid;
     // The intrados is walked the other way round so its panels keep an outward
     // normal.
     let reversed = surface == Surface::Int;
@@ -123,7 +130,7 @@ pub(super) fn zipper_skin_strip(
         } else {
             corners
         };
-        add_quad(deck, eid, ordered, PID_SKIN);
+        add_quad(deck, eid, ordered, pid);
     }
 
     if len_current > len_next {
@@ -135,7 +142,7 @@ pub(super) fn zipper_skin_strip(
             } else {
                 [a, pivot, b]
             };
-            add_tria(deck, eid, corners, PID_SKIN);
+            add_tria(deck, eid, corners, pid);
         }
     } else if len_next > len_current {
         let pivot = at_current(shortest - 1);
@@ -146,8 +153,14 @@ pub(super) fn zipper_skin_strip(
             } else {
                 [pivot, a, b]
             };
-            add_tria(deck, eid, corners, PID_SKIN);
+            add_tria(deck, eid, corners, pid);
         }
+    }
+    if *eid > first_eid {
+        deck.cover_strips.push(super::cards::CoverStrip {
+            upper: surface == Surface::Ext,
+            shells: (first_eid..*eid).collect(),
+        });
     }
 }
 
@@ -159,9 +172,14 @@ pub(super) fn add_rib_panels(
     nodes: &NodeMap,
     regions: &RibRegions,
     boxed: bool,
+    written_elsewhere: &[usize],
 ) {
     let skin_ribs_main: HashSet<usize> = regions.skin_ribs_main.iter().copied().collect();
     for &rib in &regions.all_structural {
+        // The meshed root region writes its truncated ribs' webs itself.
+        if written_elsewhere.contains(&rib) {
+            continue;
+        }
         let station = &stations[rib];
         let last_spar = last_spar_point(station);
         let n_chord = station.extrados.len();
@@ -405,16 +423,18 @@ pub(super) fn add_engine_masses(
         let nid = nodes.at(nearest, front, Surface::Int);
         let chord = wsg.local_chord(station.eta);
         if preserve_declared_station {
+            // Product deck: the declared engine centre of gravity (inlet offset,
+            // nacelle length, centreline height), the point the native torque
+            // sources use. Without a declaration, the generic pylon geometry.
+            let offset = match super::engine_cg::declared_engine_cg(wsg, engine_cfg, y_engine) {
+                Some(cg) => {
+                    let base = deck.grid_xyz(nid).unwrap_or([0.0; 3]);
+                    [cg[0] - base[0], cg[1] - base[1], cg[2] - base[2]]
+                }
+                None => [-0.15 * chord, y_engine.abs() - deck.node_y(nid), -1.0],
+            };
             attach_engine_by_pylon_spider(
-                deck,
-                eid,
-                stations,
-                nodes,
-                regions,
-                nearest,
-                nid,
-                mass,
-                [-0.15 * chord, y_engine.abs() - deck.node_y(nid), -1.0],
+                deck, eid, stations, nodes, regions, nearest, nid, mass, offset,
             );
             attached.push(nid);
             continue;

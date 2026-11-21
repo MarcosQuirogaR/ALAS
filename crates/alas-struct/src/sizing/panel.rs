@@ -50,10 +50,55 @@
 //! * `k_F` is a single number for a generic stiffener type. Stringer pitch,
 //!   stiffener type and section are not designed here; the cover is smeared.
 //! * Tabulated per-alloy `Ftu`, `Fty`, `Fcy` (MMPDS-2022, CMH-17) were not
-//!   retrievable in this lane; `f_allow` of the material remains the other
+//!   retrievable here; `f_allow` of the material remains the other
 //!   limit. Nothing here is a certified allowable.
+//!
+//! # Combined compression and shear
+//!
+//! The cover skins carry the torsional shear flow of the box. Two checks
+//! reduce the compressive allowable when they do, so that the panel is sized
+//! to whichever governs:
+//!
+//! * The stiffened-panel interaction of Niu 1988, p. 119,
+//!   `R_c^2 + R_s^2 = 1` for compression and shear, with `R_c` the panel
+//!   compression stress over the allowable above and `R_s` the skin shear
+//!   stress over the panel allowable shear stress. Niu estimates the latter
+//!   from diagonal-tension data, bounded here by the skin's ultimate shear
+//!   ([`crate::allowables::skin_shear_ultimate_pa`]), and, for a wing upper
+//!   skin designed not to buckle (Niu p. 137), by the initial shear buckling
+//!   of the skin between stringers. The cover is smeared and its stringer
+//!   pitch is the one at which the skin reaches the panel compression
+//!   allowable before buckling ([`maximum_stiffener_pitch_m`]), so at that
+//!   pitch the shear buckling stress is the compression allowable times the
+//!   ratio of the long simply supported plate coefficients, 5.34 / 4.0
+//!   (Bruhn, *Analysis and Design of Flight Vehicle Structures*, 1973, the
+//!   plate coefficients of [`super::web::buckling_coefficient`]). The
+//!   interaction gives the reduced allowable `sigma_allow sqrt(1 - R_s^2)`.
+//! * The skin sheet's combined stress (CS 25.305), von Mises
+//!   `sqrt(sigma^2 + 3 tau^2)` within
+//!   [`crate::allowables::shell_von_mises_allowable_pa`], which gives
+//!   `sqrt(F^2 - 3 tau^2)` on the skin's direct stress.
+//!
+//! With no shear flow recorded (the frozen laws) both reduce to the
+//! compression allowable. Von Mises and `F_su` are metal criteria, read from
+//! the allowables column of the station's gauge (sheet or plate, Niu 1988
+//! Figs. 4.3.3 and 4.3.5). A carbon
+//! laminate cover (an effective isotropic proxy with no declared ply schedule)
+//! takes the same two checks on its own design strain envelope instead: the
+//! truncated maximum-strain envelope at the damage-tolerant design strain
+//! ([`crate::allowables::laminate_direct_stress_limit_pa`]), whose pure-shear
+//! point ([`crate::allowables::laminate_shear_strength_pa`]) bounds the panel
+//! shear allowable. The fibre-metal laminate takes the metal checks on its
+//! declared allowable ([`crate::allowables::skin_shear_ultimate_pa`]); no
+//! skin is exempt from the shear checks.
+//!
+//! The skin gauge is the station's own ([`WingboxSizing::skin_at`]), sized by
+//! `product_strength` so that these limits can be met.
 
-use crate::allowables::bending_allowable_pa;
+use crate::allowables::{
+    bending_allowable_pa, is_carbon_laminate, laminate_direct_stress_limit_pa,
+    shell_von_mises_allowable_at_pa, skin_shear_ultimate_at_pa,
+};
 use alas_config::materials::MaterialSpec;
 
 use super::WingboxSizing;
@@ -69,6 +114,11 @@ pub const ELASTIC_LIMIT_PA: f64 = 350.0e6;
 /// Upper limit of the compressive stress of a highly loaded transport panel,
 /// Pa (Torenbeek 2013, book p.351: 420 MPa with a 5 % reserve).
 pub const COMPRESSION_LIMIT_PA: f64 = 420.0e6;
+
+/// Ratio of the shear to the compression buckling coefficient of a long
+/// simply supported plate, 5.34 / 4.0 (Bruhn 1973; see the module
+/// documentation).
+pub const SHEAR_TO_COMPRESSION_BUCKLING: f64 = 5.34 / 4.0;
 
 /// Local buckling coefficient of a skin simply supported on its stiffener
 /// lines, `f_b = 3.62 E (t/b)^2` (Niu 1988, Eq. 5.7.1, book p.157).
@@ -137,10 +187,18 @@ pub(super) struct CoverPanel {
     box_width_m: f64,
     rib_pitch_m: f64,
     skin_m: f64,
+    /// Design shear stress of the skin sheet, Pa (torsional shear flow over
+    /// the skin gauge); 0 where no shear flow is recorded.
+    skin_shear_pa: f64,
+    /// Ultimate shear of the skin material, Pa.
+    skin_shear_ultimate_pa: f64,
+    /// Largest direct stress the skin sheet carries under its shear, Pa
+    /// (combined-stress limit; infinite where none applies).
+    skin_combined_limit_pa: f64,
 }
 
 impl CoverPanel {
-    pub(super) fn new(sizing: &WingboxSizing, station: usize) -> Self {
+    pub(super) fn new(sizing: &WingboxSizing, station: usize, skin: &MaterialSpec) -> Self {
         let mut active = sizing.spars.iter().filter(|spar| spar.h[station] > 0.0);
         let first = active.next().map(|spar| spar.chord_fraction);
         let last = sizing
@@ -159,11 +217,55 @@ impl CoverPanel {
         } else {
             sizing.rib_spacing_m
         };
+        let skin_m = sizing.skin_at(station);
+        let flow = sizing.cover_shear_flow_at(station);
+        let skin_shear_pa = if flow != 0.0 && skin_m > 0.0 {
+            flow.abs() / skin_m
+        } else {
+            0.0
+        };
+        // A carbon laminate proxy takes its truncated strain envelope; every
+        // other skin (metals, and the fibre-metal laminate on its declared
+        // allowable) takes von Mises and its ultimate shear, from the
+        // allowables column of the station's own gauge (module documentation).
+        let skin_combined_limit_pa = if skin_shear_pa == 0.0 {
+            f64::INFINITY
+        } else if is_carbon_laminate(skin) {
+            laminate_direct_stress_limit_pa(skin, skin_shear_pa)
+        } else {
+            (shell_von_mises_allowable_at_pa(skin, skin_m).powi(2)
+                - 3.0 * skin_shear_pa * skin_shear_pa)
+                .max(0.0)
+                .sqrt()
+        };
         Self {
             box_width_m,
             rib_pitch_m,
-            skin_m: sizing.t_skin,
+            skin_m,
+            skin_shear_pa,
+            skin_shear_ultimate_pa: skin_shear_ultimate_at_pa(skin, skin_m),
+            skin_combined_limit_pa,
         }
+    }
+
+    /// The compression allowable `base` reduced by the compression-shear
+    /// interaction of the stiffened panel (module documentation).
+    fn with_panel_shear(self, base: f64) -> f64 {
+        let tau = self.skin_shear_pa;
+        if tau == 0.0 {
+            return base;
+        }
+        let shear_allowable = self
+            .skin_shear_ultimate_pa
+            .min(SHEAR_TO_COMPRESSION_BUCKLING * base);
+        let ratio = tau / shear_allowable;
+        base * (1.0 - ratio * ratio).max(0.0).sqrt()
+    }
+
+    /// The skin sheet's direct-stress limit under its shear, from the
+    /// combined-stress check (module documentation).
+    fn skin_combined_limit_pa(self) -> f64 {
+        self.skin_combined_limit_pa
     }
 
     /// Compressive allowable of the cover for a material of modulus `e_pa` and
@@ -176,11 +278,33 @@ impl CoverPanel {
         material_limit_pa: f64,
         flange_area_m2: f64,
     ) -> f64 {
-        if !(self.rib_pitch_m.is_finite() && self.rib_pitch_m > 0.0 && self.box_width_m > 0.0) {
-            return material_limit_pa;
-        }
-        let t_eq = smeared_cover_thickness_m(self.skin_m, flange_area_m2, self.box_width_m);
-        material_limit_pa.min(stiffened_cover_allowable_pa(e_pa, t_eq, self.rib_pitch_m))
+        let base = if !(self.rib_pitch_m.is_finite()
+            && self.rib_pitch_m > 0.0
+            && self.box_width_m > 0.0)
+        {
+            material_limit_pa
+        } else {
+            let t_eq = smeared_cover_thickness_m(self.skin_m, flange_area_m2, self.box_width_m);
+            material_limit_pa.min(stiffened_cover_allowable_pa(e_pa, t_eq, self.rib_pitch_m))
+        };
+        self.with_panel_shear(base)
+    }
+
+    /// [`Self::allowable_for_pa`] for the skin sheet's own direct stress: also
+    /// within its combined-stress limit under the skin shear.
+    pub(super) fn skin_allowable_for_pa(
+        self,
+        e_pa: f64,
+        material_limit_pa: f64,
+        flange_area_m2: f64,
+    ) -> f64 {
+        self.allowable_for_pa(e_pa, material_limit_pa, flange_area_m2)
+            .min(self.skin_combined_limit_pa())
+    }
+
+    /// [`Self::skin_allowable_for_pa`] for the registered skin material.
+    pub(super) fn skin_allowable_pa(self, skin: &MaterialSpec, flange_area_m2: f64) -> f64 {
+        self.skin_allowable_for_pa(skin.e_pa, bending_allowable_pa(skin), flange_area_m2)
     }
 
     /// [`Self::allowable_for_pa`] for a registered material and its product
@@ -213,7 +337,7 @@ mod tests {
 
     #[test]
     fn plate_buckling_matches_the_closed_form_and_flags_the_unstiffened_cover() {
-        // 6 mm aluminium skin spanning a 2.7 m box: about 1.3 MPa (audit STR-03).
+        // 6 mm aluminium skin spanning a 2.7 m box: about 1.3 MPa.
         let unstiffened = skin_buckling_stress_pa(E_AL, 0.006, 2.7);
         assert!((unstiffened - 3.62 * E_AL * (0.006_f64 / 2.7).powi(2)).abs() < 1.0);
         assert!(unstiffened < 2.0e6);

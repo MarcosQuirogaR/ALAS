@@ -28,7 +28,9 @@ use alas_config::airports::Airport;
 use alas_config::mission::MissionProfileConfig;
 use alas_config::AlasConfig;
 use serde::Serialize;
-pub use step_climb::configure_cruise_legs;
+pub use step_climb::{
+    configure_cruise_legs, minimum_cruise_time_for_step_s, CRUISE_LEVEL_INTERVAL_M,
+};
 use step_climb::{
     cruise_legs_have_enough_time_to_justify_the_ladder, estimate_non_cruise_distance,
 };

@@ -7,7 +7,7 @@
 //! spider or a clamped edge is not a structural stress: it is the response of
 //! the idealisation to a concentrated action, it grows without bound as the
 //! mesh is refined, and Saint-Venant's principle says the real field is the
-//! statically equivalent smooth one a short distance away. The 2026-10-07
+//! statically equivalent smooth one a short distance away. An
 //! A320 wingbox pull-up peak of 835 MPa was a single transition-rib element
 //! whose four corners were all `RBE3` reference grids (152 MPa at its centroid
 //! and 5.5 times lower than its corner value); the 10 t engine `CONM2`, the
@@ -30,7 +30,7 @@
 
 use std::collections::BTreeSet;
 
-use super::Deck;
+use super::{Deck, MeshNodeIndex};
 
 /// Element layers excluded around each load-introduction or constraint grid:
 /// the shells touching the seed grids plus this many minus one further rings.
@@ -106,7 +106,99 @@ impl Deck {
         }
         excluded
     }
+
+    /// Front-spar box depth against span: `(y, depth)` per rib station, the
+    /// vertical distance between the upper and lower spar grids of that
+    /// station, ascending in `y`. Empty when the index carries no spar line.
+    pub fn front_spar_depths(&self, index: &MeshNodeIndex) -> Vec<(f64, f64)> {
+        let (Some(upper), Some(lower)) =
+            (index.spar_upper_nids.first(), index.spar_lower_nids.first())
+        else {
+            return Vec::new();
+        };
+        let mut out: Vec<(f64, f64)> = upper
+            .iter()
+            .zip(lower)
+            .filter_map(|(&u, &l)| {
+                let (a, b) = (self.grid_xyz(u)?, self.grid_xyz(l)?);
+                Some((a[1], (a[2] - b[2]).abs()))
+            })
+            .collect();
+        out.sort_by(|p, q| p.0.total_cmp(&q.0));
+        out
+    }
+
+    /// Shells inside a physical exclusion zone: a shell is excluded when its
+    /// centroid lies within `depths` local box depths of a load-introduction
+    /// or constraint grid (distance measured in the basic frame, metres). The
+    /// local depth is [`Deck::front_spar_depths`] at the seed's span station
+    /// (nearest station; a seed beyond the spar line uses the end station).
+    ///
+    /// Replaces the element-layer rule for the assessed-stress read-out:
+    /// a layer count shrinks in metres as the mesh refines (N1G MJ1), whereas
+    /// the decay of a self-equilibrated end zone scales with the section depth
+    /// and not with the element size. The stations are the same for every mesh
+    /// that shares the rib layout, so the exclusion is comparable across
+    /// refinements. Seeds without coordinates are ignored.
+    pub fn load_introduction_elements_within(
+        &self,
+        index: &MeshNodeIndex,
+        depths: f64,
+    ) -> BTreeSet<i64> {
+        let stations = self.front_spar_depths(index);
+        // No spar line, so no box depth: the layer rule applies, reported by
+        // the caller as the zone it is. Never a zero-radius (silent) zone.
+        if stations.is_empty() {
+            return self.load_introduction_elements(&index.engine_nids, LOAD_INTRODUCTION_LAYERS);
+        }
+        let depth_at = |y: f64| -> f64 {
+            stations
+                .iter()
+                .min_by(|p, q| (p.0 - y).abs().total_cmp(&(q.0 - y).abs()))
+                .map_or(0.0, |station| station.1)
+        };
+        let seeds: Vec<[f64; 3]> = self
+            .load_introduction_grids(&index.engine_nids)
+            .into_iter()
+            .filter_map(|nid| self.grid_xyz(nid))
+            .collect();
+        let radii: Vec<f64> = seeds
+            .iter()
+            .map(|seed| depths * depth_at(seed[1]))
+            .collect();
+        self.quads
+            .iter()
+            .chain(&self.trias)
+            .filter(|shell| {
+                let points: Vec<[f64; 3]> = shell
+                    .nodes
+                    .iter()
+                    .filter_map(|&nid| self.grid_xyz(nid))
+                    .collect();
+                if points.is_empty() {
+                    return false;
+                }
+                let n = points.len() as f64;
+                let c = points.iter().fold([0.0; 3], |acc, p| {
+                    [acc[0] + p[0] / n, acc[1] + p[1] / n, acc[2] + p[2] / n]
+                });
+                seeds.iter().zip(&radii).any(|(s, &r)| {
+                    let d = [c[0] - s[0], c[1] - s[1], c[2] - s[2]];
+                    d[0] * d[0] + d[1] * d[1] + d[2] * d[2] <= r * r
+                })
+            })
+            .map(|shell| shell.eid)
+            .collect()
+    }
 }
+
+/// Box depths per exclusion depth: one local box depth. The end zone of a
+/// self-equilibrated load on a beam of depth `h` decays like `exp(-pi x / h)`
+/// for the first transverse mode (wavelength `2 h`; Timoshenko and Goodier,
+/// Theory of Elasticity, section on the end effects of a loaded beam), so at
+/// `x = h` the disturbance is about `exp(-pi) = 4 %` of its end value. Stress
+/// beyond one depth from the grid is taken as the far-field response.
+pub const LOAD_INTRODUCTION_DEPTHS: f64 = 1.0;
 
 #[cfg(test)]
 mod tests {

@@ -169,7 +169,7 @@ fn assemble_vehicle_request(
             num_passengers: req.num_passengers,
             cruise_mach: req.cruise_mach,
             cruise_altitude_m: req.cruise_altitude_m,
-            ultimate_load_factor: req.ultimate_load_factor,
+            ultimate_load_factor: req.design_ultimate_load_factor(),
         },
     }
 }

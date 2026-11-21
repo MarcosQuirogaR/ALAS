@@ -17,6 +17,37 @@ use alas_opt::{assess_product_candidate, CandidateAssessment};
 mod support;
 use support::{assess_view, nominal, violates, AssessmentView};
 
+/// What a drag-divergence finding is tracked by. These presets met the ceiling
+/// before; they stay failing here, by name, until a
+/// wave-drag fix lands, instead of being pinned as expected violators.
+const AERO_WAVE_DRAG_TASK: &str =
+    "tracked by the aero wave-drag fix task (wave drag over the drag-divergence ceiling since phys-aero a7c5e21d)";
+
+/// Presets whose mid-cruise wave drag still crosses the ceiling. The ceiling admits the
+/// rms error of the `M_dd` relation above `M_dd` (58.4 counts); DC-10-30F (41.8), LJ60
+/// (36.9), B787-9 (31.5) and the DC-10 now meet it, AVE (90.3 counts, 0.038 in Mach above
+/// `M_dd`) does not.
+const AERO_WAVE_DRAG_TRACKED: &[&str] = &["AVE"];
+
+/// The C295 nominal's drag-table rejection, matched exactly: the induced
+/// drag term of its trimmed table is non-physical (`drag_table::induced`).
+const C295_DRAG_TABLE: &str = "drag_table: drag-table term is non-physical: induced curvature or energy (centre of gravity at x = 9.97 m, cruise CL 0.660)";
+
+/// What the C295 drag-table rejection is tracked by.
+const C295_DRAG_TABLE_TASK: &str =
+    "tracked by the aero induced-drag fix task (non-physical C295 drag table)";
+
+/// The failure line for a preset whose reference assessment returned an
+/// error: the tracked C295 drag-table rejection by name, anything else as
+/// an unhandled error.
+fn assessment_failure(preset: &str, reason: &str) -> String {
+    if preset == "C295" && reason == C295_DRAG_TABLE {
+        format!("{preset}: {C295_DRAG_TABLE_TASK}: {reason}")
+    } else {
+        format!("{preset}: unhandled assessment error: {reason}")
+    }
+}
+
 /// Every layout residual identifier this suite covers.
 const LAYOUT_IDS: &[&str] = &[
     "wing_root_incidence_min",
@@ -67,13 +98,21 @@ fn mission_sized_reference_geometry_passes_layout_residuals() {
                 Err(_) => continue,
             };
         for id in LAYOUT_IDS {
-            // The DC-10 and B747-400 exceptions that stood here are gone (fuel-chain
-            // lane 2026-10-14): their wing thickness distributions are now the printed ones
+            // The DC-10 and B747-400 exceptions that stood here are gone: their wing thickness distributions are now the printed ones
             // (Obert Figs. 24.21 and 24.82), not an 11 % average and a 777-class CRM
             // distribution, and the mid-cruise wave drag meets the Korn ceiling.
             if violates(&assessment, id) {
                 let residual = assessment.residuals.iter().find(|r| r.id == *id);
-                failures.push(format!("{preset}: {id} violated; residual: {residual:?}"));
+                let tracked = *id == "sweep_consistent_with_cruise_mach"
+                    && AERO_WAVE_DRAG_TRACKED.contains(&preset);
+                let note = if tracked {
+                    AERO_WAVE_DRAG_TASK
+                } else {
+                    "untracked"
+                };
+                failures.push(format!(
+                    "{preset}: {id} violated ({note}); residual: {residual:?}"
+                ));
             }
         }
     }
@@ -90,7 +129,10 @@ fn hard_mtow_reference_layouts_keep_named_drag_divergence_findings() {
     for preset in alas_config::presets::available() {
         let assessment = match assess_reference(preset) {
             Ok(assessment) => assessment,
-            Err(reason) => panic!("{preset}: hard-MTOW assessment failed: {reason}"),
+            Err(reason) => {
+                failures.push(assessment_failure(preset, &reason));
+                continue;
+            }
         };
         for id in LAYOUT_IDS {
             if *id == "sweep_consistent_with_cruise_mach" {
@@ -98,32 +140,14 @@ fn hard_mtow_reference_layouts_keep_named_drag_divergence_findings() {
                 assert!(residual.actual.is_finite() && residual.actual >= 0.0);
                 assert!(residual.limit.is_finite() && residual.limit > 0.0);
                 assert_eq!(residual.role, alas_opt::mdo::ResidualRole::Constraint);
-                let finding = match preset {
-                    // The AVE's finding (27.5 against 26.9 counts at mid-cruise of the
-                    // maximum-fuel design mission) is gone at the merged tree: 26.0 counts
-                    // against the 26.9 ceiling (fix lane deck-altitude, mission_sized pins), so
-                    // only the DC-10 keeps one at this start-of-cruise gating (the B747-400 clears
-                    // it with its printed thickness distribution, fuel-chain lane 2026-10-14).
-                    // The conventional factor is not calibrated to this
-                    // aircraft's aft-loaded section (Mason, chapter 7).
-                    "DC-10" => Some("aft-loaded section lacks a sourced Korn technology factor"),
-                    // Final freeze 2026-10-15: with the printed plateau node (Obert Fig. 24.82,
-                    // 2y/b 0.5) the C2 thickness spline no longer dips to 7.4 % between the
-                    // kink and the tip, and the B747-400 meets the start-of-cruise ceiling
-                    // again as a finding: 0.00290 against 0.00269 (7.7 % over).
-                    "B747-400" => Some("the printed 8.0 % outboard thickness leaves the Korn drag rise above the ceiling"),
-                    _ => None,
-                };
-                if let Some(reason) = finding {
-                    assert!(
-                        violates(&assessment, id),
-                        "{preset}: {reason}; boundary now met: review finding"
-                    );
-                } else {
-                    assert!(
-                        !violates(&assessment, id),
+                match violates(&assessment, id) {
+                    true if AERO_WAVE_DRAG_TRACKED.contains(&preset) => {
+                        failures.push(format!("{preset}: {AERO_WAVE_DRAG_TASK}: {residual:?}"))
+                    }
+                    true => failures.push(format!(
                         "{preset}: new drag-divergence finding: {residual:?}"
-                    );
+                    )),
+                    false => {}
                 }
                 if violates(&assessment, id) {
                     assert!(residual.actual > residual.limit, "{preset}: {residual:?}");
@@ -145,26 +169,75 @@ fn hard_mtow_reference_layouts_keep_named_drag_divergence_findings() {
     );
 }
 
+/// The ceiling is the wave drag of the law in force (the one the drag table
+/// tabulates) at its own drag-divergence Mach plus the relation's rms error,
+/// so the gate trips exactly when the cruise Mach passes that Mach.
 #[test]
-fn lock_drag_divergence_ceiling_matches_the_quartic_law_slope() {
+fn drag_divergence_ceiling_is_the_law_in_force_past_its_own_divergence_mach() {
+    let mut failures = Vec::new();
     for preset in alas_config::presets::available() {
-        let assessment = assess_reference(preset).unwrap();
+        let assessment = match assess_reference(preset) {
+            Ok(assessment) => assessment,
+            Err(reason) => {
+                failures.push(assessment_failure(preset, &reason));
+                continue;
+            }
+        };
         let config = AlasConfig::from_value(&serde_json::json!({"preset": preset})).unwrap();
-        let rise = config.drag_model.wave_drag_coefficient;
         let id = "sweep_consistent_with_cruise_mach";
-        let residual = assessment
-            .residuals
-            .iter()
-            .find(|row| row.id == id)
-            .unwrap();
-        // Eliminating the Mach excess from CDw = C (M - Mcrit)^4 gives
-        // dCDw/dM = 4 C^(1/4) CDw^(3/4); drag divergence is slope 0.1.
-        let ceiling_slope = 4.0 * rise.powf(0.25) * residual.limit.powf(0.75);
-        assert!((ceiling_slope / 0.1 - 1.0).abs() <= 16.0 * f64::EPSILON);
-        let slope = 4.0 * rise.powf(0.25) * residual.actual.powf(0.75);
-        assert_eq!(residual.actual > residual.limit, slope > 0.1, "{preset}");
-        assert_eq!(violates(&assessment, id), slope > 0.1, "{preset}");
+        let Some(residual) = assessment.residuals.iter().find(|row| row.id == id) else {
+            continue;
+        };
+        let detail = residual.detail.as_deref().expect("the residual has detail");
+        let read = |label: &str| -> f64 {
+            let (_, after) = detail
+                .split_once(label)
+                .unwrap_or_else(|| panic!("{preset}: {detail}"));
+            after
+                .split([',', ';'])
+                .next()
+                .and_then(|s| s.trim().parse().ok())
+                .unwrap_or_else(|| panic!("{preset}: {detail}"))
+        };
+        let divergence = read("divergence Mach ");
+        let ceiling = read("ceiling at Mach ");
+        let rms = alas_aero::analysis::DRAG_DIVERGENCE_MACH_RMS_ERROR;
+        let scatter = alas_aero::analysis::SHEVELL_KROO_DIVERGENCE_SCATTER;
+        let offset = ceiling - divergence;
+        assert!(
+            (offset - rms).abs() <= 1.1e-3 || (offset - scatter).abs() <= 1.1e-3,
+            "{preset}: {detail}"
+        );
+        // 0.0019 cos^3 L ((M_div + 0.047)/M_cc)^14.641 under Shevell-Kroo, 58.4 counts under Lock at C = 20.
+        assert!(
+            residual.limit > 0.0010 && residual.limit < 0.0200,
+            "{preset}: ceiling {} ({detail})",
+            residual.limit
+        );
+        // The wave drag rises monotonically with Mach, so the gate and the Mach comparison agree.
+        let cruise = config.requirements.cruise_mach;
+        if (cruise - ceiling).abs() > 1.0e-3 {
+            assert_eq!(
+                residual.actual > residual.limit,
+                cruise > ceiling,
+                "{preset}: {detail}"
+            );
+        }
+        assert_eq!(
+            violates(&assessment, id),
+            residual.actual > residual.limit,
+            "{preset}"
+        );
     }
+    assert!(
+        failures.is_empty(),
+        "presets the drag-divergence check could not assess:
+  {}",
+        failures.join(
+            "
+  "
+        )
+    );
 }
 
 #[test]
@@ -203,6 +276,16 @@ fn assess_clean_sheet(
     assess_product_candidate(&config, &design)
 }
 
+/// The trim refusals of the AVE with its wing root behind the tailcone: the
+/// drag table's untrimmed induced node, or the trim solve finding no
+/// stabiliser incidence at the cruise lift. Which one trips first depends on
+/// the sized centre of gravity (x = 79.80 m against 79.77 m moved it from the
+/// first to the second); both refuse the candidate before it is scored.
+const TAILCONE_TRIM_REFUSALS: [&str; 2] = [
+    "drag_table: induced node at CL 1.5000 left Cm",
+    "trim_solve: no stabiliser incidence within 15 deg of the last estimate holds the pitching moment at CL 0.689",
+];
+
 #[test]
 fn a_wing_root_moved_past_the_tailcone_is_rejected_by_the_fuselage_containment_residual() {
     // Move the wing-root datum itself far aft, well past the registered
@@ -225,7 +308,12 @@ fn a_wing_root_moved_past_the_tailcone_is_rejected_by_the_fuselage_containment_r
             "violated: {:?}",
             assessment.violated_hard_ids()
         ),
-        Err(reason) => assert_eq!(reason, "drag_table"),
+        Err(reason) => assert!(
+            TAILCONE_TRIM_REFUSALS
+                .iter()
+                .any(|refusal| reason.starts_with(refusal)),
+            "{reason}"
+        ),
     }
 }
 
@@ -242,8 +330,12 @@ fn an_unswept_wing_at_a_high_cruise_mach_is_rejected_by_the_korn_equation_residu
         assess_clean_sheet("AVE", design, |_| {}).expect("an unswept wing still sizes");
     assert!(
         violates(&assessment, "sweep_consistent_with_cruise_mach"),
-        "violated: {:?}",
-        assessment.violated_hard_ids()
+        "violated: {:?}; residual: {:?}",
+        assessment.violated_hard_ids(),
+        assessment
+            .residuals
+            .iter()
+            .find(|row| row.id == "sweep_consistent_with_cruise_mach")
     );
 }
 
@@ -271,4 +363,42 @@ fn the_wave_drag_residual_reports_the_start_of_cruise_beside_the_gated_mid_cruis
         after_start[..end].parse::<f64>().expect("start CL number")
     };
     assert!(cl_start > cl_mid, "{detail}");
+}
+
+/// The drag-divergence ceiling is a Diagnostic for the fixed certified baseline, whose
+/// cruise Mach is a published fact, and a hard requirement in the modes that choose the
+/// wing's sweep for their cruise Mach. AVE's mid-cruise wave drag exceeds the ceiling,
+/// which admits the 0.023 rms of the `M_dd` relation above `M_dd`, by 0.015 in Mach.
+#[test]
+fn the_wave_drag_ceiling_is_diagnostic_for_the_baseline_and_hard_in_the_design_modes() {
+    let role_of = |mode: &str| {
+        let config = AlasConfig::from_value(&serde_json::json!({
+            "preset": "AVE",
+            "optimizer": {"design_space": {"mode": mode}}
+        }))
+        .unwrap();
+        // An unswept AVE at its Mach 0.84 is far past drag divergence under
+        // any law, so the row is violated in every mode; the registered AVE
+        // sits inside the row's documented scatter and cannot show the role.
+        let design = DesignVector {
+            sweep_deg: 0.0,
+            ..nominal("AVE")
+        };
+        let assessment = assess_view(&config, &design).expect("AVE assessed");
+        let row = assessment
+            .residuals
+            .iter()
+            .find(|row| row.id == "sweep_consistent_with_cruise_mach")
+            .expect("the wave-drag residual is evaluated")
+            .clone();
+        let hard = violates(&assessment, "sweep_consistent_with_cruise_mach");
+        (row, hard)
+    };
+    let (baseline, baseline_hard) = role_of("baseline_sandbox");
+    assert_eq!(baseline.role, alas_opt::mdo::ResidualRole::Diagnostic);
+    assert!(baseline.violated(), "the shortfall is still reported");
+    assert!(!baseline_hard);
+    let (adapted, adapted_hard) = role_of("reference_adaptation");
+    assert_eq!(adapted.role, alas_opt::mdo::ResidualRole::Constraint);
+    assert!(adapted_hard);
 }

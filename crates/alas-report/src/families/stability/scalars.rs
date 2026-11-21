@@ -88,7 +88,9 @@ pub fn stability_scalars(report: &AnalysisReport) -> Option<StabilityScalars<'_>
     let c_ref = plane.c_ref;
     let x_cg_aero = plane.xyz_ref[0];
     let x_cg_phys = report.physical_cg[0];
-    let x_wing_ac = wing.aerodynamic_center(AC_CHORD_FRACTION)[0];
+    // The wing station of the tail arm is the carried box's: the plan buried in
+    // the body does not lengthen it.
+    let x_wing_ac = wing.carried_box().aerodynamic_center(AC_CHORD_FRACTION)[0];
     let sm = if report.static_margin.is_nan() {
         FALLBACK_STATIC_MARGIN
     } else {
@@ -98,7 +100,10 @@ pub fn stability_scalars(report: &AnalysisReport) -> Option<StabilityScalars<'_>
 
     let s_wing = wing.reference_area();
     let s_tail = hstab.map_or(0.0, Wing::reference_area);
-    let x_hstab_ac = hstab.map_or(x_np + 2.0, |h| h.aerodynamic_center(AC_CHORD_FRACTION)[0]);
+    // Area and arm of the tail volume both on the reference planform.
+    let x_hstab_ac = hstab.map_or(x_np + 2.0, |h| {
+        h.reference_planform().aerodynamic_center(AC_CHORD_FRACTION)[0]
+    });
     let l_t = x_hstab_ac - x_wing_ac;
     let v_h = if c_ref * s_wing > 0.0 {
         (l_t * s_tail) / (c_ref * s_wing)
@@ -106,7 +111,9 @@ pub fn stability_scalars(report: &AnalysisReport) -> Option<StabilityScalars<'_>
         0.0
     };
 
-    let x_lemac = x_wing_ac - 0.25 * c_ref;
+    let x_lemac = plane
+        .mac_frame()
+        .map_or(x_wing_ac - 0.25 * c_ref, |frame| frame.x_lemac_m);
 
     Some(StabilityScalars {
         wing,
@@ -171,6 +178,7 @@ mod tests {
             polar: PolarSweep {
                 alpha_deg: Vec::new(),
                 geometric_alpha_deg: Vec::new(),
+                compressible_mach: None,
                 cl: Vec::new(),
                 cd: Vec::new(),
                 cd_induced: Vec::new(),

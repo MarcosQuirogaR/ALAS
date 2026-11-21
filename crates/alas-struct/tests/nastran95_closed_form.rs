@@ -12,11 +12,11 @@
 //! comparison against MSC Nastran is code-to-code; this one has a reference
 //! solution.
 //!
-//! The solver comes from `ALAS_NASTRAN95_DIR` / `ALAS_NASTRAN95_RUNTIME`; when
-//! it is not set the solves skip, loudly, as the other external-solver rows
-//! do. Run with `--nocapture` to see the table.
+//! The solver comes from `ALAS_NASTRAN95_DIR` / `ALAS_NASTRAN95_RUNTIME`; the
+//! test is `#[ignore]`d and runs with `--include-ignored`, where a missing
+//! solver is a failure. Add `--nocapture` to see the table.
 //!
-//! `ALAS_NASTRAN95_BENCH_DIR` (default `C:/n95bench`) is the short work
+//! `ALAS_NASTRAN95_BENCH_DIR` (default `C:/n95bench` on Windows, `/tmp/n95bench` elsewhere) is the short work
 //! directory: the solver's rigid-format path buffer holds 37 bytes.
 
 #![cfg_attr(
@@ -45,14 +45,23 @@ const STRESS_TOLERANCE: f64 = 0.05;
 fn solver() -> Option<Nastran95Solver> {
     let dir = PathBuf::from(std::env::var("ALAS_NASTRAN95_DIR").ok()?);
     let runtime = std::env::var_os("ALAS_NASTRAN95_RUNTIME").map(PathBuf::from);
-    let stage = std::env::var_os("ALAS_NASTRAN95_RF_STAGE")
-        .map_or_else(|| PathBuf::from("C:/n95bench-rf"), PathBuf::from);
+    let stage = std::env::var_os("ALAS_NASTRAN95_RF_STAGE").map_or_else(
+        || {
+            PathBuf::from(if cfg!(windows) {
+                "C:/n95bench-rf"
+            } else {
+                "/tmp/n95bench-rf"
+            })
+        },
+        PathBuf::from,
+    );
     Nastran95Solver::from_paths(&dir, runtime.as_deref(), Some(&stage), None)
 }
 
 fn solve_all(solver: &Nastran95Solver) -> Vec<BenchmarkOutcome> {
     let base = PathBuf::from(
-        std::env::var("ALAS_NASTRAN95_BENCH_DIR").unwrap_or_else(|_| "C:/n95bench".to_owned()),
+        std::env::var("ALAS_NASTRAN95_BENCH_DIR")
+            .unwrap_or_else(|_| default_bench_dir().to_owned()),
     );
     let case = CantileverBox::reference();
     SCALES
@@ -66,11 +75,11 @@ fn solve_all(solver: &Nastran95Solver) -> Vec<BenchmarkOutcome> {
 }
 
 #[test]
+#[ignore = "needs ALAS_NASTRAN95_DIR (external NASTRAN-95 solver); run with --include-ignored"]
 fn cantilever_box_matches_beam_theory_at_every_deck_length_unit() {
-    let Some(solver) = solver() else {
-        println!("skipped: ALAS_NASTRAN95_DIR is not set or the solver is incomplete");
-        return;
-    };
+    let solver = solver().expect(
+        "ALAS_NASTRAN95_DIR must name a complete NASTRAN-95 installation for this ignored test",
+    );
     let outcomes = solve_all(&solver);
     println!("L/m   case     defl[mm]  beam[mm]  err%    flange[MPa]  beam[MPa]  err%");
     for outcome in &outcomes {
@@ -117,5 +126,15 @@ fn cantilever_box_matches_beam_theory_at_every_deck_length_unit() {
                 ))
                 .collect::<Vec<_>>()
         );
+    }
+}
+
+/// Short work root when `ALAS_NASTRAN95_BENCH_DIR` is unset: a drive root on
+/// Windows, `/tmp` elsewhere (the legacy solver's path buffers are short).
+fn default_bench_dir() -> &'static str {
+    if cfg!(windows) {
+        "C:/n95bench"
+    } else {
+        "/tmp/n95bench"
     }
 }

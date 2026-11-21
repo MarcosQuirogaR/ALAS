@@ -75,6 +75,10 @@ pub struct CustomAirport {
     /// Explicitly declared landing distance available, in metres, if known.
     #[serde(default)]
     pub declared_lda_m: Option<f64>,
+    /// Departure obstacle surveys, one per take-off direction, when the user
+    /// supplies them; without them the obstacle check cannot be made.
+    #[serde(default, skip_serializing_if = "Vec::is_empty")]
+    pub departure_surveys: Vec<crate::airport_obstacles::DepartureSurvey>,
     /// Provenance retained in the workspace and export files.
     #[serde(default)]
     pub provenance: AirportProvenance,
@@ -214,7 +218,9 @@ mod registry;
 
 pub use dat::{export_file, import_file, parse_dat, parse_dat_with_source};
 pub use json::{export_json, parse_json, parse_json_with_source, parse_value};
-pub(crate) use registry::airport_by_name_or_icao;
+#[cfg(test)]
+pub(crate) use registry::REGISTRY_TEST_LOCK;
+pub(crate) use registry::{airport_by_name_or_icao, intern_airport};
 pub use registry::{
     find_custom, register_custom_airport, registered_custom_airports, replace_custom_airports,
 };
@@ -268,6 +274,7 @@ mod tests {
             runway_lengths_m: vec![2400.0, 1800.0],
             declared_toda_m: None,
             declared_lda_m: None,
+            departure_surveys: Vec::new(),
             provenance: AirportProvenance::default(),
         }
     }
@@ -293,6 +300,9 @@ mod tests {
 
     #[test]
     fn physical_lengths_supply_conservative_declared_distances() {
+        let _registry = REGISTRY_TEST_LOCK
+            .lock()
+            .unwrap_or_else(|poisoned| poisoned.into_inner());
         let airport = sample("ZZ03");
         replace_custom_airports(vec![airport]).expect("registry accepts sample");
         let resolved = airport_by_name_or_icao("ZZ03").expect("airport lookup");

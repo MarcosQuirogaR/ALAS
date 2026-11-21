@@ -20,14 +20,14 @@ fn redesigned_dc10_dispatch_and_balance_use_all_installed_tanks() {
     let mut config = AlasConfig::from_value(&serde_json::json!({"preset":"DC-10"})).unwrap();
     config.mission.enabled = false;
     config.structures.enabled = false;
-    // Candidate from the rejected saved run, independent of its result gates.
+    // A redesign inside the reference windows: longer span, more sweep and a
+    // thinner section on the registered chords, so the planform stays a valid
+    // transport wing whatever the registered loft. The literal vector of an
+    // old saved run stopped being one when the DC-10 loft was digitised.
     let mut design = preset.design_vector;
-    design.span_m = 45.96236315230242;
-    design.root_chord_m = 11.83652753680161;
-    design.break_chord_m = 7.423927757870449;
-    design.tip_chord_m = 1.9618290937525737;
-    design.sweep_deg = 38.944483085295055;
-    design.airfoil_thickness_scale = 0.9626060060394632;
+    design.span_m *= 1.05;
+    design.sweep_deg += 3.0;
+    design.airfoil_thickness_scale = 0.96;
     let report = FullAnalysis::new(config.clone())
         .run(&design, true)
         .unwrap();
@@ -44,13 +44,22 @@ fn redesigned_dc10_dispatch_and_balance_use_all_installed_tanks() {
         .map(|tank| tank.usable_capacity_kg)
         .sum();
     assert!((sum - layout.usable_capacity_kg()).abs() < 1e-7);
-    assert!(balance
-        .tanks
-        .iter()
-        .any(|tank| tank.id == "auxiliary" && tank.usable_capacity_kg > 0.0));
+    // The DC-10 Airport Planning document counts the under-wing auxiliary
+    // tank in the wing cell (`preset_fuel_tanks`), so the installed cells are
+    // the wing and the centre section, both carrying fuel.
+    for id in ["wing_inner", "center"] {
+        assert!(
+            balance
+                .tanks
+                .iter()
+                .any(|tank| tank.id.starts_with(id) && tank.usable_capacity_kg > 0.0),
+            "{id}: {:?}",
+            balance.tanks
+        );
+    }
 
     // A custom request must not regain the published total or a deleted cell.
-    config.fuel_tanks.auxiliary.enabled = false;
+    config.fuel_tanks.center.enabled = false;
     let custom = assess_fuel_capacity(&config, &design, &report);
     let custom_layout = resolve_product_layout(&config, &design, &report.airplane).unwrap();
     assert_eq!(custom.capacity_kg, Some(custom_layout.usable_capacity_kg()));

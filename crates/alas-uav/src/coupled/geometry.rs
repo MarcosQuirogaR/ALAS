@@ -13,7 +13,7 @@
 //! # Spanwise stations
 //!
 //! The lattice induced drag of a rectangular wing converges slowly in the
-//! number of strips (M2 lane A: `e` of an `A = 8` rectangle goes 0.82 -> 0.94
+//! number of strips (`e` of an `A = 8` rectangle goes 0.82 -> 0.94
 //! from 8 to 96 strips) because the tip loading falls to zero as a square
 //! root.  [`build_wing`] therefore places the cross-sections itself, clustered
 //! towards the wing tip like a half cosine (`y = (b/2) sin(pi k / 2n)`, the

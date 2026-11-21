@@ -31,15 +31,21 @@ mod vlm;
 mod vspaero;
 mod vspaero_lod;
 
-pub use drag_preview::figure_drag_preview;
-pub use model_comparison::{figure_model_comparison, figure_optimized_aircraft_comparison};
+pub use drag_preview::{figure_drag_preview, figure_drag_preview_sized, DRAG_PREVIEW_CANVAS};
+pub use model_comparison::{
+    figure_model_comparison, figure_model_comparison_with_cl_max,
+    figure_optimized_aircraft_comparison,
+};
 pub use mses::{
     figure_mses_convergence, figure_mses_cp_contours, figure_mses_mach_contours,
     figure_mses_pressure_distribution,
 };
-pub use polar::{figure_aero_panel, figure_drag_breakdown, figure_polar_comparison};
+pub use polar::{
+    figure_aero_panel, figure_aero_panel_with_cl_max, figure_drag_breakdown,
+    figure_polar_comparison, figure_polar_comparison_with_cl_max,
+};
 pub use reynolds::figure_airfoil_reynolds;
 pub use status::figure_status_message;
-pub use vlm::{figure_span_loading, figure_vlm_flow};
+pub use vlm::{figure_span_loading, figure_vlm_flow, span_loading_balance, SpanLoadingBalance};
 pub use vspaero::{figure_vspaero_polar, figure_vspaero_wake_convergence};
 pub use vspaero_lod::figure_vspaero_load_distribution;

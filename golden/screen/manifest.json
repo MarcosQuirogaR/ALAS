@@ -1,17 +1,27 @@
 {
   "fixtures": {
     "screening": {
-      "description": "Airfoil screening cruise condition, 2-D scoring, 3-D refinement, score blending, and full multi-stage sweep",
-      "generator": "gen_screen_screening.py",
-      "runtime": "alas",
       "alas_commit": "7d1555c1f4db5110cf6cd187c156718e1a033b50",
+      "description": "Airfoil screening cruise condition, 2-D scoring, 3-D refinement, score blending, and full multi-stage sweep",
       "environment": {
-        "numpy": "2.5.1",
+        "PIL": "12.2.0",
         "aerosandbox": "4.2.8",
+        "atmosphere": "us1976 (generator substitution for aerosandbox.Atmosphere)",
+        "matplotlib": "3.11.0",
+        "neuralfoil": "0.3.2",
+        "numpy": "2.5.1",
+        "numpy_blas": {
+          "name": "scipy-openblas",
+          "openblas configuration": "OpenBLAS 0.3.33.112.0  USE64BITINT DYNAMIC_ARCH NO_AFFINITY Haswell MAX_THREADS=24",
+          "version": "0.3.33.112.0"
+        },
         "platform": "Windows-11-10.0.26200-SP0",
+        "python": "3.13.13",
         "scipy": "1.17.1",
-        "python": "3.13.13"
-      }
+        "shapely": "absent"
+      },
+      "generator": "gen_screen_screening.py",
+      "runtime": "alas"
     }
   }
 }

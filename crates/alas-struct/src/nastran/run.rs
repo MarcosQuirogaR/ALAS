@@ -291,17 +291,20 @@ fn msc_command_token(path: &Path) -> Result<String, String> {
         let mut command = Command::new("cmd.exe");
         command.args(["/d", "/s", "/c"]);
         command.raw_arg("for %I in (\"%ALAS_MSC_EXECUTABLE_PATH%\") do @echo %~sI");
-        let output = command
-            .env("ALAS_MSC_EXECUTABLE_PATH", path)
-            .output()
-            .map_err(|error| format!("could not query its DOS 8.3 path: {error}"))?;
+        command.env("ALAS_MSC_EXECUTABLE_PATH", path);
+        let output = alas_exec::captured::run_captured(
+            &mut command,
+            "MSC launcher 8.3 path query",
+            std::time::Duration::from_secs(30),
+        )
+        .map_err(|error| format!("could not query its DOS 8.3 path: {error}"))?;
         if !output.status.success() {
             return Err(format!(
                 "querying its DOS 8.3 path failed with {}",
                 output.status
             ));
         }
-        let token = String::from_utf8_lossy(&output.stdout).trim().to_owned();
+        let token = output.stdout.trim().to_owned();
         if token.is_empty() || token.chars().any(char::is_whitespace) {
             return Err(format!(
                 "its installed path contains whitespace and this volume has no usable DOS 8.3 name ({token:?})"
@@ -334,6 +337,8 @@ fn supervise(mut command: Command, solve: &Solve) -> NastranRunOutcome {
         Err(error) => return NastranRunOutcome::failed(error.to_string()),
     };
     let spawned = command
+        // Never the parent's stdin: under `ALAS --mcp` it is the protocol pipe.
+        .stdin(Stdio::null())
         .stdout(Stdio::piped())
         .stderr(Stdio::piped())
         .no_window()

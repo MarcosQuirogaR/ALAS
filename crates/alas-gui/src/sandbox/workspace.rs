@@ -24,7 +24,8 @@ use super::advanced::{show_advanced_settings_window, show_menu_action};
 use super::estimates::show_estimates_strip;
 use super::viewport::show_viewport;
 use super::windows::{
-    show_discipline_windows, show_exit_prompt, show_log_window, show_results_window,
+    show_discipline_windows, show_exit_prompt, show_hump_confirm, show_log_window,
+    show_results_window,
 };
 
 /// Launch the Quick Analysis for the current revision.
@@ -50,6 +51,10 @@ pub fn start_full_analysis(state: &mut AppState) {
 }
 
 fn handle_shortcuts(state: &mut AppState, ctx: &Context) {
+    // A text box owns Ctrl+Z / Ctrl+Y (its own text undo), as in the guided shell.
+    if ctx.wants_keyboard_input() {
+        return;
+    }
     let (undo, redo) = ctx.input_mut(|input| {
         let undo = input.consume_key(egui::Modifiers::COMMAND, egui::Key::Z);
         let redo = input.consume_key(egui::Modifiers::COMMAND, egui::Key::Y)
@@ -80,20 +85,20 @@ fn show_menu_bar(state: &mut AppState, ctx: &Context, ui: &mut Ui) {
             });
             crate::user_files_ui::show_config_file_buttons(state, ui);
             if ui.button(tr("Load configuration")).clicked() {
-                state.load_config();
+                state.guarded(crate::shell_confirm::Pending::ConfigFile);
                 ui.close_menu();
             }
             if ui.button(tr("Save configuration")).clicked() {
-                state.save_config();
+                state.save_config_settling();
                 ui.close_menu();
             }
             ui.separator();
             if ui
                 .button(tr("New sandbox from AVE"))
-                .on_hover_text(tr("Replace the sandbox aircraft with the AVE reference; the current sandbox design is not kept."))
+                .on_hover_text(tr("Replace the sandbox aircraft with the AVE reference."))
                 .clicked()
             {
-                state.new_sandbox_from_reference();
+                state.guarded(crate::shell_confirm::Pending::NewSandbox);
                 ui.close_menu();
             }
             if ui.button(tr("Leave sandbox...")).clicked() {
@@ -102,35 +107,46 @@ fn show_menu_bar(state: &mut AppState, ctx: &Context, ui: &mut Ui) {
             }
             ui.separator();
             if ui.button(tr("Exit")).clicked() {
-                std::process::exit(0);
+                state.guarded(crate::shell_confirm::Pending::Exit);
+                ui.close_menu();
             }
         });
         ui.menu_button(tr("View"), |ui| {
             ui.set_min_width(layout::MENU_MIN_WIDTH);
-            ui.checkbox(
+            crate::checkbox::checkbox(
+                ui,
                 &mut state.sandbox.layout.estimates_open,
                 tr("Estimates strip"),
             );
-            ui.checkbox(
+            if crate::checkbox::checkbox(
+                ui,
                 &mut state.sandbox.layout.log_window_open,
                 tr("Run log window"),
-            );
-            ui.checkbox(
+            )
+            .changed()
+                && state.sandbox.layout.log_window_open
+            {
+                crate::native_viewport::raise(ctx, "sandbox_run_log");
+            }
+            if crate::checkbox::checkbox(
+                ui,
                 &mut state.sandbox.layout.advanced_settings_open,
                 tr("Advanced Settings window"),
-            );
+            )
+            .changed()
+                && state.sandbox.layout.advanced_settings_open
+            {
+                crate::native_viewport::raise(ctx, "advanced_settings");
+            }
             ui.separator();
             render_view_options(state, ctx, ui, true);
         });
         // One menu-bar order across modes: the guided workspace is
-        // File - View - Analysis - Advanced Settings - Help, and a command
-        // that moves position between modes costs the user every time. The
-        // standalone analyses are disabled here rather than removed, so their
-        // absence is legible and carries its reason.
-        ui.add_enabled(false, egui::Button::new(tr("Analysis")))
-            .on_disabled_hover_text(tr(
-            "Standalone analyses open from the guided workspace; leave the sandbox to use them.",
-        ));
+        // File - View - Analysis - Advanced Settings - Help. The standalone
+        // analyses act on the loaded aircraft and need no pipeline run, so the
+        // same entries are live here; their windows are dispatched by the
+        // Sandbox fast path of the app loop.
+        crate::app::menus::show_analysis_menu(state, ui);
         show_menu_action(state, ui);
         crate::views::tool_intro::show_menu_action(state, ui);
         ui.menu_button(tr("Help"), |ui| {
@@ -139,7 +155,50 @@ fn show_menu_bar(state: &mut AppState, ctx: &Context, ui: &mut Ui) {
                 ui.close_menu();
             }
         });
+        // Top-right: the one-click way out of Sandbox mode (the same dialog as
+        // File > Leave sandbox).
+        ui.with_layout(egui::Layout::right_to_left(egui::Align::Center), |ui| {
+            if exit_sandbox_button(ui)
+                .on_hover_text(tr("Exit Sandbox mode"))
+                .clicked()
+            {
+                state.request_leave_sandbox();
+            }
+        });
     });
+}
+
+/// The subtle red cross at the top-right of the Sandbox bar: a faint red
+/// plate at rest, a stronger one under the pointer. The cross is painted, not
+/// a glyph, so it never depends on a font.
+fn exit_sandbox_button(ui: &mut Ui) -> egui::Response {
+    const RED: (u8, u8, u8) = (229, 83, 75);
+    let (rect, response) = ui.allocate_exact_size(egui::vec2(24.0, 22.0), egui::Sense::click());
+    if ui.is_rect_visible(rect) {
+        let hovered = response.hovered() || response.has_focus();
+        let (fill_alpha, color) = if hovered {
+            (56, egui::Color32::from_rgb(RED.0, RED.1, RED.2))
+        } else {
+            (26, egui::Color32::from_rgb(0xff, 0x9a, 0x93))
+        };
+        ui.painter().rect_filled(
+            rect,
+            crate::theme::SELECTABLE_CONTROL_RADIUS,
+            egui::Color32::from_rgba_unmultiplied(RED.0, RED.1, RED.2, fill_alpha),
+        );
+        let stroke = egui::Stroke::new(1.6_f32, color);
+        let arm = 4.5;
+        let c = rect.center();
+        ui.painter().line_segment(
+            [c + egui::vec2(-arm, -arm), c + egui::vec2(arm, arm)],
+            stroke,
+        );
+        ui.painter().line_segment(
+            [c + egui::vec2(-arm, arm), c + egui::vec2(arm, -arm)],
+            stroke,
+        );
+    }
+    response.on_hover_cursor(egui::CursorIcon::PointingHand)
 }
 
 /// Render the whole sandbox workspace for this frame.
@@ -153,6 +212,10 @@ pub fn show_sandbox_workspace(state: &mut AppState, ctx: &Context) {
         ctx.request_repaint_after(std::time::Duration::from_millis(100));
     }
     handle_shortcuts(state, ctx);
+    // The Ctrl+K palette and its jump highlight, which the guided frame
+    // normally drives; the Sandbox returns before that code runs.
+    crate::views::search_overlay::handle_shortcuts(state, ctx);
+    crate::views::search_overlay::tick_focus(state, ctx);
 
     TopBottomPanel::top("sandbox_menu_bar")
         .frame(
@@ -183,7 +246,9 @@ pub fn show_sandbox_workspace(state: &mut AppState, ctx: &Context) {
     show_log_window(state, ctx);
     show_results_window(state, ctx);
     show_exit_prompt(state, ctx);
+    show_hump_confirm(state, ctx);
     overlays::show_about(state, ctx);
+    crate::views::search_overlay::show_overlay(state, ctx);
 }
 
 /// Render the sandbox when it is active; returns whether it was rendered so

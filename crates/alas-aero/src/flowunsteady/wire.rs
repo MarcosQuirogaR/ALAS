@@ -305,6 +305,16 @@ pub fn parse_result(text: &str) -> Result<FlowUnsteadyPolar, FlowUnsteadyError> 
             "pitch_moment_is_body_axis",
         )?,
     );
+    let wake_model = match get("model")? {
+        "vortex_particle_wake" => FlowUnsteadyWakeModel::FreeVortexParticle,
+        "quasi_steady_vortex_lattice" => FlowUnsteadyWakeModel::QuasiSteadyLattice,
+        token => {
+            return Err(FlowUnsteadyError::InvalidValue {
+                field: "model",
+                token: token.to_owned(),
+            })
+        }
+    };
     let origin_tokens = get("moment_reference_m")?.split(',').collect::<Vec<_>>();
     if origin_tokens.len() != 3 {
         return Err(FlowUnsteadyError::Missing(
@@ -357,6 +367,7 @@ pub fn parse_result(text: &str) -> Result<FlowUnsteadyPolar, FlowUnsteadyError> 
         lifting_surfaces_only: point_flags.0,
         lift_is_wind_axis: point_flags.1,
         pitch_moment_is_body_axis: point_flags.2,
+        wake_model,
         points,
     })
 }

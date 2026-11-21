@@ -19,7 +19,10 @@ use alas_config::AlasConfig;
 use alas_opt::assess_product_candidate;
 use serde_json::json;
 
-/// 70 seats, 800 nmi, no preset: only the brief's own numbers and the engine.
+/// 70 seats, 800 nmi, no preset: only the brief's own numbers and the engine. It
+/// declares no belly clearance: the class start is a low wing, outside the layout
+/// of the turboprop clearance sample, so the full documented sample stands in
+/// at both ends (and is flagged by the feasibility report).
 fn brief() -> serde_json::Value {
     json!({
         "requirements": {
@@ -60,9 +63,18 @@ fn the_turboprop_class_start_is_within_a_few_percent_of_the_engine_out_climb_che
             r.actual
         );
     }
-    // Installed T/W is the catalogue engine at the brief MTOW, not a free variable.
+    // Installed T/W is the engine the sizing scaled to this brief at the brief MTOW. The
+    // band is the catalogue PW127M's T/W at this MTOW (about 0.314) times the sizing's
+    // 20 percent scaling window (Jenkinson Sec. 9.10), not an observed value: with the
+    // propeller-aircraft fuselage group at 39 % of its length (Torenbeek Table 8-15) the CG
+    // is about 5 points MAC further forward (static margin 0.367 -> 0.420), the trimmed clean drag at the approach-climb
+    // lift coefficient is 3 percent higher (0.0783 -> 0.0807) and the closed take-off mass
+    // 0.3 percent higher (23,460 -> 23,540 kg), the required T/W rises 1.6 percent and the engine scales to 1.094
+    // of the catalogue (was 1.073), installed T/W 0.3380 -> 0.3436.
     let installed = row("oei_second_segment").actual;
-    assert!((0.30..0.34).contains(&installed), "{installed}");
+    let scale = row("engine_scale_validity").actual;
+    assert!((1.0..1.2).contains(&scale), "{scale}");
+    assert!((0.30..0.377).contains(&installed), "{installed}");
     // The class wing is inside the wing-loading floor of the class.
     assert!(!row("wing_loading").violated());
     assert!(config.performance.cl_max_to < config.performance.cl_max_land);

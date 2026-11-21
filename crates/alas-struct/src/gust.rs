@@ -68,8 +68,9 @@ const GRADIENT_RANGE_M: (f64, f64) = (9.0, 107.0);
 /// chords from zero to zero velocity).
 const PRATT_GRADIENT_CHORDS: f64 = 12.5;
 
-/// Mach margin between `M_C` and `M_D` of the AMC to CS 25.335, PDF p. 217.
-pub const MACH_MARGIN_C_TO_D: f64 = 0.07;
+/// Mach margin between `M_C` and `M_D` where compressibility limits `M_C`
+/// (CS 25.335(b)(2); AMC 25.335(b)(2) 4.b), the constant of `alas_config::design_speeds`.
+pub const MACH_MARGIN_C_TO_D: f64 = alas_config::design_speeds::COMPRESSIBILITY_MACH_MARGIN;
 
 /// Altitude stations of the critical-altitude search.
 const ALTITUDE_STATIONS: usize = 61;
@@ -124,7 +125,8 @@ pub struct GustSpeeds {
     pub cruise_eas_m_s: f64,
     /// Design dive speed `V_D`.
     pub dive_eas_m_s: f64,
-    /// Design cruising Mach number `M_C`, which limits `V_C` at altitude.
+    /// Design cruising Mach number `M_C` (MMO where declared, CS 25.1505), which limits `V_C`
+    /// at altitude.
     pub cruise_mach: f64,
 }
 
@@ -192,11 +194,15 @@ pub fn flight_profile_alleviation_factor(
 }
 
 /// DATCOM lift-curve slope of a straight-tapered wing, 1/rad (Torenbeek 2013,
-/// Eq. 11.10), `Mach < 1`.
+/// Eq. 11.10): the rule of `alas_aero::analysis::lift_slope`, `NaN` outside
+/// its domain (`0 <= Mach < 1`, positive finite aspect ratio).
 pub fn lift_curve_slope_per_rad(aspect_ratio: f64, tan_half_chord_sweep: f64, mach: f64) -> f64 {
-    let root =
-        ((tan_half_chord_sweep.powi(2) + 1.0 - mach * mach) * aspect_ratio.powi(2) + 4.0).sqrt();
-    2.0 * std::f64::consts::PI * aspect_ratio / (root + 2.0)
+    alas_aero::analysis::lift_slope::finite_wing_lift_curve_slope_per_rad(
+        aspect_ratio,
+        tan_half_chord_sweep,
+        mach,
+    )
+    .unwrap_or(f64::NAN)
 }
 
 /// One altitude's gust condition at a given equivalent airspeed.

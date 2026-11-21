@@ -12,8 +12,10 @@
 
 use crate::mdo::ResidualRole;
 
-use alas_config::{MtowPlan, MtowSizing};
+use alas_config::{AlasConfig, MtowPlan, MtowSizing};
 use alas_mass::dispatch::DispatchStatus;
+use alas_payload::layout::LayoutSummary;
+use alas_payload::oew::oew_and_cg;
 
 use super::super::offdesign::OffDesignFlight;
 use super::super::types::ConstraintFamily::Mass;
@@ -118,6 +120,64 @@ pub(crate) fn offdesign_residuals(
         role,
     ));
     residuals
+}
+
+/// The finding that a `payload_adjusted` mission on its charted range flies
+/// less than the configured load case: `payload_capped_at_chart`, the
+/// configured payload against the charted one, a diagnostic reported only
+/// when the cap reduces the payload. The configured payload is the layout
+/// before the chart cap, laid out on the configuration and empty mass the
+/// balance ledger reads.
+pub(crate) fn chart_payload_cap_residuals(
+    outcome: &super::SizingOutcome,
+    config: &AlasConfig,
+) -> Vec<ConstraintResidual> {
+    let Some(cap_kg) = crate::mdo::build::chart_payload_cap_kg(config) else {
+        return Vec::new();
+    };
+    let mut config = outcome.evaluated_at.map_or_else(
+        || config.at_sized_closure_mass(outcome.sized.takeoff_mass_kg),
+        |at| at.config(config),
+    );
+    if crate::objective::apply_candidate_payload_load_case(&mut config, &outcome.history.dv)
+        .is_err()
+    {
+        // The balance ledger reports the same load-case error.
+        return Vec::new();
+    }
+    let (oew_kg, x_oew_m) = oew_and_cg(&outcome.masses, &outcome.coords);
+    let Ok(layout) = crate::mdo::build::structurally_capped_payload_layout(
+        &config,
+        &outcome.history.dv,
+        &outcome.plane,
+        oew_kg,
+        x_oew_m,
+    ) else {
+        return Vec::new();
+    };
+    let configured_kg = layout.total_mass;
+    // Not above the cap, or not comparable (NaN): nothing to report.
+    if configured_kg.partial_cmp(&cap_kg) != Some(std::cmp::Ordering::Greater) {
+        return Vec::new();
+    }
+    let carried = if matches!(layout.summary, LayoutSummary::Passenger(_)) {
+        "the dispatch, the balance and the loading envelope carry the capped payload"
+    } else {
+        "the dispatch flies the capped payload; the freighter deck is not scaled, so \
+         the balance and the loading envelope carry the configured one"
+    };
+    vec![ConstraintResidual::scaled(
+        "payload_capped_at_chart",
+        Mass,
+        configured_kg,
+        cap_kg,
+        "kg",
+        configured_kg - cap_kg,
+        ResidualRole::Diagnostic,
+    )
+    .with_detail(format!(
+        "configured load case {configured_kg:.0} kg capped at the charted {cap_kg:.0} kg; {carried}"
+    ))]
 }
 
 /// The residuals of `sized`'s plan-dependent mass limits.

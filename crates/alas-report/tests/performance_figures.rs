@@ -71,6 +71,7 @@ fn sample_report(payload_kg: f64) -> AnalysisReport {
         polar: PolarSweep {
             alpha_deg: Vec::new(),
             geometric_alpha_deg: Vec::new(),
+            compressible_mach: None,
             cl: Vec::new(),
             cd: Vec::new(),
             cd_induced: Vec::new(),

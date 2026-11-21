@@ -28,12 +28,15 @@ fn passenger_shortfall_residual_targets_configured_floor() {
         "no passenger floor is configured, so no passenger_shortfall residual should be scored"
     );
 
-    let mut shorter = design;
-    shorter.fuselage_length_m *= 0.90;
+    // The floor is set above the AVE cabin, so the same design has a shortfall.
+    // The fuselage is not shortened to 0.90, which the trimmed drag table
+    // rejects ("induced curvature or energy" at the maximum refinement depth):
+    // that is not what this test is about, and the residual's floor does not
+    // depend on the fuselage length.
     let mut target = config;
     target.requirements.min_passenger_capacity = 525;
     let objective = DesignObjective::new(target);
-    let assessment = assess_candidate(&objective, &shorter.to_array()).unwrap();
+    let assessment = assess_candidate(&objective, &design.to_array()).unwrap();
     let shortfall = assessment
         .residuals
         .iter()

@@ -3,8 +3,7 @@
 
 //! Powertrain v2: motor, battery, ESC, propeller and the coupled operating point.
 //!
-//! This module is the M2 physics core for the UAV propulsion chain
-//! (UAV-PLAN section 3.2).  It is independent of the legacy
+//! This module is the M2 physics core for the UAV propulsion chain.  It is independent of the legacy
 //! [`crate::propulsion_electric`] solver, which stays as the catalogue-bound
 //! consumer, and has no dependency on the component database for its core
 //! equations: every model is a plain SI parameter struct, and [`from_spec`]

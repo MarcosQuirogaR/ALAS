@@ -31,7 +31,7 @@ pub fn verify_candidate_mses(
 ) {
     if !config.mses.enabled {
         candidate.mses_status = Some("error".to_string());
-        candidate.mses_error = Some("MSES is disabled (Setup > External Tools)".to_string());
+        candidate.mses_error = Some("MSES is disabled (Workspace > External Tools)".to_string());
         return;
     }
 

@@ -1,7 +1,7 @@
 // SPDX-License-Identifier: AGPL-3.0-or-later
 // Copyright (C) 2026 Marcos Quiroga Rodriguez
 
-//! The hard per-state model constraints (coordinator item A/B): a real
+//! The hard per-state model constraints: a real
 //! `mod`, not an `include!`, so this does not count against
 //! `envelope.rs`'s frozen `docs/source-size-budgets.tsv` ceiling.
 
@@ -43,17 +43,18 @@ pub enum ModelCgConstraint {
 }
 
 impl ModelCgConstraint {
-    /// Whether this check is reported but never rejects a design.
+    /// Whether this kind of check is reported but never rejects a design.
     ///
     /// `MinimumUsableCgRange` checks a configured assumption, not a physical
-    /// limit. `TailScrape` is physical, but the preset fuselages' aft lower
-    /// contour is not yet validated: every registered transport scrapes 3-5
-    /// deg below its published tail-strike attitude (A320 model 9.5 vs about
-    /// 11.7 deg), so as a hard limit it would reject real aircraft on a
-    /// geometry artefact. It stays a diagnostic until that contour is
-    /// validated; tip-back, which uses the same ground plane, stays hard.
+    /// limit. `TailScrape` rejects by kind: a built fuselage that touches the
+    /// runway below a published tail-strike attitude, compared in the gear
+    /// state it was published for, cannot fly that rotation. One assessment
+    /// can still be diagnostic when its requirement is an assumption or its
+    /// gear state is not published
+    /// (`LandingGearConfig::required_rotation_basis`); see
+    /// [`ModelCgConstraintAssessment::is_diagnostic`].
     pub const fn is_diagnostic(self) -> bool {
-        matches!(self, Self::MinimumUsableCgRange | Self::TailScrape)
+        matches!(self, Self::MinimumUsableCgRange)
     }
 
     /// Stable report label for this constraint.
@@ -96,13 +97,28 @@ pub struct ModelCgConstraintAssessment {
     pub violated: bool,
     /// Dimensionless violation used only to rank the worst constraint.
     pub normalized_exceedance: f64,
+    /// Whether this assessment is reported but never rejects a design.
+    pub diagnostic: bool,
+}
+
+impl ModelCgConstraintAssessment {
+    /// Whether this assessment is reported but never rejects a design: its
+    /// kind is diagnostic, or (tail scrape) its requirement is not a
+    /// published value compared in its own gear state.
+    pub const fn is_diagnostic(&self) -> bool {
+        self.diagnostic
+    }
 }
 
 #[derive(Debug, Clone, Copy)]
 pub(super) struct LoadingConstraintInputs {
     pub(super) state: ModelCgLoadingState,
+    /// The mechanisms `physical_limits` is scoped to: the state's phase at
+    /// its mass ([`PhaseLimits::for_state_at_mass`]).
+    pub(super) scope: PhaseLimits,
     pub(super) mass_kg: f64,
     pub(super) cg_x_m: f64,
+    pub(super) h_cg_m: f64,
     pub(super) cg_pct_mac: f64,
     pub(super) static_margin: f64,
     /// Static margin measured against the critical (most-forward) neutral
@@ -123,6 +139,9 @@ pub(super) struct LoadingConstraintInputs {
     pub(super) required_tip_back_deg: f64,
     pub(super) scrape_angle_deg: Option<f64>,
     pub(super) required_rotation_angle_deg: f64,
+    /// Whether a tail-scrape miss rejects the design
+    /// (`RotationAngleBasis::rejects`).
+    pub(super) tail_scrape_rejects: bool,
     pub(super) cg_range_pct_mac: f64,
 }
 
@@ -139,6 +158,7 @@ fn lower_bound_constraint(
         limit,
         violated: actual < limit,
         normalized_exceedance: deficit / normalization.max(f64::EPSILON),
+        diagnostic: constraint.is_diagnostic(),
     }
 }
 
@@ -155,6 +175,7 @@ fn upper_bound_constraint(
         limit,
         violated: actual > limit,
         normalized_exceedance: excess / normalization.max(f64::EPSILON),
+        diagnostic: constraint.is_diagnostic(),
     }
 }
 
@@ -228,12 +249,14 @@ pub(super) fn assess_loading_constraints(
     if let Some(scrape_angle_deg) = inputs.scrape_angle_deg {
         // State-independent (pure rotation-clearance geometry), evaluated
         // identically at every state for a uniform per-state constraint list.
-        constraints.push(lower_bound_constraint(
+        let mut scrape = lower_bound_constraint(
             ModelCgConstraint::TailScrape,
             scrape_angle_deg,
             inputs.required_rotation_angle_deg,
             1.0,
-        ));
+        );
+        scrape.diagnostic = !inputs.tail_scrape_rejects;
+        constraints.push(scrape);
     }
     // Each state is gated only by the mechanisms of its own phase: a
     // ground-only state keeps no flight CG-range or static-margin verdict.
@@ -257,10 +280,13 @@ pub(super) fn assess_loading_constraints(
     }
     ModelCgLoadingAssessment {
         state: inputs.state,
+        scope: inputs.scope,
         mass_kg: inputs.mass_kg,
         cg_x_m: inputs.cg_x_m,
+        h_cg_m: inputs.h_cg_m,
         cg_pct_mac: inputs.cg_pct_mac,
         static_margin: inputs.static_margin,
+        critical_static_margin: inputs.critical_static_margin,
         nose_gear_load_fraction,
         ground_reactions_admissible,
         physical_limits: inputs.physical_limits,

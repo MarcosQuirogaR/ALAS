@@ -15,6 +15,26 @@ impl Wing {
             xsecs,
             symmetric,
             reference: None,
+            planform_datum: None,
+            dynamic_pressure_ratio: 1.0,
+            reference_xsecs: None,
+            tip_te_flare_m: 0.0,
+            twist_about_pitch_axis: false,
+        }
+    }
+
+    /// This surface on its straight-edged reference planform
+    /// ([`Self::reference_xsecs`]), or itself when it has no other. Tail areas,
+    /// arms and the correlations stated on a theoretical planform read this;
+    /// the lattice and the wetted area read the sections themselves.
+    pub fn reference_planform(&self) -> std::borrow::Cow<'_, Self> {
+        match &self.reference_xsecs {
+            None => std::borrow::Cow::Borrowed(self),
+            Some(sections) => {
+                let mut wing = Self::new(self.name.clone(), sections.clone(), self.symmetric);
+                wing.dynamic_pressure_ratio = self.dynamic_pressure_ratio;
+                std::borrow::Cow::Owned(wing)
+            }
         }
     }
 
@@ -25,6 +45,14 @@ impl Wing {
             xsecs: self.xsecs.iter().map(|xsec| xsec.translate(xyz)).collect(),
             symmetric: self.symmetric,
             reference: self.reference.map(|reference| reference.translate(xyz[0])),
+            planform_datum: self.planform_datum.map(|datum| datum.translate(xyz)),
+            dynamic_pressure_ratio: self.dynamic_pressure_ratio,
+            reference_xsecs: self
+                .reference_xsecs
+                .as_ref()
+                .map(|sections| sections.iter().map(|xsec| xsec.translate(xyz)).collect()),
+            tip_te_flare_m: self.tip_te_flare_m,
+            twist_about_pitch_axis: self.twist_about_pitch_axis,
         }
     }
 
@@ -48,18 +76,33 @@ impl Wing {
         if ratio < 2 {
             return Err(SubdivideSectionsError::RatioTooSmall(ratio));
         }
+        let ratios = vec![ratio; self.xsecs.len().saturating_sub(1)];
+        self.subdivide_sections_by(&ratios, spacing_function)
+    }
 
-        // `spacing_function(0, 1, ratio + 1)[:-1]`: `ratio` fractions
-        // covering [0, 1): the final fraction (exactly 1) is dropped
-        // because the outer xsec it would reproduce is appended separately,
-        // unchanged, after the loop.
-        let full = spacing_function.spaced(0.0, 1.0, ratio + 1);
-        let span_fractions = &full[..full.len() - 1];
-
+    /// [`Self::subdivide_sections`] with its own ratio for each lofted
+    /// section, root to tip: `ratios[i]` splits section `i` (a ratio of 1
+    /// keeps it whole). Equal ratios of at least 2 give exactly
+    /// [`Self::subdivide_sections`]. A missing ratio counts as 1.
+    ///
+    /// # Errors
+    ///
+    /// [`SubdivideSectionsError::Blend`], as [`Self::subdivide_sections`].
+    pub fn subdivide_sections_by(
+        &self,
+        ratios: &[usize],
+        spacing_function: SpacingFunction,
+    ) -> Result<Self, SubdivideSectionsError> {
         let mut new_xsecs = Vec::new();
-        for pair in self.xsecs.windows(2) {
+        for (index, pair) in self.xsecs.windows(2).enumerate() {
             let (xsec_a, xsec_b) = (&pair[0], &pair[1]);
-            for &s in span_fractions {
+            let ratio = ratios.get(index).copied().unwrap_or(1).max(1);
+            // `spacing_function(0, 1, ratio + 1)[:-1]`: `ratio` fractions
+            // covering [0, 1): the final fraction (exactly 1) is dropped
+            // because the outer xsec it would reproduce is the next
+            // section's first, or is appended unchanged after the loop.
+            let full = spacing_function.spaced(0.0, 1.0, ratio + 1);
+            for &s in &full[..full.len() - 1] {
                 let a_weight = 1.0 - s;
                 let b_weight = s;
 
@@ -87,6 +130,7 @@ impl Wing {
                     chord: xsec_a.chord * a_weight + xsec_b.chord * b_weight,
                     twist: xsec_a.twist * a_weight + xsec_b.twist * b_weight,
                     airfoil,
+                    span_axis: interpolated_span_axis(xsec_a, xsec_b, a_weight),
                 });
             }
         }
@@ -100,6 +144,11 @@ impl Wing {
             xsecs: new_xsecs,
             symmetric: self.symmetric,
             reference: self.reference,
+            planform_datum: self.planform_datum,
+            dynamic_pressure_ratio: self.dynamic_pressure_ratio,
+            reference_xsecs: self.reference_xsecs.clone(),
+            tip_te_flare_m: self.tip_te_flare_m,
+            twist_about_pitch_axis: self.twist_about_pitch_axis,
         })
     }
 
@@ -139,15 +188,18 @@ impl Wing {
     /// from the one adjacent segment they have; an interior cross-section
     /// averages its two adjacent segments and scales `zg` by
     /// `sqrt(2 / (1 + cos(angle between them)))` so the frame remains
-    /// consistent across a change in local sweep or dihedral. Both then twist
-    /// about `yg` by the cross-section's own twist angle.
+    /// consistent across a change in local sweep or dihedral. A cross-section
+    /// with a [`WingXSec::span_axis`] takes that axis and an unscaled `zg`
+    /// instead. All then twist about `yg` by the cross-section's own twist angle.
     ///
     /// `pub(crate)`, for the same reason as [`Wing::xyz_of_xsec`], which is
     /// built on this.
     pub(crate) fn frame_of_xsec(&self, index: usize) -> ([f64; 3], [f64; 3], [f64; 3]) {
         let last = self.xsecs.len() - 1;
 
-        let (yg_local, z_scale) = if index == 0 {
+        let (yg_local, z_scale) = if let Some(axis) = self.xsecs[index].span_axis {
+            (axis, 1.0)
+        } else if index == 0 {
             let vector = sub3(self.xsecs[1].xyz_le, self.xsecs[0].xyz_le);
             (project_to_yz_and_normalize(vector), 1.0)
         } else if index == last {
@@ -172,7 +224,12 @@ impl Wing {
         let xg_local: [f64; 3] = [1.0, 0.0, 0.0];
         let zg_local = scale3(cross3(xg_local, yg_local), z_scale);
 
-        let rotation = rotation_matrix_3d(self.xsecs[index].twist * PI / 180.0, yg_local);
+        let twist_axis = if self.twist_about_pitch_axis {
+            [0.0, 1.0, 0.0]
+        } else {
+            yg_local
+        };
+        let rotation = rotation_matrix_3d(self.xsecs[index].twist * PI / 180.0, twist_axis);
         let xg_local = matvec3(rotation, xg_local);
         let zg_local = matvec3(rotation, zg_local);
 
@@ -242,8 +299,10 @@ impl Wing {
     /// comparisons.  [`Self::unfolded_span`] remains available only for the
     /// frozen compatibility geometry path.
     pub fn reference_span(&self) -> f64 {
-        self.reference
-            .map_or_else(|| self.projected_span(), |reference| reference.span_m)
+        self.reference.map_or_else(
+            || self.reference_planform().projected_span(),
+            |reference| reference.span_m,
+        )
     }
 
     /// Reference-plane area projected onto the aircraft XY plane.
@@ -276,10 +335,13 @@ impl Wing {
     ///
     /// When the wing carries a [`WingReference`] (the manufacturer
     /// reference-wing convention), this is that reference wing's area, not the
-    /// drawn planform's; [`Self::projected_area`] is always the drawn one.
+    /// drawn planform's; [`Self::projected_area`] is always the drawn one. A
+    /// tail surface with a straight-edged reference planform answers on that.
     pub fn reference_area(&self) -> f64 {
-        self.reference
-            .map_or_else(|| self.projected_area(), |reference| reference.area_m2)
+        self.reference.map_or_else(
+            || self.reference_planform().projected_area(),
+            |reference| reference.area_m2,
+        )
     }
 
     /// Each lofted section's planform area: the internal
@@ -391,10 +453,19 @@ impl Wing {
     }
 
     /// The ratio of the tip chord to the root chord: `Wing.taper_ratio`.
-    /// Only meaningful for a trapezoidal wing, as upstream notes.
+    /// Only meaningful for a trapezoidal wing, as upstream notes. A wing with a
+    /// [`PlanformDatum`] answers on the design root and the straight-edge tip,
+    /// a tail surface on its reference planform, and any other wing without the
+    /// flare of a wingtip device.
     pub fn taper_ratio(&self) -> f64 {
+        if let Some(datum) = &self.planform_datum {
+            return datum.tip_chord_m / datum.root_chord_m;
+        }
+        if self.reference_xsecs.is_some() {
+            return self.reference_planform().taper_ratio();
+        }
         let last = self.xsecs.len() - 1;
-        self.xsecs[last].chord / self.xsecs[0].chord
+        (self.xsecs[last].chord - self.tip_te_flare_m) / self.xsecs[0].chord
     }
 
     /// The geometric aspect ratio, `span^2 / area`: `Wing.aspect_ratio` at
@@ -408,11 +479,29 @@ impl Wing {
     /// from root to tip, relative to the X axis: `Wing.mean_sweep_angle`.
     /// Positive is swept back. Measured directly from the root and tip
     /// cross-sections only, with no regard for the sweep of any
-    /// cross-section in between.
+    /// cross-section in between. A wing with a [`PlanformDatum`] answers on the
+    /// design root and the straight-edge tip, a tail surface on its reference
+    /// planform, and any other wing without the flare of a wingtip device.
     pub fn mean_sweep_angle(&self, x_nondim: f64) -> f64 {
+        if self.reference_xsecs.is_some() {
+            return self.reference_planform().mean_sweep_angle(x_nondim);
+        }
         let last = self.xsecs.len() - 1;
-        let root = self.xyz_of_xsec(0, x_nondim, 0.0);
         let tip = self.xyz_of_xsec(last, x_nondim, 0.0);
+        let (root, tip) = match &self.planform_datum {
+            Some(datum) => datum.sweep_line(
+                x_nondim,
+                tip,
+                self.xsecs[last].xyz_le,
+                self.xsecs[last].chord,
+            ),
+            None => {
+                let (tip_le, chord) = (self.xsecs[last].xyz_le, self.xsecs[last].chord);
+                let unflared = (chord - self.tip_te_flare_m) / chord;
+                let tip = add3(tip_le, scale3(sub3(tip, tip_le), unflared));
+                (self.xyz_of_xsec(0, x_nondim, 0.0), tip)
+            }
+        };
         let vector = sub3(tip, root);
         let vector_norm = scale3(vector, 1.0 / norm3(vector));
         // `vector_norm[0]` is the sine of the sweep angle, being the dot

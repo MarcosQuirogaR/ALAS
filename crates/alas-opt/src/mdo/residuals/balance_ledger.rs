@@ -37,15 +37,16 @@ pub(super) fn loading_basis(
 pub(super) fn loading_bases(
     outcome: &SizingOutcome,
     config: &AlasConfig,
-) -> Result<
-    (
-        LedgerLoadingBasis,
-        Option<(LedgerLoadingBasis, LedgerLandingState)>,
-    ),
-    String,
-> {
+) -> Result<LoadingBases, String> {
     loading_bases_for(outcome, config, FuelLoad::Mission)
 }
+
+/// The design loading basis and, when the dispatch fuel loads into the
+/// tanks, the dispatched route's takeoff basis and landing state.
+pub(super) type LoadingBases = (
+    LedgerLoadingBasis,
+    Option<(LedgerLoadingBasis, LedgerLandingState)>,
+);
 
 /// How much fuel the design loading puts in the tanks.
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
@@ -67,14 +68,17 @@ pub(super) fn loading_bases_for(
     outcome: &SizingOutcome,
     config: &AlasConfig,
     fuel_load: FuelLoad,
-) -> Result<
-    (
-        LedgerLoadingBasis,
-        Option<(LedgerLoadingBasis, LedgerLandingState)>,
-    ),
-    String,
-> {
-    let mut config = config.at_sized_closure_mass(outcome.sized.takeoff_mass_kg);
+) -> Result<LoadingBases, String> {
+    // The ledger re-evaluates the grouped decomposition of `outcome.masses`,
+    // so it reads the configuration those masses were evaluated at: the last
+    // pass's mass, which an unsettled closure does not share with its
+    // dispatch. At the dispatch mass instead, a systems slot evaluated at a
+    // lighter pass fell 0.35 kg short of its own items, read at the heavier
+    // dispatch, and the A320 payload-adjusted nominal was unavailable.
+    let mut config = outcome.evaluated_at.map_or_else(
+        || config.at_sized_closure_mass(outcome.sized.takeoff_mass_kg),
+        |at| at.config(config),
+    );
     crate::objective::apply_candidate_payload_load_case(&mut config, &outcome.history.dv)
         .map_err(|error| format!("ledger load case: {error}"))?;
     let plane = &outcome.plane;
@@ -97,6 +101,8 @@ pub(super) fn loading_bases_for(
         total_mass: payload.total_mass,
         cg_x: payload.cg_x,
         cg_y: payload.cg_y,
+        equipment_mass: payload.equipment_mass(),
+        equipment_cg: payload.equipment_cg(),
     };
     let model = config.analysis_mass_model(config.requirements.mtow_kg);
     // Re-evaluate the grouped decomposition at exactly the closed design
@@ -127,9 +133,15 @@ pub(super) fn loading_bases_for(
             .with_unusable_fuel_total(groups.operating_items.unusable_fuel_kg)
             .map_err(|error| format!("ledger unusable fuel: {error}"))?;
     }
-    let carried_kg = outcome
-        .masses
-        .physical_fuel_mass_kg()
+    // One fuel load for the balance ledger and the capacity guard: the usable fuel on board at
+    // brake release of the candidate's sized takeoff (`SizedCandidate::takeoff_fuel_kg`: the
+    // dispatch plan's takeoff fuel, or the MTOW loading limited by the tanks where the mode sizes
+    // at the declared mass, which cannot exceed the usable capacity). The `fuel_capacity` guard
+    // holds the same plan's ramp fuel (its takeoff fuel plus taxi fuel) to the usable capacity.
+    // The mass-closure remainder `masses.fuel` (MTOW less zero-fuel mass when the payload is
+    // adjusted) is not fuel on board and is not loaded.
+    let carried_kg = Some(outcome.sized.takeoff_fuel_kg)
+        .filter(|kg| kg.is_finite() && *kg >= 0.0)
         .ok_or_else(|| "nonphysical ledger fuel mass".to_owned())?;
     let carried_kg = if fuel_load == FuelLoad::TankLimited {
         carried_kg.min(tanks.usable_capacity_kg())
@@ -149,15 +161,20 @@ pub(super) fn loading_bases_for(
         .distribute(fuel_kg)
         .map_err(|error| format!("ledger fuel distribution: {error}"))?;
     let items = payload
-        .items
-        .iter()
-        .filter(|item| item.mass > 0.0)
+        .payload_items()
         .enumerate()
         .map(|(index, item)| PayloadItemSummary {
             label: format!("{}_{index}", item.kind.as_str()),
             mass_kg: item.mass,
-            position_m: [item.x, item.y, item.z],
+            position_m: [item.x, item.y, item.mass_z()],
             extent_m: [item.length, item.width, item.height],
+            seats: match &item.meta {
+                alas_payload::layout::ItemMeta::Seat(seat) => Some((
+                    alas_mass::flops_transport::seats::SeatClass::from_cabin_class(seat.cls),
+                    usize::try_from(seat.filled).unwrap_or(0),
+                )),
+                _ => None,
+            },
         })
         .collect::<Vec<_>>();
     let statement = MassStatement::build_with_methods(
@@ -192,6 +209,8 @@ pub(super) fn loading_bases_for(
         takeoff_cg_x_m: tow.cg_m[0],
         takeoff_cg_z_m: tow.cg_m[2],
         takeoff_pitch_inertia_kg_m2: tow.inertia_cg.iyy,
+        oew_pitch_inertia_kg_m2: oew.inertia_cg.iyy,
+        zero_fuel_pitch_inertia_kg_m2: zfw.inertia_cg.iyy,
     };
     let design = basis(&statement.state(LoadState::Takeoff));
     let dispatch = outcome.sized.flown_dispatch();
@@ -310,7 +329,7 @@ mod tests {
                     < 1.0e-6 * scale
             );
             // The tanks carry the whole dispatched fuel: none is clipped away.
-            let carried_kg = outcome.masses.physical_fuel_mass_kg().unwrap_or(f64::NAN);
+            let carried_kg = outcome.sized.takeoff_fuel_kg;
             assert!(
                 (ledger.takeoff_mass_kg - ledger.zero_fuel_mass_kg - carried_kg).abs()
                     < 1.0e-6 * scale,
@@ -402,7 +421,7 @@ mod tests {
                 outcome.sized.dispatch.destination_landing_mass_kg
             );
             assert_eq!(landing_row.role, crate::mdo::ResidualRole::Constraint);
-            if matches!(name, "A320-200" | "DC-10") {
+            if name == "A320-200" {
                 assert_eq!(
                     load.status,
                     alas_mass::loading::MtowFuelLoadingStatus::VolumeLimited,
@@ -412,6 +431,40 @@ mod tests {
                 assert_eq!(load.usable_capacity_margin_kg, Some(0.0));
                 assert_eq!(carried, capacity_kg);
             }
+            // Every preset reports the regime its own margins state: full tanks below MTOW
+            // (volume-limited) or MTOW reached before the tanks are full (mass-limited).
+            match load.status {
+                alas_mass::loading::MtowFuelLoadingStatus::VolumeLimited => {
+                    assert!(load.mtow_margin_kg > 0.0, "{name}: {load:?}");
+                    assert_eq!(
+                        load.usable_capacity_margin_kg,
+                        Some(0.0),
+                        "{name}: {load:?}"
+                    );
+                    assert_eq!(carried, capacity_kg, "{name}: {load:?}");
+                }
+                alas_mass::loading::MtowFuelLoadingStatus::MassLimited => {
+                    assert_eq!(load.mtow_margin_kg, 0.0, "{name}: {load:?}");
+                    assert!(
+                        load.usable_capacity_margin_kg.unwrap() >= 0.0,
+                        "{name}: {load:?}"
+                    );
+                    assert!(carried <= capacity_kg, "{name}: {load:?}");
+                }
+                alas_mass::loading::MtowFuelLoadingStatus::CapacityUnverified => {
+                    assert_eq!(load.usable_capacity_margin_kg, None, "{name}: {load:?}");
+                }
+            }
+            // No DC-10 regime pin: the sources do not resolve it. At the 572,000 lb MTOGW
+            // (259,454 kg) the sourced usable fuel (ACAP sec 5.4.4, 36,522 US gal = 111,153 kg
+            // at 804 kg/m3) fills at a zero-fuel mass of 148,301 kg. The ACAP
+            // Series 30 passenger OEW, 120,914 kg, carries a +-2,000 kg uncertainty
+            // (oew_reference DC-10 record), so full tanks admit 27,387 +- 2,000 kg of payload,
+            // and the registered 255-seat load (25,746 kg on the ledger) lies inside
+            // that band. The modelled regime has flipped on OEW drift alone: mass-limited by
+            // 770.8 kg with an older 111,387 kg capacity, volume-limited by
+            // 821 kg with a later one. Its correctness belongs to the OEW validation, not to this
+            // ledger test.
         }
     }
 
@@ -432,7 +485,8 @@ mod tests {
             .unwrap_or_else(|error| panic!("{error}"));
         // Even treating all unusable fuel as usable cannot fit twice the
         // complete tank inventory; no empirical aircraft mass is pinned here.
-        outcome.masses.fuel = 2.0 * (tanks.usable_capacity_kg() + tanks.unusable_fuel_kg());
+        outcome.sized.takeoff_fuel_kg =
+            2.0 * (tanks.usable_capacity_kg() + tanks.unusable_fuel_kg());
         let error = loading_basis(&outcome, &config)
             .err()
             .unwrap_or_else(|| panic!("excess fuel must reject the ledger"));
@@ -449,5 +503,52 @@ mod tests {
             && row.limit == 0.0
             && row.normalized_violation == 1.0
             && row.detail.as_deref() == Some(error.as_str())));
+    }
+
+    /// The ledger loads the fuel on board at brake release, the load the capacity guard
+    /// judges, not the mass-closure remainder: with the payload adjusted the remainder (MTOW
+    /// less zero-fuel mass) can exceed the tanks while the mission's fuel fits them (A220-300).
+    #[test]
+    fn the_ledger_loads_the_fuel_the_capacity_guard_judges() {
+        let config =
+            AlasConfig::from_value(&serde_json::json!({"preset": "A220-300", "optimizer": {
+                "objective": {"mtow_sizing": "payload_adjusted"}
+            }}))
+            .unwrap_or_else(|error| panic!("{error}"));
+        let design = alas_config::presets::get("A220-300")
+            .unwrap_or_else(|error| panic!("{error}"))
+            .design_vector;
+        let mut outcome = crate::mdo::sizing::run_candidate(&config, &design.to_array())
+            .unwrap_or_else(|error| panic!("{}", error.reason));
+        let (ramp_kg, takeoff_kg, capacity_kg) = (
+            outcome.sized.ramp_fuel_kg,
+            outcome.sized.takeoff_fuel_kg,
+            outcome.sized.usable_capacity_kg,
+        );
+        assert!(
+            ramp_kg <= capacity_kg,
+            "ramp {ramp_kg} capacity {capacity_kg}"
+        );
+        assert!(takeoff_kg <= ramp_kg, "takeoff {takeoff_kg} ramp {ramp_kg}");
+        // A remainder above the tanks must not reach the ledger.
+        outcome.masses.fuel = 2.0 * capacity_kg;
+        let ledger = loading_basis(&outcome, &config).unwrap_or_else(|error| panic!("{error}"));
+        let loaded_kg = ledger.takeoff_mass_kg - ledger.zero_fuel_mass_kg;
+        assert!(
+            (loaded_kg - takeoff_kg).abs() < 1.0e-6 * ledger.takeoff_mass_kg,
+            "ledger fuel {loaded_kg} against takeoff fuel {takeoff_kg}"
+        );
+        let rows = super::super::balance_residuals(
+            &outcome,
+            &config,
+            crate::mdo::ResidualRole::Constraint,
+        );
+        let fuel_errors: Vec<_> = rows
+            .iter()
+            .filter(|row| row.id == "cg_model_error")
+            .filter_map(|row| row.detail.clone())
+            .filter(|detail| detail.contains("fuel"))
+            .collect();
+        assert!(fuel_errors.is_empty(), "{fuel_errors:?}");
     }
 }

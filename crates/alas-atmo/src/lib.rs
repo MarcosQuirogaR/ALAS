@@ -1,29 +1,25 @@
 // SPDX-License-Identifier: AGPL-3.0-or-later
 // Copyright (C) 2026 Marcos Quiroga Rodriguez
 
-//! Atmosphere models: every altitude-dependent physics module in this program
-//! needs pressure, temperature and the properties derived from them, and two
-//! unrelated reference implementations supply them at different points in the
-//! program's ancestry. Each gets its own submodule rather than its own crate,
-//! for the same reason `alas-math` gives its numerical primitives one each:
-//! neither is large enough to justify a crate boundary, and both belong under
-//! "atmosphere" for a caller choosing between them.
+//! The standard atmosphere: every altitude-dependent physics module in this
+//! program needs pressure, temperature and the properties derived from them,
+//! and all of them read one model, the U.S. Standard Atmosphere, 1976.
 //!
-//! [`atmosphere`] is native aerodynamic model's `Atmosphere` class: one point in the air,
-//! evaluated by one of two altitude models. [`isa`] is the closed-form
-//! International Standard Atmosphere and [`differentiable`] is the cubic
-//! B-spline fitted through it, which is the model upstream uses when a caller
-//! names none. The two disagree by about a per cent in temperature, so
-//! [`Method`] is a modeling choice a caller makes deliberately, not a
-//! performance knob.
+//! [`us1976_compute_values`] is the model as a function of altitude and
+//! temperature deviation; [`Atmosphere`] is the same evaluation as an object
+//! with one accessor per property. The two return identical numbers, so a
+//! speed, a Mach number or a dynamic pressure formed by one discipline means
+//! the same thing to the next. The altitude input is geopotential altitude
+//! everywhere: the pressure altitude of a standard day, which is what a
+//! flight level states. A geometric altitude above mean sea level (an
+//! aerodrome elevation) enters through [`Atmosphere::from_geometric`],
+//! [`us1976_values_at_geometric`] or [`geopotential_from_geometric`].
 //!
-//! [`us1976`] is mission analysis model's US Standard 1976 model, which every mission analysis model mission
-//! segment uses instead of either.
+//! [`airspeed`] holds the calibrated, equivalent and true airspeed
+//! conversions on top of that state.
 
 pub mod airspeed;
 pub mod atmosphere;
-pub mod differentiable;
-pub mod isa;
 mod us1976;
 
 pub use airspeed::{
@@ -33,15 +29,14 @@ pub use airspeed::{
     SEA_LEVEL_TEMPERATURE_K,
 };
 pub use atmosphere::{
-    Atmosphere, AtmosphereError, DensityAltitudeError, DensityAltitudeMethod, Method,
-    STANDARD_GRAVITY,
-};
-pub use differentiable::{altitude_knots_m, pressure_differentiable, temperature_differentiable};
-pub use isa::{
-    pressure_isa, temperature_isa, BAROMETRIC_GRAVITY, GAS_CONSTANT_AIR, GAS_CONSTANT_UNIVERSAL,
-    MOLECULAR_MASS_AIR,
+    pressure_isa, temperature_isa, Atmosphere, AtmosphereError, DensityAltitudeError,
+    DensityAltitudeMethod, GAS_CONSTANT_UNIVERSAL, MOLECULAR_MASS_AIR, STANDARD_GRAVITY,
 };
 pub use us1976::{
-    compute_values as us1976_compute_values, try_compute_values as us1976_try_compute_values,
-    Us1976Error, Values as Us1976Values,
+    bisect_pressure_altitude_m as us1976_bisect_pressure_altitude_m,
+    compute_values as us1976_compute_values, geometric_from_geopotential,
+    geopotential_from_geometric, pressure_pa as us1976_pressure_pa,
+    try_compute_values as us1976_try_compute_values,
+    values_at_geometric as us1976_values_at_geometric, Us1976Error, Values as Us1976Values,
+    EFFECTIVE_EARTH_RADIUS_M, GAS_CONSTANT_AIR,
 };

@@ -4,7 +4,7 @@
 //! Neutral point and static margin.
 //!
 //! The method sits behind [`NeutralPointMethod`] so the VLM-based
-//! implementation of the aerodynamics lane can replace the closed-form
+//! implementation of the aerodynamics module can replace the closed-form
 //! default without touching callers.  [`SimpleLiftingSurface`] implements
 //! Raymer Eq. 16.9 (stick-fixed, power-off):
 //!
@@ -157,7 +157,7 @@ impl NeutralPoint {
 }
 
 /// A neutral-point estimator.  The VLM-based implementation of the
-/// aerodynamics lane implements this trait and replaces the closed form.
+/// aerodynamics module implements this trait and replaces the closed form.
 pub trait NeutralPointMethod {
     /// Short identifier recorded in results.
     fn name(&self) -> &'static str;

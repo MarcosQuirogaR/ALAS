@@ -30,6 +30,7 @@ const WIREFRAME_PADDING: f64 = 0.025;
 mod sections;
 mod visibility;
 use sections::{draw_surface_sections, section_stations};
+mod isolated;
 
 /// A `(center, max_span)` pair sized from a data-space bounding box, with
 /// modest padding: what every wireframe figure hands [`Camera3D::project`]
@@ -231,17 +232,21 @@ fn title_text(scene: &mut Scene, text: &str, color: Color) {
     });
 }
 
+/// The one camera every isolated-component view is drawn from, so that wing,
+/// fuselage and empennage figures of every preset share an orientation.
+const ISOLATED_CAMERA: Camera3D = Camera3D {
+    elev_deg: 30.0,
+    azim_deg: -150.0,
+    zoom: 1.0,
+};
+
 fn surface_scene(
     plane: &Airplane,
     camera: Option<Camera3D>,
     theme: Option<&str>,
     title: Option<&str>,
 ) -> Scene {
-    let camera = camera.unwrap_or(Camera3D {
-        elev_deg: 30.0,
-        azim_deg: -150.0,
-        zoom: 1.0,
-    });
+    let camera = camera.unwrap_or(ISOLATED_CAMERA);
     let top_offset = if title.is_some() {
         HEADER_HEIGHT - 20.0
     } else {
@@ -335,11 +340,11 @@ pub fn figure_wireframe_wing(plane: &Airplane, theme: Option<&str>) -> Scene {
         .iter()
         .find(|wing| wing.name == "Main Wing")
         .or_else(|| plane.wings.first())
-        .cloned()
+        .map(isolated::trimmed_wing)
         .into_iter()
         .collect();
     isolated.fuselages.clear();
-    surface_scene(&isolated, None, theme, Some("Wing Wireframe"))
+    surface_scene(&isolated, None, theme, Some("Wing Surface"))
 }
 
 /// Isolated fuselage loft with its defining bulkhead outlines.
@@ -354,7 +359,7 @@ pub fn figure_wireframe_fuselage(plane: &Airplane, theme: Option<&str>) -> Scene
         .cloned()
         .into_iter()
         .collect();
-    surface_scene(&isolated, None, theme, Some("Fuselage Wireframe"))
+    isolated::fuselage_wire_scene(&isolated, theme)
 }
 
 /// Horizontal and vertical tail lofts, including each resolved airfoil section.
@@ -376,7 +381,7 @@ pub fn figure_wireframe_empennage(plane: &Airplane, theme: Option<&str>) -> Scen
         &isolated,
         None,
         theme,
-        Some("Empennage Wireframe (H-Stab & V-Stab)"),
+        Some("Empennage Surface (H-Stab & V-Stab)"),
     )
 }
 
@@ -629,10 +634,12 @@ mod tests {
         plane.wings[0].xsecs[1].twist = -8.0;
         assert_ne!(original, figure_wireframe_wing(&plane, None));
         let fuselage = figure_wireframe_fuselage(&plane, None);
+        // The fuselage figure is the station-profile wireframe the three-view
+        // draws: bulkhead polylines, no shaded loft.
         assert!(fuselage
             .elements
             .iter()
-            .any(|element| matches!(element, SceneElement::Polygon { fill: Some(_), .. })));
+            .any(|element| matches!(element, SceneElement::Polyline { .. })));
     }
 
     #[test]

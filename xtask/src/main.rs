@@ -8,15 +8,20 @@
 //! where the only tool guaranteed to exist is Cargo.
 
 mod affected;
+mod baseline;
 mod bench;
+mod capmap;
 mod checks;
 mod dev_env;
 mod dist;
 mod dist_archive;
 mod dist_avl;
+mod dist_nastran95;
 mod evidence;
 mod gate;
+mod hygiene;
 mod ledger;
+mod links;
 mod memo;
 mod repin;
 mod smoke;
@@ -33,7 +38,17 @@ fn main() -> ExitCode {
 
     let outcome = match task.as_deref() {
         Some("gate") => gate::run(&root, &args[1..]),
+        Some("test-affected") => {
+            let mut gate_args = vec![
+                "--quick".to_owned(),
+                "--part".to_owned(),
+                "tests".to_owned(),
+            ];
+            gate_args.extend(args[1..].iter().cloned());
+            gate::run(&root, &gate_args)
+        }
         Some("checks") => run_checks(&root),
+        Some("capability-map") => capmap::run(&root, &args[1..]),
         Some("test") => gate::test(&root, &args[1..]),
         Some("smoke") => smoke::run(&root, &args[1..]),
         Some("tiers") => tiers::run(&root, &args[1..]),
@@ -43,6 +58,9 @@ fn main() -> ExitCode {
         Some("dev-env") => dev_env::run(&args[1..]),
         Some("bench") => bench::run_benchmarks(&root),
         Some("dist") | Some("package") => dist::create_distribution(&root),
+        Some("hygiene") => hygiene::run(&root, &args[1..]),
+        Some("fmt") => gate::fmt(&root),
+        Some("expected-failures") => baseline::run(&root, &args[1..]),
         Some("backup") => backup(&root),
         Some(other) => {
             println!("unknown task: {other}");
@@ -88,11 +106,17 @@ fn usage() {
          install-hooks [--force]\n\
                         install the pre-commit hook that runs the quick gate\n\
          dev-env [--shell powershell|sh] [--target-dir DIR] [--sccache] [--run -- CMD]\n\
-                        print (or apply to one command) the lld linker and per-lane target environment\n\
+                        print (or apply to one command) the lld linker and per-checkout target environment\n\
          bench         build and execute the release computational benchmark suite\n\
          dist           compile release binary and assemble standalone distribution archive\n\
          package        alias for dist\n\
-         backup         write a git bundle to the synced backup directory"
+         hygiene [--private-branch] [--range A..B] [--text FILE]...\n\
+                        fail on private files, private paths or AI-assistant references in tracked files, commit messages and identities, PR text\n\
+                        (--private-branch: the tree stays on a private work branch)\n\
+         expected-failures <results> [--crate NAME] [--baseline FILE]\n\
+                        compare a nextest or libtest result list with .config/expected-failures.tsv\n\
+         fmt            rustfmt --check per package (cargo fmt --all fails on Windows with os error 206)\n\
+         backup         write a git bundle to $ALAS_BACKUP_DIR"
     );
 }
 
@@ -123,6 +147,8 @@ pub(crate) fn run_checks(root: &Path) -> Result<(), String> {
     }
     findings.extend(ledger::check(root)?);
     findings.extend(source_size::check(root, &sources)?);
+    findings.extend(capmap::check(root)?);
+    findings.extend(links::check(root)?);
 
     if findings.is_empty() {
         println!("checks: pass");
@@ -154,18 +180,15 @@ fn install_hooks(root: &Path, force: bool) -> Result<(), String> {
     Ok(())
 }
 
-/// Write a bundle of the whole repository into the synced backup directory.
+/// Write a bundle of the whole repository into the directory named by
+/// `ALAS_BACKUP_DIR`.
 ///
-/// This repository has no remote by design, and it lives outside the synced
-/// folder because Cargo's build directory defeats a file-level sync client. A
-/// bundle is a single file, so it syncs cleanly and still contains every branch
+/// A bundle is a single file, so it syncs cleanly through a file-level sync
+/// client (Cargo's build directory does not) and still contains every branch
 /// and every commit.
 fn backup(root: &Path) -> Result<(), String> {
-    let dir = PathBuf::from(std::env::var("USERPROFILE").map_err(|_| "USERPROFILE is unset")?)
-        .join("OneDrive")
-        .join("Proyectos")
-        .join("Universidad")
-        .join("ALAS-backups");
+    let dir =
+        PathBuf::from(std::env::var("ALAS_BACKUP_DIR").map_err(|_| "ALAS_BACKUP_DIR is unset")?);
     std::fs::create_dir_all(&dir).map_err(|e| format!("cannot create {}: {e}", dir.display()))?;
 
     let target = dir.join("alas-rust.bundle");
@@ -194,6 +217,9 @@ pub(crate) fn cargo_env(
     args: &[&str],
     env: &[(String, String)],
 ) -> Result<(), String> {
+    let args = locked_args(args, std::env::var_os("CI").is_some());
+    let args: Vec<&str> = args.iter().map(String::as_str).collect();
+    let args = args.as_slice();
     println!("\ncargo {}", args.join(" "));
     let status = Command::new(env!("CARGO"))
         .current_dir(root)
@@ -209,6 +235,25 @@ pub(crate) fn cargo_env(
     }
 }
 
+/// `args` with `--locked` added after the subcommand when running in CI, so a
+/// stale `Cargo.lock` fails the job instead of being rewritten on the runner.
+/// Subcommands that do not resolve the dependency graph are left alone.
+fn locked_args(args: &[&str], ci: bool) -> Vec<String> {
+    let mut out: Vec<String> = args.iter().map(|a| (*a).to_owned()).collect();
+    if !ci || out.iter().any(|a| a == "--locked" || a == "--frozen") {
+        return out;
+    }
+    let position = match args {
+        ["check" | "clippy" | "build" | "test" | "doc" | "run" | "metadata", ..] => Some(1),
+        ["nextest", "run" | "list", ..] => Some(2),
+        _ => None,
+    };
+    if let Some(position) = position {
+        out.insert(position, "--locked".to_owned());
+    }
+    out
+}
+
 /// The workspace root, found from this crate's manifest rather than the working
 /// directory, so the task behaves the same wherever it is invoked from.
 fn repo_root() -> PathBuf {
@@ -216,4 +261,27 @@ fn repo_root() -> PathBuf {
     manifest
         .parent()
         .map_or(manifest.clone(), Path::to_path_buf)
+}
+
+#[cfg(test)]
+mod tests {
+    use super::locked_args;
+
+    #[test]
+    fn locked_is_added_in_ci_only_to_graph_resolving_subcommands() {
+        assert_eq!(
+            locked_args(&["clippy", "--workspace"], true),
+            ["clippy", "--locked", "--workspace"]
+        );
+        assert_eq!(
+            locked_args(&["nextest", "run", "-p", "x"], true),
+            ["nextest", "run", "--locked", "-p", "x"]
+        );
+        assert_eq!(locked_args(&["fmt", "--check"], true), ["fmt", "--check"]);
+        assert_eq!(locked_args(&["check"], false), ["check"]);
+        assert_eq!(
+            locked_args(&["check", "--locked"], true),
+            ["check", "--locked"]
+        );
+    }
 }

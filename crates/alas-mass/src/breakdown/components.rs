@@ -32,12 +32,27 @@ pub(super) fn wing_named_or_first<'a>(wings: &'a [Wing], name: &str) -> &'a Wing
 /// over the configured semi-span interval rather than approximated from the
 /// total wing area, which handles tapered and multi-station wings.
 pub(super) fn configured_flap_area(wing: &Wing, control_surfaces: &ControlSurfacesConfig) -> f64 {
+    let chord_fraction = control_surfaces.flap_chord_fraction.clamp(0.0, 1.0);
+    // An inboard aileron between two flaps is not flap.
+    control_surfaces
+        .flap_bands()
+        .into_iter()
+        .map(|(start, end)| {
+            band_area(
+                wing,
+                start.clamp(0.0, 1.0),
+                end.clamp(0.0, 1.0),
+                chord_fraction,
+            )
+        })
+        .sum()
+}
+
+/// Planform area of a `chord_fraction` band between two semi-span fractions.
+fn band_area(wing: &Wing, start: f64, end: f64, chord_fraction: f64) -> f64 {
     if wing.xsecs.len() < 2 {
         return 0.0;
     }
-    let start = control_surfaces.flap_span_start_frac.clamp(0.0, 1.0);
-    let end = control_surfaces.flap_span_end_frac.clamp(0.0, 1.0);
-    let chord_fraction = control_surfaces.flap_chord_fraction.clamp(0.0, 1.0);
     if end <= start || chord_fraction <= 0.0 {
         return 0.0;
     }
@@ -105,14 +120,15 @@ fn calculate_component_masses_with_product_configuration(
     masses.wing = mass_wing_with_control_surface_area(
         wing,
         requirements.mtow_kg,
-        requirements.ultimate_load_factor,
+        requirements.design_ultimate_load_factor(),
         requirements.mtow_kg * mm.suspended_mass_fraction,
         requirements.dive_speed_m_s,
         mm.max_airspeed_for_flaps_ms,
         main_gear_mounted_to_wing(landing_gear),
         mm.flap_deflection_angle_deg,
         None,
-        configured_flap_area(wing, control_surfaces),
+        configured_flap_area(&wing.carried_box(), control_surfaces),
+        control_surfaces.has_spoilers(),
     );
     let oew_without_fuel = masses.wing
         + masses.h_stab
@@ -143,7 +159,7 @@ pub fn calculate_component_masses(
     let default_mass_model = MassModelConfig::default();
     let mm = mass_model.unwrap_or(&default_mass_model);
     let mtow_target = requirements.mtow_kg;
-    let n_ult = requirements.ultimate_load_factor;
+    let n_ult = requirements.design_ultimate_load_factor();
     let v_dive = requirements.dive_speed_m_s;
 
     let wing = wing_named_or_first(&plane.wings, "Main Wing");
@@ -157,6 +173,11 @@ pub fn calculate_component_masses(
         .iter()
         .find(|w| w.name == "Vertical Stabilizer")
         .unwrap_or_else(|| plane.wings.get(2).unwrap_or(wing));
+    // The tail mass equations are stated on the theoretical planforms.
+    let hstab = hstab.reference_planform();
+    let hstab = &*hstab;
+    let vstab = vstab.reference_planform();
+    let vstab = &*vstab;
 
     let fus = &plane.fuselages[0];
 
@@ -197,7 +218,9 @@ pub fn calculate_component_masses(
     );
 
     let l_tail = (hstab.aerodynamic_center(AERODYNAMIC_CENTER_CHORD_FRACTION)[0]
-        - wing.aerodynamic_center(AERODYNAMIC_CENTER_CHORD_FRACTION)[0])
+        - wing
+            .carried_box()
+            .aerodynamic_center(AERODYNAMIC_CENTER_CHORD_FRACTION)[0])
         .max(1.0);
     let m_fus = mass_fuselage_simple(fus, v_dive, l_tail);
 
@@ -211,7 +234,11 @@ pub fn calculate_component_masses(
     let estimate = match geometry_config.engine.active_model() {
         Ok(alas_config::ActiveEngineModel::Turbofan(spec)) => {
             crate::propulsion_mass::turbofan_installed_mass(
-                spec.rated_thrust_kn * 1_000.0,
+                geometry_config
+                    .engine
+                    .mass_basis_thrust_kn()
+                    .unwrap_or(spec.rated_thrust_kn)
+                    * 1_000.0,
                 n_engines,
                 mm.propulsion_twr_factor,
                 mm.propulsion_installation_factor,

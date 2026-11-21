@@ -5,7 +5,7 @@
 //! thresholds they use (split from `feasibility` for the module size budget).
 
 /// Static-margin band, fraction of the wing MAC (ACC rule band quoted in
-/// UAV-PLAN 6.2; the band is the competition's, not a physical optimum).
+/// the competition rules; the band is the competition's, not a physical optimum).
 pub const STATIC_MARGIN_BAND: (f64, f64) = (0.05, 0.50);
 /// Static thrust over weight below which the aircraft is flagged (ESTIMATE).
 pub const MIN_STATIC_THRUST_TO_WEIGHT: f64 = 0.25;

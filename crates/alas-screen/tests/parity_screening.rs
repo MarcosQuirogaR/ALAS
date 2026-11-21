@@ -112,9 +112,10 @@ fn parity_screening() {
     // this compatibility boundary; product analyses use 9.80665 m/s^2.
     config.requirements.gravity_m_s2 = 9.81;
     // The frozen reference prices the drag with margin 1.10 and no lift-dependent viscous term;
-    // the product defaults are 1.01 and kappa 0.25 (lane kappa-jenkinson), so the fixture states the
-    // frozen values explicitly, as the full-analysis parity fixture does.
-    config.drag_model.viscous_margin = 1.10;
+    // the product defaults are the sourced lift-dependent fraction 0.25 and the margin unset
+    // (resolved per propulsion class), so the fixture states the frozen values explicitly, as the
+    // full-analysis parity fixture does.
+    config.drag_model.viscous_margin = Some(1.10);
     config.drag_model.lift_dependent_viscous_fraction = 0.0;
     let dv = DesignVector::default();
 
@@ -129,7 +130,11 @@ fn parity_screening() {
     comp_cruise.finish();
 
     // 2. Name filtering (Exact tier)
-    let all_names = AirfoilLibrary::get_available_airfoils();
+    // The frozen fixture predates the digitised 747 and DC-10 sections; the
+    // reference sweep leaves them out as well.
+    let mut all_names = AirfoilLibrary::get_available_airfoils();
+    let digitised = alas_geom::digitised_sections::names();
+    all_names.retain(|name| !digitised.contains(name));
     for case in &fixture.filter_cases {
         let filtered = filter_names(&all_names, &case.pattern);
         if let Some(cnt) = case.expected_count {

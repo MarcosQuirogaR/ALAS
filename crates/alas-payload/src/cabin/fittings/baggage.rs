@@ -3,6 +3,7 @@
 
 use super::*;
 use crate::cargo::{derive_hold_compartments, HoldCompartment};
+use crate::layout::MAIN;
 use alas_config::BaggagePolicy;
 
 mod overflow;
@@ -60,14 +61,41 @@ pub(in super::super) fn place_baggage(
     let mut forward_fraction = 0.0;
     let mut overload_kg = 0.0;
     let policy = cargo.baggage_policy;
+    // The holds as built, independent of this load: the product position grid.
+    let installed_manager = CargoLoadManager::new(
+        g,
+        CargoDeckConfig {
+            use_main_deck: false,
+            ..cargo.clone()
+        },
+    );
+    let mut installed = installed_manager.capacity_summary_with_cabin(cabin_extent(cabin_items));
+    // A body with no positions reports the same room-based capacity the
+    // scalar path loads against, so the two never disagree.
+    if installed.net_capacity_kg <= 0.0 && mass_semantics == CargoMassSemantics::Net {
+        installed.net_capacity_kg =
+            room_capacity_kg(g, &installed_manager, cargo, cabin_items, req);
+    }
 
     if bag_mass + belly_cargo > 0.0 {
         let holds_only = CargoDeckConfig {
             use_main_deck: false,
             ..cargo.clone()
         };
-        let mut manager = CargoLoadManager::new(g, holds_only);
+        // The frozen reference replay keeps the reference loader's mass-only limits.
+        let mut manager = if mass_semantics == CargoMassSemantics::ReferenceGross {
+            CargoLoadManager::new_mass_limited(g, holds_only)
+        } else {
+            CargoLoadManager::new(g, holds_only)
+        };
         hold_capacity = manager.total_capacity();
+        // A body with no position at all (no underfloor hold: a turboprop, a
+        // business jet) stows bags in its baggage compartments, which the
+        // overflow stowage below already loads to volume x stowage density
+        // (or the declared limit). Their capacity is that same figure, not 0.
+        if hold_capacity <= 0.0 && mass_semantics == CargoMassSemantics::Net {
+            hold_capacity = room_capacity_kg(g, &manager, cargo, cabin_items, req);
+        }
         belly_cargo = belly_cargo.min((hold_capacity - bag_mass).max(0.0));
 
         // The structural payload limit is a gross aircraft payload limit: it
@@ -138,6 +166,14 @@ pub(in super::super) fn place_baggage(
             belly_cargo = reduced_belly;
         }
 
+        // Load plan: the same containers, relocated so seats plus holds
+        // centre on the planned payload station; the loose load follows.
+        let plan = cargo.plan_payload_cg_x_m.map(|plan_x| (1.0, plan_x));
+        let gross = manager.mass_props().0;
+        if plan.is_some() && gross > 0.0 {
+            manager.relocate_same_set(hold_target_cg(plan, seat_mass, seat_cg, gross));
+        }
+
         let low = &g.lower_deck;
         for slot in &manager.slots {
             if slot.payload <= MIN_PLACED_MASS_KG {
@@ -151,7 +187,7 @@ pub(in super::super) fn place_baggage(
                 y: slot.y,
                 z: g.item_z(low, slot.x, slot.uld.height),
                 length: slot.uld.length,
-                width: slot.uld.width,
+                width: slot.realized_width_m,
                 mass: total_weight,
                 height: g.clamp_height(low, slot.x, slot.uld.height),
                 label: format!("{} {} kg", slot.uld.code, total_weight as i64),
@@ -204,8 +240,9 @@ pub(in super::super) fn place_baggage(
             let mut overflow_kg = vec![0.0; compartments.len()];
             if leftover > MIN_PLACED_MASS_KG {
                 let (m0, x0, _) = manager.mass_props();
+                let balance = plan.or(aircraft_cg_target);
                 let target_x = overflow_target_x(
-                    hold_target_cg(aircraft_cg_target, seat_mass, seat_cg, m0 + leftover),
+                    hold_target_cg(balance, seat_mass, seat_cg, m0 + leftover),
                     (m0, x0),
                     leftover,
                 );
@@ -216,8 +253,15 @@ pub(in super::super) fn place_baggage(
                     leftover,
                     policy,
                     target_x,
+                    cargo
+                        .stowage_density_kg_m3
+                        .unwrap_or(crate::cargo::STOWAGE_DENSITY_KG_M3),
                 );
-                items.extend(stowed.items);
+                let mut blocks = stowed.items;
+                for block in &mut blocks {
+                    keep_beside_monuments(block, cabin_items);
+                }
+                items.extend(blocks);
                 overflow_kg = stowed.shares_kg;
                 overload_kg = stowed.overload_kg;
                 hold_used += leftover;
@@ -265,11 +309,96 @@ pub(in super::super) fn place_baggage(
         hold_capacity,
         hold_used,
         hold_ulds,
+        installed,
         compartment_masses_kg,
         forward_fraction,
         overload_kg,
     }
 }
+
+/// Baggage capacity of a body with no container positions: its baggage
+/// compartments at volume x stowage density (or the declared limit), capped by
+/// a certified baggage placard the preset declares (LJ60: EASA TCDS IM.A.212
+/// III.10, 260 lb cabin + 300 lb tail = 254 kg).
+fn room_capacity_kg(
+    g: &CabinGeometry,
+    manager: &CargoLoadManager<'_>,
+    cargo: &CargoDeckConfig,
+    cabin_items: &[DeckItem],
+    req: &DesignRequirements,
+) -> f64 {
+    let compartments = derive_hold_compartments(
+        g,
+        &manager.slots,
+        cabin_extent(cabin_items),
+        &cargo.hold_compartments,
+    );
+    let capacity: f64 = overflow::rooms(
+        &compartments,
+        &manager.slots,
+        cargo
+            .stowage_density_kg_m3
+            .unwrap_or(crate::cargo::STOWAGE_DENSITY_KG_M3),
+    )
+    .iter()
+    .map(|room| room.cap_kg.max(0.0))
+    .sum();
+    if req.cargo_payload_kg > 0.0 {
+        capacity.min(req.cargo_payload_kg)
+    } else {
+        capacity
+    }
+}
+
+/// Narrow a main-deck baggage block to the floor beside the monuments that
+/// stand in its compartment (the ATR 72-600's aft compartment houses the
+/// lavatory), on the side with the most room. Its station, and so the
+/// balance, are those of the declared compartment; only the drawn block moves
+/// laterally.
+fn keep_beside_monuments(block: &mut DeckItem, cabin_items: &[DeckItem]) {
+    if block.deck != MAIN {
+        return;
+    }
+    let (x0, x1) = (block.x - 0.5 * block.length, block.x + 0.5 * block.length);
+    let mut taken: Vec<(f64, f64)> = cabin_items
+        .iter()
+        .filter(|item| {
+            matches!(
+                item.kind,
+                ItemKind::Galley
+                    | ItemKind::Lav
+                    | ItemKind::AccessibleLav
+                    | ItemKind::WheelchairStowage
+            ) && item.deck == block.deck
+                && item.x - 0.5 * item.length < x1
+                && item.x + 0.5 * item.length > x0
+        })
+        .map(|item| (item.y - 0.5 * item.width, item.y + 0.5 * item.width))
+        .collect();
+    if taken.is_empty() {
+        return;
+    }
+    taken.sort_by(|a, b| a.0.total_cmp(&b.0));
+    let (lo, hi) = (block.y - 0.5 * block.width, block.y + 0.5 * block.width);
+    let mut best = (0.0_f64, lo, lo);
+    let mut cursor = lo;
+    for (a, b) in taken {
+        if a > cursor && a.min(hi) - cursor > best.0 {
+            best = (a.min(hi) - cursor, cursor, a.min(hi));
+        }
+        cursor = cursor.max(b);
+    }
+    if hi > cursor && hi - cursor > best.0 {
+        best = (hi - cursor, cursor, hi);
+    }
+    if best.0 >= MIN_BESIDE_BLOCK_WIDTH_M {
+        block.y = 0.5 * (best.1 + best.2);
+        block.width = best.0;
+    }
+}
+
+/// Narrowest block worth drawing beside a monument, m.
+const MIN_BESIDE_BLOCK_WIDTH_M: f64 = 0.2;
 
 /// Longitudinal extent `(x_min, x_max)` of the seats and monuments, which is
 /// the floor the main-deck baggage compartments must stay outside of.

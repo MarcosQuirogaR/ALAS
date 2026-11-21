@@ -66,15 +66,30 @@ pub(crate) fn complete_mass_analysis(
     payload_layout: Option<&PayloadLayoutSummary>,
 ) -> (MassBreakdown, MassCoordinates, [f64; 3]) {
     if let Some(layout) = payload_layout {
-        if layout.total_mass > 0.0 {
+        let has_equipment = layout.equipment_mass > 0.0;
+        if has_equipment {
+            // Declared equipment joins the furnishings line at the
+            // mass-weighted centroid of the two.
+            let base = masses.furnishings;
+            let total = base + layout.equipment_mass;
+            for axis in 0..3 {
+                coordinates.furnishings[axis] = (base * coordinates.furnishings[axis]
+                    + layout.equipment_mass * layout.equipment_cg[axis])
+                    / total;
+            }
+            masses.furnishings = total;
+        }
+        if layout.total_mass > 0.0 || has_equipment {
             let m_oew: f64 = OEW_KEYS
                 .iter()
                 .map(|&key| masses.get(key).unwrap_or(0.0))
                 .sum();
-            masses.payload = layout.total_mass;
+            if layout.total_mass > 0.0 {
+                masses.payload = layout.total_mass;
+                let z_payload = coordinates.payload[2];
+                coordinates.payload = [layout.cg_x, layout.cg_y, z_payload];
+            }
             masses.fuel = requirements.mtow_kg - (m_oew + masses.payload);
-            let z_payload = coordinates.payload[2];
-            coordinates.payload = [layout.cg_x, layout.cg_y, z_payload];
         }
     }
 
@@ -120,6 +135,35 @@ mod tests {
     }
 
     #[test]
+    fn declared_equipment_joins_furnishings_and_closes_against_the_fuel() {
+        let requirements = DesignRequirements {
+            mtow_kg: 50_000.0,
+            ..Default::default()
+        };
+        let mut start_coords = coordinates();
+        start_coords.furnishings = [20.0, 0.0, 1.0];
+        let mut start = breakdown();
+        start.furnishings = 1_000.0;
+        let layout = PayloadLayoutSummary {
+            total_mass: 0.0,
+            equipment_mass: 500.0,
+            equipment_cg: [26.0, 0.0, 2.0],
+            ..Default::default()
+        };
+        let (masses, coords, _) =
+            complete_mass_analysis(start, start_coords, &requirements, Some(&layout));
+        assert_eq!(masses.furnishings, 1_500.0);
+        // Mass-weighted centroid of 1000 kg at x = 20 and 500 kg at x = 26.
+        assert!((coords.furnishings[0] - 22.0).abs() < 1e-12);
+        assert!((coords.furnishings[2] - 4.0 / 3.0).abs() < 1e-12);
+        // The planning payload stands; every kilogram of equipment comes out
+        // of the fuel closure.
+        assert_eq!(masses.payload, start.payload);
+        let oew_before: f64 = OEW_KEYS.iter().map(|&k| start.get(k).unwrap_or(0.0)).sum();
+        assert!((masses.fuel - (50_000.0 - (oew_before + 500.0 + start.payload))).abs() < 1e-9);
+    }
+
+    #[test]
     fn the_supplied_layout_replaces_the_planning_payload_mass_station_and_fuel() {
         let requirements = DesignRequirements {
             mtow_kg: 50_000.0,
@@ -145,6 +189,7 @@ mod tests {
             total_mass: 9_000.0,
             cg_x: 23.5,
             cg_y: 0.25,
+            ..Default::default()
         };
         let (detailed, detailed_coords, _) =
             complete_mass_analysis(breakdown(), coordinates(), &requirements, Some(&layout));
@@ -173,6 +218,7 @@ mod tests {
             total_mass: 0.0,
             cg_x: 99.0,
             cg_y: 9.0,
+            ..Default::default()
         };
         let (masses, coords, _) =
             complete_mass_analysis(breakdown(), coordinates(), &requirements, Some(&empty));

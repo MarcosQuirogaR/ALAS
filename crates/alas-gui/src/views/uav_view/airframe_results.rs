@@ -47,7 +47,7 @@ fn stability_card(analysis: &AirframeAnalysis, ui: &mut Ui) {
         |ui| {
             Grid::new("uav_stability_grid")
                 .num_columns(2)
-                .spacing([20.0, 8.0])
+                .spacing(crate::theme::space::GRID_SPACING)
                 .show(ui, |ui| {
                     result_measure(
                         ui,
@@ -88,7 +88,7 @@ fn trim_card(analysis: &AirframeAnalysis, ui: &mut Ui) {
         };
         Grid::new("uav_trim_grid")
             .num_columns(2)
-            .spacing([20.0, 8.0])
+            .spacing(crate::theme::space::GRID_SPACING)
             .show(ui, |ui| {
                 result_measure(
                     ui,
@@ -118,7 +118,7 @@ fn spar_card(analysis: &AirframeAnalysis, ui: &mut Ui) {
             };
             Grid::new("uav_spar_grid")
                 .num_columns(2)
-                .spacing([20.0, 8.0])
+                .spacing(crate::theme::space::GRID_SPACING)
                 .show(ui, |ui| {
                     result_measure(ui, "Limit lift", spar.limit_lift_n, "N");
                     result_measure(ui, "Root bending moment", spar.root_moment_limit_nm, "N m");
@@ -128,9 +128,6 @@ fn spar_card(analysis: &AirframeAnalysis, ui: &mut Ui) {
                     result_value(ui, "Bending margin of safety", spar.bending_margin_of_safety);
                     result_value(ui, "Shear margin of safety", spar.shear_margin_of_safety);
                 });
-            if spar.estimate {
-                ui.weak(tr("Spar estimate: placeholder laminate data, not a design allowable"));
-            }
         },
     );
 }

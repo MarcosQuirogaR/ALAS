@@ -11,6 +11,7 @@ use crate::{
 use alas_config::{AlasConfig, DesignVector};
 use alas_struct::nastran::ResultStatus;
 
+mod cover_panels;
 mod delivery;
 mod shell_stress;
 mod spanwise;
@@ -78,6 +79,8 @@ pub(crate) fn revoke_delivery(
                 wall_time_s: 0.0,
                 analyses: 0,
                 baseline: None,
+                worst_violation: None,
+                phases: Vec::new(),
             });
     acceptance.verified = false;
     acceptance.delivered_rejected_by = errors.iter().map(|f| f.code.as_str().to_owned()).collect();
@@ -402,6 +405,12 @@ pub(crate) fn append_downstream(
             response,
             findings,
         );
+        cover_panels::append(
+            result.evaluation_inputs.as_ref(),
+            solver,
+            response,
+            findings,
+        );
         for (case, tip) in response.tip_deflection_m.iter() {
             match fem_curvature_lower_bound(tip, semispan) {
                 Some(error_bound) if error_bound <= config.structures.max_linear_curvature_relative_error => {},
@@ -439,8 +448,9 @@ fn strongest_declared_allowable(config: &AlasConfig) -> Option<f64> {
         &cfg.spar_cap_material,
         &cfg.rib_material,
     ] {
-        let allowable =
-            alas_struct::allowables::bending_allowable_pa(alas_config::materials::get(name).ok()?);
+        let allowable = alas_struct::allowables::shell_von_mises_allowable_pa(
+            alas_config::materials::get(name).ok()?,
+        );
         if !allowable.is_finite() || allowable <= 0.0 {
             return None;
         }

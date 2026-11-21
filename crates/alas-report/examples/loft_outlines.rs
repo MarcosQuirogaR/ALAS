@@ -1,7 +1,7 @@
 // SPDX-License-Identifier: AGPL-3.0-or-later
 // Copyright (C) 2026 Marcos Quiroga Rodriguez
 
-//! Study harness (never committed): model outlines of presets with the fuselage from a loft.
+//! Diagnostic: model outlines of presets with the fuselage from a loft.
 //!
 //! usage: loft_outlines <out_dir> [--loft-json <path>] [--legacy] [--nacelle-v2] <preset>...
 //!
@@ -9,7 +9,7 @@
 //! z up, metres; fuselage.sections carry x, half_width, height, zc, z_top, z_bot, shape = n, k),
 //! plus `loft`: the exact Rust evaluation of the loft on a dense axis (top, bot, a, zc, e, n, k)
 //! for point-by-point comparison with the Python mirror, the build report and, per nacelle, the
-//! exact V2 figures. `--loft-json` replaces the preset's fuselage by that file (a lane-D fit),
+//! exact V2 figures. `--loft-json` replaces the preset's fuselage by that file (a fitted loft),
 //! built at the preset's fuselage length; the rest of the aircraft is the preset's own.
 
 #![allow(clippy::print_stdout)]
@@ -119,7 +119,8 @@ fn legacy_sections(f: &Fuselage) -> (f64, f64) {
     (wh.sqrt(), std::f64::consts::FRAC_PI_4 * wh)
 }
 
-/// Main-gear station and ground plane the way the envelope code resolves them.
+/// Rotation pivot (tail-scrape station) and ground plane the way the envelope
+/// code resolves them.
 fn gear_frame(
     pr: &alas_config::presets::AircraftPreset,
     plane: &alas_geom::aircraft::airplane::Airplane,
@@ -136,7 +137,7 @@ fn gear_frame(
         .landing_gear
         .resolved_station_positions(nlg, mlg, start, length);
     let ground = alas_mass::stations::ground_plane_z_m(f, &pr.geometry, &pr.landing_gear);
-    Some((st.x_mlg_m, ground))
+    Some((st.rotation_pivot_x_m(), ground))
 }
 
 fn physics_json(
@@ -264,13 +265,6 @@ fn main() -> Result<(), Box<dyn std::error::Error>> {
         let mut wings = serde_json::Map::new();
         for (w, key) in plane.wings.iter().zip(["main", "hstab", "vstab"]) {
             wings.insert(key.to_owned(), wing_json(w));
-        }
-        // geo/close 2026-10-12: the dorsal fillet is geometry-only (vstab_dorsal_in_aero false), so the product plane
-        // does not carry it; build it for the overlay when configured and not already in the plane.
-        if !plane.wings.iter().any(|w| w.name.contains("Dorsal")) {
-            if let Some(w) = builder.build_dorsal_fin(&dv)? {
-                wings.insert("dorsal".to_owned(), wing_json(&w));
-            }
         }
         for w in plane.wings.iter().skip(3) {
             let key = if w.name.contains("Dorsal") {

@@ -13,7 +13,7 @@ use alas_pipeline::VspaeroAnalysisResult;
 #[cfg(test)]
 use alas_pipeline::VspaeroComparisonStatus;
 
-use super::support::padded_range;
+use super::support::{file_failure_reason, file_name_of, padded_range};
 use crate::chart_kit::{draw_horizontal_legend_columns, LegendMarker};
 use crate::scene::{Axes2D, Color, Fill, Scene, SceneElement, Stroke, TextAlign, TextBaseline};
 use crate::theme::get_palette;
@@ -70,7 +70,7 @@ pub(super) fn add_markers(scene: &mut Scene, axes: &Axes2D, points: &[(f64, f64)
 /// Plot the parsed VSPAERO polar without requiring the strict overlay verdict.
 ///
 /// The native result is deliberately kept separate from the ALAS model: a
-/// rejected comparison remains visible and auditable, but it is never implied
+/// rejected comparison remains visible and inspectable, but it is never implied
 /// to be an ALAS coefficient curve.
 pub fn figure_vspaero_polar(result: &VspaeroAnalysisResult, theme: Option<&str>) -> Scene {
     let pal = get_palette(theme);
@@ -319,7 +319,11 @@ pub fn figure_vspaero_wake_convergence(
         Err(error) => {
             return status_scene(
                 "VSPAERO wake history unavailable",
-                &format!("{}: {error}", history_path.display()),
+                &format!(
+                    "{}: {}",
+                    file_name_of(&history_path),
+                    file_failure_reason(&error)
+                ),
                 false,
                 theme,
             )

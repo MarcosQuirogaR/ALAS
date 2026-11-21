@@ -11,20 +11,63 @@ use alas_config::{
 use alas_geom::aircraft::fuselage::{Fuselage, FuselageXSec};
 use alas_geom::aircraft::wing::Wing;
 
+use super::ground_plane::{ClearanceSample, GroundPlaneBasis};
 use super::{fuselage_datum, ComponentStation, StationError};
 
-/// Fuselage-bottom height above the static ground line, as a fraction of the
-/// fuselage diameter, used when a preset registers no clearance. Airbus
-/// Aircraft Characteristics section 2-3-0 ground-clearance tables give the
-/// fuselage bottom at 1.76-1.79 m on the A320-200 (0.45 D, MRW) and
-/// 1.83-2.13 m on the A340-200 (0.33-0.38 D); 0.35 D sits at the low
-/// (conservative for tail scrape and tip-back) end of that evidence.
-pub const FALLBACK_BELLY_CLEARANCE_DIAMETER_FRACTION: f64 = 0.35;
+/// The documented sample an aircraft without a declared clearance is judged on:
+/// a jet sample, the sponson-gear turboprop sample, or (a turboprop of another
+/// layout) the full sample, which the caller should flag.
+pub fn clearance_sample(
+    main_wing: &Wing,
+    fuselage: &Fuselage,
+    geometry: &alas_config::GeometryConfig,
+    landing_gear: &LandingGearConfig,
+) -> ClearanceSample {
+    let turboprop = matches!(
+        geometry.engine.active_model(),
+        Ok(alas_config::ActiveEngineModel::Turboprop(_))
+    );
+    if !turboprop {
+        ClearanceSample::Jet
+    } else if sponson_layout(
+        main_wing,
+        fuselage,
+        geometry,
+        landing_gear,
+        outboard_engine_y_m(geometry),
+    ) {
+        ClearanceSample::SponsonTurboprop
+    } else {
+        ClearanceSample::OtherTurboprop
+    }
+}
+
+fn outboard_engine_y_m(geometry: &alas_config::GeometryConfig) -> Option<f64> {
+    geometry
+        .engine
+        .spanwise_positions_m
+        .iter()
+        .map(|y| y.abs())
+        .reduce(f64::max)
+}
+
+/// The belly clearance the `basis` plane stands for, m: the declared
+/// `fuselage_ground_clearance_m`, else that end of the `sample`.
+pub fn ground_clearance_for(
+    basis: GroundPlaneBasis,
+    sample: ClearanceSample,
+    fuselage: &Fuselage,
+    geometry: &alas_config::GeometryConfig,
+    landing_gear: &LandingGearConfig,
+) -> f64 {
+    gear_vertical_datum(basis, sample, fuselage, geometry, Some(landing_gear)).0
+}
 
 /// The strut length and ground-contact height both gear legs share, m.
-/// `landing_gear.fuselage_ground_clearance_m` if registered, else
-/// [`FALLBACK_BELLY_CLEARANCE_DIAMETER_FRACTION`] of the fuselage diameter;
-/// the one ground plane every caller shares (see [`ground_plane_z_m`]).
+/// `landing_gear.fuselage_ground_clearance_m` if registered, else the
+/// `basis` fraction of the fuselage diameter for the aircraft class (see
+/// [`FALLBACK_BELLY_CLEARANCE_DIAMETER_FRACTION`]); the one ground plane every
+/// caller shares (see [`ground_plane_z_m`]).
 ///
 /// The clearance is measured from the fuselage lower surface, so the ground
 /// plane hangs below the lowest point of the built lower contour
@@ -37,6 +80,8 @@ pub const FALLBACK_BELLY_CLEARANCE_DIAMETER_FRACTION: f64 = 0.35;
 /// height-width difference (0.305 m on the A320), and every CG height,
 /// tip-back boundary and tail-scrape angle inherits that error.
 fn gear_vertical_datum(
+    basis: GroundPlaneBasis,
+    sample: ClearanceSample,
     fuselage: &Fuselage,
     geometry: &alas_config::GeometryConfig,
     landing_gear: Option<&LandingGearConfig>,
@@ -45,7 +90,7 @@ fn gear_vertical_datum(
     let clearance = landing_gear.and_then(|config| config.fuselage_ground_clearance_m);
     let strut_length = clearance
         .filter(|v| v.is_finite() && *v > 0.0)
-        .unwrap_or(FALLBACK_BELLY_CLEARANCE_DIAMETER_FRACTION * diameter);
+        .unwrap_or(basis.fallback_fraction(sample) * diameter);
     (strut_length, fuselage_belly_z_m(fuselage) - strut_length)
 }
 
@@ -64,13 +109,38 @@ fn fuselage_belly_z_m(fuselage: &Fuselage) -> f64 {
 
 /// The static ground-line height in geometry axes, m: the plane the gear
 /// mass stations stand on and every CG-height consumer (tip-back, turnover,
-/// tail scrape) must measure from.
+/// tail scrape) must measure from. The nominal plane judges nothing: a consumer
+/// that judges a design uses [`ground_plane_z_for`].
 pub fn ground_plane_z_m(
     fuselage: &Fuselage,
     geometry: &alas_config::GeometryConfig,
     landing_gear: &LandingGearConfig,
 ) -> f64 {
-    gear_vertical_datum(fuselage, geometry, Some(landing_gear)).1
+    // The nominal fraction differs from the jet one only for the sponson
+    // turboprop, told apart here by the engine alone (no wing is at hand).
+    let sample = match geometry.engine.active_model() {
+        Ok(alas_config::ActiveEngineModel::Turboprop(_)) => ClearanceSample::SponsonTurboprop,
+        _ => ClearanceSample::Jet,
+    };
+    ground_plane_z_for(
+        GroundPlaneBasis::Nominal,
+        sample,
+        fuselage,
+        geometry,
+        landing_gear,
+    )
+}
+
+/// The ground plane on the given basis and sample: the declared plane for a
+/// declared clearance, that end of the sample for an undeclared one.
+pub fn ground_plane_z_for(
+    basis: GroundPlaneBasis,
+    sample: ClearanceSample,
+    fuselage: &Fuselage,
+    geometry: &alas_config::GeometryConfig,
+    landing_gear: &LandingGearConfig,
+) -> f64 {
+    gear_vertical_datum(basis, sample, fuselage, geometry, Some(landing_gear)).1
 }
 
 /// Documented-assumption fraction of strut length, above ground,
@@ -116,6 +186,22 @@ fn resolved_gear_stations(
         })
 }
 
+/// [`clearance_sample`] for a station builder that may hold no gear config
+/// (the defaults then stand for it).
+fn sample_of(
+    main_wing: &Wing,
+    fuselage: &Fuselage,
+    geometry: &alas_config::GeometryConfig,
+    landing_gear: Option<&LandingGearConfig>,
+) -> ClearanceSample {
+    clearance_sample(
+        main_wing,
+        fuselage,
+        geometry,
+        landing_gear.unwrap_or(&LandingGearConfig::default()),
+    )
+}
+
 /// The nose landing-gear station.
 ///
 /// The fallback rule here (a fraction of fuselage length aft of the nose)
@@ -129,7 +215,14 @@ pub(super) fn nose_gear_station(
     mass_model: &MassModelConfig,
     landing_gear: Option<&LandingGearConfig>,
 ) -> ComponentStation {
-    let (strut_length, ground_z) = gear_vertical_datum(fuselage, geometry, landing_gear);
+    let sample = sample_of(main_wing, fuselage, geometry, landing_gear);
+    let (strut_length, ground_z) = gear_vertical_datum(
+        GroundPlaneBasis::High,
+        sample,
+        fuselage,
+        geometry,
+        landing_gear,
+    );
     let resolved = resolved_gear_stations(fuselage, main_wing, mass_model, landing_gear);
     ComponentStation {
         position_m: [
@@ -189,7 +282,14 @@ pub(super) fn main_gear_station(
     mass_model: &MassModelConfig,
     landing_gear: Option<&LandingGearConfig>,
 ) -> Result<ComponentStation, StationError> {
-    let (strut_length, ground_z) = gear_vertical_datum(fuselage, geometry, landing_gear);
+    let sample = sample_of(main_wing, fuselage, geometry, landing_gear);
+    let (strut_length, ground_z) = gear_vertical_datum(
+        GroundPlaneBasis::High,
+        sample,
+        fuselage,
+        geometry,
+        landing_gear,
+    );
     let resolved = resolved_gear_stations(fuselage, main_wing, mass_model, landing_gear);
     if !resolved.source_scaled {
         if let Some((wing_root_z_m, fuselage_crown_z_m)) =
@@ -287,16 +387,50 @@ pub(crate) fn fuselage_mounted_main_gear_leg_m(
     landing_gear: &LandingGearConfig,
     outboard_wing_engine_y_m: Option<f64>,
 ) -> Option<f64> {
-    wing_root_above_fuselage_crown(main_wing, fuselage)?;
+    if !sponson_layout(
+        main_wing,
+        fuselage,
+        geometry,
+        landing_gear,
+        outboard_wing_engine_y_m,
+    ) {
+        return None;
+    }
+    let sample = match geometry.engine.active_model() {
+        Ok(alas_config::ActiveEngineModel::Turboprop(_)) => ClearanceSample::SponsonTurboprop,
+        _ => ClearanceSample::Jet,
+    };
+    // Needs data: the leg is the belly clearance (the sponson attach sits at belly height). A sourced leg needs the sponson attach height
+    // above the belly and the axle height above ground (tyre radius), neither on disk for the A400M or the ATR 72. The gear-fraction plausibility
+    // check against Raymer Table 15.2 cannot be read here: the page (book p.568) is a rotated scan with no text layer.
+    let (strut_length_m, _) = gear_vertical_datum(
+        GroundPlaneBasis::High,
+        sample,
+        fuselage,
+        geometry,
+        Some(landing_gear),
+    );
+    (strut_length_m.is_finite() && strut_length_m > 0.0).then_some(strut_length_m)
+}
+
+/// Whether the main gear is carried on fuselage sponsons: the two modeled facts
+/// [`fuselage_mounted_main_gear_leg_m`] decides on (wing root above the crown,
+/// main wheels nearer the fuselage than the outboard engine).
+fn sponson_layout(
+    main_wing: &Wing,
+    fuselage: &Fuselage,
+    geometry: &alas_config::GeometryConfig,
+    landing_gear: &LandingGearConfig,
+    outboard_wing_engine_y_m: Option<f64>,
+) -> bool {
+    if wing_root_above_fuselage_crown(main_wing, fuselage).is_none() {
+        return false;
+    }
     let diameter_m = geometry.fuselage.diameter_m;
     let half_track_m = diameter_m * landing_gear.track_diameter_factor / 2.0;
     let nacelle_closer = outboard_wing_engine_y_m
         .is_some_and(|engine_y_m| half_track_m >= (diameter_m / 2.0 + engine_y_m.abs()) / 2.0);
-    if !half_track_m.is_finite() || nacelle_closer {
-        return None;
-    }
-    let (strut_length_m, _) = gear_vertical_datum(fuselage, geometry, Some(landing_gear));
-    (strut_length_m.is_finite() && strut_length_m > 0.0).then_some(strut_length_m)
+    half_track_m.is_finite() && !nacelle_closer
 }
 
 /// `Some((wing_root_z_m, fuselage_crown_z_m))` when the main wing's root
@@ -312,9 +446,10 @@ pub(super) fn wing_root_above_fuselage_crown(
     main_wing: &Wing,
     fuselage: &Fuselage,
 ) -> Option<(f64, f64)> {
-    let root = main_wing.xsecs.first()?;
-    let root_z_m = root.xyz_le[2];
-    let crown_z_m = fuselage_crown_z_m(fuselage, root.xyz_le[0])?;
+    main_wing.xsecs.first()?;
+    let (root_le_m, _) = main_wing.design_root();
+    let root_z_m = root_le_m[2];
+    let crown_z_m = fuselage_crown_z_m(fuselage, root_le_m[0])?;
     if root_z_m.is_finite() && crown_z_m.is_finite() && root_z_m > crown_z_m {
         Some((root_z_m, crown_z_m))
     } else {

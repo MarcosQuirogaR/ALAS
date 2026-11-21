@@ -1,13 +1,18 @@
 // SPDX-License-Identifier: AGPL-3.0-or-later
 // Copyright (C) 2026 Marcos Quiroga Rodriguez
 
-//! One Advanced Settings page: title, description, an optional "How this
+//! One form page: title, description, an optional "How this
 //! works" deep-dive, an optional aux-preset picker, the schema-driven form for
 //! the page's configuration group, and an optional full-width live preview.
 
 mod aux_preset;
+mod cabin_cards;
 mod cabin_editor;
+mod cabin_io;
 mod engine;
+mod field_cache;
+mod installation_card;
+pub(crate) mod mesh_resolution;
 mod mission_form;
 mod optimizer_reset;
 pub(crate) mod placement;
@@ -15,13 +20,14 @@ mod preview;
 mod sections;
 #[cfg(test)]
 mod tests;
+mod wing_dihedral;
 
 use egui::{RichText, Ui};
 
 use crate::nav::{Page, Surface};
 use crate::state::AppState;
 use crate::views::form::dynamic_form;
-use crate::views::tr;
+use crate::views::tr_label;
 
 use aux_preset::show_aux_preset_picker;
 use engine::{
@@ -30,18 +36,57 @@ use engine::{
 };
 use mission_form::render_mission_form;
 use preview::render_preview;
+pub(crate) use sections::DRAG_MODEL_GROUP;
 use sections::{page_sections, render_sectioned_form};
 
-/// The notice a page carries while a registered preset protects its geometry.
-pub const PRESET_LOCK_NOTICE: &str =
-    "Preset geometry is protected from manual edits here as well; open the sandbox for geometry experiments.";
+/// Page width from which the structures planform stands beside the settings.
+const SIDE_PREVIEW_MIN_WIDTH: f32 = 1500.0;
 
-/// Render one Advanced Settings form page.
+/// The lock row a page carries while a registered preset protects its geometry:
+/// a padlock and the closed-set reason, no sentence.
+pub(crate) fn preset_lock_row(ui: &mut Ui) {
+    // A chip of its own, so the note never runs on from the text above it.
+    egui::Frame::none()
+        .fill(ui.visuals().widgets.inactive.weak_bg_fill)
+        .rounding(crate::theme::SELECTABLE_CONTROL_RADIUS)
+        .inner_margin(egui::Margin::symmetric(8.0, 3.0))
+        .show(ui, |ui| {
+            ui.horizontal(|ui| {
+                crate::theme::lock_icon(ui, &tr_label("Fixed by Reference Aircraft"));
+                ui.label(
+                    RichText::new(tr_label("Fixed by Reference Aircraft"))
+                        .weak()
+                        .small(),
+                );
+            });
+        });
+}
+
+/// Open the airfoil import dialog when an airfoil field's "Import..." entry
+/// asked for it. Called by every page that hosts airfoil fields.
+pub(crate) fn handle_airfoil_import_request(state: &mut AppState, ctx: &egui::Context) {
+    if !crate::views::form::take_airfoil_import_request(ctx) {
+        return;
+    }
+    let data = state.data_dir();
+    let current = state.custom_airfoil_file_path.clone();
+    let dialog = crate::file_dialog::spec(
+        crate::file_dialog::DialogKind::OpenFile,
+        "Import custom airfoil",
+        &current,
+        &data,
+        None,
+        vec![("Selig .dat".to_owned(), vec!["dat".to_owned()])],
+    );
+    state.begin_file_dialog(crate::file_dialog::DialogTarget::AirfoilImport, dialog);
+}
+
+/// Render one form page.
 pub fn show_form_page(state: &mut AppState, ui: &mut Ui, page: &Page) {
     show_form_page_locked(state, ui, page, false);
 }
 
-/// Render one Advanced Settings form page, with its editors optionally locked.
+/// Render one form page, with its editors optionally locked.
 ///
 /// Locking a page is not done by wrapping it whole in `add_enabled_ui(false)`. egui's
 /// disabled scope fades every painted colour toward the background, so the page
@@ -51,32 +96,46 @@ pub fn show_form_page(state: &mut AppState, ui: &mut Ui, page: &Page) {
 /// Only the editors are disabled here. A short lock status stays under the
 /// title while its explanation is available on hover.
 pub fn show_form_page_locked(state: &mut AppState, ui: &mut Ui, page: &Page, locked: bool) {
+    show_form_page_impl(state, ui, page, locked, false);
+}
+
+/// Render a form page as the body of a section of a flow page: the same
+/// editors and reset action, without the page heading the section header
+/// already carries.
+pub fn show_form_page_embedded(state: &mut AppState, ui: &mut Ui, page: &Page, locked: bool) {
+    show_form_page_impl(state, ui, page, locked, true);
+}
+
+fn show_form_page_impl(
+    state: &mut AppState,
+    ui: &mut Ui,
+    page: &Page,
+    locked: bool,
+    embedded: bool,
+) {
     let Some(group) = page.group else { return };
     placement::sync_preview_tab(state, ui.ctx(), page);
 
-    let heading = ui.heading(alas_i18n::t(Some(page.title), None));
-    if page.description.is_some() || !page.detail.is_empty() {
-        heading.on_hover_ui(|ui| {
-            ui.set_max_width(480.0);
-            if let Some(desc) = page.description {
-                ui.label(alas_i18n::t(Some(desc), None));
-            }
-            for (index, para) in page.detail.iter().enumerate() {
-                if page.description.is_some() || index > 0 {
-                    ui.add_space(4.0);
+    if !embedded {
+        let heading = ui.heading(alas_i18n::t(Some(page.title), None));
+        if page.description.is_some() || !page.detail.is_empty() {
+            heading.on_hover_ui(|ui| {
+                ui.set_max_width(480.0);
+                if let Some(desc) = page.description {
+                    crate::notation::label(ui, &alas_i18n::t(Some(desc), None));
                 }
-                ui.label(alas_i18n::t(Some(para), None));
-            }
-        });
+                for (index, para) in page.detail.iter().enumerate() {
+                    if page.description.is_some() || index > 0 {
+                        ui.add_space(4.0);
+                    }
+                    crate::notation::label(ui, &alas_i18n::t(Some(para), None));
+                }
+            });
+        }
     }
     if locked {
         ui.add_space(2.0);
-        ui.label(
-            RichText::new(tr("Preset geometry locked"))
-                .color(ui.visuals().warn_fg_color)
-                .small(),
-        )
-        .on_hover_text(tr(PRESET_LOCK_NOTICE));
+        preset_lock_row(ui);
     }
     ui.add_space(4.0);
 
@@ -104,14 +163,15 @@ pub fn show_form_page_locked(state: &mut AppState, ui: &mut Ui, page: &Page, loc
     let Some(visible_fields) = placement::cached_visible_fields(state, page, group) else {
         return;
     };
+    crate::views::form::publish_visibility_context(&state.schema, &state.config_values);
 
     ui.horizontal(|ui| {
-        ui.label(RichText::new(tr("Parameter values")).strong());
+        ui.label(RichText::new(tr_label("Parameter values")).strong());
         // A framed button, not frameless text: "Reset page" changes every
         // value on the page and must look like the action it is.
         if ui
-            .add_enabled(!locked, egui::Button::new(tr("Reset page")).small())
-            .on_hover_text(tr(
+            .add_enabled(!locked, egui::Button::new(tr_label("Reset page")).small())
+            .on_hover_text(tr_label(
                 "Restore this page's default values; other pages are unchanged.",
             ))
             .clicked()
@@ -121,26 +181,67 @@ pub fn show_form_page_locked(state: &mut AppState, ui: &mut Ui, page: &Page, loc
     });
     ui.add_space(4.0);
 
-    ui.add_enabled_ui(!locked, |ui| {
-        if page.id == "mass_advanced" {
-            crate::views::inputs_mtow::show_mtow_controls(state, ui);
-            ui.separator();
-        }
-        render_editor(
-            state,
-            ui,
-            group,
-            page.surface,
-            &visible_fields,
-            &error_fields,
-            lang,
-        );
-        placement::render_extra_sections(state, ui, page, &error_fields, lang);
-    });
-    if group == "mission" && page.surface == Surface::Advanced {
-        crate::views::mission_profile_inputs::show_mission_profile_advanced(state, ui);
+    if page.id == "analysis" {
+        // One home for the panel counts and the spanwise multiplier.
+        mesh_resolution::render(state, ui, lang);
+        ui.add_space(6.0);
     }
-    render_preview(state, ui, page.preview, page.preview_title);
+
+    let draw_editor = |state: &mut AppState, ui: &mut Ui| {
+        crate::views::form::with_baseline_group(group, || {
+            crate::views::form::with_locked_editors(ui, locked, |ui| {
+                // The guided Aircraft page owns the MTOW controls; the stand-alone
+                // Mass page of the Sandbox has no such card and keeps them.
+                if page.id == "mass_advanced" && !embedded {
+                    crate::views::inputs_mtow::show_mtow_controls(state, ui);
+                    ui.separator();
+                }
+                render_editor(
+                    state,
+                    ui,
+                    group,
+                    page.surface,
+                    &visible_fields,
+                    &error_fields,
+                    lang,
+                );
+                placement::render_extra_sections(state, ui, page, &error_fields, lang);
+            });
+        });
+    };
+    // The planform is taller than wide: on a very wide card it stands beside
+    // the settings instead of leaving the right of the card empty.
+    if page.preview == Some("structures") && ui.available_width() >= SIDE_PREVIEW_MIN_WIDTH {
+        let total = ui.available_width();
+        let left = (total * 0.56).round();
+        let right = total - left - 16.0;
+        ui.horizontal_top(|ui| {
+            ui.spacing_mut().item_spacing.x = 16.0;
+            ui.allocate_ui_with_layout(
+                egui::vec2(left, 0.0),
+                egui::Layout::top_down(egui::Align::Min),
+                |ui| {
+                    ui.set_width(left);
+                    draw_editor(state, ui);
+                },
+            );
+            ui.allocate_ui_with_layout(
+                egui::vec2(right, 0.0),
+                egui::Layout::top_down(egui::Align::Min),
+                |ui| {
+                    ui.set_width(right);
+                    render_preview(state, ui, page.preview, page.preview_title);
+                },
+            );
+        });
+    } else {
+        draw_editor(state, ui);
+        if page.id == "geometry" {
+            wing_dihedral::render(state, ui);
+        }
+        render_preview(state, ui, page.preview, page.preview_title);
+    }
+    handle_airfoil_import_request(state, ui.ctx());
 }
 
 pub(super) fn reset_page_to_defaults(state: &mut AppState, page: &Page, group: &str) {
@@ -180,17 +281,7 @@ pub(super) fn reset_page_to_defaults(state: &mut AppState, page: &Page, group: &
 
 /// Restore the MTOW controls to the registered aircraft, or generic defaults.
 fn reset_mtow_fields(state: &mut AppState) {
-    let preset = state
-        .config_values
-        .get("preset")
-        .and_then(serde_json::Value::as_str)
-        .unwrap_or("");
-    let defaults = if alas_config::presets::get(preset).is_ok() {
-        alas_config::AlasConfig::from_value(&serde_json::json!({"preset": preset}))
-            .unwrap_or_default()
-    } else {
-        alas_config::AlasConfig::default()
-    };
+    let defaults = state.starting_design_defaults();
     if let Some(requirements) = state
         .group_mut("requirements")
         .and_then(serde_json::Value::as_object_mut)
@@ -284,6 +375,7 @@ fn render_editor(
                 show_help,
             )
         } else if group == "cabin" {
+            cabin_io::show(state, ui);
             let custom_preset = state
                 .config_values
                 .pointer("/requirements/cabin_preset")

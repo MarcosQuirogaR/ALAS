@@ -184,8 +184,8 @@ mod tests {
         let tanks = resolve_product_layout(&config, &preset.design_vector, &plane)
             .unwrap_or_else(|error| panic!("{error}"));
         assert!((tanks.density_kg_m3 - 808.9).abs() < 1.0e-9);
-        // Re-pinned 2026-10-16 by probe: the preset now publishes 21,918 L (ACAP
-        // BD500-3AB48-13800-00 p.26, 5,790 USG, fix-preset-data); the 410 L
+        // The preset publishes 21,918 L (ACAP
+        // BD500-3AB48-13800-00 p.26, 5,790 USG, preset-data); the 410 L
         // difference from the 21,508 L cells (1.9 %) is reconciled onto it.
         assert!((tanks.usable_capacity_kg() - 21_918.0 * 0.8089).abs() < 1.0e-6);
         assert!(matches!(

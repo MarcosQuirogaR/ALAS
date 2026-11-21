@@ -1,7 +1,7 @@
 // SPDX-License-Identifier: AGPL-3.0-or-later
 // Copyright (C) 2026 Marcos Quiroga Rodriguez
 
-use super::{AircraftBuilder, BuildError};
+use super::{AircraftBuilder, BuildError, GeometryContract};
 use crate::aircraft::fuselage::FuselageXSec;
 use crate::aircraft::wing::WingXSec;
 use alas_config::{FuselageSectionError, TransportPlanform, WingHeights, WingShape};
@@ -20,6 +20,9 @@ impl AircraftBuilder {
         xsecs: &mut Vec<WingXSec>,
     ) -> Result<(), BuildError> {
         let wing = &self.geometry.wing;
+        if self.geometry_contract == GeometryContract::Product {
+            wing.validate_custom_sections_outboard_of_side_of_body()?;
+        }
         wing.validate_custom_sections_against_planform(planform)?;
         let ground = wing.heights(WingShape::Ground, planform)?;
         for section in wing.custom_sections_sorted()? {
@@ -105,6 +108,30 @@ mod custom_section_tests {
             (section.chord - (planform.root.chord_m + planform.kink.chord_m) / 2.0).abs() < 1.0e-12
         );
         assert_eq!(section.airfoil.name, "naca2410");
+    }
+
+    #[test]
+    fn a_custom_wing_section_at_or_inboard_of_the_side_of_body_is_refused() {
+        for span_fraction in [0.05, 0.10] {
+            let mut geometry = GeometryConfig::default();
+            geometry
+                .wing
+                .custom_sections
+                .push(alas_config::WingSection {
+                    span_fraction,
+                    leading_edge_x_m: 0.0,
+                    chord_m: 1.0,
+                    z_m: 0.0,
+                    twist_deg: 0.0,
+                    airfoil: "naca2410".to_owned(),
+                });
+            assert!(matches!(
+                AircraftBuilder::new(Some(geometry)).build(None, false),
+                Err(crate::builder::BuildError::WingSection(
+                    alas_config::WingSectionError::AtOrInboardOfSideOfBody { .. }
+                ))
+            ));
+        }
     }
 
     #[test]

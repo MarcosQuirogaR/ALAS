@@ -17,7 +17,12 @@ pub(super) fn supervise(mut command: Command, deck: &str, timeout: Duration) -> 
     let spawned = alas_exec::SupervisedSpawn::spawn_supervised(&mut command, "NASTRAN-95 solve");
     let mut child = match spawned {
         Ok(child) => child,
-        Err(error) => return RunOutcome::Failed(format!("failed to launch nastran.exe: {error}")),
+        Err(error) => {
+            return RunOutcome::Failed(format!(
+                "failed to launch {}: {error}",
+                Nastran95Solver::EXECUTABLE_NAME
+            ))
+        }
     };
 
     if let Some(mut stdin) = child.stdin.take() {
@@ -35,12 +40,16 @@ pub(super) fn supervise(mut command: Command, deck: &str, timeout: Duration) -> 
         DeadlineWait::Exited(status) => status,
         DeadlineWait::TimedOut => {
             return RunOutcome::Failed(format!(
-                "nastran.exe timed out after {:.0}s (tree force-killed)",
+                "{} timed out after {:.0}s (tree force-killed)",
+                Nastran95Solver::EXECUTABLE_NAME,
                 timeout.as_secs_f64()
             ));
         }
         DeadlineWait::PollFailed(error) => {
-            return RunOutcome::Failed(format!("failed while waiting on nastran.exe: {error}"));
+            return RunOutcome::Failed(format!(
+                "failed while waiting on {}: {error}",
+                Nastran95Solver::EXECUTABLE_NAME
+            ));
         }
     };
 
@@ -51,7 +60,8 @@ pub(super) fn supervise(mut command: Command, deck: &str, timeout: Duration) -> 
             .code()
             .map_or_else(|| "a signal".to_owned(), |code| code.to_string());
         return RunOutcome::Failed(format!(
-            "nastran.exe exited with code {code} (stdout tail: {}; stderr tail: {})",
+            "{} exited with code {code} (stdout tail: {}; stderr tail: {})",
+            Nastran95Solver::EXECUTABLE_NAME,
             tail(&stdout),
             tail(&stderr)
         ));
@@ -66,7 +76,8 @@ pub(super) fn supervise(mut command: Command, deck: &str, timeout: Duration) -> 
     }
     if read_displacement_tables(&stdout).is_empty() && read_eigenvalues(&stdout).is_empty() {
         return RunOutcome::Failed(format!(
-            "nastran.exe wrote no result table (stderr tail: {})",
+            "{} wrote no result table (stderr tail: {})",
+            Nastran95Solver::EXECUTABLE_NAME,
             tail(&stderr)
         ));
     }

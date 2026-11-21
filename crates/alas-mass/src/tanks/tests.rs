@@ -17,7 +17,10 @@ use alas_geom::aircraft::spacing::linspace;
 use alas_geom::aircraft::wing::{Wing, WingXSec};
 use alas_geom::builder::AircraftBuilder;
 
-use super::{fuel_vector, CapacitySource, FuelState, FuelTank, FuelTankLayout, TankKind, TankSide};
+use super::{
+    fuel_cg_at, fuel_vector, CapacitySource, FuelCgPoint, FuelState, FuelTank, FuelTankLayout,
+    TankKind, TankSide,
+};
 
 const DENSITY_KG_M3: f64 = 800.0;
 
@@ -506,6 +509,40 @@ fn the_fuel_loading_curve_is_monotone_in_fuel_and_ends_at_the_full_centroid() {
     }
 }
 
+#[test]
+fn the_empty_end_of_the_loading_curve_carries_the_first_tank_cg_not_the_origin() {
+    let layout = three_tank_layout();
+    let curve = layout.fuel_cg_curve(6);
+    assert_eq!(curve[0].fuel_kg, 0.0);
+    assert!(curve[0].cg_m != [0.0; 3], "placeholder origin leaked");
+    // The first tank to fill is the one with the lowest burn priority number
+    // reversed; its CG must be within the span of the tanks' own centroids.
+    let (min_x, max_x) = layout
+        .tanks()
+        .iter()
+        .fold((f64::INFINITY, f64::NEG_INFINITY), |(lo, hi), t| {
+            (lo.min(t.centroid_m[0]), hi.max(t.centroid_m[0]))
+        });
+    assert!(curve[0].cg_m[0] >= min_x - 1.0e-9 && curve[0].cg_m[0] <= max_x + 1.0e-9);
+    // Continuous with the next point's neighbourhood: no jump to the nose.
+    assert!((curve[0].cg_m[0] - curve[1].cg_m[0]).abs() < max_x - min_x);
+}
+
+#[test]
+fn fuel_cg_at_holds_the_ends_interpolates_and_skips_a_legacy_origin_placeholder() {
+    let point = |fuel_kg: f64, x: f64| FuelCgPoint {
+        fuel_kg,
+        cg_m: [x, 0.0, 0.0],
+    };
+    let legacy = [point(0.0, 0.0), point(100.0, 20.0), point(300.0, 30.0)];
+    assert_eq!(fuel_cg_at(&legacy, 0.0), Some([20.0, 0.0, 0.0]));
+    assert_eq!(fuel_cg_at(&legacy, 50.0), Some([20.0, 0.0, 0.0]));
+    assert_eq!(fuel_cg_at(&legacy, 200.0), Some([25.0, 0.0, 0.0]));
+    assert_eq!(fuel_cg_at(&legacy, 1.0e6), Some([30.0, 0.0, 0.0]));
+    assert_eq!(fuel_cg_at(&[], 1.0), None);
+    assert_eq!(fuel_cg_at(&legacy, f64::NAN), None);
+}
+
 /// A single tank whose `low_point_m` is forward of and below its full-tank
 /// `centroid_m`, the partial-fill geometry (a swept, dihedral wing
 /// cell's inboard boundary sits forward and below the cell's own centroid).
@@ -784,4 +821,114 @@ fn a_trim_tank_is_emptied_before_every_other_tank() {
     assert!(trim_draining
         .windows(2)
         .all(|pair| pair[1].x_m <= pair[0].x_m + 1.0e-12));
+}
+
+fn trim_ops_layout() -> FuelTankLayout {
+    let mut trim = synthetic_tank("trim", 400.0, 0, 40.0);
+    trim.kind = TankKind::Trim;
+    FuelTankLayout {
+        tanks: vec![
+            trim,
+            synthetic_tank("center", 500.0, 1, 10.0),
+            synthetic_tank("wing_inner", 1_000.0, 2, 20.0),
+            synthetic_tank("wing_outer", 1_500.0, 4, 30.0),
+        ],
+        geometric_calibration_factor: 1.0,
+        density_kg_m3: DENSITY_KG_M3,
+    }
+}
+
+#[test]
+fn a_transfer_moves_what_the_source_holds_and_the_destination_has_room_for() {
+    let layout = three_tank_layout();
+    let state = layout.distribute(1_200.0).expect("fits");
+    let (after, moved) = state
+        .transferred(&layout, "wing_outer", "center", 5_000.0)
+        .expect("tanks exist");
+    // The outer tank (burned last, filled first) holds 1,200 kg; the centre
+    // tank has room for 500.
+    assert!((moved - 500.0).abs() < 1.0e-9, "{moved}");
+    assert!(
+        (after.total_kg() - 1_200.0).abs() < 1.0e-9,
+        "fuel is conserved"
+    );
+    assert!((fill_of(&layout, &after, "center") - 500.0).abs() < 1.0e-9);
+    assert!(state
+        .transferred(&layout, "wing_outer", "missing", 1.0)
+        .is_err());
+    assert!(state
+        .transferred(&layout, "wing_outer", "center", -1.0)
+        .is_err());
+}
+
+#[test]
+fn fuel_received_in_flight_fills_in_loading_order_and_stops_at_capacity() {
+    let layout = three_tank_layout();
+    let state = layout.distribute(0.0).expect("fits");
+    let (after, taken) = state.received(&layout, 1_800.0).expect("valid");
+    assert!((taken - 1_800.0).abs() < 1.0e-9);
+    // Loading order: the last-burned (outer) tank first, then the inner one.
+    assert!((fill_of(&layout, &after, "wing_outer") - 1_500.0).abs() < 1.0e-9);
+    assert!((fill_of(&layout, &after, "wing_inner") - 300.0).abs() < 1.0e-9);
+    let (full, taken) = after.received(&layout, 5_000.0).expect("valid");
+    assert!(
+        (taken - 1_200.0).abs() < 1.0e-9,
+        "only the free room is taken: {taken}"
+    );
+    assert!((full.total_kg() - layout.usable_capacity_kg()).abs() < 1.0e-9);
+}
+
+#[test]
+fn the_trim_tank_is_held_while_the_rest_burns_in_order() {
+    let layout = trim_ops_layout();
+    let state = layout
+        .distribute(layout.usable_capacity_kg())
+        .expect("full");
+    assert!((state.trim_fuel_kg(&layout) - 400.0).abs() < 1.0e-9);
+    let burned = state.burned_holding_trim(&layout, 300.0).expect("burns");
+    assert!(
+        (burned.trim_fuel_kg(&layout) - 400.0).abs() < 1.0e-12,
+        "trim untouched"
+    );
+    assert!(
+        (fill_of(&layout, &burned, "center") - 200.0).abs() < 1.0e-9,
+        "centre burns first"
+    );
+    let ordinary = state.burned(&layout, 300.0).expect("burns");
+    assert!(
+        ordinary.trim_fuel_kg(&layout) < 400.0,
+        "the plain burn empties trim first"
+    );
+    assert!(
+        state.burned_holding_trim(&layout, 4_000.0).is_err(),
+        "only 3,000 kg are outside trim"
+    );
+}
+
+#[test]
+fn trim_fuel_moves_aft_from_the_next_tank_to_burn_and_back_forward() {
+    let layout = trim_ops_layout();
+    let state = layout.distribute(1_000.0).expect("fits");
+    assert_eq!(
+        state.trim_fuel_kg(&layout),
+        0.0,
+        "the trim tank is filled last"
+    );
+    let (aft, reached) = state.with_trim_fuel(&layout, 250.0);
+    assert!((reached - 250.0).abs() < 1.0e-9);
+    assert!((aft.total_kg() - 1_000.0).abs() < 1.0e-9, "total unchanged");
+    let before = state.properties(&layout).cg_m[0];
+    assert!(
+        aft.properties(&layout).cg_m[0] > before,
+        "moving fuel into the aft tank moves the CG aft"
+    );
+    // Asking for more than the tank holds stops at its capacity.
+    let (capped, reached) = aft.with_trim_fuel(&layout, 10_000.0);
+    assert!((reached - 400.0).abs() < 1.0e-9, "{reached}");
+    assert!((capped.total_kg() - 1_000.0).abs() < 1.0e-9);
+    // Forward again: the trim fuel goes back into the other tanks.
+    let (forward, reached) = capped.with_trim_fuel(&layout, 0.0);
+    assert_eq!(reached, 0.0);
+    assert!((forward.total_kg() - 1_000.0).abs() < 1.0e-9);
+    assert!((forward.properties(&layout).cg_m[0] - before).abs() < 1.0e-9);
 }

@@ -11,6 +11,101 @@
 //! state and fuselage geometry it already has, without this crate needing to
 //! own the fuselage lower-contour representation.
 
+/// The design aft centre of gravity and the static reactions at it.
+#[derive(Debug, Clone, Copy, PartialEq)]
+pub struct AftDesignState {
+    /// Design aft CG station, m: the most aft ground CG the aircraft reaches.
+    pub x_cg_m: f64,
+    /// Nose-gear reaction there, kg.
+    pub nose_kg: f64,
+    /// Total main-gear reaction there, `W - nose_kg`, kg.
+    pub main_total_kg: f64,
+    /// True when the aerodynamic aft limit lay behind the minimum-nose-load
+    /// station and was pulled back to it.
+    pub aero_limit_pulled_back: bool,
+}
+
+/// The design aft CG of the gear and the nose and main reactions at it.
+///
+/// A real aircraft never stands with its CG where the nose gear carries less
+/// than a minimum static share `f` of the weight (Raymer 6th ed. p. 343, 5 %
+/// class minimum; the airport-planning "maximum load per main gear at the
+/// most aft CG" is `(1 - f) W`, e.g. Boeing 747-400 ACAP D6-58326-1 section
+/// 7.3). The aerodynamic aft limit is a flight limit and may lie behind the
+/// main gear, so it is pulled back to the station
+/// `x_main - f * wheelbase`. A loading state the aircraft really reaches is
+/// never pulled forward: the design CG is
+/// `max(min(aero_aft_x, x_main - f * wheelbase), most_aft_state_x)`, and the
+/// nose reaction there is not below zero. A non-finite or negative `f`
+/// counts as zero.
+#[must_use]
+pub fn aft_design_state(
+    design_weight_kg: f64,
+    x_main_effective_m: f64,
+    wheelbase_m: f64,
+    aero_aft_x_m: f64,
+    most_aft_state_x_m: Option<f64>,
+    min_nose_fraction: f64,
+) -> AftDesignState {
+    let fraction = if min_nose_fraction.is_finite() {
+        min_nose_fraction.clamp(0.0, 1.0)
+    } else {
+        0.0
+    };
+    let x_ground_m = x_main_effective_m - fraction * wheelbase_m;
+    let x_aero_m = aero_aft_x_m.min(x_ground_m);
+    let x_cg_m = most_aft_state_x_m
+        .filter(|state| state.is_finite())
+        .map_or(x_aero_m, |state| x_aero_m.max(state));
+    let nose_kg = (design_weight_kg * (x_main_effective_m - x_cg_m) / wheelbase_m).max(0.0);
+    AftDesignState {
+        x_cg_m,
+        nose_kg,
+        main_total_kg: (design_weight_kg - nose_kg).max(0.0),
+        aero_limit_pulled_back: aero_aft_x_m > x_ground_m,
+    }
+}
+
+/// What the tip-back check needs beyond the sizing CG.
+#[derive(Debug, Clone, Copy, Default, PartialEq)]
+pub struct TipBackBasis {
+    /// The most aft CG the aircraft can reach on the ground (the operational
+    /// loading envelope's aft extreme, or the model's worst aft limit where
+    /// no envelope is evaluated), m. `None` judges the design CG only.
+    pub most_aft_ground_cg_x_m: Option<f64>,
+    /// The fuselage tail-scrape angle at the main gear, degrees, when the
+    /// built geometry places one.
+    pub scrape_angle_deg: Option<f64>,
+    /// The CG height above the ground plane the tip-back angle is judged
+    /// with, m: the CG envelope's ground-referenced height of the analysed
+    /// takeoff state. `None` uses the sizing call's own height estimate.
+    pub cg_height_m: Option<f64>,
+}
+
+/// The tip-back angle the aircraft must clear, degrees:
+/// `max(min_tip_back_deg, scrape_angle_deg)`. The one definition shared by the
+/// layout check and the CG envelope's per-state limits.
+#[must_use]
+pub fn required_tip_back_deg(min_tip_back_deg: f64, scrape_angle_deg: Option<f64>) -> f64 {
+    min_tip_back_deg.max(
+        scrape_angle_deg
+            .filter(|angle| angle.is_finite())
+            .unwrap_or(0.0),
+    )
+}
+
+/// The most aft CG station that still clears `required_deg` of tip-back:
+/// `x_axle - h * tan(required)`; `NaN` unless `h_cg_m` is finite and positive.
+/// [`tip_back_angle_deg`]` >= required` holds exactly when `x_cg <=` this.
+#[must_use]
+pub fn tip_back_limit_x_m(x_mlg_aft_axle_m: f64, h_cg_m: f64, required_deg: f64) -> f64 {
+    if h_cg_m.is_finite() && h_cg_m > 0.0 {
+        x_mlg_aft_axle_m - h_cg_m * required_deg.to_radians().tan()
+    } else {
+        f64::NAN
+    }
+}
+
 /// Tip-back (longitudinal tip-over) angle, degrees, measured from the
 /// vertical at the static ground line.
 ///

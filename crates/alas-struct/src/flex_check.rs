@@ -18,7 +18,7 @@
 //! * Boeing 787-8 static test wing: about 7.6 m (25 ft) upward at ultimate
 //!   load (Boeing news release, 28 March 2010).
 //!
-//! # Sweep (derived, not literature-verified in this lane)
+//! # Sweep (derived, not literature-verified here)
 //!
 //! The beam model integrates `M/EI` in the streamwise frame. A uniform
 //! cantilever swept by `Lambda` whose section properties are those of the
@@ -125,6 +125,7 @@ mod tests {
             shear_n: vec![0.0; 2],
             moment_nm: vec![0.0; 2],
             deflection_m: vec![0.0, tip],
+            shear_deflection_m: Vec::new(),
             tip_deflection_m: tip,
             spar_stress: Vec::new(),
         }

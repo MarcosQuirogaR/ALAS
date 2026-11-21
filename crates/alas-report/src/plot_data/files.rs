@@ -22,9 +22,15 @@ impl std::error::Error for ParseError {}
 const COLUMNS: &str =
     "panel,series_index,series,kind,index,x,y,z,x2,y2,x_unit,y_unit,x_si,y_si,label";
 
-/// Shortest decimal text that parses back to the same `f64`.
+/// Shortest decimal text that parses back to the same `f64`. A NaN (a masked
+/// or unsolved cell) is an empty field, the same as no value; `inf` and `-inf`
+/// stay as text.
 fn number(value: f64) -> String {
-    format!("{value:?}")
+    if value.is_nan() {
+        String::new()
+    } else {
+        format!("{value:?}")
+    }
 }
 
 fn scale_text(scale: super::AxisScale) -> String {
@@ -226,21 +232,40 @@ pub(super) fn parse_csv(text: &str) -> Result<PlotData, ParseError> {
             ));
         }
         let series = &mut panel.series[series_n - 1];
-        series.x.push(float(&f[5], "x")?);
+        // An empty field is NaN (see `number`): x and y always carry a value
+        // per row, and z, x2, y2 are NaN once the series has any (a heatmap
+        // always has z).
+        series.x.push(if f[5].is_empty() {
+            f64::NAN
+        } else {
+            float(&f[5], "x")?
+        });
         if !f[14].is_empty() {
             series.labels.push(f[14].clone());
         }
-        if !f[6].is_empty() {
-            series.y.push(float(&f[6], "y")?);
-        }
+        series.y.push(if f[6].is_empty() {
+            f64::NAN
+        } else {
+            float(&f[6], "y")?
+        });
+        let heatmap = series.kind == SeriesKind::Heatmap;
         for (column, target) in [(7, 0), (8, 1), (9, 2)] {
-            if !f[column].is_empty() {
-                let value = float(&f[column], "extra")?;
-                match target {
-                    0 => series.z.push(value),
-                    1 => series.x2.push(value),
-                    _ => series.y2.push(value),
-                }
+            let seen = match target {
+                0 => heatmap || !series.z.is_empty(),
+                1 => !series.x2.is_empty(),
+                _ => !series.y2.is_empty(),
+            };
+            let value = if !f[column].is_empty() {
+                float(&f[column], "extra")?
+            } else if seen {
+                f64::NAN
+            } else {
+                continue;
+            };
+            match target {
+                0 => series.z.push(value),
+                1 => series.x2.push(value),
+                _ => series.y2.push(value),
             }
         }
     }
@@ -327,7 +352,9 @@ One CSV and one JSON file per plot; index.csv / index.json list them.\n\
 CSV: tidy long format, one row per data point; '#' lines carry metadata.\n\
   x, y, z are the plotted values in the unit named by x_unit / y_unit.\n\
   x_si, y_si repeat them in SI when the unit is a known display unit (empty otherwise).\n\
+  A value that does not exist (a masked or unsolved heatmap cell) is an empty field.\n\
 JSON: full fidelity (labels, units, SI factors, axis scales and ranges, series colours,\n\
-  heatmap cell edges). Non-finite numbers are written as the strings NaN / inf / -inf.\n\
+  heatmap cell edges). A value that does not exist (NaN) is null; infinities are written as\n\
+  the strings inf / -inf.\n\
 Series kinds: line, polygon (vertices), points (markers), segments (consecutive point pairs),\n\
   bars (x,y one corner and x2,y2 the opposite corner), heatmap (cell centre in x,y; value in z).\n";

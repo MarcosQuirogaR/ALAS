@@ -36,7 +36,8 @@ fn deck_is_self_contained_and_duplicates_symmetric_surfaces() {
     })
     .unwrap_or_else(|error| panic!("sample geometry is invalid: {error}"));
     assert!(deck.contains("3.000000000000 0.800000000000 4.000000000000"));
-    assert!(deck.contains("SURFACE\nMain Wing\n8 1.0 20 -1.0"));
+    assert!(deck.contains("SURFACE\nMain Wing\n8 1.0\nYDUPLICATE"));
+    assert!(deck.contains("2.000000000000 20 1.0\n"));
     assert!(deck.contains("YDUPLICATE\n0.0"));
     assert_eq!(deck.matches("SECTION").count(), 2);
     assert_eq!(deck.matches("AIRFOIL").count(), 2);
@@ -199,9 +200,9 @@ fn trim_cases_round_trip_the_native_run_layout_and_commands_are_safe() {
 #[test]
 fn vortex_budget_keeps_the_deck_below_the_solver_bound() {
     let airplane = sample_airplane();
-    // One symmetric surface, two stations: 2 x chord x max(span, 8).
+    // One symmetric surface, one section interval: 2 x chord x span.
     assert_eq!(avl_vortex_count(&airplane, 16, 20), 2 * 16 * 20);
-    assert_eq!(avl_vortex_count(&airplane, 8, 1), 2 * 8 * 8);
+    assert_eq!(avl_vortex_count(&airplane, 8, 1), 2 * 8);
     // A request inside the target is untouched.
     assert_eq!(fit_vortex_budget(&airplane, 16, 20, 8), (16, 20));
     // 16 x 200 x 2 = 6400 > target: chordwise is reduced first (11 x 200 x 2

@@ -7,13 +7,14 @@
 //! `VMCA` is the speed at which the rudder (at its stop) and at most 5 deg of
 //! bank balance the yawing moment of the live-engine thrust and the failed
 //! engine's windmilling drag, CS 25.149(b); the balance and its sources are
-//! in [`alas_perf::performance::yaw_balance`]. The thrust is the live-engine
-//! take-off rating at the speed itself and the airport, so `VMCA` is a
-//! fixed point of the deck thrust (a few iterations). `VMCG` is the same
-//! balance with the wings level and no sideslip, i.e. the rudder alone: an
-//! ESTIMATE that ignores tyre side force and nose-wheel steering (CS 25.149(e)
-//! forbids the latter, the former lowers the true value), so it bounds
-//! the real `VMCG` from above in that respect.
+//! in [`alas_perf::performance::yaw_balance`]. The sideslip follows from the
+//! lateral force balance, and the weight is the operating empty weight, the
+//! lightest and so the least bank side force (CS 25.149(c)(4)). The thrust
+//! is the live-engine take-off rating at the speed itself and the airport, so
+//! `VMCA` is a fixed point of the deck thrust (a few iterations). `VMCG` is
+//! the ground run of the same airframe after the failure, rudder and main
+//! tyre side force against the thrust moment and no nose-wheel steering
+//! (CS 25.149(e)), the deviation limited to 30 ft.
 //!
 //! # How the computed value enters the speed rule
 //!
@@ -32,11 +33,13 @@
 //! - `vmc_over_vsr`: `VMC / VSR` against the 1.13 ceiling (hard for clean
 //!   sheet, diagnostic for a registered aircraft). Evaluated at sea level
 //!   ISA, where the thrust is greatest, as CS 25.149 prescribes.
-//! - `crosswind_rudder`: rudder deflection that holds the sideslip of a
-//!   30 kt crosswind at the approach speed against the rudder stop
-//!   (Torenbeek Eq. 9-68). CS 25.237(a) demonstrates 20 kt or 0.2 `VSO` (at
-//!   most 25 kt); 30 kt is the Class II to IV requirement of Sadraey Table
-//!   12.13 (p. 651), a margin over it.
+//! - `crosswind_rudder`: rudder deflection that holds the sideslip of the
+//!   design crosswind at the approach speed against the rudder stop
+//!   (Torenbeek Eq. 9-68). The design crosswind is the certification basis
+//!   of CS 25.237(a)(3)(ii) (14 CFR 25.237(a)(3)(ii)): the greater of 20 kt
+//!   and 0.2 `VSR0`, need not exceed 25 kt ([`design_crosswind_m_s`]). The
+//!   30 kt of Sadraey Table 12.13 (p. 651) is a textbook preference, not the
+//!   requirement.
 //! - `directional_stability`: `Cn_beta` of fuselage plus fin at the approach
 //!   Mach number, at least zero (CS 25.177; Sadraey p. 282). Wing and nacelle
 //!   terms are not modelled, so the 0.1 to 0.4 per rad of complete aircraft is
@@ -52,7 +55,8 @@ use alas_config::airports::Airport;
 use alas_config::{AlasConfig, DesignMode};
 use alas_geom::aircraft::airplane::Airplane;
 use alas_perf::performance::yaw_balance::{
-    ControlLimit, YawControlGeometry, YawTrimMode, DIRECTIONAL_STABILITY_SCALE_PER_RAD,
+    ControlLimit, GroundRunThrust, MinimumControlSpeed, MinimumControlSpeedFailure,
+    YawControlGeometry, YawTrimMode, DIRECTIONAL_STABILITY_SCALE_PER_RAD,
     MINIMUM_DIRECTIONAL_STABILITY_PER_RAD, VMC_CEILING_OVER_VSR,
 };
 
@@ -64,11 +68,21 @@ use super::types::ConstraintFamily::Performance;
 use super::types::ConstraintResidual;
 use crate::mdo::ResidualRole;
 
-/// Design crosswind at the approach speed, m/s (30 kt; Torenbeek Sec. 9.6.3
-/// puts the design sideslip at 12 to 15 deg for a transport in 30 kt).
-pub const CROSSWIND_DESIGN_M_S: f64 = 30.0 * 0.514_444_444;
-/// Fixed-point iterations of the thrust at the minimum control speed.
-const THRUST_ITERATIONS: usize = 12;
+/// Lower bound of the CS 25.237(a)(3)(ii) design crosswind, m/s (20 kt).
+pub const CROSSWIND_MINIMUM_M_S: f64 = 20.0 * 0.514_444_444;
+/// The CS 25.237(a)(3)(ii) design crosswind need not exceed 25 kt, m/s.
+pub const CROSSWIND_CAP_M_S: f64 = 25.0 * 0.514_444_444;
+
+/// CS 25.237(a)(3)(ii) design 90-degree crosswind for a landplane, m/s: the
+/// greater of 20 kt and 0.2 `VSR0` (the landing-configuration reference stall
+/// speed), need not exceed 25 kt.
+#[must_use]
+pub fn design_crosswind_m_s(vsr0_m_s: f64) -> f64 {
+    (0.2 * vsr0_m_s).clamp(CROSSWIND_MINIMUM_M_S, CROSSWIND_CAP_M_S)
+}
+/// Iterations of the thrust at the minimum control speed (the secant steps of
+/// the root search, then the damped fixed point when no root is bracketed).
+const THRUST_ITERATIONS: usize = 40;
 /// Convergence of the speed in the thrust iteration, m/s.
 const SPEED_TOLERANCE_M_S: f64 = 0.01;
 
@@ -81,7 +95,9 @@ pub struct VmcAssessment {
     pub vsr_m_s: f64,
     /// `VMCA / VSR`.
     pub vmc_over_vsr: f64,
-    /// Ground minimum control speed estimate (rudder alone), m/s.
+    /// Ground minimum control speed, m/s: the engine-failure speed of a
+    /// 30 ft deviation in the CS 25.149(e) take-off run (no nose-wheel
+    /// steering), `alas_perf::performance::yaw_balance::GroundRunGeometry`.
     pub vmcg_m_s: Option<f64>,
     /// Rudder deflection at `VMCA`, deg.
     pub rudder_deg: f64,
@@ -96,15 +112,43 @@ pub struct VmcAssessment {
     /// Fin area over the actual one that brings `VMCA` to the ceiling
     /// (below one: the fin has margin), at constant aspect ratio and arm.
     pub fin_area_ratio_for_ceiling: Option<f64>,
+    /// Whether the fixed point of the take-off thrust at `VMCA` closed within
+    /// its speed tolerance. `false`: the iteration cap ended it and the
+    /// values above are its last iterate.
+    pub thrust_iteration_converged: bool,
 }
 
-/// Why the minimum control speed could not be evaluated.
+/// Why no minimum control speed was evaluated.
 #[derive(Debug, Clone, PartialEq)]
 pub enum VmcFailure {
     /// The airframe cannot hold the asymmetry at any speed of the search.
     NotControllable,
+    /// The airframe holds the asymmetry with control to spare down to the
+    /// bottom of the search range: the engine-out yawing moment sets no
+    /// minimum control speed, and the declared ratio stays in the speed rule.
+    NotLimiting {
+        /// Bottom of the search range, true airspeed, m/s.
+        below_m_s: f64,
+    },
     /// A model input was missing or invalid.
     Unavailable(String),
+}
+
+impl From<MinimumControlSpeedFailure> for VmcFailure {
+    fn from(failure: MinimumControlSpeedFailure) -> Self {
+        match failure {
+            MinimumControlSpeedFailure::AboveSearchRange { .. } => Self::NotControllable,
+            MinimumControlSpeedFailure::BelowSearchRange { tas_m_s } => {
+                Self::NotLimiting { below_m_s: tas_m_s }
+            }
+            MinimumControlSpeedFailure::TrimUnavailable { tas_m_s } => Self::Unavailable(format!(
+                "the engine-out yaw trim could not be evaluated at {tas_m_s:.1} m/s"
+            )),
+            MinimumControlSpeedFailure::UnusableInputs => Self::Unavailable(
+                "air density or speed of sound is not a positive finite number".to_owned(),
+            ),
+        }
+    }
 }
 
 /// The crosswind rudder check.
@@ -152,6 +196,13 @@ pub struct VmcInputs<'a> {
     pub cg_x_m: f64,
     /// Take-off mass, kg.
     pub takeoff_mass_kg: f64,
+    /// Operating empty mass, kg: the lightest mass the aircraft flies at,
+    /// the weight of the airborne `VMCA` balance (`NaN` or not positive:
+    /// the take-off mass). The bank's weight component is the only term of
+    /// the balance that grows with mass, so the lightest weight is the most
+    /// unfavourable one of CS 25.149(c)(4) ("or any lesser weight necessary
+    /// to show VMC").
+    pub minimum_mass_kg: f64,
     /// Landing mass, kg (for the crosswind check).
     pub landing_mass_kg: f64,
     /// Reference wing area, m^2.
@@ -178,6 +229,12 @@ fn assess_at(
 ) -> Result<VmcAssessment, VmcFailure> {
     let gravity = inputs.config.requirements.gravity_m_s2;
     let weight_n = inputs.takeoff_mass_kg * gravity;
+    // The bank's weight component at the most unfavourable (lightest) weight.
+    let control_weight_n = if inputs.minimum_mass_kg.is_finite() && inputs.minimum_mass_kg > 0.0 {
+        inputs.minimum_mass_kg.min(inputs.takeoff_mass_kg) * gravity
+    } else {
+        weight_n
+    };
     let atmosphere = us1976_compute_values(altitude_m, isa_deviation_c);
     let (rho, a_m_s) = (atmosphere.density_kg_m3, atmosphere.speed_of_sound_m_s);
     let cl_max = inputs.config.performance.cl_max_to;
@@ -200,24 +257,109 @@ fn assess_at(
         let q = 0.5 * rho * tas * tas;
         Ok(point.thrust_per_engine_n + point.windmilling_cd * q * inputs.s_ref_m2)
     };
-    let mut speed = 1.15 * vsr;
-    let mut solved = None;
-    for _ in 0..THRUST_ITERATIONS {
+    // VMCA is the speed v at which the minimum control speed of the thrust at
+    // v is v itself: the root of h(v) = VMC(F(v)) - v. The first two points
+    // (1.15 VSR and the VMC it gives) bracket the root whenever VMC falls
+    // or stays flat as the thrust falls with speed, the usual case; the
+    // bracket is closed by regula falsi with the Illinois modification
+    // (Dowell and Jarratt, BIT 11 (1971) 168-174), which keeps the bracket
+    // and converges superlinearly. Without a bracket the damped fixed point
+    // (half step) is kept. A damped step alone needs about
+    // log2(gap / tolerance) steps: 12 left the LJ60 (VMC 0.64 VSR, a gap
+    // of 0.5 VSR from the start) 0.014 m/s short of the tolerance.
+    let evaluate = |speed: f64| -> Result<(MinimumControlSpeed, f64, f64), VmcFailure> {
         let force = force_at(speed)?;
-        let vmc = control
-            .minimum_control_speed(force, rho, a_m_s, Some(weight_n), YawTrimMode::LeastRudder)
-            .ok_or(VmcFailure::NotControllable)?;
-        let converged = (vmc.tas_m_s - speed).abs() < SPEED_TOLERANCE_M_S;
-        solved = Some((vmc, force));
-        if converged {
-            break;
+        let vmc = control.minimum_control_speed_outcome(
+            force,
+            rho,
+            a_m_s,
+            Some(control_weight_n),
+            YawTrimMode::LeastRudder,
+        )?;
+        Ok((vmc, force, speed))
+    };
+    let residual = |solved: &(MinimumControlSpeed, f64, f64)| solved.0.tas_m_s - solved.2;
+    let mut solved = evaluate(1.15 * vsr)?;
+    let mut converged = residual(&solved).abs() < SPEED_TOLERANCE_M_S;
+    if !converged {
+        let first = solved;
+        let second = evaluate(first.0.tas_m_s)?;
+        solved = second;
+        converged = residual(&second).abs() < SPEED_TOLERANCE_M_S;
+        let bracketed = residual(&first).signum() != residual(&second).signum();
+        if !converged && bracketed {
+            let (mut a, mut b) = (first, second);
+            let (mut ha, mut hb) = (residual(&a), residual(&b));
+            for _ in 0..THRUST_ITERATIONS {
+                let speed = (a.2 * hb - b.2 * ha) / (hb - ha);
+                let next = evaluate(speed)?;
+                let h = residual(&next);
+                solved = next;
+                if h.abs() < SPEED_TOLERANCE_M_S {
+                    converged = true;
+                    break;
+                }
+                if h.signum() == hb.signum() {
+                    ha *= 0.5;
+                } else {
+                    a = b;
+                    ha = hb;
+                }
+                b = next;
+                hb = h;
+            }
+        } else if !converged {
+            let mut speed = 0.5 * (second.2 + second.0.tas_m_s);
+            for _ in 0..THRUST_ITERATIONS {
+                let next = evaluate(speed)?;
+                solved = next;
+                if residual(&next).abs() < SPEED_TOLERANCE_M_S {
+                    converged = true;
+                    break;
+                }
+                speed = 0.5 * (speed + next.0.tas_m_s);
+            }
         }
-        speed = 0.5 * (speed + vmc.tas_m_s);
     }
-    let (vmc, force) = solved.ok_or(VmcFailure::NotControllable)?;
-    let vmcg = control
-        .minimum_control_speed(force, rho, a_m_s, None, YawTrimMode::RudderOnly)
-        .map(|ground| ground.tas_m_s);
+    let (vmc, force, thrust_speed) = solved;
+    if !converged {
+        tracing::warn!(
+            vmca_m_s = vmc.tas_m_s,
+            thrust_speed_m_s = thrust_speed,
+            iterations = THRUST_ITERATIONS,
+            "minimum control speed: the thrust fixed point did not converge; the last iterate is reported"
+        );
+    }
+    let engines = inputs
+        .config
+        .geometry
+        .engine
+        .spanwise_positions_m
+        .len()
+        .max(2) as f64;
+    let ground_thrust = |tas: f64| -> Option<GroundRunThrust> {
+        let point = model
+            .point(
+                EngineOutCondition {
+                    altitude_m,
+                    isa_deviation_c,
+                    tas_m_s: tas,
+                },
+                EngineOutRating::TakeoffGoAround,
+                (inputs.clean_cd0)(tas / a_m_s, altitude_m, isa_deviation_c),
+            )
+            .ok()?;
+        Some(GroundRunThrust {
+            thrust_per_engine_n: point.thrust_per_engine_n,
+            windmilling_drag_n: point.windmilling_cd * 0.5 * rho * tas * tas * inputs.s_ref_m2,
+            total_thrust_n: point.thrust_per_engine_n * engines,
+        })
+    };
+    let ground_cd0 = (inputs.clean_cd0)(0.2, altitude_m, isa_deviation_c);
+    let vmcg =
+        ground::ground_run_geometry(inputs, model.is_turboprop(), ground_cd0).and_then(|ground| {
+            control.ground_minimum_control_speed(&ground, &ground_thrust, rho, a_m_s)
+        });
     let target = VMC_CEILING_OVER_VSR * vsr;
     Ok(VmcAssessment {
         vmca_m_s: vmc.tas_m_s,
@@ -229,7 +371,15 @@ fn assess_at(
         bank_deg: vmc.trim.bank_rad.to_degrees(),
         limit: vmc.limit,
         asymmetric_force_n: force,
-        fin_area_ratio_for_ceiling: fin_area_ratio(control, force, rho, a_m_s, weight_n, target),
+        fin_area_ratio_for_ceiling: fin_area_ratio(
+            control,
+            force,
+            rho,
+            a_m_s,
+            control_weight_n,
+            target,
+        ),
+        thrust_iteration_converged: converged,
     })
 }
 
@@ -288,7 +438,7 @@ fn crosswind(control: YawControlGeometry, inputs: &VmcInputs<'_>) -> Option<Cros
     if !(approach.is_finite() && approach > 0.0) {
         return None;
     }
-    let sideslip = (CROSSWIND_DESIGN_M_S / approach).atan();
+    let sideslip = (design_crosswind_m_s(vs_land) / approach).atan();
     let rudder = control.crosswind_rudder_rad(sideslip, approach / sea_level.speed_of_sound_m_s)?;
     Some(CrosswindAssessment {
         approach_speed_m_s: approach,
@@ -428,30 +578,35 @@ pub(crate) fn vmc_residuals(outcome: &VmcOutcome, role: ResidualRole) -> Vec<Con
         }
     } else {
         // Not controllable at any speed is a violation; a missing input is
-        // reported without ranking.
-        let (value, row_role, detail) = match &outcome.at_sea_level {
-            Err(VmcFailure::NotControllable) => (
+        // reported without ranking. An asymmetry the airframe holds with
+        // control to spare at every searched speed sets no minimum control
+        // speed: there is no ratio to hold against the ceiling and no row.
+        let row = match &outcome.at_sea_level {
+            Err(VmcFailure::NotControllable) => Some((
                 f64::INFINITY,
                 role,
                 "the fin cannot balance the engine-out yawing moment at any speed".to_owned(),
-            ),
+            )),
+            Err(VmcFailure::NotLimiting { .. }) => None,
             Err(VmcFailure::Unavailable(reason)) => {
-                (f64::NAN, ResidualRole::Diagnostic, reason.clone())
+                Some((f64::NAN, ResidualRole::Diagnostic, reason.clone()))
             }
-            Ok(_) => (f64::NAN, ResidualRole::Diagnostic, String::new()),
+            Ok(_) => Some((f64::NAN, ResidualRole::Diagnostic, String::new())),
         };
-        residuals.push(
-            ConstraintResidual::scaled(
-                "vmc_over_vsr",
-                Performance,
-                value,
-                VMC_CEILING_OVER_VSR,
-                "VMC/VSR",
-                value,
-                row_role,
-            )
-            .with_detail(detail),
-        );
+        if let Some((value, row_role, detail)) = row {
+            residuals.push(
+                ConstraintResidual::scaled(
+                    "vmc_over_vsr",
+                    Performance,
+                    value,
+                    VMC_CEILING_OVER_VSR,
+                    "VMC/VSR",
+                    value,
+                    row_role,
+                )
+                .with_detail(detail),
+            );
+        }
     }
     if let Some(check) = outcome.crosswind {
         residuals.push(ConstraintResidual::scaled(
@@ -489,6 +644,7 @@ pub(crate) fn evaluate_candidate(outcome: &SizingOutcome, config: &AlasConfig) -
         plane: &outcome.plane,
         cg_x_m: outcome.cg_x,
         takeoff_mass_kg: outcome.sized.takeoff_mass_kg,
+        minimum_mass_kg: operating_empty_mass_kg(&outcome.masses),
         landing_mass_kg: outcome.sized.design_landing_mass_kg,
         s_ref_m2,
         static_per_engine_n: Some(outcome.static_thrust_kn * 1_000.0)
@@ -497,6 +653,21 @@ pub(crate) fn evaluate_candidate(outcome: &SizingOutcome, config: &AlasConfig) -
         clean_cd0: &|mach, altitude_m, isa_c| drag.cd_at_atmosphere(0.0, mach, altitude_m, isa_c),
     })
 }
+
+/// Operating empty mass of a mass breakdown, kg: the groups of
+/// `alas_mass::breakdown::OEW_KEYS` (everything but payload and fuel).
+fn operating_empty_mass_kg(masses: &alas_mass::breakdown::MassBreakdown) -> f64 {
+    masses.wing
+        + masses.h_stab
+        + masses.v_stab
+        + masses.fuselage
+        + masses.gear
+        + masses.propulsion
+        + masses.systems
+        + masses.furnishings
+}
+
+mod ground;
 
 #[cfg(test)]
 mod tests;

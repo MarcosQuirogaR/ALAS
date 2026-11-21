@@ -90,6 +90,33 @@ pub(super) fn engine_editor_model(engine: &EngineConfig) -> Result<EngineEditorM
 pub(super) fn render_engine_physics_summary(ui: &mut Ui, model: &EngineEditorModel) {
     crate::theme::card_frame(ui).show(ui, |ui| {
         ui.set_min_width(ui.available_width());
+        // The summary collapses like its sibling cards.
+        let (title, hover) = match model {
+            EngineEditorModel::Turbofan {
+                off_design_evidence,
+                provenance,
+                ..
+            } => (
+                tr("Turbofan rating & cycle anchors"),
+                format!(
+                    "{}: {off_design_evidence}\n\n{}: {provenance}",
+                    tr("Off-design thrust"),
+                    tr("Provenance")
+                ),
+            ),
+            EngineEditorModel::Turboprop { provenance, .. } => (
+                tr("Turboprop shaft-power system"),
+                format!(
+                    "{}: {provenance}\n\n{}",
+                    tr("Provenance"),
+                    tr("Limitation: conceptual Level-1 propeller performance; no proprietary PW127M/568F engine deck or propeller map is claimed.")
+                ),
+            ),
+        };
+        let header = egui::CollapsingHeader::new(crate::theme::card_title(ui, title))
+            .id_salt("propulsion::engine_summary")
+            .default_open(true);
+        let header = crate::theme::show_header(ui, header, |ui| {
         match model {
         EngineEditorModel::Turbofan {
             rated_thrust_kn,
@@ -102,15 +129,8 @@ pub(super) fn render_engine_physics_summary(ui: &mut Ui, model: &EngineEditorMod
             cruise_tsfc_evidence,
             cruise_tsfc_source,
             takeoff_fuel_flow_kg_s,
-            off_design_evidence,
-            provenance,
+            ..
         } => {
-            ui.label(RichText::new(tr("Turbofan rating & cycle anchors")).strong())
-                .on_hover_text(format!(
-                    "{}: {off_design_evidence}\n\n{}: {provenance}",
-                    tr("Off-design thrust"),
-                    tr("Provenance")
-                ));
             readonly_metrics(
                 ui,
                 &[
@@ -141,14 +161,8 @@ pub(super) fn render_engine_physics_summary(ui: &mut Ui, model: &EngineEditorMod
             diameter_m,
             governed_rpm,
             reduction_ratio,
-            provenance,
+            ..
         } => {
-            ui.label(RichText::new(tr("Turboprop shaft-power system")).strong())
-                .on_hover_text(format!(
-                    "{}: {provenance}\n\n{}",
-                    tr("Provenance"),
-                    tr("Limitation: conceptual Level-1 propeller performance; no proprietary PW127M/568F engine deck or propeller map is claimed.")
-                ));
             readonly_metrics(
                 ui,
                 &[
@@ -170,6 +184,8 @@ pub(super) fn render_engine_physics_summary(ui: &mut Ui, model: &EngineEditorMod
             ui.label(format!("{}: {propeller_model}", tr("Propeller model")));
         }
         }
+            });
+        header.header_response.on_hover_text(hover);
     });
 }
 
@@ -187,12 +203,49 @@ fn cruise_tsfc_provenance_text(evidence: &str, source: &str) -> String {
     let source = if source.is_empty() {
         tr("Not recorded")
     } else {
-        source.to_owned()
+        plain_source(source)
     };
     crate::views::tr_fields(
         "Cruise TSFC evidence: {evidence}. Source: {source}",
         &[("evidence", evidence), ("source", source)],
     )
+}
+
+/// A catalogue source note without internal tracking tags: the leading
+/// `NEEDS-DATA(...)` marker goes, and a sentence that only repeats the
+/// evidence class ("Unsourced estimate") is not said twice.
+fn plain_source(source: &str) -> String {
+    let mut text = source.trim();
+    // A tracking tag opens with the open datum itself ("sourced ... not on
+    // disk."): that is a to-do for the maintainers, not a note for the user.
+    if let Some(rest) = text.strip_prefix("NEEDS-DATA(") {
+        if let Some((_, after)) = rest.split_once("):") {
+            text = after.trim();
+            if let Some((_, remainder)) = text.split_once(". ") {
+                text = remainder.trim();
+            }
+        }
+    }
+    let text = text.strip_prefix("Unsourced estimate: ").unwrap_or(text);
+    let mut chars = text.chars();
+    match chars.next() {
+        Some(first) => first.to_uppercase().collect::<String>() + chars.as_str(),
+        None => String::new(),
+    }
+}
+
+/// A value to four significant figures without trailing zeros.
+fn significant(value: f64) -> String {
+    if !value.is_finite() || value == 0.0 {
+        return format!("{value}");
+    }
+    let decimals = (3 - value.abs().log10().floor() as i32).clamp(0, 6) as usize;
+    let text = format!("{value:.decimals$}");
+    if text.contains('.') {
+        text.trim_end_matches('0').trim_end_matches('.').to_owned()
+    } else {
+        text
+    }
 }
 
 fn readonly_metrics(ui: &mut Ui, metrics: &[(String, f64, &str)]) {
@@ -208,9 +261,9 @@ fn readonly_metrics(ui: &mut Ui, metrics: &[(String, f64, &str)]) {
             // number, and a physical unit gets its typographic form.
             let unit = crate::views::form::display_unit(unit);
             let text = if unit.is_empty() {
-                format!("{label}: {value:.3}")
+                format!("{label}: {}", significant(*value))
             } else {
-                format!("{label}: {value:.3} {unit}")
+                format!("{label}: {} {unit}", significant(*value))
             };
             column_uis[index / rows_per_column].label(text);
         }
@@ -274,33 +327,18 @@ pub(super) fn render_engine_designer_form(
     ];
 
     let mut edits = Vec::new();
+    // The cards, each with the fields it holds; the rest go to "Other".
+    let mut cards: Vec<(&str, &str, bool, Vec<alas_config::Field>)> = Vec::new();
     for (title, names, default_open) in GROUPS {
         let section: Vec<alas_config::Field> = fields
             .iter()
             .filter(|field| names.contains(&field.name))
             .cloned()
             .collect();
-        if section.is_empty() {
-            continue;
+        if !section.is_empty() {
+            cards.push((title, title, default_open, section));
         }
-        crate::theme::card_frame(ui).show(ui, |ui| {
-            egui::CollapsingHeader::new(RichText::new(tr(title)).strong())
-                .id_salt(format!("propulsion_cycle::{title}"))
-                .default_open(default_open)
-                .show(ui, |ui| {
-                    edits.extend(dynamic_form(
-                        ui,
-                        &section,
-                        values,
-                        error_fields,
-                        lang,
-                        show_help,
-                    ));
-                });
-        });
-        ui.add_space(6.0);
     }
-
     let remaining: Vec<alas_config::Field> = fields
         .iter()
         .filter(|field| {
@@ -311,21 +349,66 @@ pub(super) fn render_engine_designer_form(
         .cloned()
         .collect();
     if !remaining.is_empty() {
-        crate::theme::card_frame(ui).show(ui, |ui| {
-            egui::CollapsingHeader::new(RichText::new(tr("Other parameters")).strong())
-                .id_salt("propulsion_cycle::other")
-                .default_open(true)
-                .show(ui, |ui| {
-                    edits.extend(dynamic_form(
-                        ui,
-                        &remaining,
-                        values,
-                        error_fields,
-                        lang,
-                        show_help,
-                    ));
-                });
-        });
+        cards.push(("Other parameters", "other", true, remaining));
     }
+    // Short cards share a row; a lone short card spreads over its own width.
+    let cols: Vec<usize> = cards
+        .iter()
+        .map(|(_, _, _, list)| crate::views::form::leaf_columns(list, values))
+        .collect();
+    crate::views::form::flow_cards(ui, "engine_cards", &cols, |ui, k| {
+        let (title, key, default_open, section) = &cards[k];
+        // A search jump to a field of this card opens it.
+        let forced = section.iter().any(|field| {
+            crate::search::focus_wants(ui.ctx(), &format!("propulsion_cycle.{}", field.name))
+        });
+        crate::theme::card_frame(ui).show(ui, |ui| {
+            ui.set_min_width(ui.available_width());
+            let mut header = egui::CollapsingHeader::new(crate::theme::card_title(ui, tr(title)))
+                .id_salt(format!("propulsion_cycle::{key}"))
+                .default_open(*default_open)
+                .open(crate::perf_tour::force_open());
+            if forced {
+                header = header.open(Some(true));
+            }
+            crate::theme::show_header(ui, header, |ui| {
+                edits.extend(dynamic_form(
+                    ui,
+                    section,
+                    values,
+                    error_fields,
+                    lang,
+                    show_help,
+                ));
+            });
+            crate::views::form::equalise(ui);
+        });
+        ui.add_space(6.0);
+    });
     edits
+}
+
+#[cfg(test)]
+mod display_tests {
+    use super::{plain_source, significant};
+
+    #[test]
+    fn numbers_drop_trailing_zeros_and_keep_four_significant_figures() {
+        assert_eq!(significant(10.0), "10");
+        assert_eq!(significant(1670.0), "1670");
+        assert_eq!(significant(467.0), "467");
+        assert_eq!(significant(0.545), "0.545");
+        assert_eq!(significant(0.0), "0");
+        assert_eq!(significant(0.0123456), "0.01235");
+    }
+
+    #[test]
+    fn a_source_note_loses_its_tracking_tag_and_repeated_class() {
+        let note = plain_source(
+            "NEEDS-DATA(PR2b, GE9X): sourced cruise TSFC datum (GE9X uninstalled) not on disk. Unsourced estimate: no public cruise TSFC was found.",
+        );
+        assert_eq!(note, "No public cruise TSFC was found.");
+        assert!(!note.contains("NEEDS-DATA"));
+        assert_eq!(plain_source("Scholz engine table"), "Scholz engine table");
+    }
 }

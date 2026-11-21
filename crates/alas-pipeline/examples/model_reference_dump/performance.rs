@@ -121,7 +121,7 @@ fn critical_mach(
         &report.airplane,
         AeroAnalysis::quarter_chord_sweep_deg(&report.airplane, sweep_le_deg),
         Some(config.geometry.clone()),
-        Some(config.drag_model.clone()),
+        Some(config.resolved_drag_model()),
         Some(config.analysis.clone()),
     );
     let (mach_dd, mach_crit) = aero.korn_mach_numbers(cl, None);

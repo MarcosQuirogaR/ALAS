@@ -22,6 +22,8 @@ impl Axes2D {
             y_scale: Scale::Linear,
             x_tick_decimals: None,
             y_tick_decimals: None,
+            y_tick_negated: false,
+            tick_font_size: 8.5,
         }
     }
 
@@ -34,6 +36,19 @@ impl Axes2D {
     /// Set the Y-axis scale (chainable).
     pub fn with_y_scale(mut self, scale: Scale) -> Self {
         self.y_scale = scale;
+        self
+    }
+
+    /// Label the Y ticks with the negated data value: the axis holds `-q` so
+    /// that `q` increases downward (chainable).
+    pub fn with_negated_y_tick_labels(mut self) -> Self {
+        self.y_tick_negated = true;
+        self
+    }
+
+    /// Set the tick-label font size; titles follow at +1.5 (chainable).
+    pub fn with_tick_font(mut self, size: f64) -> Self {
+        self.tick_font_size = size;
         self
     }
 
@@ -140,23 +155,36 @@ impl Axes2D {
     pub fn add_line_series(&self, scene: &mut Scene, pts: &[(f64, f64)], stroke: Stroke) {
         scene.data_trace.note_line_series(self, pts, &stroke.color);
         let _chrome = crate::plot_data::ChromeGuard::begin();
-        let mut clipped = Vec::new();
+        // A run that leaves the axes box and re-enters is two polylines: joining the exit and
+        // re-entry points would draw a stray chord across the plot.
+        let mut runs: Vec<Vec<(f64, f64)>> = Vec::new();
+        let mut clipped: Vec<(f64, f64)> = Vec::new();
         for pair in pts.windows(2) {
             let Some((start, end)) = clip_segment(self, pair[0], pair[1]) else {
+                if clipped.len() >= 2 {
+                    runs.push(std::mem::take(&mut clipped));
+                } else {
+                    clipped.clear();
+                }
                 continue;
             };
+            if let Some(&last) = clipped.last() {
+                if last != start {
+                    runs.push(std::mem::take(&mut clipped));
+                }
+            }
             if clipped.last().copied() != Some(start) {
                 clipped.push(start);
             }
             clipped.push(end);
         }
         if clipped.len() >= 2 {
+            runs.push(clipped);
+        }
+        for run in runs {
             scene.add(SceneElement::Polyline {
-                points: clipped
-                    .into_iter()
-                    .map(|(x, y)| self.map_point(x, y))
-                    .collect(),
-                stroke,
+                points: run.into_iter().map(|(x, y)| self.map_point(x, y)).collect(),
+                stroke: stroke.clone(),
             });
         }
     }

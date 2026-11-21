@@ -5,7 +5,7 @@
 //!
 //! No new physics: the figures are the ones the feasibility checks already
 //! derive ([`alas_pipeline::thrust_checks`], the same call the acceptance
-//! audit uses): the initial and step levels of the frozen plan, the highest
+//! checks use): the initial and step levels of the frozen plan, the highest
 //! level at which level flight at the maximum-cruise rating still holds at the
 //! initial mass and Mach, and the installed-over-required static thrust ratio
 //! at the worst (governing) planned level. Flight levels are the model's

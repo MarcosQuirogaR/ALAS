@@ -20,7 +20,7 @@ use alas_geom::wing_structure::{RibStation, WingStructureGeometry};
 use super::cards::{Deck, Mat1, Param, ParamValue, Pshell, Spc1};
 use super::elements::{
     station_value, MID_CAP, MID_RIB, MID_SKIN, MID_WEB, PID_MAIN_RIB, PID_SEC_RIB, PID_SKIN,
-    PID_TE_STRIP, PID_WEB_BASE,
+    PID_SKIN_STRIP_BASE, PID_TE_STRIP, PID_WEB_BASE,
 };
 use super::nodes::{NodeMap, Surface};
 use super::{
@@ -111,10 +111,39 @@ fn build_with_caps(
     rib_mat: &MaterialSpec,
     product_caps: bool,
 ) -> Result<(Deck, MeshHealthReport, MeshNodeIndex), MeshError> {
-    let mut stations = wsg.get_rib_stations(
+    let (rib_count, chord_points) = (
         sizing.num_ribs.max(0) as usize,
         cfg.mesh_chordwise_points.max(0) as usize,
     );
+    let mut stations = if product_caps {
+        wsg.get_rib_stations_twisted(rib_count, chord_points)
+    } else {
+        wsg.get_rib_stations(rib_count, chord_points)
+    };
+    if product_caps {
+        // The product deck's cover is the wing's own loft, streamwise
+        // sections: the stations sample each section along their swept cut,
+        // which puts the cover a few per cent of the depth off it and off
+        // the streamwise root rib.
+        for station in &mut stations {
+            let last = station.extrados.len().saturating_sub(1);
+            for (surface, upper) in [
+                (&mut station.extrados, true),
+                (&mut station.intrados, false),
+            ] {
+                for point in surface.iter_mut() {
+                    point[2] = wsg.streamwise_surface_z(point[0], point[1], upper, true);
+                }
+            }
+            // The last point stays pinched shut (trailing edge or root cut).
+            if let (Some(upper), Some(lower)) = (
+                station.extrados.get(last).copied(),
+                station.intrados.get_mut(last),
+            ) {
+                *lower = upper;
+            }
+        }
+    }
     let trimmed = if product_caps {
         super::section_closure::trim_aft_intersections(wsg, &mut stations)?
     } else {
@@ -131,6 +160,14 @@ fn build_with_caps(
     }
 
     let mut deck = Deck::new();
+    if product_caps {
+        deck.lift_shape = wsg.span_load.clone();
+        if let (Some(&front), Some(&rear)) = (wsg.spar_fracs.first(), wsg.spar_fracs.last()) {
+            if rear - front > 1.0e-9 {
+                deck.quarter_chord_rear_share = (0.25 - front) / (rear - front);
+            }
+        }
+    }
     for (mid, material) in [
         (MID_SKIN, skin_mat),
         (MID_WEB, web_mat),
@@ -146,7 +183,9 @@ fn build_with_caps(
         });
     }
     for (pid, mid, t) in [
-        (PID_SKIN, MID_SKIN, sizing.t_skin),
+        // Every strip's skin when no spanwise gauge is recorded; else the root
+        // region's, set below once the region is planned.
+        (PID_SKIN, MID_SKIN, sizing.skin_at(0)),
         (PID_MAIN_RIB, MID_RIB, cfg.t_rib_m),
         (PID_SEC_RIB, MID_RIB, cfg.t_rib_m * SEC_RIB_THICKNESS_FACTOR),
         (PID_TE_STRIP, MID_RIB, cfg.t_te_strip_m),
@@ -200,8 +239,81 @@ fn build_with_caps(
         spar_lower.push(lower);
     }
 
+    // The product deck meshes the swept-root region between the root plane
+    // and the first full rib through its truncated ribs (`root_region`), so
+    // the skin, spars and truncated ribs share grids there.
+    let root_plan = if product_caps {
+        super::root_region::plan(&stations, &nodes, &regions)
+    } else {
+        None
+    };
+    // The root region's skin is one property over the span from the root to
+    // the first full skin rib: it takes the largest sized gauge there, so no
+    // part of it is thinner than the sizing asked for.
+    if let (Some(plan), false) = (&root_plan, sizing.skin_gauge_m.is_empty()) {
+        let end = stations[plan.skin_start].eta;
+        let gauge = sizing
+            .eta_stations
+            .iter()
+            .zip(&sizing.skin_gauge_m)
+            .filter(|(&eta, _)| eta <= end)
+            .map(|(_, &t)| t)
+            .fold(
+                station_value(end, &sizing.eta_stations, &sizing.skin_gauge_m),
+                f64::max,
+            );
+        if let Some(root) = deck.shell_properties.iter_mut().find(|p| p.pid == PID_SKIN) {
+            root.t = gauge;
+        }
+    }
     let mut eid: i64 = 1;
-    for pair in regions.skin_ribs.windows(2) {
+    let root_mesh = root_plan.as_ref().map(|plan| {
+        let surface =
+            |x: f64, y: f64, s: usize| wsg.streamwise_surface_z(x, y, s == 0, product_caps);
+        super::root_region::build(&mut deck, &mut eid, plan, &surface)
+    });
+    if let (Some(plan), Some(mesh)) = (&root_plan, &root_mesh) {
+        let station = &stations[plan.skin_start];
+        for (side, spar) in [0, n_spars - 1].into_iter().enumerate() {
+            let replacement = if side == 0 { &mesh.front } else { &mesh.rear };
+            let Some(&point) = station.j_spars.get(spar) else {
+                continue;
+            };
+            let lines = [&mut spar_upper[spar], &mut spar_lower[spar]];
+            for ((line, surface), new) in lines
+                .into_iter()
+                .zip([Surface::Ext, Surface::Int])
+                .zip(replacement)
+            {
+                let outer = nodes.at(plan.skin_start, point.max(0) as usize, surface);
+                if let Some(position) = line.iter().position(|&nid| nid == outer) {
+                    line.splice(..=position, new.iter().copied()).for_each(drop);
+                }
+            }
+        }
+    }
+    for (strip, pair) in regions.skin_ribs.windows(2).enumerate() {
+        if root_plan
+            .as_ref()
+            .is_some_and(|plan| pair == [0, plan.skin_start])
+        {
+            continue;
+        }
+        // One skin property per strip where the sizing records a spanwise
+        // gauge: read at the strip's mid-span, like the web panels.
+        let pid = if sizing.skin_gauge_m.is_empty() {
+            PID_SKIN
+        } else {
+            let eta = (0.5 * (stations[pair[0]].eta + stations[pair[1]].eta)).clamp(0.0, 1.0);
+            let pid = PID_SKIN_STRIP_BASE + strip as i64;
+            deck.shell_properties.push(Pshell {
+                pid,
+                mid1: MID_SKIN,
+                t: station_value(eta, &sizing.eta_stations, &sizing.skin_gauge_m),
+                mid2: MID_SKIN,
+            });
+            pid
+        };
         for surface in [Surface::Ext, Surface::Int] {
             elements::zipper_skin_strip(
                 &mut deck,
@@ -211,6 +323,7 @@ fn build_with_caps(
                 pair,
                 surface,
                 product_caps,
+                pid,
             );
         }
     }
@@ -258,6 +371,9 @@ fn build_with_caps(
         &nodes,
         &regions,
         product_caps,
+        root_plan
+            .as_ref()
+            .map_or(&[][..], |plan| plan.transition_ribs.as_slice()),
     );
     if !product_caps {
         // The boxed product deck has no structure aft of the rear spar.
@@ -276,7 +392,14 @@ fn build_with_caps(
         elements::add_spar_caps(&mut deck, &mut eid, &spar_upper, &spar_lower, sizing, wsg);
     }
 
-    let root_nodes = elements::root_constraint_nodes(&stations, &nodes, product_caps);
+    let mut root_nodes = elements::root_constraint_nodes(&stations, &nodes, product_caps);
+    if let Some(mesh) = &root_mesh {
+        for &nid in &mesh.root_plane {
+            if !root_nodes.contains(&nid) {
+                root_nodes.push(nid);
+            }
+        }
+    }
     deck.constraints.push(Spc1 {
         sid: 1,
         components: "123456",
@@ -309,7 +432,13 @@ fn build_with_caps(
         &stations,
         &nodes,
         &regions.skin_ribs_set,
-        &regions.transition_ribs,
+        // The meshed root region shares grids with its truncated ribs: no
+        // rivets.
+        if root_plan.is_some() {
+            &[]
+        } else {
+            &regions.transition_ribs
+        },
         wsg.semi_span,
         sizing.num_ribs,
         eid,

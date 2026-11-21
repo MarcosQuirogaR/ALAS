@@ -57,8 +57,15 @@ pub fn collect_plot_data(state: &AppState) -> Result<Vec<PlotData>, ExportError>
     let run = run_label(state);
     let mut plots = Vec::new();
     for descriptor in alas_report::RESULT_FIGURES {
-        if let Some(Some(scene)) = build_result_figure(state, descriptor.id, &result.config, &theme)
-        {
+        // A figure the Results gallery already holds is not built again: the
+        // gallery builds every figure under `capture_plot_data`, so its scene
+        // carries the plotted numbers. Rebuilding all of them here held the UI
+        // thread 2 s (A320-200) to 9 s (ATR72-600) after a run (measured).
+        let built = match state.gallery_cached_figure(descriptor.id) {
+            Some(cached) => cached.map(|scene| (*scene).clone()),
+            None => build_result_figure(state, descriptor.id, &result.config, &theme).flatten(),
+        };
+        if let Some(scene) = built {
             if let Some(mut plot) = PlotData::from_scene(&scene, descriptor.id, Some(&run)) {
                 plot.title = descriptor.title.to_owned();
                 plots.push(plot);

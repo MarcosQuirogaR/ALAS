@@ -120,7 +120,9 @@ pub fn sized_wingbox_centroid(
                 sizing.y_stations[i],
                 geometry.z_le(eta),
             ];
-            skin.add(0.5 * dy * chord, point);
+            // Cover area times the station's sized gauge (uniform for the
+            // frozen laws, where the gauge factor cancels).
+            skin.add(0.5 * dy * chord * sizing.skin_at(i), point);
             ribs.add(0.5 * dy, point);
         }
     }

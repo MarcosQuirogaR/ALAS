@@ -4,7 +4,11 @@
 //! CPACS XML rendering and source-geometry validation.
 
 mod analysis;
+mod body_record;
+mod design_vector;
 mod engine;
+mod main_wing;
+mod tail_planform;
 
 #[cfg(test)]
 // Renderer fixtures intentionally use expect so malformed test setup is reported
@@ -55,6 +59,7 @@ pub(super) fn render_cpacs_v35_with_analysis(
     timestamp: &str,
 ) -> Result<String, CpacsExportError> {
     validate_airplane(&report.airplane, config)?;
+    design_vector::validate_design_vector_record(&report.design)?;
 
     render_document(
         &report.airplane,
@@ -82,7 +87,24 @@ fn render_document(
     );
     write_header(&mut xml, airplane, timestamp);
     write_vehicles(&mut xml, airplane, config, report, feasibility, mission)?;
-    engine::write_toolspecific_propulsion(&mut xml, config);
+    let turboprop = engine::has_toolspecific_propulsion(config);
+    let main_wing_record = main_wing::has_main_wing_record(airplane);
+    let tail_record = tail_planform::has_tail_planform_record(airplane);
+    let body_record = body_record::has_body_record(airplane);
+    let design = report.map(|report| &report.design);
+    if turboprop || main_wing_record || tail_record || body_record || design.is_some() {
+        let _ = writeln!(xml, "  <toolspecific>");
+        if turboprop {
+            engine::write_toolspecific_propulsion(&mut xml, config);
+        }
+        main_wing::write_main_wing_tool(&mut xml, airplane);
+        tail_planform::write_tail_planform_tool(&mut xml, airplane);
+        body_record::write_body_record_tool(&mut xml, airplane);
+        if let Some(design) = design {
+            design_vector::write_design_vector_tool(&mut xml, design);
+        }
+        let _ = writeln!(xml, "  </toolspecific>");
+    }
     let _ = writeln!(xml, "</cpacs>");
     Ok(xml)
 }
@@ -95,6 +117,7 @@ fn validate_airplane(airplane: &Airplane, config: &AlasConfig) -> Result<(), Cpa
     validate_number(airplane.c_ref, "airplane reference chord")?;
     validate_number(airplane.b_ref, "airplane reference span")?;
     validate_vector(airplane.xyz_ref, "airplane reference point")?;
+    main_wing::validate_main_wing_record(airplane)?;
     // A non-finite cycle scalar is named as such before the binding check.
     if let Some(spec) = &config.geometry.engine.turbofan {
         validate_number(spec.rated_thrust_kn, "engine take-off thrust")?;
@@ -296,12 +319,16 @@ fn write_reference(xml: &mut String, airplane: &Airplane) {
 fn write_fuselages(xml: &mut String, airplane: &Airplane) {
     let _ = writeln!(xml, "        <fuselages>");
     for (fuselage_index, fuselage) in airplane.fuselages.iter().enumerate() {
+        // The closed surface. A scarfed lip stays upright: the CPACS section
+        // reader of this program takes no section rotation. The stations the
+        // analyses read and the scarf are in the body record.
+        let stations = fuselage.closed_stations();
         let uid = fuselage_uid(fuselage_index);
         let _ = writeln!(xml, "          <fuselage uID=\"{uid}\">");
         write_text(xml, 12, "name", &fuselage.name);
         write_transformation(xml, 12, [1.0, 1.0, 1.0], [0.0, 0.0, 0.0], [0.0, 0.0, 0.0]);
         let _ = writeln!(xml, "            <sections>");
-        for (section_index, section) in fuselage.xsecs.iter().enumerate() {
+        for (section_index, section) in stations.iter().enumerate() {
             let section_uid = fuselage_section_uid(fuselage_index, section_index);
             let element_uid = fuselage_element_uid(fuselage_index, section_index);
             let _ = writeln!(xml, "              <section uID=\"{section_uid}\">");
@@ -334,7 +361,7 @@ fn write_fuselages(xml: &mut String, airplane: &Airplane) {
         }
         let _ = writeln!(xml, "            </sections>");
         let _ = writeln!(xml, "            <segments>");
-        for section_index in 1..fuselage.xsecs.len() {
+        for section_index in 1..stations.len() {
             let segment_uid = fuselage_segment_uid(fuselage_index, section_index - 1);
             let _ = writeln!(xml, "              <segment uID=\"{segment_uid}\">");
             write_text(
@@ -664,7 +691,14 @@ fn number(value: f64) -> String {
     value.to_string()
 }
 
+/// The rotation about x of section `section_index`'s frame, degrees: its kept
+/// plane when it has a [`alas_geom::aircraft::wing::WingXSec::span_axis`] (a
+/// wingtip device's root and path stations), otherwise the bisector of its
+/// adjacent leading-edge segments, the frame the loft derives.
 fn section_dihedral_deg(wing: &Wing, section_index: usize) -> Result<f64, CpacsExportError> {
+    if let Some(axis) = wing.xsecs[section_index].span_axis {
+        return Ok(axis[2].atan2(axis[1]).to_degrees());
+    }
     let current = wing.xsecs[section_index].xyz_le;
     let failure = || CpacsExportError::DegenerateWingStation {
         name: wing.name.clone(),

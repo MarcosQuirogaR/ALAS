@@ -9,6 +9,8 @@
 //! such as symmetry declarations and UID relationships before a downstream
 //! consumer had a chance to inspect it.
 
+use alas_geom::aircraft::wing::{PlanformDatum, WingReference};
+
 /// The only CPACS schema version accepted by the current reader.
 pub const CPACS_35_VERSION: &str = "3.5";
 
@@ -75,6 +77,85 @@ pub struct CpacsAircraft {
     pub wings: Vec<CpacsWing>,
     /// Engine installations in document order.
     pub engine_positions: Vec<CpacsEnginePosition>,
+    /// ALAS toolspecific records of the tail reference planforms. A document not
+    /// exported by ALAS has none.
+    pub tail_planform_records: Vec<CpacsTailPlanformRecord>,
+    /// ALAS toolspecific records of the bodies as the analyses read them. A document
+    /// not exported by ALAS has none.
+    pub body_records: Vec<CpacsBodyRecord>,
+    /// ALAS toolspecific record of the main wing, when present. A document not
+    /// exported by ALAS has none.
+    pub main_wing_record: Option<CpacsMainWingRecord>,
+    /// ALAS toolspecific record of the design vector the exported aircraft
+    /// was built from, when present. A document not exported by ALAS has none.
+    pub design_vector: Option<alas_config::DesignVector>,
+}
+
+/// The straight reference planform of a tail surface whose built edges leave it,
+/// which CPACS 3.5 cannot encode, and the sections it was recorded against. See the
+/// exporter's `tail_planform` module.
+#[derive(Debug, Clone, PartialEq)]
+pub struct CpacsTailPlanformRecord {
+    /// The surface's name in the document.
+    pub name: String,
+    /// The reference planform's sections, root to tip.
+    pub reference: Vec<CpacsRecordedSection>,
+    /// The sections of the exported surface, root to tip.
+    pub sections: Vec<CpacsRecordedSection>,
+}
+
+/// A body as the analyses read it, which the document's closed sections are not. See
+/// the exporter's `body_record` module.
+#[derive(Debug, Clone, PartialEq)]
+pub struct CpacsBodyRecord {
+    /// The body's name in the document.
+    pub name: String,
+    /// The stations, nose to tail, open ends open and with their shape exponents.
+    pub stations: Vec<alas_geom::aircraft::fuselage::FuselageXSec>,
+    /// The scarfed inlet, if any.
+    pub lip_scarf: Option<alas_geom::aircraft::fuselage::LipScarf>,
+    /// What the lofted surface is built from, when the body has one.
+    pub loft: Option<CpacsBodyLoft>,
+    /// The stations of the separate APU cone, when the body has one.
+    pub apu_cone: Option<Vec<alas_geom::aircraft::fuselage::FuselageXSec>>,
+}
+
+/// The inputs of a body's lofted surface, in the frame of the record's stations.
+#[derive(Debug, Clone, PartialEq)]
+pub struct CpacsBodyLoft {
+    /// The loft data of the body, geometry only: no fit statistics or provenance.
+    pub spec: alas_geom::loft::LoftSpec,
+    /// How that data was instantiated.
+    pub params: alas_geom::loft::LoftParams,
+}
+
+/// The main wing's reference wing and design planform, which CPACS 3.5 cannot
+/// encode, and what they were recorded against. See the exporter's `main_wing` module.
+#[derive(Debug, Clone, PartialEq)]
+pub struct CpacsMainWingRecord {
+    /// The reference wing, when the exported wing had one.
+    pub reference: Option<WingReference>,
+    /// The design planform, when the exported wing had one.
+    pub datum: Option<PlanformDatum>,
+    /// The wingtip device's flare in the last section's chord of a wing with no datum,
+    /// m; 0 otherwise.
+    pub tip_te_flare_m: f64,
+    /// The sections of the exported wing, root to tip. Empty in a record from an
+    /// export older than this list, which cannot be checked against its document.
+    pub sections: Vec<CpacsRecordedSection>,
+    /// The document's own `<reference>` area and length at the export, m^2 and m.
+    pub document_reference: Option<(f64, f64)>,
+}
+
+/// One recorded section. Metres and degrees, aircraft axes, x aft.
+#[derive(Debug, Clone, Copy, PartialEq)]
+pub struct CpacsRecordedSection {
+    /// Leading edge.
+    pub le_m: [f64; 3],
+    /// Chord.
+    pub chord_m: f64,
+    /// Twist.
+    pub twist_deg: f64,
 }
 
 /// Aircraft reference quantities expressed in CPACS SI geometry coordinates.

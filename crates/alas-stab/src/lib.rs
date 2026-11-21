@@ -37,8 +37,11 @@
 //! takes a narrow, flat input rather than a whole vehicle. See its module doc
 //! for why every centre of gravity it reads is the origin.
 
+pub mod compressible_sweep;
 pub mod dynamics;
+pub mod flap_downwash;
 pub mod modes;
 pub mod neutral_point;
+pub mod reference_dimensions;
 pub mod static_stability;
 pub mod trim;

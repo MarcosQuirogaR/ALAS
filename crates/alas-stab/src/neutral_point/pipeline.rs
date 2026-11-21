@@ -15,21 +15,19 @@ use alas_atmo::Atmosphere;
 use alas_config::analysis::AnalysisConfig;
 use alas_geom::aircraft::airplane::Airplane;
 
-use super::surfaces::{combine, goethert_stretch, per_surface_contributions, tail_slope_loss};
-use super::{fuselage, nacelles, FuselageTerms, NacelleTerm, NpDiagnostics};
-use crate::trim::{hstab, main_wing, resolution, AC_CHORD_FRACTION, HSTAB_NAME, MAIN_WING_NAME};
+use super::surfaces::{
+    beta_for_mach, combine_scaled, goethert_stretch, per_surface_contributions, tail_slope_loss,
+};
+use super::NpDiagnostics;
+use crate::trim::{resolution, HSTAB_NAME, MAIN_WING_NAME};
 
+mod aeroelastic;
+mod airframe;
+pub(super) mod high_lift;
+pub(crate) use aeroelastic::elastic_np_shift;
+pub(crate) use high_lift::HighLiftScaling;
 pub(crate) mod compressible;
-
-/// Beta floor shared with [`goethert_stretch`], kept here too so
-/// `1.0 - mach*mach` is never evaluated at `mach >= 1.0` (this module has no
-/// transonic/supersonic model).
-const MAX_MACH_FOR_BETA: f64 = 0.99;
-
-pub(crate) fn beta_for_mach(mach: f64) -> f64 {
-    let m = mach.abs().min(MAX_MACH_FOR_BETA);
-    (1.0 - m * m).sqrt()
-}
+use airframe::{airframe_terms, zero_airframe_terms};
 
 /// The mesh resolution and two-alpha operating condition every VLM probe in
 /// this module is taken at: bundled so call sites (here and in
@@ -52,9 +50,10 @@ impl ProbeCondition {
 
 /// The corrected physical neutral point (F1-F3) at `condition`: no Mach
 /// stretch is applied here (the caller is responsible for that, see
-/// [`clean_np_at_condition`]). `eta_tail` and `tail_deps_extra` set the F1
-/// tail weighting (`tail_deps_extra` is the high-lift downwash increment,
-/// `0.0` for the clean case); `include_airframe_terms` gates the F2/F3
+/// [`clean_np_at_condition`]). `eta_tail` and `wing_slope_scale` set the F1
+/// tail weighting (`wing_slope_scale` is the factor by which extended flaps and
+/// slats raise the main wing's lift slope, `1.0` for the clean case);
+/// `include_airframe_terms` gates the F2/F3
 /// fuselage and nacelle corrections (matching `AnalysisConfig::include_fuselage_stability`'s
 /// existing role).
 ///
@@ -65,8 +64,9 @@ fn corrected_np_from_probes(
     airplane: &Airplane,
     condition: &ProbeCondition,
     eta_tail: f64,
-    tail_deps_extra: f64,
+    high_lift: HighLiftScaling,
     include_airframe_terms: bool,
+    body_lift: bool,
 ) -> Result<(f64, NpDiagnostics), VlmError> {
     let system = VlmSystem::assemble(
         airplane,
@@ -92,8 +92,9 @@ fn corrected_np_from_probes(
         &lo,
         &hi,
         eta_tail,
-        tail_deps_extra,
+        high_lift,
         include_airframe_terms,
+        body_lift,
     )
 }
 
@@ -128,8 +129,9 @@ pub(crate) fn product_neutral_point(
         &condition,
         lo,
         hi,
-        analysis.tail_efficiency,
-        0.0,
+        analysis.tail_efficiency_or(airplane.horizontal_tail_dynamic_pressure_ratio()),
+        HighLiftScaling::NONE,
+        analysis.include_fuselage_stability,
         analysis.include_fuselage_stability,
     )
     .map(|(x_np, _)| x_np)
@@ -142,22 +144,25 @@ pub(crate) fn product_neutral_point(
 /// # Errors
 ///
 /// See [`VlmError`].
+#[allow(clippy::too_many_arguments)]
 pub(crate) fn corrected_np_from_solved_probes(
     airplane: &Airplane,
     condition: &ProbeCondition,
     lo: &alas_aero::vlm::VlmResult,
     hi: &alas_aero::vlm::VlmResult,
     eta_tail: f64,
-    tail_deps_extra: f64,
+    high_lift: HighLiftScaling,
     include_airframe_terms: bool,
+    body_lift: bool,
 ) -> Result<(f64, NpDiagnostics), VlmError> {
     let shared = np_shared_terms(airplane, condition, lo, hi)?;
     Ok(np_from_shared_terms(
         airplane,
         &shared,
         eta_tail,
-        tail_deps_extra,
+        high_lift,
         include_airframe_terms,
+        body_lift,
     ))
 }
 
@@ -167,7 +172,7 @@ pub(crate) fn corrected_np_from_solved_probes(
 /// gradient at the tail (which itself pays for an isolated-tail solve on a
 /// one-wing subset mesh). [`neutral_point_conditions`]'s low-speed and
 /// high-lift conditions probe the same stretched geometry at the same
-/// Mach/altitude and differ only in `tail_deps_extra`, so this is the part
+/// Mach/altitude and differ only in `wing_slope_scale`, so this is the part
 /// they share.
 ///
 /// [`neutral_point_conditions`]: super::neutral_point_conditions
@@ -176,6 +181,7 @@ struct NpSharedTerms {
     main_wing_index: usize,
     tail_wing_index: Option<usize>,
     cl_alpha_total: f64,
+    wing_lift_fraction: f64,
     deps_dalpha_vlm: f64,
 }
 
@@ -208,6 +214,11 @@ fn np_shared_terms(
         .position(|w| w.name == MAIN_WING_NAME)
         .unwrap_or(0);
     let tail_wing_index = airplane.wings.iter().position(|w| w.name == HSTAB_NAME);
+    let wing_lift_fraction = if d_lift_sum.abs() > 1e-9 {
+        contributions[main_wing_index].d_lift / d_lift_sum
+    } else {
+        1.0
+    };
 
     let deps_dalpha_vlm = match tail_wing_index {
         Some(idx) if d_lift_sum.abs() > 1e-9 && cl_alpha_total.is_finite() => {
@@ -244,38 +255,100 @@ fn np_shared_terms(
         main_wing_index,
         tail_wing_index,
         cl_alpha_total,
+        wing_lift_fraction,
         deps_dalpha_vlm,
     })
 }
 
 /// The tail-deps_extra-dependent half of [`corrected_np_from_solved_probes`]:
 /// the tail-weighted combine and, when asked, the fuselage/nacelle terms
-/// (themselves independent of `tail_deps_extra`, but gated the same way the
+/// (themselves independent of `wing_slope_scale`, but gated the same way the
 /// undivided function gated them).
 fn np_from_shared_terms(
     airplane: &Airplane,
     shared: &NpSharedTerms,
     eta_tail: f64,
-    tail_deps_extra: f64,
+    high_lift: HighLiftScaling,
     include_airframe_terms: bool,
+    body_lift: bool,
 ) -> (f64, NpDiagnostics) {
-    let x_np_surfaces = combine(
-        &shared.contributions,
-        shared.tail_wing_index,
-        eta_tail,
-        tail_slope_loss(tail_deps_extra, shared.deps_dalpha_vlm),
-    )
-    .unwrap_or(airplane.xyz_ref[0]);
+    // A lattice that already carries the tail's effectiveness as the
+    // surface's dynamic-pressure ratio (`Wing::dynamic_pressure_ratio`, set by
+    // the product pipeline) has applied it to the tail's lift: weight the
+    // tail by the remainder only, so the efficiency counts once.
+    let eta_tail = eta_tail
+        / airplane
+            .horizontal_tail_dynamic_pressure_ratio()
+            .max(1.0e-6);
+    // High-lift condition: extended flaps (and slats, if declared) add wing area
+    // and so raise the wing slope by `r = 1 + delta_flap + delta_slat` (Raymer
+    // p. 413); the added lift acts at the quarter chord of the extended section,
+    // which moves the wing's aerodynamic centre. The downwash gradient at the
+    // tail keeps its clean value: USAF DATCOM (1978, Sec. 4.4.1, "Downwash Due
+    // to Flap Deflection", pp. 4.4.1-2 and 4.4.1-8/-9, Fig. 4.4.1-72) gives
+    // the flap's effect on the downwash as an angle increment
+    // `Delta eps = f(h_H/(b/2), flap type) Delta C_L / (A b_f/(b/2))`,
+    // proportional to the flap lift increment at small angles of attack, a
+    // trim term and not a change of `d eps / d alpha`; its gradient method
+    // has no flap term. (Scaling the gradient with the flapped wing slope,
+    // Torenbeek's clean eq. E-52 extrapolated, is not what either source
+    // states.)
+    let wing_slope_scale = high_lift.slope_scale();
+    let eps = shared.deps_dalpha_vlm;
+    let eps_scaled = eps;
+    let tail_loss = tail_slope_loss(eps_scaled - eps, eps);
+    let wing_fraction = shared.wing_lift_fraction.clamp(0.0, 1.0);
+    let tail_slope_factor = 1.0 - tail_loss;
+    let total_scale = wing_slope_scale * wing_fraction + tail_slope_factor * (1.0 - wing_fraction);
+    let mut cl_alpha_total = shared.cl_alpha_total * total_scale;
+    let mut wing_lift_fraction = if total_scale > 1e-9 {
+        wing_slope_scale * wing_fraction / total_scale
+    } else {
+        wing_fraction
+    };
     let x_wing_alone_ac = shared
         .contributions
         .get(shared.main_wing_index)
         .map(|c| c.x_ac)
         .unwrap_or(airplane.xyz_ref[0]);
+    let wing_ac_shift = high_lift.ac_shift(x_wing_alone_ac);
+    let x_np_surfaces = combine_scaled(
+        &shared.contributions,
+        Some(shared.main_wing_index),
+        wing_slope_scale,
+        wing_ac_shift,
+        shared.tail_wing_index,
+        eta_tail,
+        tail_loss,
+    )
+    .unwrap_or(airplane.xyz_ref[0]);
+
+    // Wing-body lift interference, Torenbeek 1982 E-33/E-34 (p. 479): the
+    // body carries `(K_I - 1) a_w` of extra lift at the exposed root
+    // mid-chord. It joins the total slope and the wing-body share, and moves
+    // the surface neutral point to the lift-weighted station.
+    let mut x_np_surfaces = x_np_surfaces;
+    let mut wing_body_lift_factor = 1.0;
+    let mut x_wing_body_lift_m = f64::NAN;
+    if body_lift {
+        let a_w = cl_alpha_total * wing_lift_fraction;
+        if let Some((k_i, x_extra)) = airframe::wing_body_lift_interference(airplane, a_w) {
+            let extra = (k_i - 1.0) * a_w;
+            let total = cl_alpha_total + extra;
+            if total.abs() > 1e-9 {
+                x_np_surfaces = (cl_alpha_total * x_np_surfaces + extra * x_extra) / total;
+                wing_lift_fraction = (a_w + extra) / total;
+                cl_alpha_total = total;
+                wing_body_lift_factor = k_i;
+                x_wing_body_lift_m = x_extra;
+            }
+        }
+    }
 
     let (fuselage_shift, nacelle_shift, fuselage_diag, nacelle_diag) = if include_airframe_terms {
-        airframe_terms(airplane, shared.cl_alpha_total, shared.deps_dalpha_vlm)
+        airframe_terms(airplane, cl_alpha_total, wing_lift_fraction, eps_scaled)
     } else {
-        zero_airframe_terms(shared.deps_dalpha_vlm)
+        zero_airframe_terms(eps_scaled)
     };
 
     let x_np = x_np_surfaces + fuselage_shift + nacelle_shift;
@@ -284,19 +357,22 @@ fn np_from_shared_terms(
         NpDiagnostics {
             x_wing_alone_ac,
             x_np_surfaces,
-            cl_alpha_total: shared.cl_alpha_total,
-            deps_dalpha_vlm: shared.deps_dalpha_vlm,
+            cl_alpha_total,
+            wing_lift_fraction,
+            deps_dalpha_vlm: eps_scaled,
             fuselage: fuselage_diag,
             nacelle_terms: nacelle_diag,
             nacelle_shift_m: nacelle_shift,
+            wing_body_lift_factor,
+            x_wing_body_lift_m,
         },
     )
 }
 
 /// [`clean_np_at_condition`] evaluated at the same Mach/altitude for two
-/// `tail_deps_extra` values at once, reusing one stretched-mesh assembly,
+/// `wing_slope_scale` values at once, reusing one stretched-mesh assembly,
 /// one pair of alpha probes, the isolated-tail downwash solve and the
-/// fuselage/nacelle terms: none of those depend on `tail_deps_extra`, only
+/// fuselage/nacelle terms: none of those depend on `wing_slope_scale`, only
 /// the final tail-weighted combine does (see [`np_shared_terms`]).
 /// [`neutral_point_conditions`]'s low-speed and high-lift conditions are
 /// exactly this: the same condition, differing only in the high-lift
@@ -316,8 +392,8 @@ pub(crate) fn clean_np_at_conditions_sharing_probe(
     analysis: &AnalysisConfig,
     mach: f64,
     altitude_m: f64,
-    tail_deps_extra_a: f64,
-    tail_deps_extra_b: f64,
+    high_lift_a: HighLiftScaling,
+    high_lift_b: HighLiftScaling,
 ) -> Result<NpResultPair, VlmError> {
     let atmosphere = Atmosphere::new(altitude_m);
     let beta = beta_for_mach(mach);
@@ -350,13 +426,14 @@ pub(crate) fn clean_np_at_conditions_sharing_probe(
     let hi = system.solve(&op(condition.alpha_hi_deg))?;
     let shared = np_shared_terms(&stretched, &condition, &lo, &hi)?;
 
-    let finish = |tail_deps_extra: f64| -> (f64, NpDiagnostics) {
+    let finish = |high_lift: HighLiftScaling| -> (f64, NpDiagnostics) {
         let (x_np_stretched, mut diag) = np_from_shared_terms(
             &stretched,
             &shared,
-            analysis.tail_efficiency,
-            tail_deps_extra,
+            analysis.tail_efficiency_or(stretched.horizontal_tail_dynamic_pressure_ratio()),
+            high_lift.stretched(beta),
             false,
+            analysis.include_fuselage_stability,
         );
         // The stretched solve gave the wing/tail contribution and the
         // Mach-consistent slopes; rescale the wing/tail stations back to
@@ -364,10 +441,16 @@ pub(crate) fn clean_np_at_conditions_sharing_probe(
         // physical airplane, matching `clean_np_at_condition`.
         diag.x_np_surfaces = x_np_stretched * beta;
         diag.x_wing_alone_ac *= beta;
+        diag.x_wing_body_lift_m *= beta;
 
         let (fuselage_shift, nacelle_shift, fuselage_diag, nacelle_diag) =
             if analysis.include_fuselage_stability {
-                airframe_terms(airplane, diag.cl_alpha_total, diag.deps_dalpha_vlm)
+                airframe_terms(
+                    airplane,
+                    diag.cl_alpha_total,
+                    diag.wing_lift_fraction,
+                    diag.deps_dalpha_vlm,
+                )
             } else {
                 zero_airframe_terms(diag.deps_dalpha_vlm)
             };
@@ -378,68 +461,7 @@ pub(crate) fn clean_np_at_conditions_sharing_probe(
         (diag.x_np_surfaces + fuselage_shift + nacelle_shift, diag)
     };
 
-    Ok((finish(tail_deps_extra_a), finish(tail_deps_extra_b)))
-}
-
-/// The F2/F3 fuselage and nacelle terms for `airplane`'s own (physical)
-/// geometry, given the Mach-consistent `cl_alpha_total` and the VLM-implied
-/// tail downwash `deps_dalpha_vlm`: `(fuselage_shift_m, nacelle_shift_m,
-/// FuselageTerms, Vec<NacelleTerm>)`. `0.0`/empty when `cl_alpha_total` is
-/// too small a slope to normalise by.
-fn airframe_terms(
-    airplane: &Airplane,
-    cl_alpha_total: f64,
-    deps_dalpha_vlm: f64,
-) -> (f64, f64, FuselageTerms, Vec<NacelleTerm>) {
-    if !cl_alpha_total.is_finite() || cl_alpha_total.abs() < 0.1 {
-        return zero_airframe_terms(deps_dalpha_vlm);
-    }
-    let Some(wing) = main_wing(airplane).filter(|wing| !wing.xsecs.is_empty()) else {
-        return zero_airframe_terms(deps_dalpha_vlm);
-    };
-    let x_le_root = wing.xsecs[0].xyz_le[0];
-    let x_te_root = x_le_root + wing.xsecs[0].chord;
-    let x_wing_ac_root = x_le_root + AC_CHORD_FRACTION * wing.xsecs[0].chord;
-    let x_tail_ac = match hstab(airplane) {
-        Some(h) => h.aerodynamic_center(AC_CHORD_FRACTION)[0],
-        None => x_te_root + 3.0 * airplane.c_ref.max(0.1),
-    };
-    let fus = fuselage::fuselage_terms(
-        airplane,
-        cl_alpha_total,
-        deps_dalpha_vlm,
-        x_le_root,
-        x_te_root,
-        x_tail_ac,
-        wing.mean_sweep_angle(AC_CHORD_FRACTION).to_radians(),
-        wing.taper_ratio(),
-    );
-    let (nac_shift, nac_terms) =
-        nacelles::nacelle_terms(airplane, cl_alpha_total, wing, x_wing_ac_root, x_te_root);
-    (
-        fus.multhopp_shift_m + fus.torenbeek_d2_shift_m,
-        nac_shift,
-        fus,
-        nac_terms,
-    )
-}
-
-/// The all-zero [`airframe_terms`] result, for a caller that has disabled
-/// the fuselage/nacelle correction (`AnalysisConfig::include_fuselage_stability`)
-/// or has too degenerate a lift slope to normalise by.
-fn zero_airframe_terms(deps_dalpha_vlm: f64) -> (f64, f64, FuselageTerms, Vec<NacelleTerm>) {
-    (
-        0.0,
-        0.0,
-        FuselageTerms {
-            multhopp_shift_m: 0.0,
-            torenbeek_d2_shift_m: 0.0,
-            torenbeek_d1_shift_m: 0.0,
-            gilruth_shift_m: 0.0,
-            deps_dalpha: deps_dalpha_vlm,
-        },
-        Vec::new(),
-    )
+    Ok((finish(high_lift_a), finish(high_lift_b)))
 }
 
 /// [`corrected_np_from_probes`] at a stated Mach/altitude, through the
@@ -459,7 +481,7 @@ pub(crate) fn clean_np_at_condition(
     analysis: &AnalysisConfig,
     mach: f64,
     altitude_m: f64,
-    tail_deps_extra: f64,
+    high_lift: HighLiftScaling,
 ) -> Result<(f64, NpDiagnostics), VlmError> {
     let atmosphere = Atmosphere::new(altitude_m);
     let beta = beta_for_mach(mach);
@@ -475,9 +497,10 @@ pub(crate) fn clean_np_at_condition(
     let (x_np_stretched, mut diag) = corrected_np_from_probes(
         &stretched,
         &condition,
-        analysis.tail_efficiency,
-        tail_deps_extra,
+        analysis.tail_efficiency_or(stretched.horizontal_tail_dynamic_pressure_ratio()),
+        high_lift.stretched(beta),
         false,
+        analysis.include_fuselage_stability,
     )?;
     // The stretched solve gave the wing/tail contribution and the
     // Mach-consistent slopes; rescale the wing/tail stations back to
@@ -485,10 +508,16 @@ pub(crate) fn clean_np_at_condition(
     // airplane.
     diag.x_np_surfaces = x_np_stretched * beta;
     diag.x_wing_alone_ac *= beta;
+    diag.x_wing_body_lift_m *= beta;
 
     let (fuselage_shift, nacelle_shift, fuselage_diag, nacelle_diag) =
         if analysis.include_fuselage_stability {
-            airframe_terms(airplane, diag.cl_alpha_total, diag.deps_dalpha_vlm)
+            airframe_terms(
+                airplane,
+                diag.cl_alpha_total,
+                diag.wing_lift_fraction,
+                diag.deps_dalpha_vlm,
+            )
         } else {
             zero_airframe_terms(diag.deps_dalpha_vlm)
         };

@@ -110,7 +110,8 @@ fn child_output(executable: &Path, cwd: &Path, user_data: &Path, args: &[String]
 
 fn assert_success(output: &Output, context: &str) {
     assert!(
-        output.status.success(),
+        // 3: the run completed but delivered no accepted design.
+        matches!(output.status.code(), Some(0 | 3)),
         "{context} failed with {}\nstdout:\n{}\nstderr:\n{}",
         output.status,
         String::from_utf8_lossy(&output.stdout),

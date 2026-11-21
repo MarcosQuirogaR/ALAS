@@ -304,8 +304,7 @@ fn frozen_plans_replay_their_declared_fuel_and_converge_with_fixed_choices() {
 /// always enough from the unstepped closure (B787-9 with the taxi-in budget
 /// carried: 0.109 % after one, 0.009 % after two).
 ///
-/// The B787-9 range is 5,350 nmi (was 5,300; re-pinned by lane field lengths,
-/// 2026-10-17, by probe): with the capped BPR 8 take-off chart the 5,300 nmi
+/// The B787-9 range is 5,350 nmi (not 5,300): with the capped BPR 8 take-off chart the 5,300 nmi
 /// closure sits on the optimum-step policy's switch from three to four step
 /// climbs at about 279 t (plans frozen at 278,476 and 279,092 kg differ by a
 /// step and 229 kg of trip fuel), so the re-freeze iteration cycles between the
@@ -390,15 +389,18 @@ fn a320_climb_time_and_fuel_lie_in_their_sourced_bands() {
     );
 }
 
-/// The initial level is the *highest* altitude below the cap that keeps the
-/// 300 ft/min residual climb at the estimated top-of-climb mass, and it never
-/// rises with mass. The default widebody fixture's residual climb at cruise
-/// speed is not monotone in altitude (a dip near the 8,000 m crossover from
-/// the calibrated-airspeed limit to the Mach limit), which is where a
+/// The initial level is the legal flight level at or below the *highest*
+/// altitude under the cap that keeps the 300 ft/min residual climb at the
+/// estimated top-of-climb mass (no qualifying altitude lies more than one
+/// legal-level spacing above it), and it never rises with mass. The default
+/// widebody fixture's residual climb at cruise speed is not monotone in
+/// altitude (a dip near the 8,000 m crossover from the calibrated-airspeed
+/// limit to the Mach limit), which is where a
 /// bisection over the whole band picked a low root: 7,565 m at 95 % MTOW
 /// while 10,000 m qualified.
 #[test]
 fn the_initial_level_is_the_highest_qualifying_altitude_and_never_rises_with_mass() {
+    use super::cruise_levels::legal_level_spacing_m;
     use super::cruise_levels::{CLIMB_MASS_FRACTION, LEVEL_SCAN_STEP_M, RESIDUAL_CLIMB_M_S};
     let config = AlasConfig::default();
     let (config, _, plane) = build_geometry(&config, &DesignVector::default().to_array())
@@ -456,11 +458,16 @@ fn the_initial_level_is_the_highest_qualifying_altitude_and_never_rises_with_mas
         let level_m =
             model.initial_cruise_level_m(&geometry, LegKind::Trip, mass_kg, range_m, cap_m);
         assert!(
-            margin(mass_kg, level_m - 1.0) >= 0.0,
+            margin(mass_kg, level_m) >= 0.0,
             "{mass_kg} kg: {level_m} m fails"
         );
+        let level_fl = level_m / (100.0 * alas_units::FOOT);
+        assert!(
+            (level_fl - level_fl.round()).abs() < 1.0e-6,
+            "{mass_kg} kg: {level_m} m is not a flight level"
+        );
         let mut above_m = cap_m;
-        while above_m > level_m + 1.0 {
+        while above_m > level_m + legal_level_spacing_m(level_m) + 1.0 {
             assert!(
                 margin(mass_kg, above_m) < 0.0,
                 "{mass_kg} kg: {above_m} m qualifies above the chosen {level_m} m"
@@ -529,12 +536,18 @@ fn a_frozen_plan_answers_a_mass_the_same_after_an_unflyable_trip() {
 /// re-frozen replays bit-identically on the plan it carries out: every mass
 /// the closure priced came from that one plan, so report trip equals
 /// closure trip.
+///
+/// The jets' light plans cannot climb at the closed mass, so they are
+/// re-frozen. The ATR 72-600's 16 t plan flies its closed mass (about 22 t)
+/// on its commanded turboprop climb without a deficit or a profile that does
+/// not fit, so no re-freeze is requested and the carried plan is the first
+/// one: the replay must still be exact.
 #[test]
 fn a_re_frozen_dispatch_replays_exactly_on_its_carried_plan() {
-    for (preset, first_kg, zfw_kg, range_nmi) in [
-        ("A320-200", 50_000.0, 62_500.0, 2_120.0),
-        ("B787-9", 170_000.0, 400_000.0 * LB, 5_300.0),
-        ("ATR72-600", 16_000.0, 20_290.0, 758.0),
+    for (preset, first_kg, zfw_kg, range_nmi, refrozen) in [
+        ("A320-200", 50_000.0, 62_500.0, 2_120.0, true),
+        ("B787-9", 170_000.0, 400_000.0 * LB, 5_300.0, true),
+        ("ATR72-600", 16_000.0, 20_290.0, 758.0, false),
     ] {
         let (model, config) = preset_model(preset);
         let model = without_operating_limits(model, preset);
@@ -547,7 +560,12 @@ fn a_re_frozen_dispatch_replays_exactly_on_its_carried_plan() {
         let plan = carried
             .frozen_plan()
             .unwrap_or_else(|| panic!("{preset}: no plan"));
-        assert_ne!(plan.takeoff_mass_kg, first_kg, "{preset}: never re-frozen");
+        if refrozen {
+            assert_ne!(plan.takeoff_mass_kg, first_kg, "{preset}: never re-frozen");
+        } else {
+            assert_eq!(plan.takeoff_mass_kg, first_kg, "{preset}: re-frozen");
+            assert_eq!(carried.refreeze_request_kg(), None, "{preset}");
+        }
         assert!(
             matches!(closure.status, DispatchStatus::Converged),
             "{preset}"
@@ -568,17 +586,17 @@ fn a_re_frozen_dispatch_replays_exactly_on_its_carried_plan() {
     }
 }
 
-/// Probe of fix lane C1 (not an assertion): trip fuel and time of each
+/// Probe of the speed-ladder and ground-roll change (not an assertion): trip fuel and time of each
 /// registered preset on a representative sector with (a) the retired shared
 /// literal-TAS ladder, (b) the preset's CAS/Mach ladder without the ground
-/// roll, and (c) the full C1 model. The fixture polar is representative, not
+/// roll, and (c) the full model. The fixture polar is representative, not
 /// the preset's own, so the numbers size the change and are not references.
 /// Run with `--ignored --nocapture`.
 #[test]
-#[ignore = "probe: prints the before/after of the C1 speed ladders"]
-// A probe prints its numbers for the lane report; it asserts nothing.
+#[ignore = "probe: prints the before/after of the speed ladders"]
+// A probe prints its numbers; it asserts nothing.
 #[allow(clippy::print_stdout)]
-fn probe_c1_ladders() {
+fn probe_speed_ladders() {
     for (preset, mass_fraction, range_nmi) in [
         ("A220-300", 1.0, 800.0),
         ("A320-200", 1.0, 1_000.0),
@@ -617,7 +635,7 @@ fn probe_c1_ladders() {
             old.profile.max_operating_cas_m_s = 0.0;
         }
         println!(
-            "C1 PROBE {preset:10} {range_nmi:6.0} nmi  old {:?}  ladder {:?}  full {:?}",
+            "LADDER PROBE {preset:10} {range_nmi:6.0} nmi  old {:?}  ladder {:?}  full {:?}",
             fly(&old),
             fly(&no_roll),
             fly(&model)
@@ -629,7 +647,7 @@ fn probe_c1_ladders() {
 /// frozen at 50 t can no longer climb to its level and is re-frozen.
 #[test]
 #[ignore = "probe: finds the re-freeze threshold mass used by the frozen-plan pins"]
-// A probe prints its numbers for the lane report; it asserts nothing.
+// A probe prints its numbers; it asserts nothing.
 #[allow(clippy::print_stdout)]
 fn probe_a320_refreeze_threshold() {
     let (model, _) = preset_model("A320-200");
@@ -640,7 +658,7 @@ fn probe_a320_refreeze_threshold() {
         let frozen = model.clone().with_frozen_plan(plan.clone());
         let result = frozen.fly_trip(mass_kg, range).map(|f| f.leg.fuel_kg);
         println!(
-            "C1 PROBE refreeze {mass_kg:8.0} kg -> {:?} request {:?}",
+            "LADDER PROBE refreeze {mass_kg:8.0} kg -> {:?} request {:?}",
             result,
             frozen.refreeze_request_kg()
         );
@@ -649,7 +667,7 @@ fn probe_a320_refreeze_threshold() {
 
 /// The take-off segment carries the take-off flap increment (gear up, the
 /// second-segment configuration) and the landing segment the landing flap
-/// plus gear increments of the per-phase configuration drag (lane A1 fields).
+/// plus gear increments of the per-phase configuration drag (fields).
 #[test]
 fn the_phase_drag_increments_come_from_the_per_phase_configuration_drag() {
     let mut config = AlasConfig::default();
@@ -665,10 +683,11 @@ fn the_phase_drag_increments_come_from_the_per_phase_configuration_drag() {
 /// the level search holds: judged at the speeds the plan flies at that level
 /// (the first cruise rung and the top climb rung, the lower of the two), not
 /// at the constant-Mach speed `M a(h)`. Below the configured level the rung is
-/// capped at `VC = VD / 1.25` in equivalent airspeed, so the plan is slower
-/// than `M a(h)` there and the constant-Mach rate understates what it flies
-/// (A220-300 over 251 nmi at FL250: 0.66 m/s at 241.6 m/s, 3.5 m/s at the
-/// 209 m/s the plan flies).
+/// held to the type certificate VMO (A320-200 350 kt), so where the Mach hold
+/// passes VMO the plan is slower than `M a(h)` and the constant-Mach rate
+/// overstates the drag it flies. The level is 4,500 m: VD-DATA replaced the
+/// `VD / 1.25` ceiling (280 kt EAS) by VMO, under which the A320 holds M 0.78
+/// at FL250 and the old 7,620 m level no longer separates the two speeds.
 #[test]
 fn the_top_of_climb_rate_is_judged_at_the_speeds_the_plan_flies() {
     use super::cruise_levels::{CLIMB_MASS_FRACTION, RESIDUAL_CLIMB_M_S};
@@ -676,7 +695,7 @@ fn the_top_of_climb_rate_is_judged_at_the_speeds_the_plan_flies() {
     let geometry = model.geometry();
     let range_m = 1_500.0 * NMI;
     let mass_kg = 0.9 * config.requirements.mtow_kg;
-    let altitude_m = 7_620.0;
+    let altitude_m = 4_500.0;
     assert!(altitude_m < config.requirements.cruise_altitude_m - 1_000.0);
     let plan = geometry
         .plan_at(LegKind::Trip, range_m, altitude_m)
@@ -871,4 +890,218 @@ fn a_route_ladders_first_level_starts_lower_when_heavy() {
     assert_eq!(fraction(&canonical, 396_000.0), None);
     let flown = model.fly_trip(396_000.0, range);
     assert!(flown.is_ok(), "{flown:?}");
+}
+
+/// Trip fuel is continuous in range across the route-fit boundary of the
+/// A220-300 at its declared FL250 route level (RANGE-STEP). The cruise
+/// ceiling (VD / 1.25 then, the TCDS VMO now, VD-DATA) applied only below
+/// the configured level, so a route that could not fit the faster cruise's
+/// acceleration flew 1 m lower at the ceiling and burned less per nautical
+/// mile than the next longer one: block fuel stepped +65 kg between 270 and
+/// 275 nmi in the product sizing, and this fixture's trip fuel by 36 kg at
+/// 190-195 nmi. A step shows as one second difference of the trip fuel of
+/// the order of the jump; the slope corners of a continuous trip fuel (where
+/// the route-fit level stops rising with range, and where it crosses the
+/// altitude at which the declared Mach meets VMO) give under 1 kg at this
+/// 1 nmi spacing.
+#[test]
+fn trip_fuel_is_continuous_in_range_across_the_route_fit_boundary() {
+    let (model, config) = preset_model_at("A220-300", true);
+    let tow_kg = 0.85 * config.requirements.mtow_kg;
+    let ranges_nmi: Vec<f64> = (0..=120).map(|i| 180.0 + f64::from(i)).collect();
+    let fuel_kg: Vec<f64> = ranges_nmi
+        .iter()
+        .map(|range| {
+            model
+                .fly_trip(tow_kg, range * NMI)
+                .unwrap_or_else(|error| panic!("A220-300 over {range} nmi: {error}"))
+                .leg
+                .fuel_kg
+        })
+        .collect();
+    for (fuel, ranges) in fuel_kg.windows(3).zip(ranges_nmi.windows(3)) {
+        let second_kg = fuel[2] - 2.0 * fuel[1] + fuel[0];
+        assert!(
+            second_kg.abs() <= 5.0,
+            "trip fuel second difference {second_kg:.2} kg at {} nmi: {fuel:?}",
+            ranges[1]
+        );
+    }
+}
+
+/// The step record of a flown trip is the flight the totals describe: its
+/// times and ranges are continuous from brake release, the ground roll is the
+/// first step, the masses fall monotonically to the end mass, the airborne
+/// ranges add up to the flown distance, and every phase of the ladder
+/// (take-off acceleration, climb, cruise, descent) appears in order.
+#[test]
+fn the_step_record_of_a_trip_closes_on_its_totals() {
+    let (model, _) = preset_model_at("A320-200", true);
+    let tow = 42_000.0 + 150.0 * 95.0 + 6_000.0;
+    let flown = model
+        .fly_trip(tow, 536.0 * NMI)
+        .unwrap_or_else(|error| panic!("A320 short sector: {error}"));
+    let steps = &flown.steps;
+    assert!(steps.len() > 20, "{} steps", steps.len());
+    assert_eq!(steps[0].phase, StepPhase::Ground);
+    assert_eq!(steps[0].time_s[0], 0.0);
+    for pair in steps.windows(2) {
+        let (a, b) = (&pair[0], &pair[1]);
+        assert!(
+            (b.time_s[0] - a.time_s[1]).abs() < 1.0e-6,
+            "time gap {:?} -> {:?}",
+            a.time_s,
+            b.time_s
+        );
+        assert!(
+            (b.range_m[0] - a.range_m[1]).abs() < 1.0e-6,
+            "range gap {:?} -> {:?}",
+            a.range_m,
+            b.range_m
+        );
+        assert!(
+            (b.mass_kg[0] - a.mass_kg[1]).abs() < 1.0e-6,
+            "mass gap {:?} -> {:?}",
+            a.mass_kg,
+            b.mass_kg
+        );
+    }
+    for step in steps {
+        assert!(step.mass_kg[1] <= step.mass_kg[0] + 1.0e-9);
+        assert!(step.time_s[1] >= step.time_s[0] && step.range_m[1] >= step.range_m[0]);
+    }
+    let last = steps.last().expect("steps");
+    assert!((last.time_s[1] - flown.leg.time_s).abs() < 1.0e-6);
+    assert!((last.range_m[1] - flown.flown_distance_m).abs() < 1.0e-6);
+    assert!((last.mass_kg[1] - flown.end_mass_kg).abs() < 1.0e-6);
+    assert!((steps[0].mass_kg[0] - last.mass_kg[1] - flown.leg.fuel_kg).abs() < 1.0e-6);
+    let order: Vec<StepPhase> = steps.iter().map(|s| s.phase).fold(Vec::new(), |mut v, p| {
+        if v.last() != Some(&p) {
+            v.push(p);
+        }
+        v
+    });
+    let first_cruise = order
+        .iter()
+        .position(|p| *p == StepPhase::Cruise)
+        .expect("cruise");
+    let first_descent = order
+        .iter()
+        .position(|p| *p == StepPhase::Descent)
+        .expect("descent");
+    assert!(first_cruise < first_descent);
+    assert!(order[..first_cruise].contains(&StepPhase::Climb));
+    // Cruise steps are level, at one altitude per segment, with a physical L/D.
+    for step in steps.iter().filter(|s| s.phase == StepPhase::Cruise) {
+        assert!((step.altitude_m[1] - step.altitude_m[0]).abs() < 1.0e-9);
+        assert!(
+            (5.0..30.0).contains(&step.lift_to_drag),
+            "L/D {}",
+            step.lift_to_drag
+        );
+    }
+}
+
+/// A prescribed (`Declared`) level the aircraft cannot climb to at a heavy
+/// mass is lowered to the highest level it can climb to, continuously in the
+/// mass (the sizing closure reported an
+/// unconverged dispatch whose residual was a mass the model could not be flown
+/// at).
+#[test]
+fn a_declared_level_the_aircraft_cannot_climb_to_is_lowered() {
+    let (mut model, _) = preset_model("A320-200");
+    model.profile.cruise_altitude_policy = CruiseAltitudePolicy::Declared;
+    let declared_m = 13_000.0;
+    model.cruise_altitude_m = declared_m;
+    let range_m = 2_000.0 * NMI;
+    let soft = |mass_kg: f64| model.fly_adapted(LegKind::Trip, mass_kg, range_m, false);
+    // Light: the declared level is climbed to and flown as declared.
+    for mass_kg in [60_000.0, 70_000.0] {
+        let adapted = soft(mass_kg).unwrap();
+        assert_eq!(adapted.cruise_m, declared_m);
+        assert!(!adapted.flown.adapted);
+        // The declared level is directly attainable here.
+        assert!(model
+            .fly_adapted_at_level(LegKind::Trip, mass_kg, range_m, false)
+            .is_ok());
+    }
+    // Heavy: the aircraft cannot climb to 13,000 m at 78 t ...
+    let error = model
+        .fly_adapted_at_level(LegKind::Trip, 78_000.0, range_m, false)
+        .err()
+        .expect("unattainable")
+        .to_string();
+    assert!(error.contains("it still cannot climb"), "{error}");
+    // ... and the trip is flown lower, continuously in the mass (the climb-feasible set is
+    // not an interval in the level, so not strictly monotone: 12,982 m at 76 t, 12,925 m
+    // at 77 t, 12,825 m at 78 t), the leg saying so.
+    let mut previous_m = declared_m;
+    for mass_kg in (0..=8).map(|i| 70_000.0 + 1_000.0 * i as f64) {
+        let adapted = soft(mass_kg).unwrap();
+        assert!(
+            (adapted.cruise_m - previous_m).abs() <= 150.0,
+            "{mass_kg} kg: {} m after {previous_m} m",
+            adapted.cruise_m
+        );
+        assert!(adapted.cruise_m == declared_m || adapted.flown.adapted);
+        previous_m = adapted.cruise_m;
+    }
+    let lowered = soft(78_000.0).unwrap();
+    assert!(lowered.cruise_m < declared_m);
+    let mut at = model.clone();
+    at.cruise_altitude_m = lowered.cruise_m;
+    assert!(at
+        .fly_adapted_at_level(LegKind::Trip, 78_000.0, range_m, false)
+        .is_ok());
+}
+
+/// The design mission a closure or a loading's cruise point flies is the
+/// route model moved to the design cruise altitude
+/// (`mtow_modes::closure_mission`); it cruises at the requirement's Mach at
+/// every level it plans, as the route model does at the route's level. The
+/// A220-300 (route FL250) and A320-200 (route FL280) declare their cruise
+/// speeds at the route level: read literally at FL370 they flew Mach 0.819
+/// and 0.808 against the 0.78 requirement, and the A220's MTOW cruise point
+/// was planned one flight level below the trip the payload-range chart flies
+/// at Mach 0.78 (FL300 against FL310).
+#[test]
+fn the_design_mission_cruises_at_the_requirement_mach() {
+    for preset in ["A220-300", "A320-200"] {
+        let (route_model, config) = preset_model_at(preset, true);
+        let req = &config.requirements;
+        assert!(
+            route_model.cruise_altitude_m < req.cruise_altitude_m - 1_000.0,
+            "{preset}: the fixture flies the route level below the design altitude"
+        );
+        let plan = alas_config::MtowPlan {
+            design_mission: Some(config.design_mission()),
+            ..config.mtow_plan()
+        };
+        let mission =
+            crate::mdo::mtow_modes::closure_mission(&plan, &config, &route_model, 1.0e6, (0.0, 0))
+                .unwrap_or_else(|_| panic!("{preset}: design-mission model"))
+                .unwrap_or_else(|| panic!("{preset}: no design mission"));
+        let model = mission.model;
+        let range_m = 5.0e6;
+        for level_m in [9_144.0, req.cruise_altitude_m] {
+            let flown = model
+                .geometry()
+                .plan_at(LegKind::Trip, range_m, level_m)
+                .unwrap_or_else(|error| panic!("{preset} at {level_m} m: {error}"));
+            let sound = alas_atmo::us1976_compute_values(flown.cruise_altitude_m, 0.0)
+                .speed_of_sound_m_s;
+            // The rung as the schedule commands it, before the one envelope
+            // factor (VMO/MMO) the plan applies to the whole leg.
+            assert!(flown.envelope_scale > 0.0 && flown.envelope_scale <= 1.0);
+            for &(tas_m_s, _) in &flown.cruise_rungs {
+                let mach = tas_m_s / flown.envelope_scale / sound;
+                assert!(
+                    (mach - req.cruise_mach).abs() < 1.0e-6,
+                    "{preset} at {} m cruises at Mach {mach:.4}, requirement {}",
+                    flown.cruise_altitude_m,
+                    req.cruise_mach
+                );
+            }
+        }
+    }
 }

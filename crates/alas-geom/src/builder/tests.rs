@@ -56,6 +56,9 @@ fn a_configured_centre_engine_pod_is_placed_sized_and_pitched_as_stated() {
         width_m: 2.85,
         height_m: 3.0,
         profile: vec![(0.0, 0.93), (0.8, 1.0), (11.9, 1.0), (14.15, 0.25)],
+        nozzle_aft_of_fuselage_m: 0.0,
+        struts: Vec::new(),
+        fin_aft_fairing: None,
     });
     let builder = AircraftBuilder::new(Some(geometry));
     let dv = DesignVector::default();
@@ -369,7 +372,18 @@ fn the_flight_shape_raises_the_tip_and_carries_the_nacelles_with_the_wing() {
     let tip = |plane: &Airplane| plane.wings[0].xsecs.last().map(|x| x.xyz_le[2]);
     let root = |plane: &Airplane| plane.wings[0].xsecs.first().map(|x| x.xyz_le[2]);
     assert_eq!(tip(&ground), Some(wing.tip_z_m));
-    assert_eq!(root(&ground), root(&flight));
+    // The sections inboard of the side of body keep the side-of-body
+    // station's height, so the root rises with the flight shape by the rise at the side of body.
+    let side_of_body_y = planform.side_of_body.as_ref().expect("side of body").y_m;
+    let ground_heights = wing.heights(WingShape::Ground, &planform).expect("valid");
+    let root_rise = root(&flight).zip(root(&ground)).map(|(f, g)| f - g);
+    assert!(root_rise.is_some_and(|rise| {
+        (rise
+            - (flight_heights.at(&planform, side_of_body_y)
+                - ground_heights.at(&planform, side_of_body_y)))
+        .abs()
+            < 1e-9
+    }));
     let rise = tip(&flight).zip(tip(&ground)).map(|(f, g)| f - g);
     assert!(rise.is_some_and(|rise| (rise - 0.1 * planform.tip.y_m).abs() < 1e-9));
 
@@ -413,8 +427,8 @@ fn a_panel_count_below_the_section_count_still_keeps_every_station() {
         let main_wing = &airplane.wings[0];
         assert_eq!(
             main_wing.xsecs.len(),
-            3,
-            "root/kink/tip must survive a panel count of {count}"
+            4,
+            "root datum, side of body, kink and tip must survive a panel count of {count}"
         );
     }
 }

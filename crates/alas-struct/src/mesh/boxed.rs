@@ -78,16 +78,22 @@ pub(super) fn attach_engine_by_pylon_spider(
     let last = (position + 1).min(regions.all_structural.len().saturating_sub(1));
     let mut independents: Vec<i64> = Vec::new();
     for &rib in &regions.all_structural[first..=last] {
-        let Some(&point) = stations[rib].j_spars.first() else {
-            continue;
-        };
-        if point < 0 {
-            continue;
-        }
-        for surface in [Surface::Ext, Surface::Int] {
-            let nid = nodes.at(rib, point as usize, surface);
-            if nid != 0 && !independents.contains(&nid) {
-                independents.push(nid);
+        // Front and rear spar grids, upper and lower: a box, not the plane of
+        // the front web, so the spider's equilibrium matrix is well conditioned
+        // (MSC Nastran QRG, RBE3 remarks: avoid collinear or coplanar
+        // independent grids, warning 7343).
+        for spar in [stations[rib].j_spars.first(), stations[rib].j_spars.last()] {
+            let Some(&point) = spar else {
+                continue;
+            };
+            if point < 0 {
+                continue;
+            }
+            for surface in [Surface::Ext, Surface::Int] {
+                let nid = nodes.at(rib, point as usize, surface);
+                if nid != 0 && !independents.contains(&nid) {
+                    independents.push(nid);
+                }
             }
         }
     }

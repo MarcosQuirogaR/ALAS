@@ -64,6 +64,11 @@ fn report(label: &str, config: &AlasConfig, design: &DesignVector) {
                         r.normalized_violation,
                         if r.violated() { " VIOLATED" } else { "" }
                     );
+                    if std::env::var_os("CELL_PROBE_DETAIL").is_some() {
+                        if let Some(detail) = r.detail.as_deref() {
+                            println!("        detail: {detail}");
+                        }
+                    }
                 }
             }
         }

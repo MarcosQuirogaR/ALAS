@@ -4,7 +4,54 @@
 //! Takeoff-speed derivation and per-type mission speed schedules for presets that carry one.
 
 mod openap_ladders;
-pub(super) use openap_ladders::apply_registered_ladder;
+pub(crate) use openap_ladders::apply_default_rule;
+pub(super) use openap_ladders::{apply_default_ladder, apply_registered_ladder};
+
+/// Applies a preset's hand-written speed schedule to its mission profile at its cruise altitude, m.
+pub(super) type HandWrittenApplier =
+    fn(&super::AircraftPreset, &mut crate::MissionProfileConfig, f64);
+
+/// The hand-written speed schedule registered for the preset `name`, if any. A preset whose
+/// `speed_schedule_source` is `HandWritten` must have one; no other preset may.
+pub(super) fn hand_written_applier(name: &str) -> Option<HandWrittenApplier> {
+    match name {
+        "A320-200" => Some(|preset, profile, cruise_altitude_m| {
+            apply_a320_200_speed_schedule(
+                profile,
+                cruise_altitude_m,
+                preset.requirements.mtow_kg,
+                schedule_wing_area_m2(preset),
+                schedule_cl_max_takeoff(preset),
+            );
+        }),
+        "A400M" => Some(|_, profile, _| super::military::apply_a400m_speed_schedule(profile)),
+        "ATR72-600" => Some(|preset, profile, _| {
+            apply_atr72_600_speed_schedule(
+                profile,
+                preset.requirements.mtow_kg,
+                schedule_wing_area_m2(preset),
+                schedule_cl_max_takeoff(preset),
+            );
+        }),
+        _ => None,
+    }
+}
+
+/// Reference wing area, m^2, the takeoff-speed derivation of a hand-written schedule uses.
+fn schedule_wing_area_m2(preset: &super::AircraftPreset) -> f64 {
+    preset
+        .reference
+        .reference_wing_area_m2
+        .unwrap_or(preset.requirements.max_wing_area_m2)
+}
+
+/// Takeoff maximum lift coefficient the takeoff-speed derivation of a hand-written schedule uses.
+fn schedule_cl_max_takeoff(preset: &super::AircraftPreset) -> f64 {
+    preset.performance.as_ref().map_or_else(
+        || crate::PerformanceConfig::default().cl_max_to,
+        |p| p.cl_max_to,
+    )
+}
 
 /// International knot, m/s.
 const KNOT_M_S: f64 = 1852.0 / 3600.0;
@@ -79,8 +126,8 @@ pub fn atr72_600_takeoff_speed_m_s(mtow_kg: f64, wing_area_m2: f64, cl_max_takeo
 /// no altitude-resolved climb or descent table) and the 3-degree-like
 /// approach rate. None of it is calibrated to the factsheet's block fuel or
 /// time figures; see an internal speed-schedule-integration study
-/// (2026-09-07) for the comparison that was actually run.
-pub(super) fn apply_atr72_600_speed_schedule(
+/// for the comparison that was actually run.
+fn apply_atr72_600_speed_schedule(
     profile: &mut crate::MissionProfileConfig,
     mtow_kg: f64,
     wing_area_m2: f64,
@@ -173,7 +220,7 @@ const NARROWBODY_V2_OVER_VSR: f64 = 1.13;
 /// currently close their dispatch do so because their operational levels
 /// happen to sit near the one the default was written for, not because the
 /// contract is right.
-pub(super) fn apply_a320_200_speed_schedule(
+fn apply_a320_200_speed_schedule(
     profile: &mut crate::MissionProfileConfig,
     cruise_altitude_m: f64,
     mtow_kg: f64,
@@ -228,4 +275,59 @@ pub(super) fn apply_a320_200_speed_schedule(
     // speed ratio, on a nominal 3-degree path (unsourced rate).
     profile.landing_air_speed_m_s = 1.23 * stall_reference_m_s;
     profile.landing_descent_rate_m_s = 700.0 * FT_MIN_M_S; // unsourced
+}
+
+#[cfg(test)]
+mod c295_tests {
+    use super::KNOT_M_S;
+
+    #[test]
+    fn the_c295_flies_a_turboprop_schedule_inside_its_type_certificate_vmo() {
+        let preset = crate::presets::get("C295").unwrap_or_else(|e| panic!("{e}"));
+        let operational = preset.operational_mission_defaults();
+        let profile = &operational.profile;
+        assert_eq!(
+            profile.climb_descent_speed_reference,
+            crate::SpeedReference::CalibratedAirspeed
+        );
+        // TCDS VMO at the cruise level, straight line between 14,000 ft
+        // (245 KIAS) and 25,000 ft (200 KIAS).
+        // The TCDS altitude schedule replaces the single VMO
+        // (`operating_limits::C295`), so the single value is unset.
+        let ft = operational.cruise_altitude_m / 0.3048;
+        let vmo_kt = 245.0 - 45.0 * (ft - 14_000.0) / 11_000.0;
+        assert_eq!(profile.max_operating_cas_m_s, 0.0);
+        let rows = &profile.vmo_schedule;
+        let at = rows
+            .windows(2)
+            .find(|pair| {
+                (pair[0].0..=pair[1].0).contains(&operational.cruise_altitude_m)
+                    && pair[1].0 > pair[0].0
+            })
+            .map(|pair| {
+                let t = (operational.cruise_altitude_m - pair[0].0) / (pair[1].0 - pair[0].0);
+                pair[0].1 + t * (pair[1].1 - pair[0].1)
+            })
+            .unwrap_or_else(|| panic!("cruise level inside the VMO schedule"));
+        assert!((at / KNOT_M_S - vmo_kt).abs() < 1e-6, "{}", at / KNOT_M_S);
+        let vmo_max = rows.iter().map(|row| row.1).fold(0.0, f64::max);
+        let climb = [
+            profile.takeoff_air_speed_m_s,
+            profile.initial_climb_air_speed_m_s,
+            profile.step_climb_1_air_speed_m_s,
+            profile.step_climb_2_air_speed_m_s,
+        ];
+        for speed in climb {
+            assert!((45.0..vmo_max).contains(&speed), "{speed}");
+        }
+        // Below the TCDS VLE of 175 KIAS on the approach.
+        assert!(profile.landing_air_speed_m_s < 175.0 * KNOT_M_S);
+        assert!(profile.landing_air_speed_m_s < profile.takeoff_air_speed_m_s * 1.2);
+        // The C295 now flies the ladder-less CAS climb of `openap_ladders`
+        // (no cruise leg at the speed-limit level; the first leg's share
+        // moves to the other two), not the single-level class schedule.
+        assert_eq!(profile.cruise_1_distance_fraction, 0.0);
+        let shares = profile.cruise_2_distance_fraction + profile.cruise_3_distance_fraction;
+        assert!((shares - 1.0).abs() < 1e-12, "{shares}");
+    }
 }

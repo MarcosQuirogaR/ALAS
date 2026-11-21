@@ -9,6 +9,12 @@ use crate::airports::{self, Airport};
 
 use super::{AirportIoError, CustomAirport};
 
+/// Serialises the unit tests that write the process-wide registry: one test
+/// replacing it (`replace_custom_airports`) while another registers and reads
+/// back its own record made the reader fail at random under parallel tests.
+#[cfg(test)]
+pub(crate) static REGISTRY_TEST_LOCK: Mutex<()> = Mutex::new(());
+
 /// Register one custom airport for route and settings lookup.
 pub fn register_custom_airport(mut airport: CustomAirport) -> Result<(), AirportIoError> {
     airport.validate_and_normalize()?;
@@ -75,7 +81,7 @@ pub(crate) fn airport_by_name_or_icao(name_or_icao: &str) -> Option<&'static Air
 /// Return a `&'static` record for `airport`, reusing the earlier leak when an
 /// identical record was interned before, so repeated edits, rollbacks and file
 /// loads leak at most one record per distinct airport.
-fn intern_airport(airport: Airport) -> &'static Airport {
+pub(crate) fn intern_airport(airport: Airport) -> &'static Airport {
     static INTERNED: OnceLock<Mutex<Vec<&'static Airport>>> = OnceLock::new();
     let mut interned = INTERNED
         .get_or_init(|| Mutex::new(Vec::new()))

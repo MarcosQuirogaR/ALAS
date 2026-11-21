@@ -64,14 +64,16 @@ pub struct PlausibilityLimits {
     /// Whether the limits are enforced at all.
     #[config(
         label = "Enforce the validity domain",
-        help = "On by default. Off lets the search leave the shape window these correlations were fitted for; the objective keeps improving while the aeroplane stops existing, so the residual table can no longer be read as a statement about an aircraft."
+        help = "On by default.",
+        long_help = "On by default. Off lets the search leave the shape window these correlations were fitted for; the objective keeps improving while the aeroplane stops existing, so the residual table can no longer be read as a statement about an aircraft."
     )]
     pub enabled: bool,
 
     /// Smallest wing aspect ratio, `b^2 / S`, accepted as a transport wing.
     #[config(
         label = "Minimum wing aspect ratio",
-        help = "Smallest b^2/S accepted, on the projected reference span and area, dimensionless. Below this the lifting-line and wingbox correlations are extrapolating. Every registered aircraft sits well above it."
+        help = "Smallest b^2/S accepted (dimensionless), on projected reference span and area. Below this the lifting-line and wingbox correlations extrapolate.",
+        long_help = "Smallest b^2/S accepted, on the projected reference span and area, dimensionless. Below this the lifting-line and wingbox correlations are extrapolating. Every registered aircraft sits well above it."
     )]
     pub min_aspect_ratio: f64,
 
@@ -85,14 +87,16 @@ pub struct PlausibilityLimits {
     /// aeroelastic model here remains meaningful there.
     #[config(
         label = "Maximum wing aspect ratio",
-        help = "Largest b^2/S accepted, dimensionless. Conventional cantilever transports run from about 7.5 to about 11; the ceiling is set well above that because a higher aspect ratio is a legitimate design direction. What it excludes is the unbounded span the induced-drag credit would otherwise reward, where neither the wingbox correlation nor the aeroelastic model remains meaningful."
+        help = "Largest b^2/S accepted (dimensionless).",
+        long_help = "Largest b^2/S accepted, dimensionless. Conventional cantilever transports run from about 7.5 to about 11; the ceiling is set well above that because a higher aspect ratio is a legitimate design direction. What it excludes is the unbounded span the induced-drag credit would otherwise reward, where neither the wingbox correlation nor the aeroelastic model remains meaningful."
     )]
     pub max_aspect_ratio: f64,
 
     /// Smallest fuselage fineness ratio (length over equivalent diameter).
     #[config(
         label = "Minimum fuselage fineness ratio",
-        help = "Smallest overall length divided by the largest cross-section equivalent diameter, both in metres, dimensionless. Below this the body is too stubby for the skin-friction and structure correlations fitted to transport fuselages."
+        help = "Smallest overall length divided by the largest equivalent cross-section diameter (dimensionless).",
+        long_help = "Smallest overall length divided by the largest cross-section equivalent diameter, both in metres, dimensionless. Below this the body is too stubby for the skin-friction and structure correlations fitted to transport fuselages."
     )]
     pub min_fuselage_fineness: f64,
 
@@ -105,14 +109,16 @@ pub struct PlausibilityLimits {
     /// does not model.
     #[config(
         label = "Maximum fuselage fineness ratio",
-        help = "Largest length over equivalent diameter, dimensionless. Transport fuselages sit near 8 to 12 and the longest stretches reach about 14. Beyond the ceiling the skin-friction and structure correlations are extrapolating, and the body would not meet bending or ground-clearance cases this program does not model."
+        help = "Largest length over equivalent diameter (dimensionless). Transport fuselages sit near 8-12; the longest stretches reach about 14.",
+        long_help = "Largest length over equivalent diameter, dimensionless. Transport fuselages sit near 8 to 12 and the longest stretches reach about 14. Beyond the ceiling the skin-friction and structure correlations are extrapolating, and the body would not meet bending or ground-clearance cases this program does not model."
     )]
     pub max_fuselage_fineness: f64,
 
     /// Smallest horizontal-tail arm as a fraction of fuselage length.
     #[config(
         label = "Minimum horizontal-tail arm fraction",
-        help = "Smallest distance from the main wing quarter-chord aerodynamic centre to the horizontal tail quarter-chord, divided by fuselage length, dimensionless and positive aft. Below this the tail has too little arm for the pitch authority the trim solution assumes."
+        help = "Smallest wing quarter-chord to horizontal-tail quarter-chord distance divided by fuselage length (dimensionless, positive aft).",
+        long_help = "Smallest distance from the main wing quarter-chord aerodynamic centre to the horizontal tail quarter-chord, divided by fuselage length, dimensionless and positive aft. Below this the tail has too little arm for the pitch authority the trim solution assumes."
     )]
     pub min_tail_arm_fraction: f64,
 
@@ -125,7 +131,8 @@ pub struct PlausibilityLimits {
     /// arm the airframe does not have.
     #[config(
         label = "Maximum horizontal-tail arm fraction",
-        help = "Largest tail arm as a fraction of fuselage length, dimensionless. The tail cannot be mounted beyond the body that carries it: a conventional transport sits near 0.40 to 0.55, and this wider window stops the search buying pitch authority with an arm the airframe does not have."
+        help = "Largest tail arm as a fraction of fuselage length (dimensionless).",
+        long_help = "Largest tail arm as a fraction of fuselage length, dimensionless. The tail cannot be mounted beyond the body that carries it: a conventional transport sits near 0.40 to 0.55, and this wider window stops the search buying pitch authority with an arm the airframe does not have."
     )]
     pub max_tail_arm_fraction: f64,
 
@@ -136,14 +143,16 @@ pub struct PlausibilityLimits {
     /// wing has. The floor is below every registered aircraft's value.
     #[config(
         label = "Minimum tip-to-root chord ratio",
-        help = "Smallest tip chord divided by root chord, dimensionless. A vanishing tip chord is where the lattice local Reynolds number and the section data stop being defined, and it is a shape no transport wing has. The floor is below every registered aircraft value."
+        help = "Smallest tip chord divided by root chord (dimensionless).",
+        long_help = "Smallest tip chord divided by root chord, dimensionless. A vanishing tip chord is where the lattice local Reynolds number and the section data stop being defined, and it is a shape no transport wing has. The floor is below every registered aircraft value."
     )]
     pub min_tip_root_chord_ratio: f64,
 
     /// Largest tip-to-root chord ratio of the main wing.
     #[config(
         label = "Maximum tip-to-root chord ratio",
-        help = "Largest tip chord divided by root chord, dimensionless. Above this the wing is closer to untapered than to a transport planform, and the spanwise load the correlations assume no longer holds."
+        help = "Largest tip chord divided by root chord (dimensionless).",
+        long_help = "Largest tip chord divided by root chord, dimensionless. Above this the wing is closer to untapered than to a transport planform, and the spanwise load the correlations assume no longer holds."
     )]
     pub max_tip_root_chord_ratio: f64,
 
@@ -158,7 +167,8 @@ pub struct PlausibilityLimits {
     /// scored as ordinary wings by the correlations.
     #[config(
         label = "Require an ordered trailing-edge break",
-        help = "On by default. The yehudi break joins the inboard box carrying the centre-section load to the outboard panel, so its chord must lie between the tip and root chords. A break chord outside that interval is either a notch in the built geometry or an inversion where the wing grows outboard of the root, and the correlations score both as ordinary wings."
+        help = "On by default.",
+        long_help = "On by default. The yehudi break joins the inboard box carrying the centre-section load to the outboard panel, so its chord must lie between the tip and root chords. A break chord outside that interval is either a notch in the built geometry or an inversion where the wing grows outboard of the root, and the correlations score both as ordinary wings."
     )]
     pub require_monotonic_planform_break: bool,
 
@@ -177,7 +187,8 @@ pub struct PlausibilityLimits {
     /// cannot represent at the thick end.
     #[config(
         label = "Maximum root thickness-to-chord ratio",
-        help = "Largest root thickness as a fraction of root chord, dimensionless. Transport roots run from about 0.12 to 0.16 on supercritical wings; the window is wider on both sides, and the ceiling excludes sections the compressible drag model cannot represent."
+        help = "Largest root thickness as a fraction of root chord (dimensionless).",
+        long_help = "Largest root thickness as a fraction of root chord, dimensionless. Transport roots run from about 0.12 to 0.16 on supercritical wings; the window is wider on both sides, and the ceiling excludes sections the compressible drag model cannot represent."
     )]
     pub max_root_thickness_ratio: f64,
 
@@ -201,7 +212,8 @@ pub struct PlausibilityLimits {
     #[config(
         label = "Most negative built washout",
         unit = "deg",
-        help = "Most negative built geometric washout accepted, in degrees: the built tip section incidence minus the root section incidence, negative for washout. This is not the tip twist design variable, which is the tip absolute incidence. Measured on the registered design vectors the built washout runs from -4.0 deg (AVE, ATR 72-600) to -7.0 deg (A380-800), and the floor sits below the most twisted of them with margin."
+        help = "Most negative built geometric washout accepted [deg]: built tip incidence minus root incidence (negative is washout). Registered aircraft run -4 to -7 deg.",
+        long_help = "Most negative built geometric washout accepted, in degrees: the built tip section incidence minus the root section incidence, negative for washout. This is not the tip twist design variable, which is the tip absolute incidence. Measured on the registered design vectors the built washout runs from -4.0 deg (AVE, ATR 72-600) to -7.0 deg (A380-800), and the floor sits below the most twisted of them with margin."
     )]
     pub min_tip_washout_deg: f64,
 
@@ -237,7 +249,8 @@ pub struct PlausibilityLimits {
     #[config(
         label = "Least negative built washout",
         unit = "deg",
-        help = "Least negative built washout accepted, in degrees, applied to the root-to-tip difference and to every spanwise run, so neither the break nor the tip may be set above the section inboard of it. Zero: a transport wing is not built with wash-in. The vortex-lattice model rewards loading the tip while neither the stall progression nor the outboard gust and manoeuvre case that washout exists to control is represented here, so positive tip twist would be bought from an omission in the model."
+        help = "Least negative built washout accepted [deg], applied to the root-to-tip difference and every spanwise run.",
+        long_help = "Least negative built washout accepted, in degrees, applied to the root-to-tip difference and to every spanwise run, so neither the break nor the tip may be set above the section inboard of it. Zero: a transport wing is not built with wash-in. The vortex-lattice model rewards loading the tip while neither the stall progression nor the outboard gust and manoeuvre case that washout exists to control is represented here, so positive tip twist would be bought from an omission in the model."
     )]
     pub max_tip_washout_deg: f64,
 }

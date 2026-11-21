@@ -77,6 +77,7 @@ fn unevaluated(name: &str) -> PresetAcceptanceResult {
         cruise_equilibrium: None,
         fuel_capacity_evidence: FuelCapacityEvidence::Unavailable,
         design_mission_status: PresetDesignMissionStatus::Unverified,
+        design_mission: None,
         wing_area_within_limit: false,
         execution_passed: false,
         physical_passed: false,

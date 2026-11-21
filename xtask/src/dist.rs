@@ -16,6 +16,8 @@ use std::process::Command;
 
 use crate::dist_archive;
 use crate::dist_avl;
+use crate::dist_nastran95::bundle_nastran95;
+use crate::hygiene;
 
 mod smoke;
 
@@ -278,6 +280,10 @@ pub fn create_distribution(root: &Path) -> Result<(), String> {
     // are excluded before any package manifest is written.
     let source_snapshot = bundle_source_snapshot(root, &pkg_dir)?;
 
+    // Nothing internal or naming an AI assistant may ship; fail before any
+    // manifest, validation or archive is produced.
+    hygiene::verify_package(&pkg_dir)?;
+
     // 3. Export configuration templates.
     let configs_dir = pkg_dir.join("configs");
     fs::create_dir_all(&configs_dir)
@@ -325,6 +331,10 @@ pub fn create_distribution(root: &Path) -> Result<(), String> {
     if archive_path.exists() {
         let _ = fs::remove_file(&archive_path);
     }
+
+    // The first scan ran on the source snapshot; the configuration template,
+    // manifest and smoke-test outputs were written afterwards.
+    hygiene::verify_package(&pkg_dir)?;
 
     println!("Creating package archive: {}", archive_path.display());
     dist_archive::create_archive(&dist_root, &package_name, &archive_name)?;
@@ -593,6 +603,11 @@ fn source_path_allowed(path: &str) -> bool {
         return false;
     }
 
+    // Internal programme documents never ship, whatever their extension.
+    if hygiene::is_internal_path(&normalized) {
+        return false;
+    }
+
     if SOURCE_ROOT_FILES
         .iter()
         .any(|candidate| *candidate == normalized)
@@ -602,6 +617,7 @@ fn source_path_allowed(path: &str) -> bool {
         || SOURCE_EMBEDDED_ASSET_FILES
             .iter()
             .any(|candidate| *candidate == normalized)
+        || normalized == "assets/textures/earth_blue_marble.png"
         || SOURCE_GOLDEN_FIXTURE_FILES
             .iter()
             .any(|candidate| *candidate == normalized)
@@ -720,7 +736,7 @@ fn write_source_manifest(source_root: &Path, snapshot: &SourceSnapshot) -> Resul
         "  \"allowed_embedded_asset_files\": {},\n",
         json_string_array(&SOURCE_EMBEDDED_ASSET_FILES)
     ));
-    json.push_str("  \"allowed_asset_files\": [],\n");
+    json.push_str("  \"allowed_asset_files\": [\"assets/textures/earth_blue_marble.png\"],\n");
     json.push_str(&format!(
         "  \"allowed_data_directory_prefixes\": {},\n",
         json_string_array(&SOURCE_DATA_DIRECTORY_PREFIXES)
@@ -1151,198 +1167,7 @@ fn validate_bundled_mses_osmap(package_dir: &Path) -> Result<(), String> {
     Ok(())
 }
 
-/// Copy NASTRAN-95 as a separately licensed adjacent program when its
-/// executable, runtime dependency declaration, license, modification record,
-/// and source association are all present and internally checkable.
-///
-/// The default mode omits incomplete staging and records the reason in the
-/// release manifest. Set `ALAS_STRICT_BUNDLED_NASTRAN95=1` to make an
-/// intentional bundled release fail closed instead.
-fn bundle_nastran95(root: &Path, package_dir: &Path, strict: bool) -> Result<BundleStatus, String> {
-    let source = root.join("external tools").join("NASTRAN-95");
-    let issues = assess_nastran95(&source);
-    if !issues.is_empty() {
-        let reason = issues.join("; ");
-        if strict {
-            return Err(format!(
-                "strict NASTRAN-95 bundle mode refused incomplete staging at {}: {}",
-                source.display(),
-                reason
-            ));
-        }
-        println!("[INFO] NASTRAN-95 not bundled: {reason}");
-        return Ok(BundleStatus::not_bundled(reason));
-    }
-
-    let destination = package_dir.join("external tools").join("NASTRAN-95");
-    copy_directory(&source, &destination)?;
-    println!(
-        "Bundled separately licensed NASTRAN-95 executable, runtime, rigid formats, corresponding source, and notices in {}",
-        destination.display()
-    );
-    Ok(BundleStatus::bundled())
-}
-
-fn assess_nastran95(source: &Path) -> Vec<String> {
-    let required_files = [
-        "build/bin/nastran.exe",
-        "build/bin/nastran95-build.txt",
-        "rf/NASINFO",
-        "LICENSE",
-        "MODIFICATIONS.md",
-        "SOURCE-REVISION.txt",
-        "source/NASTRAN-95-source.zip",
-    ];
-    let mut issues = Vec::new();
-    if !source.is_dir() {
-        issues.push(format!(
-            "staging directory is absent ({})",
-            source.display()
-        ));
-        return issues;
-    }
-    for relative in required_files {
-        let artifact = source.join(relative);
-        if !artifact.is_file() {
-            issues.push(format!("missing {relative}"));
-        } else if fs::metadata(&artifact).is_ok_and(|metadata| metadata.len() == 0) {
-            issues.push(format!("empty {relative}"));
-        }
-    }
-
-    let runtime = source.join("runtime");
-    if !runtime.is_dir() {
-        issues.push("runtime directory is absent".to_owned());
-    } else {
-        let runtime_files = match fs::read_dir(&runtime) {
-            Ok(entries) => entries
-                .filter_map(Result::ok)
-                .filter(|entry| entry.file_type().is_ok_and(|file_type| file_type.is_file()))
-                .collect::<Vec<_>>(),
-            Err(error) => {
-                issues.push(format!("cannot inspect runtime directory: {error}"));
-                Vec::new()
-            }
-        };
-        if runtime_files.is_empty() {
-            issues.push("runtime directory is empty".to_owned());
-        }
-        validate_runtime_dll_manifest(&runtime, &runtime_files, &mut issues);
-    }
-
-    let revision_path = source.join("SOURCE-REVISION.txt");
-    if revision_path.is_file() {
-        match fs::read_to_string(&revision_path) {
-            Ok(text) => validate_source_revision(&text, source, &mut issues),
-            Err(error) => issues.push(format!("cannot read SOURCE-REVISION.txt: {error}")),
-        }
-    }
-    issues
-}
-
-fn validate_runtime_dll_manifest(
-    runtime: &Path,
-    runtime_files: &[fs::DirEntry],
-    issues: &mut Vec<String>,
-) {
-    let manifest = runtime.join("DEPENDENCIES.txt");
-    if !manifest.is_file() {
-        issues.push(
-            "runtime/DEPENDENCIES.txt is missing (exact DLL inventory is required)".to_owned(),
-        );
-        return;
-    }
-    let text = match fs::read_to_string(&manifest) {
-        Ok(text) => text,
-        Err(error) => {
-            issues.push(format!("cannot read runtime/DEPENDENCIES.txt: {error}"));
-            return;
-        }
-    };
-    let mut declared = BTreeSet::new();
-    for line in text.lines() {
-        let name = line.trim();
-        if name.is_empty() || name.starts_with('#') {
-            continue;
-        }
-        let lower = name.to_ascii_lowercase();
-        if !lower.ends_with(".dll") || Path::new(name).file_name().is_none_or(|file| file != name) {
-            issues.push(format!(
-                "runtime dependency entry is not a DLL basename: {name}"
-            ));
-            continue;
-        }
-        if !declared.insert(lower.clone()) {
-            issues.push(format!("runtime DLL is declared more than once: {name}"));
-        }
-        let dependency = runtime.join(name);
-        if !dependency.is_file() {
-            issues.push(format!("declared runtime DLL is missing: runtime/{name}"));
-        } else if fs::metadata(&dependency).is_ok_and(|metadata| metadata.len() == 0) {
-            issues.push(format!("declared runtime DLL is empty: runtime/{name}"));
-        }
-    }
-    if declared.is_empty() {
-        issues.push("runtime/DEPENDENCIES.txt declares no DLLs".to_owned());
-    }
-
-    let actual = runtime_files
-        .iter()
-        .filter_map(|entry| {
-            let path = entry.path();
-            let extension = path.extension()?.to_str()?;
-            extension
-                .eq_ignore_ascii_case("dll")
-                .then(|| entry.file_name().to_string_lossy().to_ascii_lowercase())
-        })
-        .collect::<BTreeSet<_>>();
-    for extra in actual.difference(&declared) {
-        issues.push(format!(
-            "runtime DLL is absent from DEPENDENCIES.txt: {extra}"
-        ));
-    }
-}
-
-fn validate_source_revision(text: &str, source: &Path, issues: &mut Vec<String>) {
-    let lower = text.to_ascii_lowercase();
-    if lower.contains("not reproducibly associated") {
-        issues.push(
-            "SOURCE-REVISION.txt explicitly disclaims reproducible executable/source association"
-                .to_owned(),
-        );
-    }
-    let source_archive = source.join("source/NASTRAN-95-source.zip");
-    let actual_hash = fs::read(&source_archive)
-        .ok()
-        .map(|bytes| sha256_hex(&bytes));
-    // A revision record may also contain a full Git commit hash. Only accept
-    // a 64-digit value on the line explicitly labelling the source archive;
-    // otherwise a valid commit identifier could be mistaken for the archive
-    // digest.
-    let declared_hash = text.lines().find_map(|line| {
-        let lower = line.to_ascii_lowercase();
-        if !(lower.contains("source archive") && lower.contains("sha-256")) {
-            return None;
-        }
-        line.split(|character: char| !character.is_ascii_hexdigit())
-            .find(|token| {
-                token.len() == 64 && token.chars().all(|character| character.is_ascii_hexdigit())
-            })
-            .map(str::to_ascii_lowercase)
-    });
-    match (declared_hash, actual_hash) {
-        (Some(declared), Some(actual)) if declared != actual => issues.push(format!(
-            "SOURCE-REVISION.txt source-archive hash {declared} does not match SHA-256 {actual}"
-        )),
-        (Some(_), Some(_)) => {}
-        _ => issues.push(
-            "SOURCE-REVISION.txt must label the exact 64-digit SHA-256 of source/NASTRAN-95-source.zip"
-                .to_owned(),
-        ),
-    }
-}
-
-fn copy_directory(source: &Path, destination: &Path) -> Result<(), String> {
+pub(crate) fn copy_directory(source: &Path, destination: &Path) -> Result<(), String> {
     fs::create_dir_all(destination)
         .map_err(|error| format!("failed to create {}: {error}", destination.display()))?;
     for entry in fs::read_dir(source)
@@ -1556,7 +1381,7 @@ fn cargo_target_dir(root: &Path) -> PathBuf {
 
 /// A small dependency-free SHA-256 implementation keeps xtask's manifest
 /// hashes portable without changing the workspace dependency graph.
-fn sha256_hex(data: &[u8]) -> String {
+pub(crate) fn sha256_hex(data: &[u8]) -> String {
     let mut message = data.to_vec();
     let bit_len = (message.len() as u64).wrapping_mul(8);
     message.push(0x80);
@@ -1656,9 +1481,9 @@ mod tests {
     use std::path::PathBuf;
 
     use super::{
-        assess_nastran95, bundle_branding, bundle_mses_osmap, bundle_source_snapshot,
-        bundle_status_json, deleted_tracked_paths, package_name, parse_artifact_records,
-        sha256_hex, source_path_allowed, target_label, validate_bundled_mses_osmap, BundleStatus,
+        bundle_branding, bundle_mses_osmap, bundle_source_snapshot, bundle_status_json,
+        deleted_tracked_paths, package_name, parse_artifact_records, sha256_hex,
+        source_path_allowed, target_label, validate_bundled_mses_osmap, BundleStatus,
         MSES_OSMAP_RELATIVE_PATH, SOURCE_EMBEDDED_ASSET_FILES, USER_SUPPLIED_EXTERNAL_TOOLS,
     };
 
@@ -1804,7 +1629,10 @@ mod tests {
             "crates/alas-pipeline/src/openvsp/unreviewed.py"
         ));
         assert!(!source_path_allowed("external tools/AVL-GPL-2.0.txt"));
-        assert!(!source_path_allowed(".agent/reports/review.html"));
+        assert!(!source_path_allowed(concat!(
+            ".age",
+            "nt/reports/review.html"
+        )));
         assert!(!source_path_allowed("runs/private/output.json"));
         assert!(!source_path_allowed("private/unreviewed.rs"));
         assert!(!source_path_allowed("crates/alas-app/src/private.rs"));
@@ -1851,6 +1679,23 @@ mod tests {
             assert!(manifest.contains(asset), "source manifest omits {asset}");
         }
         fs::remove_dir_all(package).expect("remove temporary package");
+    }
+
+    #[test]
+    fn internal_programme_documents_are_never_admitted_to_the_source_package() {
+        assert!(!source_path_allowed(concat!(
+            "docs/",
+            "internal/v15/RULES.md"
+        )));
+        assert!(!source_path_allowed(concat!(
+            "docs/",
+            "internal/v15/briefs/H4-dist-hygiene.md"
+        )));
+    }
+
+    #[test]
+    fn private_research_notes_are_never_admitted_to_the_source_package() {
+        assert!(!source_path_allowed(concat!("docs/", "research/notes.md")));
     }
 
     #[test]
@@ -1917,19 +1762,6 @@ mod tests {
                 "{name} reason should point to the licence/provenance notices"
             );
         }
-    }
-
-    #[test]
-    fn missing_nastran_staging_is_reported_without_a_placeholder() {
-        let source = std::env::temp_dir().join(format!(
-            "alas-nastran-staging-{}-absent",
-            std::process::id()
-        ));
-        let issues = assess_nastran95(&source);
-        assert!(issues
-            .iter()
-            .any(|issue| issue.contains("staging directory is absent")));
-        assert!(!source.exists());
     }
 
     #[test]

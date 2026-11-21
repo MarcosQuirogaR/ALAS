@@ -8,6 +8,8 @@ authors.workspace = true
 rust-version.workspace = true
 
 [dependencies]
+# The partial-run report cache (`alas --only`) stores report types.
+serde = { workspace = true }
 # `CabinGeometry` samples a built `Airplane`'s fuselage and main wing, exactly
 # as `alas/physics/payload.py` does.
 alas-geom = { path = "../alas-geom" }
@@ -23,6 +25,8 @@ alas-mass = { path = "../alas-mass" }
 # `alas-math`; this crate takes it from there rather than keeping a copy.
 alas-math = { path = "../alas-math" }
 thiserror = { workspace = true }
+# The auto-balance reports a movable payload that reached the end of its range.
+tracing = { workspace = true }
 
 [dev-dependencies]
 alas-testkit = { path = "../alas-testkit" }

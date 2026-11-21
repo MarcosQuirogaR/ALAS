@@ -13,7 +13,7 @@ use alas_payload::loading_sequence::{
 use alas_payload::CabinGeometry;
 use alas_pipeline::full_analysis::AnalysisReport;
 
-use super::{NamedPath, PotatoLevel};
+use super::{CurveKind, LoadingCurve, NamedPath, PotatoLevel};
 
 /// Number of tank-burn points in the fuel path.
 const FUEL_POINTS: usize = 21;
@@ -41,7 +41,10 @@ pub(super) fn load_sequence_set(
         .map(|g| layout_hold_spans(g, &config.cabin.cargo, layout))
         .unwrap_or_default();
     let tanks = resolve_product_layout(config, &report.design, &report.airplane).ok()?;
-    let state = tanks.distribute(fuel_kg.max(0.0)).ok()?;
+    // A takeoff fuel at the closure mass can exceed what the tanks hold; the
+    // curve follows the tank sequence up to the usable capacity.
+    let fuel_kg = fuel_kg.max(0.0).min(tanks.usable_capacity_kg());
+    let state = tanks.distribute(fuel_kg).ok()?;
     let vector = fuel_vector(&tanks, &state, FUEL_POINTS);
     Some(LoadSequenceSet::from_layout(layout, &holds, &vector, dow))
 }
@@ -96,4 +99,70 @@ pub(super) fn potato_and_paths(
         })
         .collect();
     (potato, paths)
+}
+
+/// The loading curves of the potato from the composed orders: the cargo path
+/// from the dry operating weight to the weight with the holds loaded, and the
+/// four seat orders (window or aisle seats first, front to back or back to
+/// front) from there to the end of the cabin loading.
+///
+/// An order is recognised by the name its generator gives it; the fuel leg and
+/// everything after `cabin_end_kg` are not part of a curve. `hold_kg` is
+/// `None` for a run without lower-hold cargo.
+pub(super) fn loading_curves(
+    composed: &[LoadingSequence],
+    hold_kg: Option<f64>,
+    cabin_end_kg: f64,
+    pct_mac: impl Fn(f64) -> f64,
+) -> Vec<LoadingCurve> {
+    let mut curves: Vec<LoadingCurve> = Vec::new();
+    let mut seen_cargo: Vec<&str> = Vec::new();
+    let mut seen_seats: Vec<(bool, bool)> = Vec::new();
+    let cut = |points: &[LoadingPoint], lo: f64, hi: f64| -> Vec<(f64, f64)> {
+        points
+            .iter()
+            .filter(|p| p.mass_kg >= lo - 0.5 && p.mass_kg <= hi + 0.5 && p.x_m.is_finite())
+            .map(|p| (p.mass_kg, pct_mac(p.x_m)))
+            .collect()
+    };
+    for sequence in composed {
+        let parts: Vec<&str> = sequence.name.split(" | ").collect();
+        let seats = parts.iter().find(|p| p.contains("-first,"));
+        let cargo = parts
+            .iter()
+            .find(|p| !p.contains("-first,") && **p != "fuel" && !p.is_empty());
+        if let (Some(hold_kg), Some(cargo)) = (hold_kg, cargo) {
+            if !seen_cargo.contains(cargo) {
+                seen_cargo.push(cargo);
+                let points = cut(&sequence.points, f64::NEG_INFINITY, hold_kg);
+                if points.len() >= 2 {
+                    curves.push(LoadingCurve {
+                        kind: CurveKind::Cargo,
+                        points,
+                    });
+                }
+            }
+        }
+        if let Some(seats) = seats {
+            let key = (
+                seats.ends_with("front-to-back"),
+                seats.starts_with("window-first"),
+            );
+            if !seen_seats.contains(&key) {
+                seen_seats.push(key);
+                let lo = hold_kg.unwrap_or(f64::NEG_INFINITY);
+                let points = cut(&sequence.points, lo, cabin_end_kg);
+                if points.len() >= 2 {
+                    curves.push(LoadingCurve {
+                        kind: CurveKind::Seats {
+                            front_to_back: key.0,
+                            window_first: key.1,
+                        },
+                        points,
+                    });
+                }
+            }
+        }
+    }
+    curves
 }

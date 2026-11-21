@@ -86,6 +86,12 @@ pub(super) fn render_geo(
     // `BoundaryLayer` field, so the seed is necessary hygiene and the real fix
     // is an explicit prism-layer construction that does not use that field.
     out.push_str("Mesh.RandomSeed = 1;\n");
+    // Gmsh scales its geometric tolerance with the model's bounding box. With
+    // the outer boundary 100 chords away that tolerance reached the blunt
+    // trailing-edge boundary-layer fan and merged its nodes into collapsed
+    // hexahedra (14-23 faces left outside every patch on NACA 0012); an
+    // absolute tolerance far below the first-cell height keeps the fan.
+    out.push_str("Geometry.Tolerance = 1e-12;\n");
     out.push_str("Mesh.Algorithm = 5;\n");
     out.push_str("Mesh.Algorithm3D = 1;\n");
     out.push_str("Mesh.ElementOrder = 1;\n");
@@ -95,8 +101,18 @@ pub(super) fn render_geo(
     out.push_str("Mesh.CharacteristicLengthExtendFromBoundary = 0;\n");
     out.push_str("Mesh.CharacteristicLengthFromPoints = 1;\n");
     out.push_str("Mesh.CharacteristicLengthFromCurvature = 0;\n");
+    let outer_size_m = |x: f64, y: f64| far_field_size(config, far_size_m, x, y);
+    let largest_size_m = [
+        (domain_min_x_m, domain_min_y_m),
+        (domain_max_x_m, domain_min_y_m),
+        (domain_max_x_m, domain_max_y_m),
+        (domain_min_x_m, domain_max_y_m),
+    ]
+    .into_iter()
+    .map(|(x, y)| outer_size_m(x, y))
+    .fold(far_size_m, f64::max);
     out.push_str(&format!(
-        "Mesh.CharacteristicLengthMax = {far_size_m:.16e};\n"
+        "Mesh.CharacteristicLengthMax = {largest_size_m:.16e};\n"
     ));
     out.push_str(&format!(
         "Mesh.CharacteristicLengthMin = {min:.16e};\n",
@@ -118,7 +134,8 @@ pub(super) fn render_geo(
         (4, (domain_min_x_m, domain_max_y_m)),
     ] {
         out.push_str(&format!(
-            "Point({id}) = {{{x:.16e}, {y:.16e}, 0, {far_size_m:.16e}}};\n"
+            "Point({id}) = {{{x:.16e}, {y:.16e}, 0, {size:.16e}}};\n",
+            size = outer_size_m(x, y),
         ));
     }
     let point_offset = 5_i32;
@@ -168,7 +185,7 @@ pub(super) fn render_geo(
     out.push_str("Field[2].Sampling = 200;\n");
     out.push_str("Field[3] = Threshold;\nField[3].InField = 2;\n");
     out.push_str(&format!(
-        "Field[3].SizeMin = {size_min:.16e};\nField[3].SizeMax = {far_size_m:.16e};\nField[3].DistMin = {dist_min:.16e};\nField[3].DistMax = {dist_max:.16e};\n",
+        "Field[3].SizeMin = {size_min:.16e};\nField[3].SizeMax = {far_size_m:.16e};\nField[3].DistMin = {dist_min:.16e};\nField[3].DistMax = {dist_max:.16e};\nField[3].StopAtDistMax = 1;\n",
         // The BoundaryLayer field owns the first layers.  Outside that
         // field, retain the exact surface spacing as the lower background
         // limit; using a fraction of it over a whole chord would create an
@@ -177,10 +194,10 @@ pub(super) fn render_geo(
         dist_min = if sizing.enabled { sizing.total_thickness_m.max(config.chord_m * 0.005) } else { config.chord_m * 0.005 },
         dist_max = config.chord_m * 0.75,
     ));
-    let (_, _, wake_y_min_m, wake_y_max_m) = wake_box(config);
+    let (_, wake_x_max_m, wake_y_min_m, wake_y_max_m) = wake_box(config);
     out.push_str("Field[4] = Box;\n");
     out.push_str(&format!(
-        "Field[4].VIn = {wake_size_m:.16e};\nField[4].VOut = {far_size_m:.16e};\nField[4].XMin = 0;\nField[4].XMax = {domain_max_x_m:.16e};\nField[4].YMin = {y_min:.16e};\nField[4].YMax = {y_max:.16e};\nField[4].ZMin = 0;\nField[4].ZMax = {extrusion_span_m:.16e};\n",
+        "Field[4].VIn = {wake_size_m:.16e};\nField[4].VOut = {largest_size_m:.16e};\nField[4].XMin = 0;\nField[4].XMax = {wake_x_max_m:.16e};\nField[4].YMin = {y_min:.16e};\nField[4].YMax = {y_max:.16e};\nField[4].ZMin = 0;\nField[4].ZMax = {extrusion_span_m:.16e};\n",
         y_min = wake_y_min_m,
         y_max = wake_y_max_m,
     ));
@@ -216,15 +233,28 @@ pub(super) fn render_geo(
             // minutes, against ten seconds at level 0.  Relaxing to
             // `far_size_m` makes the field impose nothing outside its own ball,
             // which is what "leading-edge refinement" is supposed to mean.
-            "Field[7].SizeMin = {le_size_m:.16e};\nField[7].SizeMax = {far_size_m:.16e};\nField[7].DistMin = {dist_min:.16e};\nField[7].DistMax = {dist_max:.16e};\n",
+            "Field[7].SizeMin = {le_size_m:.16e};\nField[7].SizeMax = {far_size_m:.16e};\nField[7].DistMin = {dist_min:.16e};\nField[7].DistMax = {dist_max:.16e};\nField[7].StopAtDistMax = 1;\n",
             dist_min = LEADING_EDGE_REFINEMENT_INNER_CHORDS * config.chord_m,
             dist_max = LEADING_EDGE_REFINEMENT_OUTER_CHORDS * config.chord_m,
         ));
+    }
+    // Far field (template v8): the near-field size holds inside a circle of
+    // NEAR_FIELD_RADIUS_CHORDS about mid-chord and grows by
+    // FAR_FIELD_GROWTH per metre beyond it, so the boundary can sit far away
+    // for a handful of cells.
+    out.push_str(&format!(
+        "Field[8] = MathEval;\nField[8].F = \"{far_size_m:.16e} + {FAR_FIELD_GROWTH:.16e} * (Sqrt((x - {mid:.16e})^2 + y^2) - {radius:.16e})\";\nField[9] = MathEval;\nField[9].F = \"{far_size_m:.16e}\";\nField[10] = Max;\nField[10].FieldsList = {{8, 9}};\n",
+        mid = 0.5 * config.chord_m,
+        radius = NEAR_FIELD_RADIUS_CHORDS * config.chord_m,
+    ));
+    if config.mesh.leading_edge_refinement > 0 && le_size_m < surface_size_m {
         out.push_str(
-            "Field[5] = Min;\nField[5].FieldsList = {3, 4, 7};\nBackground Field = 5;\n\n",
+            "Field[5] = Min;\nField[5].FieldsList = {3, 4, 7, 10};\nBackground Field = 5;\n\n",
         );
     } else {
-        out.push_str("Field[5] = Min;\nField[5].FieldsList = {3, 4};\nBackground Field = 5;\n\n");
+        out.push_str(
+            "Field[5] = Min;\nField[5].FieldsList = {3, 4, 10};\nBackground Field = 5;\n\n",
+        );
     }
 
     if sizing.enabled {
@@ -406,7 +436,25 @@ pub(in crate::mesh) fn leading_edge_size(config: &CfdStudyConfig, surface_size_m
 /// trailing-edge plane to the outlet, two chords above and below the chord line.
 pub(in crate::mesh) fn wake_box(config: &CfdStudyConfig) -> (f64, f64, f64, f64) {
     let (_, max_x, _, _) = domain_bounds(config);
-    (0.0, max_x, -2.0 * config.chord_m, 2.0 * config.chord_m)
+    let wake_x_max = max_x.min(WAKE_REFINEMENT_LENGTH_CHORDS * config.chord_m);
+    (0.0, wake_x_max, -2.0 * config.chord_m, 2.0 * config.chord_m)
+}
+
+/// Downstream length of the refined wake strip, in chords: the historical
+/// 20c outlet distance, kept when the outer boundary moves further away.
+pub(super) const WAKE_REFINEMENT_LENGTH_CHORDS: f64 = 20.0;
+
+/// Radius (chords, about mid-chord) inside which the near-field size holds.
+pub(super) const NEAR_FIELD_RADIUS_CHORDS: f64 = 10.0;
+
+/// Growth of the isotropic cell size per unit distance beyond the near field.
+pub(super) const FAR_FIELD_GROWTH: f64 = 0.1;
+
+/// Background cell size at an outer point `(x, y)` in metres.
+fn far_field_size(config: &CfdStudyConfig, far_size_m: f64, x: f64, y: f64) -> f64 {
+    let r = (x - 0.5 * config.chord_m).hypot(y);
+    (far_size_m + FAR_FIELD_GROWTH * (r - NEAR_FIELD_RADIUS_CHORDS * config.chord_m))
+        .max(far_size_m)
 }
 
 #[cfg(test)]

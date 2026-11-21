@@ -4,7 +4,7 @@
 //! Non-wing parasite-drag components from a `UavSpec` and a hull description.
 //!
 //! The spec carries the empennage and the boom; the fuselage envelope, wheels
-//! and nacelles are not spec fields yet (the airframe lane will derive them
+//! and nacelles are not spec fields yet (the airframe module will derive them
 //! from the component tree), so the caller describes them in [`Hull`].  The
 //! result feeds [`crate::aero::drag_lowre::build_up`] (Cf transitional, Hoerner
 //! form factors, Raymer interference factors; no Mach term).
@@ -164,7 +164,7 @@ pub fn components(spec: &UavSpec, hull: &Hull) -> Result<Vec<Component>, Coupled
         }
     } else {
         return Err(CoupledError::Spec(
-            "driven empennage needs the airframe lane to size the surfaces; use Explicit".into(),
+            "driven empennage needs the airframe module to size the surfaces; use Explicit".into(),
         ));
     }
     out.extend(hull.items.iter().cloned());

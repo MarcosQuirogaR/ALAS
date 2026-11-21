@@ -5,6 +5,27 @@
 
 use alas_config::airport_io::{AirportProvenance, AirportProvenanceKind, CustomAirport};
 
+use crate::views::tr;
+
+/// The entry fields of the editor, for per-field messages.
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub enum DraftField {
+    /// ICAO code.
+    Icao,
+    /// Display name.
+    Name,
+    /// Latitude.
+    Latitude,
+    /// Longitude.
+    Longitude,
+    /// ISA temperature delta.
+    IsaDelta,
+    /// Field altitude.
+    Altitude,
+    /// Runway lengths.
+    Runways,
+}
+
 /// String-backed airport fields so an incomplete edit does not panic or
 /// replace the last valid application state.
 #[derive(Debug, Clone, Default)]
@@ -50,6 +71,100 @@ impl CustomAirportDraft {
         }
     }
 
+    /// Whether no field has been typed into yet.
+    pub fn is_pristine(&self) -> bool {
+        [
+            &self.icao,
+            &self.name,
+            &self.latitude_deg,
+            &self.longitude_deg,
+            &self.isa_delta_c,
+            &self.altitude_m,
+            &self.runway_lengths_m,
+        ]
+        .iter()
+        .all(|field| field.trim().is_empty())
+    }
+
+    /// The message (already translated) for one field, or `None` when the
+    /// field is acceptable. Empty fields are errors too.
+    pub fn field_error(&self, field: DraftField) -> Option<String> {
+        let number = |text: &str, label: &str, range: Option<(f64, f64)>| -> Option<String> {
+            let text = text.trim();
+            if text.is_empty() {
+                return Some(format!("{} {}", tr(label), tr("is required.")));
+            }
+            let Some(value) = crate::user_number::parse_user_number(text) else {
+                return Some(format!("{} {}", tr(label), tr("must be a number.")));
+            };
+            if !value.is_finite() {
+                return Some(format!("{} {}", tr(label), tr("must be a finite number.")));
+            }
+            match range {
+                Some((low, high)) if !(low..=high).contains(&value) => Some(format!(
+                    "{} {} {low} {} {high}.",
+                    tr(label),
+                    tr("must be between"),
+                    tr("and")
+                )),
+                _ => None,
+            }
+        };
+        match field {
+            DraftField::Icao => {
+                let icao = self.icao.trim();
+                if icao.is_empty() {
+                    Some(tr("ICAO is required."))
+                } else if icao.len() != 4 || !icao.bytes().all(|b| b.is_ascii_alphanumeric()) {
+                    Some(tr("ICAO must be 4 letters or digits."))
+                } else {
+                    None
+                }
+            }
+            DraftField::Name => self.name.trim().is_empty().then(|| tr("Name is required.")),
+            DraftField::Latitude => number(&self.latitude_deg, "Latitude", Some((-90.0, 90.0))),
+            DraftField::Longitude => {
+                number(&self.longitude_deg, "Longitude", Some((-180.0, 180.0)))
+            }
+            DraftField::IsaDelta => number(&self.isa_delta_c, "ISA delta", None),
+            DraftField::Altitude => number(&self.altitude_m, "Altitude", None),
+            DraftField::Runways => {
+                let parts: Vec<&str> = self
+                    .runway_lengths_m
+                    .split(|c: char| c == ',' || c.is_whitespace())
+                    .filter(|value| !value.is_empty())
+                    .collect();
+                if parts.is_empty() {
+                    Some(tr("At least one runway length is required."))
+                } else if parts
+                    .iter()
+                    .any(|part| !part.parse::<f64>().is_ok_and(|v| v.is_finite() && v > 0.0))
+                {
+                    Some(tr("Runway lengths must be positive numbers."))
+                } else {
+                    None
+                }
+            }
+        }
+    }
+
+    /// Whether every field passes and the registry would accept the airport.
+    pub fn is_valid(&self) -> bool {
+        const FIELDS: [DraftField; 7] = [
+            DraftField::Icao,
+            DraftField::Name,
+            DraftField::Latitude,
+            DraftField::Longitude,
+            DraftField::IsaDelta,
+            DraftField::Altitude,
+            DraftField::Runways,
+        ];
+        FIELDS
+            .iter()
+            .all(|field| self.field_error(*field).is_none())
+            && self.to_airport().is_ok()
+    }
+
     /// Convert the draft into a validated custom airport.
     pub fn to_airport(&self) -> Result<CustomAirport, String> {
         let mut airport = CustomAirport {
@@ -70,6 +185,7 @@ impl CustomAirportDraft {
             // values that would look like user-supplied regulatory data.
             declared_toda_m: None,
             declared_lda_m: None,
+            departure_surveys: Vec::new(),
             provenance: AirportProvenance {
                 kind: AirportProvenanceKind::UserEntered,
                 source: Some("ALAS custom-airport editor".to_owned()),
@@ -90,6 +206,7 @@ impl CustomAirportDraft {
             if unchanged {
                 airport.declared_toda_m = origin.declared_toda_m;
                 airport.declared_lda_m = origin.declared_lda_m;
+                airport.departure_surveys = origin.departure_surveys.clone();
                 airport.provenance = origin.provenance.clone();
             }
         }
@@ -98,10 +215,8 @@ impl CustomAirportDraft {
 }
 
 fn parse_number(label: &str, value: &str) -> Result<f64, String> {
-    value
-        .trim()
-        .parse::<f64>()
-        .map_err(|_| format!("{label} must be a finite number"))
+    crate::user_number::parse_user_number(value)
+        .ok_or_else(|| format!("{label} must be a finite number"))
 }
 
 #[cfg(test)]
@@ -119,6 +234,7 @@ mod tests {
             runway_lengths_m: vec![3500.0, 4100.5],
             declared_toda_m: Some(3600.0),
             declared_lda_m: None,
+            departure_surveys: Vec::new(),
             provenance: AirportProvenance {
                 kind: AirportProvenanceKind::DatImport,
                 source: Some("lexx.dat".to_owned()),

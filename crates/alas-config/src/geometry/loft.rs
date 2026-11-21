@@ -47,8 +47,9 @@ pub use residual::{
     MAX_RESIDUAL_TERMS, MIN_WIDTH_FACTOR, RESIDUAL_COEFF_LIMIT,
 };
 pub use spec::{
-    BodyCurves, CabinStations, Closure, Confidence, DrawingRef, FairnessBudget, FitRecord,
-    InflectionBudget, LoftSpec, ProvenanceKind, SourceRef, SplineSpec, LOFT_SCHEMA_VERSION,
+    ApuConeSpec, BodyCurves, CabinStations, Closure, Confidence, DrawingRef, FairnessBudget,
+    FitRecord, InflectionBudget, LoftSpec, ProvenanceKind, SourceRef, SplineSpec,
+    LOFT_SCHEMA_VERSION,
 };
 pub use validate::{
     LoftSpecError, SplineProblem, MAX_COEFFS_PER_CURVE, MAX_EXPONENT, MAX_TIP_RADIUS_RATIO,

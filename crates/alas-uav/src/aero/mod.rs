@@ -1,13 +1,13 @@
 // SPDX-License-Identifier: AGPL-3.0-or-later
 // Copyright (C) 2026 Marcos Quiroga Rodriguez
 
-//! Low-Reynolds aerodynamics for fixed-wing UAVs (M2 lane A, UAV-PLAN 3.1).
+//! Low-Reynolds aerodynamics for fixed-wing UAVs.
 //!
 //! | module | content |
 //! |---|---|
 //! | [`viscous_vlm`] | VLM circulation with NeuralFoil strip coupling (modified-incidence fixed point), wing `CL`, `CD`, `CLmax`, stall location |
 //! | [`section`] | 2-D section model: NeuralFoil or imported table, with the validity guard |
-//! | [`polar_csv`] | Polar CSV / XFLR5-XFOIL text import (decision D7; no XFOIL/MSES integration) |
+//! | [`polar_csv`] | Polar CSV / XFLR5-XFOIL text import (no XFOIL/MSES integration) |
 //! | [`drag_lowre`] | Parasite drag of fuselage, tails, booms, gear with transitional skin friction |
 //! | [`ground_effect`] | Ground-effect correlations and lift-slope increment |
 //! | [`slipstream`] | Actuator-disk propeller slipstream on the wing strips |

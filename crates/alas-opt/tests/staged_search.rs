@@ -153,13 +153,20 @@ fn the_reference_envelope_is_the_ten_percent_window_around_the_loaded_preset() {
 #[test]
 fn the_same_seed_reaches_the_same_winner_at_1_4_and_16_workers_nightly() {
     // AVE has no feasible candidate since the clean-polar kappa 0.25 / margin 1.01
-    // change (OEI second segment 0.2786 required vs 0.2655 installed): use A320-200.
-    let preset = "A320-200";
+    // change (OEI second segment 0.2786 required vs 0.2655 installed).
+    // No curated survey certifies a take-off obstacle clearance (every survey carries the
+    // 100 m completeness allowance), so
+    // no registered preset has a feasible design at its own departure. The C919 departs
+    // the hand-entered open-ground fixture (support::open_ground_departure, EDDF's position
+    // and declared distances), where it has no hard finding at its nominal: this test is
+    // about the search, not the obstacle data.
+    let preset = "C919";
     let start = nominal(preset);
     // Time limits are machine- and load-dependent by design, so the run stops
     // on its evaluation budgets only: the documented reproducible mode.
     let run_with = |workers: i64| {
         let mut config = reference_config(preset, workers);
+        support::open_ground_departure(&mut config);
         config.optimizer.solver.stop_on_evaluations_only = true;
         let mut optimizer = DesignOptimizer::new(config);
         optimizer
@@ -179,9 +186,16 @@ fn every_stage_respects_its_budget_and_a_time_limited_run_replays_exactly() {
     // nominal passes the hard gate: the AVE nominal now fails the rotation
     // forward-CG limit (a physical finding, see `mission_sized`), leaving a
     // four-evaluation search nothing feasible to return.
-    let preset = "A320-200";
+    // No curated survey certifies a take-off obstacle clearance (every survey carries the
+    // 100 m completeness allowance), so
+    // no registered preset has a feasible design at its own departure. The C919 departs
+    // the hand-entered open-ground fixture (support::open_ground_departure, EDDF's position
+    // and declared distances), where it has no hard finding at its nominal: this test is
+    // about the search, not the obstacle data.
+    let preset = "C919";
     let start = nominal(preset);
     let mut limited = reference_config(preset, 4);
+    support::open_ground_departure(&mut limited);
     limited.optimizer.solver.stop_on_evaluations_only = false;
     limited.optimizer.solver.screening.time_limit_s = 3.0;
     limited.optimizer.solver.refinement.time_limit_s = 6.0;
@@ -234,8 +248,15 @@ fn every_stage_respects_its_budget_and_a_time_limited_run_replays_exactly() {
 fn a_run_that_reports_convergence_has_a_feasible_candidate_the_replay_accepts() {
     // Convergence is a claim about the aircraft, not about the loop: it may
     // only be reported for a winner that satisfies every hard residual.
-    let preset = "A320-200";
+    // No curated survey certifies a take-off obstacle clearance (every survey carries the
+    // 100 m completeness allowance), so
+    // no registered preset has a feasible design at its own departure. The C919 departs
+    // the hand-entered open-ground fixture (support::open_ground_departure, EDDF's position
+    // and declared distances), where it has no hard finding at its nominal: this test is
+    // about the search, not the obstacle data.
+    let preset = "C919";
     let mut config = reference_config(preset, 16);
+    support::open_ground_departure(&mut config);
     config.optimizer.solver.refinement.max_evaluations = 400;
     let start = nominal(preset);
 

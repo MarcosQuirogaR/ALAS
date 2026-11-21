@@ -19,7 +19,7 @@ use crate::breakdown::{calculate_physical_cg, MassBreakdown, MassCoordinates, OE
 use crate::tanks::resolve_product_layout;
 
 /// Governing limit of the maximum available takeoff fuel load.
-#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+#[derive(serde::Serialize, serde::Deserialize, Debug, Clone, Copy, PartialEq, Eq)]
 pub enum MtowFuelLoadingStatus {
     /// The available fuel reaches MTOW without filling all usable volume.
     MassLimited,
@@ -41,7 +41,7 @@ impl MtowFuelLoadingStatus {
 }
 
 /// One maximum-fuel load case, distinct from a mission's required fuel plan.
-#[derive(Debug, Clone, Copy, PartialEq)]
+#[derive(serde::Serialize, serde::Deserialize, Debug, Clone, Copy, PartialEq)]
 pub struct MtowFuelLoading {
     /// Operating empty mass, including unusable fuel, plus carried payload.
     pub zero_fuel_mass_kg: f64,

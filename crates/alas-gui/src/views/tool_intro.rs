@@ -198,7 +198,7 @@ enum Acquisition {
 
 /// Every acquisition this screen may offer on this host, in display order.
 ///
-/// This is the complete set of audited in-app download paths. Other tools
+/// This is the complete set of in-app download paths with a vetted source. Other tools
 /// have publisher links and user-owned installations, so "download all"
 /// cannot reach them.
 fn offered_acquisitions() -> Vec<Acquisition> {
@@ -264,7 +264,7 @@ fn download_all_row(state: &mut AppState, ui: &mut Ui) {
             "One consent for every automated download in this group. Other tools have official publisher links and require a separate user installation or licence.",
         ));
     ui.horizontal(|ui| {
-        ui.checkbox(
+        crate::checkbox::checkbox(ui,
             &mut state.tool_intro_download_all_consent,
             tr("I consent to every download in this group"),
         )
@@ -302,7 +302,7 @@ fn navdata_row(state: &mut AppState, ui: &mut Ui) {
         ui.hyperlink_to(tr("View source"), "https://github.com/mcantsin/x-plane-navdata");
     });
     ui.horizontal(|ui| {
-        ui.checkbox(
+        crate::checkbox::checkbox(ui,
             &mut state.tool_intro_navdata_consent,
             tr("I consent to this download"),
         )
@@ -346,7 +346,7 @@ fn openvsp_preview_row(state: &mut AppState, ui: &mut Ui) {
     );
     ui.label(RichText::new(status.label()).weak().small());
     ui.horizontal(|ui| {
-        ui.checkbox(
+        crate::checkbox::checkbox(ui,
             &mut state.tool_intro_openvsp_preview_consent,
             tr("I consent to this download"),
         )

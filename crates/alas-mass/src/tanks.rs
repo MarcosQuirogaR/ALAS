@@ -27,6 +27,7 @@
 mod bays;
 mod distribute;
 mod geometry;
+mod operations;
 mod order;
 mod product;
 mod resolve;
@@ -36,7 +37,7 @@ mod types;
 #[cfg(test)]
 mod tests;
 
-pub use distribute::{fuel_vector, FuelState};
+pub use distribute::{fuel_cg_at, fuel_vector, FuelState};
 pub use product::{
     inventory_density_kg_m3, resolve_product_layout, uses_preset_fuel, uses_registered_tank_layout,
     PUBLISHED_INVENTORY_TOLERANCE,

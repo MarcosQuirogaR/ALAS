@@ -22,7 +22,14 @@
     0.7441860465116279,
     0.7441860465116279,
     0.7441860465116279,
+    0.7726098191214469,
     0.7953488372093023,
+    0.8113695090439276,
+    0.8501291989664082,
+    0.8888888888888888,
+    0.9276485788113694,
+    0.96640826873385,
+    0.9832041343669249,
     1.0,
     1.0,
     1.0,
@@ -31,21 +38,28 @@
     1.0
    ],
    "coeffs": [
-    -7.965473995190917e-17,
-    0.0653999999999999,
-    0.631745313012848,
-    1.8977295210188996,
-    2.436198739009154,
-    3.062499999999998,
-    3.0625000000000013,
-    3.062500000000004,
+    -2.377509463140231e-15,
+    0.06539999999999821,
+    0.8457089132014037,
+    1.8657765213130966,
+    2.1074798839598987,
+    3.062500000000003,
     3.0625000000000044,
-    3.0624999999999973,
-    3.0625000000000018,
-    0.07776670810880068,
-    2.1281038590194905,
-    0.02335274269125244,
-    0.00019902028324034204
+    3.06250000000001,
+    3.062500000000003,
+    3.0624999999999996,
+    3.062500000000005,
+    3.003622344731414,
+    2.760876470762952,
+    2.2403533393733635,
+    1.6848083953286448,
+    1.216398285235437,
+    0.8104696583029595,
+    0.6205294796594168,
+    0.17509470378083153,
+    0.02584534591157232,
+    0.015106226729392238,
+    0.0036457918863222662
    ]
   },
   "E": {
@@ -63,8 +77,18 @@
     0.656330749354005,
     0.656330749354005,
     0.656330749354005,
+    0.6950904392764857,
     0.725064599483204,
+    0.7338501291989663,
+    0.7726098191214469,
+    0.8113695090439276,
     0.8453488372093023,
+    0.8501291989664082,
+    0.8888888888888888,
+    0.9276485788113694,
+    0.96640826873385,
+    0.979328165374677,
+    0.992248062015504,
     1.0,
     1.0,
     1.0,
@@ -73,21 +97,31 @@
     1.0
    ],
    "coeffs": [
-    1.7173198058982508e-15,
-    0.4488000000000004,
-    2.041284877834239,
-    3.0962264584554617,
+    -2.0078737734639002e-15,
+    0.4488000000000058,
+    2.250813145113113,
+    3.189582932712723,
+    3.461460249999998,
+    3.4614602500000022,
+    3.4614602499999974,
     3.4614602499999996,
-    3.4614602499999987,
-    3.46146025,
-    3.461460249999999,
-    3.461460250000001,
-    3.4614602499999996,
-    2.1433284034027693,
-    1.494155293532269,
-    0.8080527335777163,
-    0.29559901802670785,
-    0.1253790035874673
+    3.4614602500000067,
+    3.4659217746498907,
+    3.4284730729913315,
+    3.279255687269894,
+    2.9772945346831534,
+    2.6220686982736705,
+    2.2847778612124525,
+    1.8718364531621183,
+    1.4819418217937987,
+    1.112592044135674,
+    0.804818106399852,
+    0.5212967668673493,
+    0.33590274477339377,
+    0.2413221181731858,
+    0.20508804865770233,
+    0.17827386418043267,
+    0.17067058693992052
    ]
   },
   "zc": {
@@ -105,8 +139,18 @@
     0.656330749354005,
     0.656330749354005,
     0.656330749354005,
+    0.6950904392764857,
     0.725064599483204,
+    0.7338501291989663,
+    0.7726098191214469,
+    0.8113695090439276,
     0.8453488372093023,
+    0.8501291989664082,
+    0.8888888888888888,
+    0.9276485788113694,
+    0.96640826873385,
+    0.979328165374677,
+    0.992248062015504,
     1.0,
     1.0,
     1.0,
@@ -115,21 +159,31 @@
     1.0
    ],
    "coeffs": [
-    -0.6987895053560467,
-    -0.5550676053636309,
-    -0.3491714943312809,
-    0.05112217933264719,
-    0.09999999999999991,
-    0.10000000000000035,
-    0.09999999999999962,
-    0.10000000000000031,
-    0.1000000000000005,
-    0.1000000000000011,
-    0.3998669489680923,
-    0.6044850987744225,
-    0.8365979466840696,
-    0.9888387923532117,
-    1.0596513883913736
+    -0.6987895053560469,
+    -0.5359523015436285,
+    -0.25789766905323047,
+    0.178205871642688,
+    0.10000000000000027,
+    0.10000000000000069,
+    0.09999999999999934,
+    0.10000000000000088,
+    0.1000000000000006,
+    0.0988283649739043,
+    0.10871082469682308,
+    0.1459809921764954,
+    0.2225177375639889,
+    0.31328993933466104,
+    0.39992230745668955,
+    0.5080193274128127,
+    0.6102691720592279,
+    0.7093254167497798,
+    0.7987990297945298,
+    0.8932102773705568,
+    0.9645665304263282,
+    1.0041643090484949,
+    1.019087397174859,
+    1.0348924531731567,
+    1.0381024327605248
    ]
   },
   "n": {
@@ -164,6 +218,18 @@
     0.0,
     0.0,
     0.0,
+    0.0682170542635659,
+    0.0682170542635659,
+    0.0682170542635659,
+    0.17054263565891473,
+    0.17054263565891473,
+    0.17054263565891473,
+    0.656330749354005,
+    0.656330749354005,
+    0.656330749354005,
+    0.7766149870801033,
+    0.7766149870801033,
+    0.7766149870801033,
     1.0,
     1.0,
     1.0,
@@ -172,12 +238,24 @@
     1.0
    ],
    "coeffs": [
-    0.0,
-    0.0,
-    0.0,
-    0.0,
-    0.0,
-    0.0
+    -2.0136815305685395e-16,
+    3.7224801637432817e-16,
+    -4.278911770810352e-16,
+    1.5414953401168147e-16,
+    -2.051505020214953e-16,
+    9.959493562319687e-17,
+    0.08030000000000001,
+    0.08030000000000008,
+    0.08029999999999995,
+    0.08030000000000007,
+    0.08029999999999994,
+    0.08029999999999994,
+    -8.924339132271308e-18,
+    1.520424140321469e-17,
+    -1.2420785259418653e-17,
+    9.199413081892142e-18,
+    -1.0281921188483138e-17,
+    1.1085278999394639e-18
    ]
   }
  },
@@ -201,10 +279,10 @@
   "tv_ratio_max": 1.5
  },
  "fit": {
-  "rms_m": 0.023960733109410718,
-  "max_m": 0.1101364441897878,
+  "rms_m": 0.0287,
+  "max_m": 0.0788,
   "lambda": 7.085031686256147e-05,
-  "tool_version": "loft_fit 0.1"
+  "tool_version": "loft_fit 0.1 + tail_all 1 (aft-only, task 08); rms_m and max_m are over the drawn samples (ink priors and hidden intervals excluded) + plan tail end on the drawn line (2026-11-06)"
  },
  "provenance": [
   {
@@ -215,7 +293,7 @@
     "title": "Airbus Canada A220 Aircraft Characteristics Publication, Issue 013, 2025-11-27",
     "page": "Fig.1 sheets 1-2",
     "sha256": "ac489084ac6fd0b68f7d8df65bde42f01644442dc6069b9c0562b42bc7ae678b",
-    "path": "<fit-workdir>/A220_ACP_issue013.pdf"
+    "path": "A220_ACP_issue013.pdf"
    },
    "view": "top",
    "px_per_m": 84.06358480059254,
@@ -223,7 +301,7 @@
    "rms_m": 0.0234907388184314,
    "max_m": 0.07134418175786639,
    "confidence": "A",
-   "note": "plan half-width from the calibrated top silhouette (both halves averaged, centreline offset -0.006 m removed); wing/hstab/fairing intervals excluded (exclusions/A220-300.json); plateau value = preset D/2, line-width correction +0.011 m/side"
+   "note": "plan half-width from the calibrated top silhouette (both halves averaged, centreline offset -0.006 m removed); wing/hstab/fairing intervals excluded (exclusions/A220-300.json); plateau value = preset D/2, line-width correction +0.011 m/side | TAIL REFIT task 08 (2026-10-20): tail cone (x >= 25.40 m, the end of the cylinder on the first of the three curves) refitted with the forward coefficients frozen, knots every 1.5 m, curvature-variation weight 1e6, drawn-sample cap = class gate; samples hidden behind the fin / horizontal tail (exclusion intervals, previously bridged by linear priors) carry no accuracy claim (sigma 0.25 m) so the fuselage contour no longer follows the empennage priors | Nose plan refit 2026-11-05 to the same top view (up to 0.05 m). | Tail plan line refit 2026-11-05 to the same top view (out up to 0.07 m at x 37 m, in to 0.07 m half-width at the end); printed 38.69 m length held; fit block values predate it. Tail end (2026-11-06): plan line of the top view, straight over x 37.4-38.4 m and masked aft of it, carried on to the body end; half-width 0.05 m at the end."
   },
   {
    "group": "E",
@@ -233,7 +311,7 @@
     "title": "Airbus Canada A220 Aircraft Characteristics Publication, Issue 013, 2025-11-27",
     "page": "Fig.1 sheets 1-2",
     "sha256": "ac489084ac6fd0b68f7d8df65bde42f01644442dc6069b9c0562b42bc7ae678b",
-    "path": "<fit-workdir>/A220_ACP_issue013.pdf"
+    "path": "A220_ACP_issue013.pdf"
    },
    "view": "side",
    "px_per_m": 84.20998216547339,
@@ -241,7 +319,7 @@
    "rms_m": 0.0242225235349618,
    "max_m": 0.1101364441897878,
    "confidence": "A",
-   "note": "half-height from crown and keel of the side silhouette; fin/engine/gear/fairing intervals excluded; plateau = preset height_m/2 (H measured 3.721 m)"
+   "note": "half-height from crown and keel of the side silhouette; fin/engine/gear/fairing intervals excluded; plateau = preset height_m/2 (H measured 3.721 m) | TAIL REFIT task 08 (2026-10-20): tail cone (x >= 25.40 m, the end of the cylinder on the first of the three curves) refitted with the forward coefficients frozen, knots every 1.5 m, curvature-variation weight 1e6, drawn-sample cap = class gate; samples hidden behind the fin / horizontal tail (exclusion intervals, previously bridged by linear priors) carry no accuracy claim (sigma 0.25 m) so the fuselage contour no longer follows the empennage priors | Nose crown and aft keel refit 2026-11-05 to the same side view (crown up to 0.14 m at x 2.5-3 m, aft keel down to 0.23 m at x 30 m); fit block values predate it."
   },
   {
    "group": "zc",
@@ -251,7 +329,7 @@
     "title": "Airbus Canada A220 Aircraft Characteristics Publication, Issue 013, 2025-11-27",
     "page": "Fig.1 sheets 1-2",
     "sha256": "ac489084ac6fd0b68f7d8df65bde42f01644442dc6069b9c0562b42bc7ae678b",
-    "path": "<fit-workdir>/A220_ACP_issue013.pdf"
+    "path": "A220_ACP_issue013.pdf"
    },
    "view": "side",
    "px_per_m": 84.20998216547339,
@@ -259,7 +337,7 @@
    "rms_m": 0.0242225235349618,
    "max_m": 0.1101364441897878,
    "confidence": "A",
-   "note": "centreline height; z datum: crown of the drawing = cabin_z + H/2 of the preset; nose tip z from the drawing -0.699 m (preset nose_z_m -1.01)"
+   "note": "centreline height; z datum: crown of the drawing = cabin_z + H/2 of the preset; nose tip z from the drawing -0.699 m (preset nose_z_m -1.01) | TAIL REFIT task 08 (2026-10-20): tail cone (x >= 25.40 m, the end of the cylinder on the first of the three curves) refitted with the forward coefficients frozen, knots every 1.5 m, curvature-variation weight 1e6, drawn-sample cap = class gate; samples hidden behind the fin / horizontal tail (exclusion intervals, previously bridged by linear priors) carry no accuracy claim (sigma 0.25 m) so the fuselage contour no longer follows the empennage priors"
   },
   {
    "group": "n",
@@ -269,7 +347,7 @@
     "title": "Airbus Canada A220 Aircraft Characteristics Publication, Issue 013, 2025-11-27",
     "page": "Fig.1 sheets 1-2",
     "sha256": "ac489084ac6fd0b68f7d8df65bde42f01644442dc6069b9c0562b42bc7ae678b",
-    "path": "<fit-workdir>/A220_ACP_issue013.pdf"
+    "path": "A220_ACP_issue013.pdf"
    },
    "view": "front",
    "px_per_m": 84.20998216547339,
@@ -287,7 +365,7 @@
     "title": "Airbus Canada A220 Aircraft Characteristics Publication, Issue 013, 2025-11-27",
     "page": "Fig.1 sheets 1-2",
     "sha256": "ac489084ac6fd0b68f7d8df65bde42f01644442dc6069b9c0562b42bc7ae678b",
-    "path": "<fit-workdir>/A220_ACP_issue013.pdf"
+    "path": "A220_ACP_issue013.pdf"
    },
    "view": "side",
    "px_per_m": 84.20998216547339,
@@ -295,7 +373,7 @@
    "rms_m": 0.0,
    "max_m": 0.0,
    "confidence": "A",
-   "note": "k = 0 (shoulder at centreline): unmeasured"
+   "note": "k = 0 (shoulder at centreline): unmeasured | TASK 08 S1: constant shoulder offset k = 0.0803 on the cabin cylinder, fitted to the drawn outer section contour (drawn outer section contour of the manufacturer airport-planning drawing)"
   },
   {
    "group": "closure",
@@ -305,7 +383,7 @@
     "title": "Airbus Canada A220 Aircraft Characteristics Publication, Issue 013, 2025-11-27",
     "page": "Fig.1 sheets 1-2",
     "sha256": "ac489084ac6fd0b68f7d8df65bde42f01644442dc6069b9c0562b42bc7ae678b",
-    "path": "<fit-workdir>/A220_ACP_issue013.pdf"
+    "path": "A220_ACP_issue013.pdf"
    },
    "view": "side",
    "px_per_m": 84.20998216547339,
@@ -323,7 +401,7 @@
     "title": "Airbus Canada A220 Aircraft Characteristics Publication, Issue 013, 2025-11-27",
     "page": "Fig.1 sheets 1-2",
     "sha256": "ac489084ac6fd0b68f7d8df65bde42f01644442dc6069b9c0562b42bc7ae678b",
-    "path": "<fit-workdir>/A220_ACP_issue013.pdf"
+    "path": "A220_ACP_issue013.pdf"
    },
    "view": "side",
    "px_per_m": 84.20998216547339,

@@ -160,16 +160,18 @@ pub fn calculate_induced_velocity_horseshoe_cored(
     vortex_core_radius: f64,
     leg_core_radius: f64,
 ) -> [f64; 3] {
-    let bare = calculate_induced_velocity_horseshoe(
-        field,
-        left,
-        right,
-        trailing_vortex_direction,
-        gamma,
-        vortex_core_radius,
-    );
+    let bare = || {
+        calculate_induced_velocity_horseshoe(
+            field,
+            left,
+            right,
+            trailing_vortex_direction,
+            gamma,
+            vortex_core_radius,
+        )
+    };
     if leg_core_radius <= 0.0 || !leg_core_radius.is_finite() {
-        return bare;
+        return bare();
     }
     let u = trailing_vortex_direction;
     let bound_factor = rankine_factor(
@@ -179,7 +181,7 @@ pub fn calculate_induced_velocity_horseshoe_cored(
     let left_factor = rankine_factor(distance_to_leg(field, left, u, false), leg_core_radius);
     let right_factor = rankine_factor(distance_to_leg(field, right, u, false), leg_core_radius);
     if bound_factor == 1.0 && left_factor == 1.0 && right_factor == 1.0 {
-        return bare;
+        return bare();
     }
 
     let a = sub3(field, left);
@@ -196,13 +198,16 @@ pub fn calculate_induced_velocity_horseshoe_cored(
     let left_trailing = scale3(cross3(a, u), term2);
     let right_trailing = scale3(cross3(b, u), -term3);
 
+    // One multiplication by the strength constant, last: the kernel cache
+    // stores this bracket at unit constant and multiplies by `gamma / (4 pi)`
+    // afterwards, and the direct evaluation must round the same way.
     let constant = gamma / (4.0 * std::f64::consts::PI);
-    let mut velocity = bare;
+    let mut velocity = [0.0; 3];
     for axis in 0..3 {
-        velocity[axis] += constant
-            * ((bound_factor - 1.0) * bound[axis]
-                + (left_factor - 1.0) * left_trailing[axis]
-                + (right_factor - 1.0) * right_trailing[axis]);
+        velocity[axis] = constant
+            * (bound_factor * bound[axis]
+                + left_factor * left_trailing[axis]
+                + right_factor * right_trailing[axis]);
     }
     velocity
 }

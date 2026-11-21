@@ -44,7 +44,13 @@ use super::{AirfoilSnapshot, CfdStudyConfig};
 /// edge differs.
 /// `v7` additionally fans every acute convex solid corner, including sharp
 /// leading edges, without altering the exact polygon or layer sizing.
-pub const GMSH_TEMPLATE_VERSION: &str = "alas-airfoil-gmsh-openfoam-v7";
+/// `v10` also grows the stack until its outermost layer reaches the isotropic
+/// near-wall size, so a high-lift suction-side layer thicker than the
+/// flat-plate estimate stays on graded cells; NACA 0012 at alpha 10 deg,
+/// medium preset: 35 to 40 layers, CD 0.01336 to 0.01279 (NASA TMR SST
+/// 0.01236 to 0.01253).
+/// `v11` defaults the first cell to y+ 0.1 (`MeshSettings::target_y_plus`).
+pub const GMSH_TEMPLATE_VERSION: &str = "alas-airfoil-gmsh-openfoam-v11";
 
 /// Expansion ratio used by the generated boundary-layer field.
 pub const BOUNDARY_LAYER_EXPANSION_RATIO: f64 = 1.2;
@@ -57,10 +63,11 @@ pub const BOUNDARY_LAYER_EXPANSION_RATIO: f64 = 1.2;
 /// A stack that stops inside the boundary layer therefore leaves the outer
 /// shear layer to one or two isotropic cells, which thickens the modelled
 /// layer and inflates pressure drag.  Spanning `1.5` times the flat-plate
-/// estimate keeps the whole layer inside the graded region with margin for
-/// the adverse-pressure-gradient thickening the flat-plate correlation does
-/// not capture, at a negligible cell cost because the outer layers are the
-/// largest ones.
+/// estimate keeps an attached zero-gradient layer inside the graded region at
+/// a negligible cell cost, because the outer layers are the largest ones.  It
+/// does not cover adverse-pressure-gradient thickening at high lift; the
+/// stack is also grown until its outermost layer reaches the isotropic
+/// near-wall size (`layers_reaching_size`), which covers that case.
 pub const BOUNDARY_LAYER_COVERAGE_FACTOR: f64 = 1.5;
 
 /// Upper bound on the derived layer count.
@@ -196,9 +203,15 @@ pub struct MeshGeometryReport {
     /// Number of coordinates in the snapshot, including a repeated closing
     /// coordinate if the input carried one.
     pub input_coordinate_count: usize,
-    /// Number of points emitted to Gmsh after removing only a repeated closing
-    /// coordinate, if present.
+    /// Number of points emitted to Gmsh: the snapshot coordinates (after
+    /// removing only a repeated closing coordinate, if present) plus
+    /// [`Self::inserted_curve_points`].
     pub emitted_coordinate_count: usize,
+    /// Points inserted between consecutive snapshot coordinates on a
+    /// centripetal Catmull-Rom curve through them, so that smooth parts of the
+    /// section turn by at most 2 deg between emitted facets.
+    #[serde(default)]
+    pub inserted_curve_points: usize,
     /// Whether the last input coordinate repeated the first and was omitted
     /// from the point table while the closing line preserved the same edge.
     pub removed_closing_duplicate: bool,
@@ -219,10 +232,11 @@ pub struct MeshGeometryReport {
     pub extrusion_span_m: f64,
     /// Exact section topology classification.
     pub topology: AirfoilTopology,
-    /// Whether the GEO uses one line per exact input coordinate.
+    /// Whether every exact input coordinate is a vertex of the GEO polygon,
+    /// in order (inserted curve points lie between them).
     pub exact_polygon_geometry: bool,
-    /// Native Gmsh source has no spline or resampling error because this is
-    /// always true for a successful build.
+    /// Largest distance of an inserted curve point from the snapshot facet
+    /// it subdivides, in metres; zero when no point was inserted.
     pub geometry_resampling_error_m: f64,
     /// Boundary-layer sizing evidence.
     pub boundary_layer: BoundaryLayerSizing,
@@ -331,7 +345,9 @@ mod tests {
             Err(error) => panic!("failed to build GEO: {error}"),
         };
         assert!(artifact.report.exact_polygon_geometry);
-        assert_eq!(artifact.report.geometry_resampling_error_m, 0.0);
+        // Curve points subdivide only the facets that turn: the resampling
+        // stays a small fraction of the chord.
+        assert!(artifact.report.geometry_resampling_error_m < 1.0e-3 * config.chord_m);
         assert!(artifact.source.contains("Mesh.Algorithm = 5;"));
         assert!(artifact
             .source
@@ -515,6 +531,55 @@ mod tests {
     }
 
     #[test]
+    fn naca0012_leading_edge_facets_turn_at_most_two_degrees_and_keep_every_coordinate() {
+        let config = CfdStudyConfig::default();
+        let airfoil =
+            super::super::resolve_airfoil("n0012").unwrap_or_else(|error| panic!("n0012: {error}"));
+        let artifact =
+            build_gmsh_geo(&config, &airfoil).unwrap_or_else(|error| panic!("GEO: {error}"));
+        assert!(artifact.report.inserted_curve_points > 0);
+        // Airfoil points follow the four outer-rectangle points.
+        let points: Vec<(f64, f64)> = artifact
+            .source
+            .lines()
+            .filter_map(|line| {
+                let rest = line.strip_prefix("Point(")?;
+                let (id, rest) = rest.split_once(')')?;
+                if id.parse::<i32>().ok()? < 5 {
+                    return None;
+                }
+                let inner = rest.split_once('{')?.1;
+                let mut fields = inner.split(',').map(|v| v.trim().parse::<f64>());
+                Some((fields.next()?.ok()?, fields.next()?.ok()?))
+            })
+            .collect();
+        assert_eq!(points.len(), artifact.report.emitted_coordinate_count);
+        let n = points.len();
+        for i in 1..n - 1 {
+            let (a, b, c) = (points[i - 1], points[i], points[i + 1]);
+            let (u, v) = ((b.0 - a.0, b.1 - a.1), (c.0 - b.0, c.1 - b.1));
+            let turn = (u.0 * v.1 - u.1 * v.0)
+                .atan2(u.0 * v.0 + u.1 * v.1)
+                .abs()
+                .to_degrees();
+            assert!(turn < 2.2, "facet turn {turn} deg at point {i}");
+        }
+        let chord = config.chord_m;
+        let mut cursor = 0;
+        for &(x, y) in &airfoil.coordinates[..n - artifact.report.inserted_curve_points] {
+            let found = points[cursor..]
+                .iter()
+                .position(|p| {
+                    (p.0 - x * chord).abs() < 1.0e-12 && (p.1 - y * chord).abs() < 1.0e-12
+                })
+                .unwrap_or_else(|| {
+                    panic!("snapshot coordinate ({x}, {y}) missing or out of order")
+                });
+            cursor += found + 1;
+        }
+    }
+
+    #[test]
     fn invalid_snapshot_hash_is_rejected_without_substitution() {
         let airfoil = AirfoilSnapshot {
             name: "fixture".to_owned(),
@@ -586,8 +651,14 @@ mod tests {
         };
         assert!(artifact.report.removed_closing_duplicate);
         assert_eq!(artifact.report.input_coordinate_count, 10);
-        assert_eq!(artifact.report.emitted_coordinate_count, 9);
-        assert_eq!(artifact.source.matches("Point(").count(), 13);
+        assert_eq!(
+            artifact.report.emitted_coordinate_count,
+            9 + artifact.report.inserted_curve_points
+        );
+        assert_eq!(
+            artifact.source.matches("Point(").count(),
+            4 + artifact.report.emitted_coordinate_count
+        );
     }
 
     #[test]
@@ -618,9 +689,16 @@ mod tests {
                 .and_then(|value| value.trim().trim_end_matches(';').parse::<f64>().ok())
                 .expect("GEO assignment")
         };
+        // The surface and near-field sizes are chord based. Beyond the near
+        // field the cells grow with distance (template v8), so the largest
+        // cell, at the far boundary, grows with the domain only.
         assert_eq!(
-            assignment(&coarse.source, "Mesh.CharacteristicLengthMax"),
-            assignment(&enlarged.source, "Mesh.CharacteristicLengthMax")
+            assignment(&coarse.source, "Field[4].VIn"),
+            assignment(&enlarged.source, "Field[4].VIn")
+        );
+        assert!(
+            assignment(&coarse.source, "Mesh.CharacteristicLengthMax")
+                > assignment(&enlarged.source, "Mesh.CharacteristicLengthMax")
         );
         let point_size = |source: &str| {
             source

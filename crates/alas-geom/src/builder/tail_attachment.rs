@@ -37,7 +37,7 @@ pub(super) fn hstab_x(g: &EmpennageConfig, dv: &DesignVector) -> f64 {
 /// Largest distance, in x and in z, between the tailplane root and the fin tip
 /// leading edge for the tailplane to count as seated on the fin (T-tail).
 ///
-/// geo/close 2026-10-12: was exact coincidence. The drawn ATR 72-600 and A400M
+/// The seat is not an exact coincidence: the drawn ATR 72-600 and A400M
 /// tailplanes sit 0.6 m and 1.0 m below the drawn fin top (the fin cap and tip
 /// fairing rise above them), so the seat is a fixed offset from the fin tip
 /// leading edge that scales with the fin like the coincident seat did. Every
@@ -56,6 +56,16 @@ fn attached(g: &EmpennageConfig, dv: &DesignVector) -> bool {
     g.vstab_tip_le_m.1.abs() < 1e-8
         && along.abs() <= T_TAIL_SEAT_TOLERANCE_M
         && up.abs() <= T_TAIL_SEAT_TOLERANCE_M
+}
+
+/// Where the tailplane root sits on a T-tail fin, or `None` for a tailplane not
+/// seated on its fin.
+pub(super) fn tailplane_seat(
+    g: &EmpennageConfig,
+    dv: &DesignVector,
+    contract: GeometryContract,
+) -> Option<[f64; 3]> {
+    (contract == GeometryContract::Product && attached(g, dv)).then(|| root(g, dv, contract))
 }
 
 pub(super) fn root(g: &EmpennageConfig, dv: &DesignVector, contract: GeometryContract) -> [f64; 3] {

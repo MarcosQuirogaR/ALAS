@@ -5,7 +5,7 @@
 //! and the registered-MRW lookup it sizes the gear with.
 //!
 //! Private items of `envelope.rs` (e.g.
-//! `operational_loading_states_with_z`, `assess_model_cg_envelope_from_states`)
+//! `operational_loading_states_with_z`, `assess_on_one_ground_plane`)
 //! stay visible here because Rust privacy extends to descendant modules.
 
 use alas_config::{AlasConfig, MacFrame};
@@ -14,10 +14,14 @@ use alas_geom::aircraft::airplane::Airplane;
 use super::rotation::{
     pitch_radius_of_gyration_m, rotation_pitch_acceleration_deg_s2, rotation_tail_lift,
 };
-use super::rotation_thrust::{rotation_lift_coefficient, RotationThrustModel};
-use super::support::{
-    horizontal_tail_ac_x_m, tail_area_ratio, tail_ground_effect_factor, ROTATION_CM_AC_WB_TAKEOFF,
+use super::rotation_thrust::{
+    rotation_lift_coefficient, rotation_lift_coefficient_at, rotation_speed_m_s,
+    rotation_vmc_floor_m_s, RotationThrustModel,
 };
+use super::support::{
+    horizontal_tail_ac_x_m, landing_cm_ac_wb, tail_area_ratio, tail_efficiency,
+};
+use super::ths_trim::takeoff_trim_model;
 use super::*;
 
 /// The registered preset's maximum ramp weight (CS 25.733 /
@@ -30,30 +34,41 @@ pub(super) fn registered_mrw_kg(config: &AlasConfig) -> Option<f64> {
         .and_then(|preset| preset.reference.mrw_kg)
 }
 
-/// The minimum static nose-gear load fraction at `mass_kg`, the state's own
-/// weight: the registered preset's published aft-CG nose share against weight
-/// ([`alas_config::PublishedAftCgNoseLoad::minimum_nose_gear_fraction`]) when
-/// it has one, else the class default `mass_model.pct_load_nlg_min`. A
-/// clean-sheet preset has no published split and keeps the class default.
-pub(super) fn minimum_nose_gear_fraction(
+/// The registered preset's published stabiliser ice protection, `None` for a
+/// clean-sheet or unregistered preset (checked as unprotected).
+pub(super) fn registered_tail_ice_protection(
     config: &AlasConfig,
-    published: Option<alas_config::PublishedAftCgNoseLoad>,
-    mass_kg: f64,
-) -> f64 {
-    let class_minimum = config.mass_model.pct_load_nlg_min;
-    published.map_or(class_minimum, |split| {
-        split.minimum_nose_gear_fraction(class_minimum, mass_kg)
-    })
-}
-
-/// The registered preset's published aft-CG gear-load split, `None` for a
-/// clean-sheet or unregistered preset.
-pub(super) fn registered_aft_cg_nose_load(
-    config: &AlasConfig,
-) -> Option<alas_config::PublishedAftCgNoseLoad> {
+) -> Option<alas_config::TailIceProtection> {
     alas_config::presets::get(&config.preset)
         .ok()
-        .and_then(|preset| preset.reference.aft_cg_nose_load)
+        .and_then(|preset| preset.reference.horizontal_tail_ice_protection)
+        .map(|sourced| sourced.protection)
+}
+
+/// The MLW that scopes each state and sets the landing-trim speeds, kg: the
+/// mode-aware [`AlasConfig::landing_mass_limit_kg`] the mass model uses, at
+/// the candidate MTOW (the analysed take-off mass only if that is unusable),
+/// so a lighter loading keeps the aircraft's MLW and landing speeds; its clip
+/// to the candidate only bites on an MLW above the MTOW, which no landing
+/// reaches.
+pub(super) fn maximum_landing_mass_kg(config: &AlasConfig, takeoff_mass_kg: f64) -> f64 {
+    let candidate_kg = Some(config.requirements.mtow_kg).filter(|m| m.is_finite() && *m > 0.0);
+    config.landing_mass_limit_kg(candidate_kg.unwrap_or(takeoff_mass_kg))
+}
+
+/// The stability margin kept between the critical neutral point and the aft
+/// limit, as a fraction of the MAC: Torenbeek's minimum for an inherently
+/// stable transport, `0.02 l_h` (*Advanced Aircraft Design*, Wiley, 2013,
+/// sec. 6.3.3, p. 168: "Minimum stability margin: Delta x_sm = 0.02 l_h"),
+/// `l_h` the tail arm from the wing-body aerodynamic centre, and never less
+/// than the configured floor (`requirements.min_physical_static_margin`).
+/// Without a tail station the configured floor alone.
+pub(super) fn minimum_stability_margin(configured: f64, tail_arm_m: f64, mac_m: f64) -> f64 {
+    if tail_arm_m.is_finite() && tail_arm_m > 0.0 && mac_m > 0.0 {
+        configured.max(0.02 * tail_arm_m / mac_m)
+    } else {
+        configured
+    }
 }
 
 /// Shared body of `super::assess_model_cg_envelope` and
@@ -63,17 +78,19 @@ pub(super) fn registered_aft_cg_nose_load(
 /// [`ModelCgLoadingState::AnalyzedTakeoff`] state and may carry an
 /// [`ModelCgLoadingState::AnalyzedLanding`] state.
 ///
-/// `takeoff_pitch_inertia_kg_m2` is the mass ledger's pitch moment of
-/// inertia about the analyzed-takeoff centre of gravity, kg m^2; `NaN` when
+/// `pitch_inertia` is the mass ledger whose tensors give each state's own
+/// pitch moment of inertia about its own centre of gravity
+/// ([`super::LedgerLoadingBasis::pitch_inertia_about_kg_m2`]); `None` when
 /// no ledger exists, which selects Raymer's radius of gyration
-/// (`rotation::pitch_radius_of_gyration_m`). Every state uses the takeoff
-/// radius of gyration with its own mass; only the takeoff state is gated by
-/// rotation, so the other states' rotation boundaries are diagnostics.
+/// (`rotation::pitch_radius_of_gyration_m`). Each state's rotation balance
+/// takes its own radius of gyration, so a state's line does not depend on
+/// which basis built the list; only the takeoff state is gated by rotation,
+/// so the other states' rotation boundaries are diagnostics.
 #[allow(clippy::too_many_arguments)]
-pub(super) fn assess_model_cg_envelope_from_states(
+pub(super) fn assess_on_one_ground_plane(
     plane: &Airplane,
     states: Vec<(ModelCgLoadingState, f64, f64, f64)>,
-    takeoff_pitch_inertia_kg_m2: f64,
+    pitch_inertia: Option<&super::LedgerLoadingBasis>,
     cg_x: f64,
     x_np: f64,
     critical_x_np: f64,
@@ -125,7 +142,7 @@ pub(super) fn assess_model_cg_envelope_from_states(
         return Err(ModelCgEnvelopeError::InvalidInput);
     }
 
-    let x_wing_ac = wing.aerodynamic_center(0.25)[0];
+    let x_wing_ac = wing.carried_box().aerodynamic_center(0.25)[0];
     let x_mac_le = plane
         .mac_frame()
         .ok_or(ModelCgEnvelopeError::MissingMainWing)?
@@ -157,6 +174,8 @@ pub(super) fn assess_model_cg_envelope_from_states(
     }
     let x_nose_gear = gear_stations.x_nlg_m;
     let x_main_gear = gear_stations.x_mlg_m;
+    // Tail scrape, tip-back and lift-off pitch about the aft-most main station.
+    let pivot_x_m = gear_stations.rotation_pivot_x_m();
     let wheelbase_m = x_main_gear - x_nose_gear;
     if !x_wing_ac.is_finite()
         || !x_mac_le.is_finite()
@@ -179,22 +198,40 @@ pub(super) fn assess_model_cg_envelope_from_states(
         .find(|(state, _, _, _)| *state == ModelCgLoadingState::AnalyzedTakeoff)
         .ok_or(ModelCgEnvelopeError::InvalidInput)?;
     let mtow_h_cg_m = mtow_state_z_m - ground_z_m;
-    let scrape_points = fuselage_lower_points_aft_of(fuselage, x_main_gear);
+    let scrape_points = lower_contour_aft_of(plane, fuselage, pivot_x_m);
     let scrape_angle_deg = alas_perf::landing_gear::geometry::tail_scrape_angle_deg(
         &scrape_points,
-        x_main_gear,
+        pivot_x_m,
         ground_z_m,
     );
-    let required_tip_back_deg = config.landing_gear.min_tip_back_deg.max(
+    // The tail-scrape gate compares like with like: a gear-extended (or
+    // state-unspecified) tail-strike attitude is met by the contour on the
+    // ground plane lowered by the lift-off oleo extension, a static one by the
+    // static plane. Tip-back keeps the static angle.
+    let rotation_basis = config.landing_gear.required_rotation_basis;
+    let scrape_gate_deg = if rotation_basis.gear_extended() {
+        alas_perf::landing_gear::geometry::tail_scrape_angle_deg(
+            &scrape_points,
+            x_main_gear,
+            ground_z_m - super::liftoff_oleo_extension_m(),
+        )
+    } else {
         scrape_angle_deg
-            .filter(|angle| angle.is_finite())
-            .unwrap_or(0.0),
+    };
+    let required_tip_back_deg = alas_perf::landing_gear::geometry::required_tip_back_deg(
+        config.landing_gear.min_tip_back_deg,
+        scrape_angle_deg,
     );
     let fuselage_diameter_m = config.geometry.fuselage.diameter_m;
     // Size at the governing design state (most-aft of the aero limit
     // and the analyzed takeoff) rather than the aero limit alone.
-    let aerodynamic_aft_limit_pct_mac =
-        to_pct_mac(critical_x_np) - 100.0 * config.requirements.min_physical_static_margin;
+    let static_margin_floor = minimum_stability_margin(
+        config.requirements.min_physical_static_margin,
+        horizontal_tail_ac_x_m(plane)
+            - (x_mac_le + super::support::wing_body_ac_frac(plane, config) * mac),
+        mac,
+    );
+    let aerodynamic_aft_limit_pct_mac = to_pct_mac(critical_x_np) - 100.0 * static_margin_floor;
     let physical_aft_x_m = x_mac_le + aerodynamic_aft_limit_pct_mac / 100.0 * mac;
     let s_ref = wing.reference_area();
     // The envelope-wide forward limit (gear sizing and the top-level
@@ -206,53 +243,153 @@ pub(super) fn assess_model_cg_envelope_from_states(
     // thrust.
     let x_h_ac_m = horizontal_tail_ac_x_m(plane);
     let tail_area_ratio_val = tail_area_ratio(plane, s_ref);
-    let tail_ground_effect_factor_val = tail_ground_effect_factor(plane, ground_z_m);
-    let cl_ground_attitude =
-        config.performance.cl_max_to * config.landing_gear.cl_ground_attitude_frac_of_cl_max_to;
-    let rotation_tail_lift_coefficient =
-        rotation_tail_lift(plane, config, ground_z_m, cl_ground_attitude)
-            .map_or(f64::NAN, |tail| tail.lift_coefficient);
-    let pitch_radius_of_gyration_m = pitch_radius_of_gyration_m(
-        config.landing_gear.pitch_radius_of_gyration_frac_mac,
-        mac,
-        takeoff_pitch_inertia_kg_m2,
-        mtow_mass_kg,
-        plane.b_ref,
-        fuselage_length_m,
+    // The landing-trim balance and the iced-tail check are candidates of every
+    // state and of the envelope-wide limit, so they are evaluated once, at the
+    // maximum landing mass (the speeds they are set by). The same MLW gates
+    // the phase scoping of each state (`PhaseLimits::for_state_at_mass`): an
+    // en-route state above it cannot land and drops landing trim. A landing
+    // state's presence moves no envelope-wide value and no other state's
+    // verdict.
+    let design_landing_mass_kg = maximum_landing_mass_kg(config, mtow_mass_kg);
+    let landing_trim_cl_h = super::iced_tail::landing_trim_cl_h(
+        plane,
+        config,
+        s_ref,
+        x_mac_le + super::support::wing_body_ac_frac(plane, config) * mac,
+        x_h_ac_m,
+        design_landing_mass_kg,
+        super::iced_tail::IceAccretion::of(registered_tail_ice_protection(config)),
     );
+    let landing_authority =
+        super::landing_download::landing_authority(plane, config, s_ref, design_landing_mass_kg);
+    let cl_ground_attitude = super::support::takeoff_ground_lift(plane, config, s_ref);
     let cl_r_rotation = rotation_lift_coefficient(&config.performance);
+    // Each state's own `V_R`: the stall branch, floored by 1.05 of the computed
+    // minimum control speed when the gate's configuration carries one.
+    let vr_floor_m_s = rotation_vmc_floor_m_s(config);
+    let cl_r_at = |mass_kg: f64| {
+        rotation_lift_coefficient_at(
+            mass_kg * config.requirements.gravity_m_s2,
+            s_ref,
+            cl_r_rotation,
+            vr_floor_m_s,
+        )
+    };
+    // The analysed takeoff state's rotation speed sets the Mach and Reynolds
+    // numbers of the tail's stall limit.
+    let rotation_speed_m_s = rotation_speed_m_s(
+        mtow_mass_kg * config.requirements.gravity_m_s2,
+        s_ref,
+        cl_r_at(mtow_mass_kg),
+    );
+    let rotation_tail = rotation_tail_lift(
+        plane,
+        config,
+        ground_z_m,
+        cl_ground_attitude,
+        rotation_speed_m_s,
+    );
+    let rotation_tail_lift_coefficient =
+        rotation_tail.map_or(f64::NAN, |tail| tail.lift_coefficient);
+    // A reversible elevator holds only what the pilot's pull and the trim tab
+    // allow (`super::elevator_force`): at rotation the two-hand pull at the
+    // state's own `q_R = W / (S CL_R)`, at landing the trimmed approach and the
+    // one-hand flare at the maximum landing mass, like the rest of the landing
+    // balance.
+    let gravity = config.requirements.gravity_m_s2;
+    let eta_tail = tail_efficiency(plane);
+    let reversible_elevator =
+        super::elevator_force::reversible_elevator(plane, config, rotation_speed_m_s);
+    let rotation_cl_h_at = |mass_kg: f64| -> f64 {
+        match (reversible_elevator, rotation_tail) {
+            (Some(elevator), Some(tail)) => {
+                let q_h = eta_tail * mass_kg * gravity / (s_ref * cl_r_at(mass_kg));
+                let alpha_h = tail.incidence_rad - tail.downwash_rad;
+                let held = tail.lift_curve_slope_per_rad
+                    * (alpha_h
+                        + elevator.elevator_term_rad(
+                            q_h,
+                            alpha_h,
+                            super::elevator_force::ROTATION_PULL_FORCE_N,
+                        ));
+                held.max(-tail.section_cap).max(rotation_tail_lift_coefficient)
+            }
+            _ => rotation_tail_lift_coefficient,
+        }
+    };
+    let landing_authority = match (landing_authority, reversible_elevator) {
+        (Some(authority), Some(elevator)) => Some(authority.with_reversible_elevator(
+            &elevator,
+            design_landing_mass_kg * gravity,
+            s_ref,
+            eta_tail,
+        )),
+        (authority, _) => authority,
+    };
     let thrust_model = RotationThrustModel::new(plane, config, ground_z_m, cl_r_rotation);
     let takeoff_thrust = thrust_model.at_mass(mtow_mass_kg);
-    let published_nose_load = registered_aft_cg_nose_load(config);
+    let takeoff_trim = takeoff_trim_model(
+        plane,
+        config,
+        rotation_tail,
+        s_ref,
+        mac,
+        x_mac_le,
+        x_h_ac_m,
+        tail_area_ratio_val,
+        cl_ground_attitude,
+        takeoff_thrust.thrust_to_weight,
+        mtow_h_cg_m - takeoff_thrust.thrust_line_height_m,
+    );
+    let radius_of_gyration_at = |mass_kg: f64, cg_x_m: f64, cg_z_m: f64| {
+        pitch_radius_of_gyration_m(
+            config.landing_gear.pitch_radius_of_gyration_frac_mac,
+            mac,
+            pitch_inertia.map_or(f64::NAN, |ledger| {
+                ledger.pitch_inertia_about_kg_m2(mass_kg, cg_x_m, cg_z_m)
+            }),
+            mass_kg,
+            plane.b_ref,
+            fuselage_length_m,
+        )
+    };
+    let pitch_radius_of_gyration_m =
+        radius_of_gyration_at(mtow_mass_kg, mtow_state_x_m, mtow_state_z_m);
     let forward_mechanism_input = PhysicalCgLimitsInput {
         mac_frame,
         critical_np_x_m: critical_x_np,
         clean_np_x_m: x_np,
-        min_physical_static_margin: config.requirements.min_physical_static_margin,
+        min_physical_static_margin: static_margin_floor,
         x_main_gear_m: x_main_gear,
-        x_mlg_aft_axle_m: x_main_gear,
+        x_mlg_aft_axle_m: pivot_x_m,
         wheelbase_m,
         // The analyzed takeoff state's height and thrust, so the forward
         // limit used for gear sizing is the takeoff rotation boundary.
         h_cg_m: mtow_h_cg_m,
         min_tip_back_deg: config.landing_gear.min_tip_back_deg,
         scrape_angle_deg: None,
-        pct_load_nlg_min: minimum_nose_gear_fraction(config, published_nose_load, mtow_mass_kg),
-        pct_load_nlg_max_handling: config.mass_model.pct_load_nlg_max_handling,
-        x_ac_wb_frac: SCISSOR_X_AC_WB_FRAC,
-        cm_ac_wb_landing: SCISSOR_CM_AC_WB_LANDING,
+        pct_load_nlg_min: config.mass_model.pct_load_nlg_min,
+        pct_load_nlg_max_handling: super::support::nose_handling_fraction(config, mtow_mass_kg),
+        x_ac_wb_frac: super::support::wing_body_ac_frac(plane, config),
+        cm_ac_wb_landing: landing_cm_ac_wb(plane, config, s_ref),
         cl_max_landing: config.performance.cl_max_land,
-        eta: SCISSOR_ETA,
-        tail_volume_coefficient: tail_volume_coefficient(plane, s_ref, mac),
+        eta: tail_efficiency(plane),
+        tail_volume_coefficient: tail_volume_coefficient(
+            plane,
+            s_ref,
+            mac,
+            x_mac_le + super::support::wing_body_ac_frac(plane, config) * mac,
+        ),
         cl_h_max: SCISSOR_CL_H_MAX,
+        landing_authority,
         cg_range_pct_mac: config.requirements.cg_range_pct_mac,
         x_h_ac_m,
         tail_area_ratio: tail_area_ratio_val,
-        tail_ground_effect_factor: tail_ground_effect_factor_val,
-        rotation_tail_lift_coefficient,
+        landing_trim_cl_h,
+        rotation_tail_lift_coefficient: rotation_cl_h_at(mtow_mass_kg),
         cl_ground_attitude,
-        cl_r_rotation,
-        cm_ac_wb_takeoff: ROTATION_CM_AC_WB_TAKEOFF,
+        cl_r_rotation: cl_r_at(mtow_mass_kg),
+        cm_ac_wb_takeoff: super::support::takeoff_cm_ac_wb(plane, config, s_ref),
         pitch_radius_of_gyration_m,
         rotation_angular_accel_deg_s2: rotation_pitch_acceleration_deg_s2(config),
         gravity_m_s2: config.requirements.gravity_m_s2,
@@ -261,10 +398,23 @@ pub(super) fn assess_model_cg_envelope_from_states(
         rotation_rolling_friction_coefficient: config
             .landing_gear
             .rotation_rolling_friction_coefficient,
+        takeoff_trim,
+        clean_trim: super::clean_trim::clean_trim_model(
+            plane,
+            config,
+            s_ref,
+            mac,
+            x_mac_le,
+            x_h_ac_m,
+            tail_area_ratio_val,
+            landing_authority,
+            rotation_tail,
+        ),
     };
     let forward_limit_pct_mac = physical_cg_limits(&forward_mechanism_input).fwd_limit_pct_mac;
     let physical_forward_x_m = x_mac_le + forward_limit_pct_mac / 100.0 * mac;
     let mrw_kg = registered_mrw_kg(config);
+    let gear_design_weight_kg = mrw_kg.map_or(mtow_mass_kg, |mrw| mrw.max(mtow_mass_kg));
     let gear = size_landing_gear_at_design_state(
         mtow_mass_kg,
         mrw_kg,
@@ -273,6 +423,15 @@ pub(super) fn assess_model_cg_envelope_from_states(
         physical_forward_x_m,
         physical_aft_x_m,
         Some(mtow_state_x_m),
+        // The gear is sized at its design weight with the class minimum; the
+        // per-state ground limit below reads the same value, so sizing and
+        // envelope agree.
+        config.mass_model.pct_load_nlg_min,
+        alas_perf::landing_gear::geometry::TipBackBasis {
+            most_aft_ground_cg_x_m: None,
+            scrape_angle_deg,
+            cg_height_m: None,
+        },
         fuselage_diameter_m,
         mtow_h_cg_m,
         &gear_stations.main_gear_x_m,
@@ -285,6 +444,7 @@ pub(super) fn assess_model_cg_envelope_from_states(
     let mut worst_aft_limit_pct_mac = f64::INFINITY;
     let mut worst_aft_limit_governance = AftCgLimitGovernance::NotEvaluated;
     let mut top_level_limits: Option<PhysicalCgLimits> = None;
+    let usable_range = super::usable_range::UsableRangeRequirement::of(config);
     for (state, state_cg_x, state_cg_z, mass_kg) in states {
         let nose_gear_load_kg = mass_kg * (x_main_gear - state_cg_x) / wheelbase_m;
         let main_gear_load_kg = mass_kg - nose_gear_load_kg;
@@ -297,22 +457,24 @@ pub(super) fn assess_model_cg_envelope_from_states(
         } else {
             thrust_model.at_mass(mass_kg)
         };
-        let min_nose_fraction = minimum_nose_gear_fraction(config, published_nose_load, mass_kg);
+        let min_nose_fraction = config.mass_model.pct_load_nlg_min;
         let unscoped_limits = physical_cg_limits(&PhysicalCgLimitsInput {
-            x_mlg_aft_axle_m: gear.x_mlg_aft_axle_m,
+            x_mlg_aft_axle_m: pivot_x_m,
             h_cg_m,
             scrape_angle_deg,
             pct_load_nlg_min: min_nose_fraction,
+            pct_load_nlg_max_handling: super::support::nose_handling_fraction(config, mass_kg),
             rotation_thrust_to_weight: state_thrust.thrust_to_weight,
             rotation_thrust_line_height_m: state_thrust.thrust_line_height_m,
+            rotation_tail_lift_coefficient: rotation_cl_h_at(mass_kg),
+            cl_r_rotation: cl_r_at(mass_kg),
+            pitch_radius_of_gyration_m: radius_of_gyration_at(mass_kg, state_cg_x, state_cg_z),
             ..forward_mechanism_input
         });
-        let physical_limits = unscoped_limits.scoped(PhaseLimits::for_state(state));
-        let tip_back_angle_deg = alas_perf::landing_gear::geometry::tip_back_angle_deg(
-            gear.x_mlg_aft_axle_m,
-            state_cg_x,
-            h_cg_m,
-        );
+        let scope = PhaseLimits::for_state_at_mass(state, mass_kg, design_landing_mass_kg);
+        let physical_limits = unscoped_limits.scoped(scope);
+        let tip_back_angle_deg =
+            alas_perf::landing_gear::geometry::tip_back_angle_deg(pivot_x_m, state_cg_x, h_cg_m);
         if physical_limits.aft_limit_pct_mac.is_finite()
             && physical_limits.aft_limit_pct_mac < worst_aft_limit_pct_mac
         {
@@ -341,12 +503,14 @@ pub(super) fn assess_model_cg_envelope_from_states(
         }
         let assessment = assess_loading_constraints(LoadingConstraintInputs {
             state,
+            scope,
             mass_kg,
             cg_x_m: state_cg_x,
+            h_cg_m,
             cg_pct_mac: to_pct_mac(state_cg_x),
             static_margin: (x_np - state_cg_x) / mac,
             critical_static_margin: (critical_x_np - state_cg_x) / mac,
-            static_margin_floor: config.requirements.min_physical_static_margin,
+            static_margin_floor,
             physical_limits,
             nose_gear_load_kg,
             nose_gear_capacity_kg,
@@ -354,12 +518,15 @@ pub(super) fn assess_model_cg_envelope_from_states(
             main_gear_capacity_kg,
             capacity_basis_declared: gear.capacity_basis_declared,
             minimum_nose_gear_load_fraction: min_nose_fraction,
-            maximum_nose_gear_load_fraction: config.mass_model.pct_load_nlg_max_handling,
+            maximum_nose_gear_load_fraction: super::support::nose_handling_fraction(
+                config, mass_kg,
+            ),
             tip_back_angle_deg,
             required_tip_back_deg,
-            scrape_angle_deg,
+            scrape_angle_deg: scrape_gate_deg,
             required_rotation_angle_deg: config.landing_gear.required_rotation_angle_deg,
-            cg_range_pct_mac: config.requirements.cg_range_pct_mac,
+            tail_scrape_rejects: rotation_basis.rejects(),
+            cg_range_pct_mac: usable_range.pct_of_model_mac(mass_kg, mac),
         });
         loading_assessments.push(assessment);
     }
@@ -378,11 +545,14 @@ pub(super) fn assess_model_cg_envelope_from_states(
 
     Ok(ModelCgEnvelopeAssessment {
         loading_states: loading_assessments,
-        minimum_physical_static_margin: config.requirements.min_physical_static_margin,
+        design_landing_mass_kg,
+        mac_m: mac,
+        minimum_physical_static_margin: static_margin_floor,
         aerodynamic_aft_limit_pct_mac: top_level_limits.aerodynamic_aft_pct_mac,
         clean_np_pct_mac: top_level_limits.clean_np_pct_mac,
         configured_forward_limit_pct_mac: top_level_limits.fwd_limit_pct_mac,
         max_nose_load_fwd_limit_pct_mac: top_level_limits.max_nose_load_fwd_pct_mac,
+        landing_trim_fwd_limit_pct_mac: top_level_limits.landing_trim_fwd_pct_mac,
         scissor_plot_fwd_limit_pct_mac: top_level_limits.scissor_plot_fwd_pct_mac,
         main_gear_station_pct_mac,
         ground_aft_limit_pct_mac,
@@ -390,6 +560,11 @@ pub(super) fn assess_model_cg_envelope_from_states(
         worst_aft_limit_pct_mac,
         capacity_basis_declared: gear.capacity_basis_declared,
         tire_overloaded: gear.tire_overloaded,
+        gear_design_weight_kg,
+        gear_design_main_reaction_kg: gear.r_mlg_total_design_kg,
+        gear_aero_aft_limit_pulled_back: gear.aero_aft_limit_pulled_back,
+        gear_raw_aft_nose_reaction_kg: gear.r_nlg_aft_raw_kg,
+        gear_raw_aft_cg_is_takeoff_state: mtow_state_x_m > physical_aft_x_m,
         required_tip_back_deg,
         scrape_angle_deg,
         target_static_margin: StaticMarginPreferenceAssessment {
@@ -397,6 +572,7 @@ pub(super) fn assess_model_cg_envelope_from_states(
             target: config.requirements.target_static_margin,
             deviation: mtow_static_margin - config.requirements.target_static_margin,
         },
+        takeoff_trim,
     })
 }
 
@@ -406,57 +582,6 @@ pub(super) fn assess_model_cg_envelope_from_states(
 #[cfg(test)]
 mod tests {
     use super::super::LedgerLoadingBasis;
-    use super::{minimum_nose_gear_fraction, registered_aft_cg_nose_load};
-
-    /// Every published point that prints its most-aft CG must land the
-    /// model ground aft boundary, at that mass, on that CG. The tolerance is
-    /// the model-frame residual: the model MAC and LEMAC are fitted, not the
-    /// manufacturer's (A320 36.8 [S] -> 36.9 [M], A340 38.0 -> 38.4, A380
-    /// 43.0 -> 42.0).
-    #[test]
-    fn published_aft_cg_gear_splits_return_the_tabulated_aft_cg() {
-        use alas_config::{presets, AlasConfig};
-        use alas_geom::builder::AircraftBuilder;
-        let mut checked = 0;
-        for name in presets::available() {
-            let config = AlasConfig::from_value(&serde_json::json!({ "preset": name }))
-                .expect("a registered preset configures");
-            let Some(split) = registered_aft_cg_nose_load(&config) else {
-                continue;
-            };
-            let registered = presets::get(name).expect("a registered preset");
-            let plane = AircraftBuilder::new(Some(config.geometry.clone()))
-                .build(Some(&registered.design_vector), true)
-                .expect("a registered preset builds");
-            let frame = plane.mac_frame().expect("a main wing");
-            let fuselage = &plane.fuselages[0];
-            let start = fuselage.xsecs[0].xyz_c[0];
-            let length = fuselage.xsecs[fuselage.xsecs.len() - 1].xyz_c[0] - start;
-            let stations = config.landing_gear.resolved_station_positions(
-                start + length * config.mass_model.nlg_x_fraction,
-                frame.x_lemac_m + config.mass_model.mlg_x_fraction_mac * frame.chord_m,
-                start,
-                length,
-            );
-            let wheelbase_m = stations.x_mlg_m - stations.x_nlg_m;
-            for point in split.points {
-                let Some(published_pct_mac) = point.aft_cg_pct_mac else {
-                    continue;
-                };
-                let fraction = minimum_nose_gear_fraction(&config, Some(split), point.mass_kg);
-                let aft_x_m = stations.x_mlg_m - fraction * wheelbase_m;
-                let model_pct_mac = frame.pct_mac(aft_x_m);
-                assert!(
-                    (model_pct_mac - published_pct_mac).abs() < 1.5,
-                    "{name}: model ground aft {model_pct_mac:.2} % MAC against the published \
-                     {published_pct_mac} % MAC at {} kg",
-                    point.mass_kg
-                );
-                checked += 1;
-            }
-        }
-        assert!(checked >= 18, "published points checked: {checked}");
-    }
 
     /// Feeding `payload_and_fuel`'s back-solved deltas into the same
     /// mass-weighted mixing the shared loading-state builder uses must
@@ -476,6 +601,8 @@ mod tests {
             takeoff_cg_x_m: 17.8,
             takeoff_cg_z_m: 1.2,
             takeoff_pitch_inertia_kg_m2: f64::NAN,
+            oew_pitch_inertia_kg_m2: f64::NAN,
+            zero_fuel_pitch_inertia_kg_m2: f64::NAN,
         };
         let (payload_mass, payload_cg_x, payload_cg_z, fuel_mass, fuel_cg_x, fuel_cg_z) =
             basis.payload_and_fuel();
@@ -512,6 +639,8 @@ mod tests {
             takeoff_cg_x_m: 17.0,
             takeoff_cg_z_m: 1.0,
             takeoff_pitch_inertia_kg_m2: f64::NAN,
+            oew_pitch_inertia_kg_m2: f64::NAN,
+            zero_fuel_pitch_inertia_kg_m2: f64::NAN,
         };
         let (payload_mass, payload_cg_x, payload_cg_z, fuel_mass, fuel_cg_x, fuel_cg_z) =
             basis.payload_and_fuel();

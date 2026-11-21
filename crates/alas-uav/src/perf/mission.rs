@@ -380,7 +380,7 @@ pub fn fly_mission(
             }
             SegmentKind::Launch { method } => {
                 return Err(PerfError::Unsupported(format!(
-                    "launch '{method}' (decision D2: no hand launch in v1)"
+                    "launch '{method}' (no hand launch in v1)"
                 )))
             }
         }

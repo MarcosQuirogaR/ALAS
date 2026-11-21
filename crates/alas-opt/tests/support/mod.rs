@@ -107,3 +107,76 @@ pub fn assert_same_search_outcome(
     assert_eq!(counts(&a), counts(&b));
     assert_eq!(b.workers, workers as usize);
 }
+
+/// ICAO code of the hand-entered aerodrome [`open_ground_departure`] registers.
+pub const OPEN_GROUND_ICAO: &str = "ZOGD";
+
+/// Departs `config` from a hand-entered aerodrome whose entered survey states open
+/// ground: EDDF's position, elevation, declared distances and runway 25C heading, the
+/// terrain flat at the field elevation with no obstacle, the symmetric survey
+/// uncertainty of a lidar surface (0.45 m) and the 14 CFR 77.9(c) mobile-object
+/// allowance (7.01 m), and no completeness allowance.
+///
+/// It is a TEST FIXTURE, not physical evidence about EDDF: no curated survey can certify a take-off obstacle clearance, so no
+/// registered preset at its own departure has a feasible design. The tests that use
+/// it are about the optimizer's search (budgets, replay, determinism, cost ordering),
+/// which needs a feasible design; the obstacle check itself is tested in alas-perf and
+/// in `mission_sized` on the curated surveys.
+pub fn open_ground_departure(config: &mut AlasConfig) {
+    use alas_config::airport_io::{
+        find_custom, register_custom_airport, AirportProvenance, AirportProvenanceKind,
+        CustomAirport,
+    };
+    use alas_config::airport_obstacles::{departure_surveys, DepartureSurvey};
+    static REGISTERED: std::sync::Once = std::sync::Once::new();
+    REGISTERED.call_once(|| {
+        if find_custom(OPEN_GROUND_ICAO).is_some() {
+            return;
+        }
+        let eddf = alas_config::airports::get("EDDF").expect("EDDF is curated");
+        let heading_deg = departure_surveys("EDDF")
+            .expect("EDDF surveys")
+            .iter()
+            .find(|survey| survey.runway == "25C")
+            .expect("EDDF 25C")
+            .heading_deg;
+        let lateral_centres_m: Vec<f64> = (0..41).map(|i| -600.0 + 30.0 * f64::from(i)).collect();
+        let rows = ((40_000.0 + 2.0 * 250.0) / 250.0) as usize;
+        let survey = DepartureSurvey {
+            runway: "25C".to_owned(),
+            heading_deg,
+            reference_elevation_m: Some(eddf.elevation_m),
+            terrain_source: "test fixture: open ground entered by hand".to_owned(),
+            vertical_uncertainty_m: Some(0.45),
+            one_sided_bias_m: Some(23.0 * 0.3048),
+            completeness_allowance_m: None,
+            reference_minus_aerodrome_elevation_m: Some(0.0),
+            terrain_s0_m: eddf.toda_m,
+            terrain_max_elevation_m: vec![vec![eddf.elevation_m; lateral_centres_m.len()]; rows],
+            cell_along_m: 250.0,
+            lateral_centres_m,
+            cell_lateral_m: 30.0,
+            obstacles: Vec::new(),
+            provenance: "test fixture".to_owned(),
+        };
+        register_custom_airport(CustomAirport {
+            icao: OPEN_GROUND_ICAO.to_owned(),
+            name: "Open-ground test fixture".to_owned(),
+            latitude_deg: eddf.latitude_deg,
+            longitude_deg: eddf.longitude_deg,
+            isa_delta_c: eddf.isa_deviation_c,
+            altitude_m: eddf.elevation_m,
+            runway_lengths_m: vec![eddf.toda_m],
+            declared_toda_m: Some(eddf.toda_m),
+            declared_lda_m: Some(eddf.lda_m),
+            departure_surveys: vec![survey],
+            provenance: AirportProvenance {
+                kind: AirportProvenanceKind::UserEntered,
+                source: Some("ALAS optimizer test fixture".to_owned()),
+                note: None,
+            },
+        })
+        .expect("the fixture aerodrome registers");
+    });
+    config.departure_airport = OPEN_GROUND_ICAO.to_owned();
+}

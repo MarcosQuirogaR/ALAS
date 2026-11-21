@@ -118,15 +118,48 @@ pub fn combine(
     eta_tail: f64,
     tail_deps_extra: f64,
 ) -> Option<f64> {
+    combine_scaled(
+        contributions,
+        None,
+        1.0,
+        0.0,
+        tail_wing_index,
+        eta_tail,
+        tail_deps_extra,
+    )
+}
+
+/// [`combine`] with the lift slope of the surface `scaled_wing_index` (the
+/// main wing) multiplied by `wing_slope_scale`: the high-lift condition, where
+/// extending flaps raise the wing's lift slope by about the ratio of extended
+/// to original wing area (Raymer, 6th ed., printed p. 413, PDF p. 447), with
+/// its aerodynamic centre moved by `wing_ac_shift` (the added lift acts at the
+/// quarter chord of the extended section).
+pub fn combine_scaled(
+    contributions: &[SurfaceContribution],
+    scaled_wing_index: Option<usize>,
+    wing_slope_scale: f64,
+    wing_ac_shift: f64,
+    tail_wing_index: Option<usize>,
+    eta_tail: f64,
+    tail_deps_extra: f64,
+) -> Option<f64> {
     let mut numerator = 0.0_f64;
     let mut denominator = 0.0_f64;
     for contribution in contributions {
         let eta = if Some(contribution.wing_index) == tail_wing_index {
             eta_tail * (1.0 - tail_deps_extra)
+        } else if Some(contribution.wing_index) == scaled_wing_index {
+            wing_slope_scale
         } else {
             1.0
         };
-        numerator += eta * contribution.d_lift * contribution.x_ac;
+        let x_ac = if Some(contribution.wing_index) == scaled_wing_index {
+            contribution.x_ac + wing_ac_shift
+        } else {
+            contribution.x_ac
+        };
+        numerator += eta * contribution.d_lift * x_ac;
         denominator += eta * contribution.d_lift;
     }
     if denominator.abs() > DEGENERACY_FLOOR {
@@ -134,6 +167,17 @@ pub fn combine(
     } else {
         None
     }
+}
+
+/// Mach ceiling of [`beta_for_mach`], so `1 - M^2` is never evaluated at
+/// `M >= 1` (no transonic or supersonic model here).
+const MAX_MACH_FOR_BETA: f64 = 0.99;
+
+/// Prandtl-Glauert factor `sqrt(1 - M^2)` of the freestream Mach: the stretch
+/// of [`goethert_stretch`].
+pub fn beta_for_mach(mach: f64) -> f64 {
+    let m = mach.abs().min(MAX_MACH_FOR_BETA);
+    (1.0 - m * m).sqrt()
 }
 
 /// The Goethert/Prandtl-Glauert subsonic compressibility transform of a
@@ -153,6 +197,12 @@ pub fn goethert_stretch(airplane: &Airplane, beta: f64) -> Airplane {
     let mut stretched = airplane.clone();
     for wing in &mut stretched.wings {
         for xsec in &mut wing.xsecs {
+            xsec.xyz_le[0] /= beta;
+            xsec.chord /= beta;
+        }
+        wing.planform_datum = wing.planform_datum.map(|datum| datum.stretch_x(1.0 / beta));
+        wing.tip_te_flare_m /= beta;
+        for xsec in wing.reference_xsecs.iter_mut().flatten() {
             xsec.xyz_le[0] /= beta;
             xsec.chord /= beta;
         }
@@ -203,6 +253,16 @@ mod tests {
         let stretched = goethert_stretch(&plane, 0.5);
         assert!((stretched.wings[0].xsecs[0].chord - 6.0).abs() < 1e-12);
         assert!((stretched.xyz_ref[0] - 2.0).abs() < 1e-12);
+    }
+
+    #[test]
+    fn beta_for_mach_is_the_prandtl_glauert_factor_capped_below_mach_one() {
+        assert_eq!(beta_for_mach(0.0), 1.0);
+        assert_eq!(beta_for_mach(-0.6), beta_for_mach(0.6));
+        assert!((beta_for_mach(0.6) - 0.8).abs() < 1e-15);
+        let floor = (1.0_f64 - 0.99 * 0.99).sqrt();
+        assert_eq!(beta_for_mach(1.0), floor);
+        assert_eq!(beta_for_mach(2.5), floor);
     }
 
     #[test]

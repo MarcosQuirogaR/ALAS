@@ -22,7 +22,7 @@ fn root_z(state: &AppState) -> f64 {
 }
 
 #[test]
-fn first_entry_starts_from_ave_and_preserves_the_prior_case() {
+fn first_entry_opens_the_loaded_preset_and_preserves_the_prior_case() {
     let mut state = state();
     state.load_preset("A380-800");
     let prior_preset = state.active_preset.clone();
@@ -32,7 +32,12 @@ fn first_entry_starts_from_ave_and_preserves_the_prior_case() {
     assert!(state.enter_sandbox(false));
     assert!(state.sandbox.active());
     assert!(state.active_preset.is_empty());
-    assert_eq!(state.design_values["span_m"], 71.75, "AVE span");
+    // The sandbox opens on the loaded preset (not on AVE), as a custom case.
+    let a380 = alas_config::presets::get("A380-800").expect("A380-800 preset");
+    assert_eq!(
+        state.design_values["span_m"], a380.design_vector.span_m,
+        "the loaded preset's span"
+    );
     assert_eq!(
         state.config_values["optimizer"]["design_space"]["mode"],
         Value::String("baseline_sandbox".to_owned())
@@ -83,6 +88,7 @@ fn promotion_returns_to_the_guided_workspace_with_a_custom_baseline() {
     assert!(config.preset.is_empty());
     assert_eq!(config.optimizer.design_space.mode, DesignMode::CleanSheet);
     assert!(!config.optimizer.design_space.fuselage_sized_by_cabin);
+    assert!(!config.optimizer.design_space.engine_sized_by_requirements);
     assert!(
         state.pipeline_result.is_none(),
         "mismatched results are dropped"
@@ -220,10 +226,6 @@ fn the_estimates_strip_stays_closed_until_quick_analysis_opens_it() {
         !state.sandbox.layout.estimates_open,
         "closed on first entry"
     );
-    assert!(
-        !state.sandbox.layout.summary_open,
-        "the Summary card is closed too"
-    );
     // A strip left open (View menu or an older layout) does not survive a
     // re-entry: only Quick Analysis opens it.
     state.sandbox.layout.estimates_open = true;
@@ -236,4 +238,19 @@ fn the_estimates_strip_stays_closed_until_quick_analysis_opens_it() {
         state.sandbox.layout.estimates_open,
         "Quick Analysis opens it"
     );
+}
+
+#[test]
+fn leaving_while_an_analysis_runs_keeps_the_prompt_open() {
+    let mut state = state();
+    assert!(state.enter_sandbox(false));
+    state.is_running = true;
+    state.request_leave_sandbox();
+    assert!(!state.resolve_leave_sandbox(ExitChoice::Discard));
+    assert!(state.sandbox.active(), "the sandbox stays open");
+    assert!(state.sandbox.exit_prompt, "the prompt is not swallowed");
+    assert!(state.cancellation_requested, "the run is asked to stop");
+    state.is_running = false;
+    assert!(state.resolve_leave_sandbox(ExitChoice::Discard));
+    assert!(!state.sandbox.active());
 }

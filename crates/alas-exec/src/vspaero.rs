@@ -11,10 +11,12 @@
 
 use std::fs::{self, File};
 use std::path::{Path, PathBuf};
-use std::process::{Command, Stdio};
+use std::process::{Child, Command, Stdio};
+use std::thread;
+use std::time::{Duration, Instant};
 
 use crate::process::{
-    parent_directory, timeout_from_seconds, wait_with_timeout, DeadlineWait, NewProcessGroup,
+    parent_directory, stop_process_tree, timeout_from_seconds, DeadlineWait, NewProcessGroup,
     NoConsoleWindow,
 };
 use crate::supervise::SupervisedSpawn;
@@ -335,16 +337,30 @@ pub fn run_vspaero(
         }
     };
 
-    let process_status = match wait_with_timeout(&mut child, timeout) {
-        DeadlineWait::Exited(status) => status,
-        DeadlineWait::TimedOut => {
+    let process_status = match wait_with_progress(
+        &mut child,
+        timeout,
+        &stdout_path,
+        VSPAERO_STALL_LIMIT,
+    ) {
+        WaitOutcome::Finished(DeadlineWait::Exited(status)) => status,
+        WaitOutcome::Finished(DeadlineWait::TimedOut) => {
             result.status = VspaeroProcessStatus::TimedOut;
             result.error = Some(format!(
                 "VSPAERO exceeded the {timeout_seconds:.1} s deadline; process tree force-killed"
             ));
             return result;
         }
-        DeadlineWait::PollFailed(error) => {
+        WaitOutcome::Stalled => {
+            result.status = VspaeroProcessStatus::TimedOut;
+            result.error = Some(format!(
+                "VSPAERO wrote no output for {:.0} s; process tree force-killed as hung; last output: {}",
+                VSPAERO_STALL_LIMIT.as_secs_f64(),
+                text_tail(&fs::read_to_string(&stdout_path).unwrap_or_default()),
+            ));
+            return result;
+        }
+        WaitOutcome::Finished(DeadlineWait::PollFailed(error)) => {
             // A child that cannot be polled is still running as far as
             // anyone knows; the wait has already killed its tree.
             result.status = VspaeroProcessStatus::SolverFailed;
@@ -390,15 +406,102 @@ pub fn run_vspaero(
     result
 }
 
+/// Longest silence on VSPAERO's console before the solve is treated as hung.
+///
+/// A healthy solve prints a GMRES line every few seconds and a progress
+/// counter while it rebuilds the multipole tree for each wake iteration; on a
+/// fully loaded 16-thread desktop the longest observed gap was well under a
+/// minute (A320 and ATR 72 cases of 10 900 to 15 900 panels). The
+/// overall deadline must cover a slow but progressing sweep, so it is set
+/// generously by the caller; this silence limit is what catches a real hang
+/// early.
+const VSPAERO_STALL_LIMIT: Duration = Duration::from_secs(300);
+
+/// How a VSPAERO process supervised by [`wait_with_progress`] stopped.
+enum WaitOutcome {
+    /// It exited, passed the overall deadline, or could not be polled.
+    Finished(DeadlineWait),
+    /// Its console output stopped growing for [`VSPAERO_STALL_LIMIT`]; the
+    /// process tree was killed and reaped.
+    Stalled,
+}
+
+/// Wait for `child` up to `timeout`, also killing it when `progress` (its
+/// redirected console file) stops growing for `stall_limit`.
+fn wait_with_progress(
+    child: &mut Child,
+    timeout: Duration,
+    progress: &Path,
+    stall_limit: Duration,
+) -> WaitOutcome {
+    let started = Instant::now();
+    let deadline = started.checked_add(timeout);
+    let mut last_length = 0_u64;
+    let mut last_growth = started;
+    loop {
+        match child.try_wait() {
+            Ok(Some(status)) => return WaitOutcome::Finished(DeadlineWait::Exited(status)),
+            Ok(None) => {}
+            Err(error) => {
+                stop_process_tree(child);
+                return WaitOutcome::Finished(DeadlineWait::PollFailed(error));
+            }
+        }
+        let now = Instant::now();
+        if deadline.is_some_and(|deadline| now >= deadline) {
+            stop_process_tree(child);
+            return WaitOutcome::Finished(DeadlineWait::TimedOut);
+        }
+        let length = fs::metadata(progress).map_or(0, |metadata| metadata.len());
+        if length != last_length {
+            last_length = length;
+            last_growth = now;
+        } else if now.duration_since(last_growth) >= stall_limit {
+            stop_process_tree(child);
+            return WaitOutcome::Stalled;
+        }
+        thread::sleep(PROGRESS_POLL_INTERVAL);
+    }
+}
+
+/// Poll period of [`wait_with_progress`]: the file-size check is a system
+/// call, so it runs a few times a second rather than at the 25 ms process
+/// poll.
+const PROGRESS_POLL_INTERVAL: Duration = Duration::from_millis(250);
+
+/// The last few meaningful solver lines, for a one-line failure message.
+///
+/// VSPAERO redraws its progress counters with carriage returns and prints
+/// iteration tables hundreds of characters wide, so a plain line tail grew
+/// to several kilobytes in the run log. Carriage returns split lines here,
+/// blank lines are dropped, each line is shortened and the whole tail is
+/// capped; the complete transcript stays in the stdout file the message names.
 fn text_tail(text: &str) -> String {
-    const MAX_LINES: usize = 20;
+    const MAX_LINES: usize = 4;
+    const MAX_LINE_CHARS: usize = 120;
     const EMPTY_LOG: &str = "<empty>";
 
-    let tail = text.lines().rev().take(MAX_LINES).collect::<Vec<_>>();
+    let tail = text
+        .split(['\n', '\r'])
+        .map(|line| line.split_whitespace().collect::<Vec<_>>().join(" "))
+        .filter(|line| !line.is_empty())
+        .collect::<Vec<_>>();
     if tail.is_empty() {
         return EMPTY_LOG.to_owned();
     }
-    tail.into_iter().rev().collect::<Vec<_>>().join(" | ")
+    tail[tail.len().saturating_sub(MAX_LINES)..]
+        .iter()
+        .map(|line| {
+            if line.chars().count() > MAX_LINE_CHARS {
+                let mut short = line.chars().take(MAX_LINE_CHARS).collect::<String>();
+                short.push_str("...");
+                short
+            } else {
+                line.clone()
+            }
+        })
+        .collect::<Vec<_>>()
+        .join(" | ")
 }
 
 fn vspaero_case_argument(case_path: &Path) -> &std::ffi::OsStr {
@@ -538,6 +641,74 @@ mod tests {
             "first | second | third"
         );
         assert_eq!(text_tail(""), "<empty>");
+        // Carriage-return progress counters become separate lines, and only
+        // the last few survive, each shortened.
+        let progress = format!(
+            "a\nb\n1000 / 15870 \r2000 / 15870 \rSolving {}\n\n",
+            "x".repeat(300)
+        );
+        let tail = text_tail(&progress);
+        assert!(
+            tail.starts_with("b | 1000 / 15870 | 2000 / 15870 | Solving xxx"),
+            "{tail}"
+        );
+        assert!(tail.len() < 4 * 125, "{tail}");
+    }
+
+    /// A long-lived child that prints nothing.
+    fn silent_child() -> std::io::Result<Child> {
+        let mut command = if cfg!(windows) {
+            let mut command = Command::new("ping");
+            command.args(["-n", "30", "127.0.0.1"]);
+            command
+        } else {
+            let mut command = Command::new("sleep");
+            command.arg("30");
+            command
+        };
+        command
+            .stdout(Stdio::null())
+            .stderr(Stdio::null())
+            .new_process_group()
+            .spawn()
+    }
+
+    #[test]
+    fn a_silent_solver_is_stopped_as_hung_before_the_deadline() -> std::io::Result<()> {
+        let progress =
+            std::env::temp_dir().join(format!("alas-vspaero-silent-{}.txt", std::process::id()));
+        fs::write(&progress, "started\n")?;
+        let mut child = silent_child()?;
+        let started = Instant::now();
+        let outcome = wait_with_progress(
+            &mut child,
+            Duration::from_secs(60),
+            &progress,
+            Duration::from_millis(600),
+        );
+        let _ = fs::remove_file(&progress);
+        assert!(matches!(outcome, WaitOutcome::Stalled));
+        assert!(started.elapsed() < Duration::from_secs(20));
+        Ok(())
+    }
+
+    #[test]
+    fn the_overall_deadline_still_applies_to_a_progressing_solver() -> std::io::Result<()> {
+        let progress =
+            std::env::temp_dir().join(format!("alas-vspaero-deadline-{}.txt", std::process::id()));
+        let _ = fs::remove_file(&progress);
+        let mut child = silent_child()?;
+        let outcome = wait_with_progress(
+            &mut child,
+            Duration::from_millis(500),
+            &progress,
+            Duration::from_secs(60),
+        );
+        assert!(matches!(
+            outcome,
+            WaitOutcome::Finished(DeadlineWait::TimedOut)
+        ));
+        Ok(())
     }
 
     #[test]

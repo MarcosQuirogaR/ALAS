@@ -11,7 +11,7 @@
 
 use egui::{vec2, Color32, Grid, RichText, ScrollArea, Ui};
 
-use alas_aero::wing_analysis::{WingAnalysisOutcome, OMITTED_COMPONENTS};
+use alas_aero::wing_analysis::WingAnalysisOutcome;
 
 use super::draw::{line_chart, Series};
 use super::wing_analysis::with_window;
@@ -120,10 +120,10 @@ fn show_point_card(outcome: &WingAnalysisOutcome, configuration: &str, ui: &mut 
         let columns = if ui.available_width() >= 760.0 { 2 } else { 1 };
         Grid::new("wing_analysis_point")
             .num_columns(2 * columns)
-            .spacing([12.0, 4.0])
+            .spacing(crate::theme::space::GRID_SPACING)
             .show(ui, |ui| {
                 for (index, (label, value)) in rows.iter().enumerate() {
-                    let response = ui.label(tr(label));
+                    let response = crate::notation::label(ui, &tr(label));
                     if index == 0 && outcome.alpha_from_lift_target {
                         response.on_hover_text(tr(
                             "The angle of attack was solved from the lift-coefficient target.",
@@ -135,11 +135,7 @@ fn show_point_card(outcome: &WingAnalysisOutcome, configuration: &str, ui: &mut 
                     }
                 }
             });
-        ui.label(RichText::new(tr("Induced drag only")).weak().small())
-            .on_hover_text(tr_fields(
-                "Induced drag only; this configuration omits {components}.",
-                &[("components", OMITTED_COMPONENTS.join(", "))],
-            ));
+        ui.label(RichText::new(tr("Induced drag only")).weak().small());
     });
 }
 
@@ -302,7 +298,7 @@ fn show_stability_card(outcome: &WingAnalysisOutcome, configuration: &str, ui: &
         let reference = outcome.reference.moment_reference_m;
         Grid::new("wing_analysis_stability")
             .num_columns(2)
-            .spacing([12.0, 4.0])
+            .spacing(crate::theme::space::GRID_SPACING)
             .show(ui, |ui| {
                 for (label, value) in [
                     ("CL_alpha (1/rad)", stability.cl_alpha_per_rad),
@@ -317,7 +313,7 @@ fn show_stability_card(outcome: &WingAnalysisOutcome, configuration: &str, ui: &
                     ("Moment reference y (m)", reference[1]),
                     ("Moment reference z (m)", reference[2]),
                 ] {
-                    let response = ui.label(tr(label));
+                    let response = crate::notation::label(ui, &tr(label));
                     if label.starts_with("Moment reference") {
                         response.on_hover_text(tr_fields(
                             "About the stated moment reference at x = {x} m, y = {y} m, z = {z} m in geometry axes.",
@@ -345,8 +341,8 @@ fn show_stability_card(outcome: &WingAnalysisOutcome, configuration: &str, ui: &
                 ui.visuals().warn_fg_color,
             )
         };
-        ui.colored_label(color, longitudinal)
-            .on_hover_text(explanation);
+        let verdict = ui.colored_label(color, longitudinal);
+        crate::notation::hover(verdict, &explanation);
     });
 }
 
@@ -361,7 +357,7 @@ fn show_evidence_card(outcome: &WingAnalysisOutcome, ui: &mut Ui) {
         );
         Grid::new("wing_analysis_surfaces")
             .num_columns(3)
-            .spacing([12.0, 4.0])
+            .spacing(crate::theme::space::GRID_SPACING)
             .show(ui, |ui| {
                 ui.label(RichText::new(tr("Surface")).weak().small());
                 ui.label(RichText::new(tr("Lift (N)")).weak().small());
@@ -377,7 +373,7 @@ fn show_evidence_card(outcome: &WingAnalysisOutcome, ui: &mut Ui) {
         let diagnostics = &outcome.diagnostics;
         Grid::new("wing_analysis_diagnostics")
             .num_columns(2)
-            .spacing([12.0, 4.0])
+            .spacing(crate::theme::space::GRID_SPACING)
             .show(ui, |ui| {
                 for (label, value) in [
                     ("Panels", diagnostics.panel_count.to_string()),

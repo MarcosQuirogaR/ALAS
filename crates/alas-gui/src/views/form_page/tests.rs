@@ -63,6 +63,8 @@ fn advanced_mass_reset_restores_its_mtow_controls_without_other_requirements_or_
     for preset in ["A320-200", ""] {
         let mut state = AppState::default();
         state.config_values["preset"] = json!(preset);
+        // A reset restores the active starting design, which `active_preset` names.
+        state.active_preset = preset.to_owned();
         state.config_values["requirements"]["mtow_kg"] = json!(123.0);
         state.config_values["requirements"]["cruise_mach"] = json!(0.71);
         state.config_values["optimizer"]["objective"]["mtow_sizing"] = json!("payload_adjusted");
@@ -334,8 +336,8 @@ fn propulsion_page_routes_to_the_rendered_thermodynamic_preview() {
         .expect("default turbofan cycle preview");
     // `ts_preview::diagram` embeds the configured engine's name in the
     // drawn title (distinct from the static page heading asserted
-    // above), so the default GE9X turbofan renders "GE9X * T-s".
-    assert_eq!(scene.title.as_deref(), Some("GE9X * T-s"));
+    // above), so the default GE9X turbofan renders "GE9X middle-dot T-s".
+    assert_eq!(scene.title.as_deref(), Some("GE9X \u{00b7} T-s"));
     assert!(
         scene
             .elements
@@ -362,7 +364,7 @@ fn propulsion_preview_title_tracks_the_configured_engine_name() {
 
     let scene = crate::scene::build_page_preview(&state, "engine")
         .expect("turbofan cycle preview for the renamed engine");
-    assert_eq!(scene.title.as_deref(), Some("LEAP-1A * T-s"));
+    assert_eq!(scene.title.as_deref(), Some("LEAP-1A \u{00b7} T-s"));
 }
 
 #[test]
@@ -411,4 +413,33 @@ fn optimizer_page_exposes_the_search_settings() {
             "{shown} must be shown on the optimizer settings page"
         );
     }
+}
+
+/// B5: after a clean sheet, every page reset restores the clean-sheet
+/// defaults, whatever aircraft was loaded before and whatever the `preset`
+/// key of the edit buffer still says.
+#[test]
+fn page_resets_after_a_clean_sheet_never_use_the_previous_aircraft() {
+    let defaults = alas_config::AlasConfig::default();
+    let mut state = AppState::default();
+    state.load_preset("A320-200");
+    assert!(state.start_clean_sheet(&crate::config_edit::CleanSheetBrief::default()));
+    // A stale name left in the buffer must not steer any reset.
+    state.config_values["preset"] = json!("A320-200");
+    assert!(state.active_preset.is_empty());
+    assert_eq!(state.starting_design_defaults(), defaults);
+
+    state.config_values["requirements"]["mtow_kg"] = json!(12_345.0);
+    for page in nav::ADVANCED_SETTINGS_PAGES
+        .iter()
+        .filter(|page| page.group.is_some())
+    {
+        let group = page.group.expect("filtered to pages with a group");
+        reset_page_to_defaults(&mut state, page, group);
+    }
+    assert_eq!(
+        state.config_values["requirements"]["mtow_kg"],
+        json!(defaults.requirements.mtow_kg),
+        "the MTOW controls restore to the clean-sheet defaults, not the A320"
+    );
 }

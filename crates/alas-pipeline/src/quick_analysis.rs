@@ -57,7 +57,8 @@
 //!   as above so no corner exceeds MTOW; an empty mass at or above MTOW
 //!   fails the diagram instead of drawing it.
 //! * Feasibility: the physical feasibility assessment of the full baseline
-//!   analysis without a flown mission, plus the closure's dispatch flags.
+//!   analysis, on the flight the route metric flies (`route::assess_on_flown_route`),
+//!   plus the closure's dispatch flags.
 //!
 //! [`QuickMetric::basis`] states, per metric, whether the value is the Full
 //! Analysis' own or an estimate, and the measured bound of the closure
@@ -70,9 +71,7 @@ use alas_config::AlasConfig;
 use alas_mass::breakdown::OEW_KEYS;
 use alas_opt::assess_product_candidate;
 
-use crate::feasibility::{
-    assess_airplane_fuel_capacity, assess_physical_feasibility, FindingSeverity,
-};
+use crate::feasibility::{assess_airplane_fuel_capacity, FindingSeverity};
 use crate::full_analysis::{effective_structural_payload_limit_kg, AnalysisReport, FullAnalysis};
 
 pub mod band;
@@ -83,13 +82,16 @@ mod payload_range;
 mod route;
 mod types;
 
-pub use cruise::{CruiseDrag, CruiseSolve, SERVICE_CEILING_CLIMB_RATE_M_S};
+pub use cruise::{
+    CruiseDrag, CruiseSolve, OUTSIDE_SOLVED_DRAG_RANGE, SERVICE_CEILING_CLIMB_RATE_M_S,
+};
 use dispatch_flags::{dispatch_flags_of, dispatch_status_text};
 use payload_range::quick_range;
 pub use payload_range::{
     fuel_capacity_basis, payload_capacity_estimate, payload_range_corners, PayloadCapacityEstimate,
     PayloadRangeUnavailable, QuickPayloadRange,
 };
+pub use route::planned_flight;
 pub use types::{
     QuickAnalysisRequest, QuickAnalysisSummary, QuickBasis, QuickEvent, QuickFeasibility,
     QuickFlag, QuickMetric, QuickOutcome, QuickRouteFuel, QuickStage, QuickValue,
@@ -325,7 +327,14 @@ pub fn run_quick_analysis(
     // weights, its fuel priced on the baseline fuel model), then the
     // thrust-limited envelope.
     let design = request.design;
-    let report = match FullAnalysis::new(sandbox.clone()).run(&design, true) {
+    // Through the baseline-artifacts entry the command line uses, so the
+    // reported cruise point is bound to the mission of the analysed loading
+    // (`bind_design_cruise_point`) rather than left as the untrimmed
+    // lattice-sweep point at the declared mass.
+    let report = match crate::fuel_model::run_with_baseline_artifacts(
+        &FullAnalysis::new(sandbox.clone()),
+        &design,
+    ) {
         Ok(report) => report,
         Err(error) => {
             publisher.fail_all(
@@ -352,6 +361,14 @@ pub fn run_quick_analysis(
                     } else {
                         format!("thrust-equals-drag Mach {mach:.3}")
                     };
+                    let point = if solve.speed_outside_solved_drag_range(mach) {
+                        format!(
+                            "{point} ({}: the drag there is extrapolated)",
+                            cruise::OUTSIDE_SOLVED_DRAG_RANGE
+                        )
+                    } else {
+                        point
+                    };
                     publisher.value(
                         QuickMetric::CruiseSpeed,
                         solve.tas_at_requested_altitude(mach),
@@ -366,21 +383,40 @@ pub fn run_quick_analysis(
                     publisher.publish(QuickMetric::CruiseSpeed, QuickOutcome::Failed(message))
                 }
             }
-            match solve.service_ceiling_m() {
-                Ok(ceiling_m) => {
-                    publisher.value(
-                        QuickMetric::ServiceCeiling,
-                        ceiling_m,
-                        None,
-                        &format!(
-                            "altitude where the best excess-power climb rate over the deck Mach domain falls to {SERVICE_CEILING_CLIMB_RATE_M_S} m/s at {takeoff_mass_estimate_kg:.0} kg, maximum-climb rating, bounded by the deck domain of 13716 m"
-                        ),
-                    );
+            match solve.service_ceiling() {
+                Ok(ceiling) => {
+                    let ceiling_m = ceiling.altitude_m;
+                    let range_note = if solve.ceiling_outside_solved_drag_range(ceiling_m) {
+                        format!(
+                            "; the best-climb point there is {}: its drag is extrapolated",
+                            cruise::OUTSIDE_SOLVED_DRAG_RANGE
+                        )
+                    } else {
+                        String::new()
+                    };
+                    let ceiling_note = if ceiling.at_scan_bound {
+                        format!(
+                            "at least this altitude: the best excess-power climb rate over the deck Mach domain still exceeds {SERVICE_CEILING_CLIMB_RATE_M_S} m/s at {takeoff_mass_estimate_kg:.0} kg, maximum-climb rating, at the upper bound of the altitude scan ({:.0} m); the ceiling itself is above it and was not searched{range_note}",
+                            cruise::CEILING_SCAN_BOUND_M
+                        )
+                    } else {
+                        format!(
+                            "altitude where the best excess-power climb rate over the deck Mach domain falls to {SERVICE_CEILING_CLIMB_RATE_M_S} m/s at {takeoff_mass_estimate_kg:.0} kg, maximum-climb rating{range_note}"
+                        )
+                    };
+                    publisher.value(QuickMetric::ServiceCeiling, ceiling_m, None, &ceiling_note);
+                    let altitude_note = if !ceiling.at_scan_bound {
+                        "requested altitude capped by the service ceiling"
+                    } else if requirements.cruise_altitude_m > ceiling_m {
+                        "requested altitude is above the upper bound of the ceiling scan; shown at that bound, which is not a ceiling of the aircraft"
+                    } else {
+                        "requested altitude; the service ceiling is at or above the upper bound of the scan"
+                    };
                     publisher.value(
                         QuickMetric::CruiseAltitude,
                         requirements.cruise_altitude_m.min(ceiling_m),
                         Some(requirements.cruise_altitude_m),
-                        "requested altitude capped by the service ceiling",
+                        altitude_note,
                     );
                 }
                 Err(message) => {
@@ -421,8 +457,14 @@ pub fn run_quick_analysis(
         QuickMetric::RouteFuelBurn,
         route::route_fuel(&sandbox, &report),
     );
+    // The same route flown natively, as the full analysis flies it: its numbers replace the estimate.
+    let flown_route = route::route_fuel_flown(&sandbox, &report, cancel).map(|(outcome, flown)| {
+        publisher.publish(QuickMetric::RouteFuelBurn, outcome);
+        flown
+    });
 
-    let feasibility = assess_physical_feasibility(&sandbox, &design, &report, None);
+    let feasibility =
+        route::assess_on_flown_route(&sandbox, &design, &report, flown_route.as_ref());
     let mut flags: Vec<QuickFlag> = feasibility
         .findings
         .iter()
@@ -430,6 +472,9 @@ pub fn run_quick_analysis(
             code: format!("{:?}", finding.code),
             blocking: finding.severity == FindingSeverity::Error,
             message: finding.message.clone(),
+            actual: finding.actual,
+            limit: finding.limit,
+            unit: finding.unit.to_owned(),
         })
         .collect();
     flags.append(&mut dispatch_flags);
@@ -491,4 +536,54 @@ pub fn report_oew_kg(report: &crate::full_analysis::AnalysisReport) -> f64 {
         .iter()
         .map(|key| report.component_masses.get(*key).copied().unwrap_or(0.0))
         .sum()
+}
+
+#[cfg(test)]
+#[allow(clippy::unwrap_used, clippy::expect_used)]
+mod cruise_point_tests {
+    use super::*;
+    use crate::fuel_model::run_with_baseline_artifacts;
+
+    /// The published cruise L/D is the cruise point the command-line baseline
+    /// reports (bound to the mission of the analysed loading), not the
+    /// untrimmed point `FullAnalysis::run` alone leaves.
+    #[test]
+    fn the_quick_cruise_lift_to_drag_is_the_baseline_bound_cruise_point() {
+        let config = AlasConfig::from_value(&serde_json::json!({ "preset": "ATR72-600" })).unwrap();
+        let design = config.configured_nominal_design();
+        let request = QuickAnalysisRequest {
+            revision: 1,
+            config: config.clone(),
+            design,
+        };
+        let mut published = None;
+        run_quick_analysis(
+            &request,
+            &mut |event| {
+                if let (QuickMetric::CruiseLiftToDrag, QuickOutcome::Value(value)) =
+                    (event.metric, event.outcome)
+                {
+                    published = Some(value.achieved);
+                }
+            },
+            &AtomicBool::new(false),
+        );
+        let published = published.expect("the cruise L/D is published");
+
+        let full = FullAnalysis::new(sandbox_config(&config));
+        let l_over_d = |report: &AnalysisReport| {
+            report
+                .trimmed_design_point
+                .as_ref()
+                .map_or(report.design_point.l_over_d, |point| point.l_over_d)
+        };
+        let bound = run_with_baseline_artifacts(&full, &design).unwrap();
+        assert_eq!(published, l_over_d(&bound), "the same bound cruise point");
+        let unbound = full.run(&design, true).unwrap();
+        assert!(
+            (published - l_over_d(&unbound)).abs() > 1e-6,
+            "binding must move the point ({published} vs unbound {})",
+            l_over_d(&unbound)
+        );
+    }
 }

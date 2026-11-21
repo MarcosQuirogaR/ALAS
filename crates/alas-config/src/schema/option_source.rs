@@ -26,6 +26,8 @@ pub enum OptionSource {
     StrutMaterial,
     /// The tire database.
     TireClass,
+    /// The certified data-book tires, after `auto`.
+    CertifiedTire,
     /// Which trailing-edge ribs the structural mesh generates.
     TeRibMode,
     /// The optimization method.
@@ -48,6 +50,8 @@ pub enum OptionSource {
     PylonMassMethod,
     /// Which method prices the cabin equipment and operating items.
     CabinEquipmentMethod,
+    /// The class of a clean-sheet brief.
+    AircraftClass,
     /// Which LTH operating-item relation an aircraft takes.
     OperatingHaulClass,
     /// Which FLOPS wing bending-material factor is evaluated.
@@ -56,6 +60,8 @@ pub enum OptionSource {
     FlopsStarterScope,
     /// Whether the FLOPS engine nozzle is inside the declared baseline mass.
     FlopsNozzleScope,
+    /// Source and gear state of a required rotation (tail-strike) attitude.
+    RotationAngleBasis,
     /// Blade material and pitch-change hardware of a turboprop propeller.
     PropellerConstruction,
     /// Whether the cargo compartments are loose-loaded or take unit load
@@ -82,6 +88,8 @@ pub enum OptionSource {
     /// The ICAO Annex 14 aerodrome reference code letter that caps the
     /// wingspan of a clean-sheet design.
     AerodromeReferenceCode,
+    /// The drag-divergence relation of the main wing.
+    DragDivergenceLaw,
 }
 
 impl OptionSource {
@@ -125,6 +133,8 @@ impl OptionSource {
                 "unknown",
             ]),
             Self::CabinEquipmentMethod => Some(crate::CabinEquipmentMethod::OPTIONS),
+            Self::RotationAngleBasis => Some(crate::RotationAngleBasis::OPTIONS),
+            Self::AircraftClass => Some(crate::presets::AircraftClass::OPTIONS),
             Self::OperatingHaulClass => Some(&["short_medium_haul", "long_haul"]),
             Self::PropellerConstruction => Some(&[
                 "aluminium_double_acting",
@@ -152,6 +162,7 @@ impl OptionSource {
             Self::MtowSizing => Some(&crate::optimizer::MtowSizing::NAMES),
             Self::DesignMode => Some(&["clean_sheet", "reference_adaptation", "baseline_sandbox"]),
             Self::AerodromeReferenceCode => Some(&crate::optimizer::AerodromeReferenceCode::NAMES),
+            Self::DragDivergenceLaw => Some(&crate::DragDivergenceLaw::NAMES),
             _ => None,
         }
     }

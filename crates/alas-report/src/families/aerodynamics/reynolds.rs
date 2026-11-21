@@ -78,6 +78,70 @@ fn logspace(a: f64, b: f64, n: usize) -> Vec<f64> {
         .collect()
 }
 
+/// Chord Reynolds number below which NeuralFoil cells are not drawn.
+const LOW_RE_MASK: f64 = 1.0e5;
+
+/// Hatch the columns of cells that are not drawn (Re below [`LOW_RE_MASK`]) so
+/// the empty strip reads as masked, not as missing data.
+fn hatch_masked_cells(
+    scene: &mut Scene,
+    axes: &Axes2D,
+    x_edges: &[f64],
+    y_edges: &[f64],
+    masked_columns: usize,
+    ink: &str,
+) {
+    if masked_columns == 0 {
+        return;
+    }
+    let (Some(&x0), Some(&x1), Some(&y0), Some(&y1)) = (
+        x_edges.first(),
+        x_edges.get(masked_columns),
+        y_edges.first(),
+        y_edges.last(),
+    ) else {
+        return;
+    };
+    let a = axes.map_point(x0, y0);
+    let b = axes.map_point(x1, y1);
+    let (left, right) = (a[0].min(b[0]), a[0].max(b[0]));
+    let (top, bottom) = (a[1].min(b[1]), a[1].max(b[1]));
+    let base = Color::from_hex(ink);
+    let stroke = Stroke::new(Color::rgba(base.r, base.g, base.b, 120), 0.6);
+    let spacing = 6.0;
+    let (width, height) = (right - left, bottom - top);
+    // 45 degree lines rising to the right, clipped to the strip.
+    let mut offset = spacing;
+    while offset < width + height {
+        let start_x = left + (offset - height).max(0.0);
+        let start_y = bottom - (offset - (start_x - left));
+        let end_x = left + offset.min(width);
+        let end_y = bottom - (offset - (end_x - left));
+        scene.add(SceneElement::Line {
+            p1: [start_x, start_y],
+            p2: [end_x, end_y],
+            stroke: stroke.clone(),
+        });
+        offset += spacing;
+    }
+}
+
+/// The footnote: which Re range is hatched and how many cells that is per map.
+fn masked_note(reynolds: &[f64], alpha_count: usize) -> String {
+    let masked: Vec<f64> = reynolds
+        .iter()
+        .copied()
+        .filter(|&re| re < LOW_RE_MASK)
+        .collect();
+    let (Some(lo), Some(hi)) = (masked.first(), masked.last()) else {
+        return "No cells are masked: every Re of the sweep is drawn.".to_owned();
+    };
+    format!(
+        "Hatched: Re {lo:.1e} to {hi:.1e} ({} cells per map) is not drawn, unreliable low-Re surrogate range. The colour scale uses only the drawn cells.",
+        masked.len() * alpha_count
+    )
+}
+
 /// Generate the profile and four NeuralFoil coefficient maps used by the UI.
 pub fn figure_airfoil_reynolds(airfoil: &Airfoil, theme: Option<&str>) -> Scene {
     let pal = get_palette(theme);
@@ -106,6 +170,11 @@ pub fn figure_airfoil_reynolds(airfoil: &Airfoil, theme: Option<&str>) -> Scene 
         })
         .collect();
     for (i, cell) in cells.into_iter().enumerate() {
+        // Low-Re cells are masked: the surrogate's laminar-separation
+        // artefacts there would otherwise set the colour range.
+        if reynolds[i % columns] < LOW_RE_MASK {
+            continue;
+        }
         if let Some(value) = cell {
             fields[0][i] = value.cl;
             fields[1][i] = value.cd;
@@ -148,6 +217,7 @@ pub fn figure_airfoil_reynolds(airfoil: &Airfoil, theme: Option<&str>) -> Scene 
     });
 
     let x_edges = cell_edges_log(&reynolds);
+    let masked_columns = reynolds.iter().filter(|&&re| re < LOW_RE_MASK).count();
     let y_edges = cell_edges_linear(&alpha);
     for (index, (label, cmap)) in [
         ("CL", Colormap::Plasma),
@@ -165,7 +235,7 @@ pub fn figure_airfoil_reynolds(airfoil: &Airfoil, theme: Option<&str>) -> Scene 
                 65.0 + col as f64 * 440.0,
                 205.0 + row as f64 * 255.0,
                 315.0,
-                205.0,
+                190.0,
             ),
             (reynolds[0], *reynolds.last().unwrap_or(&1e7)),
             (alpha[0], *alpha.last().unwrap_or(&12.0)),
@@ -200,6 +270,14 @@ pub fn figure_airfoil_reynolds(airfoil: &Airfoil, theme: Option<&str>) -> Scene 
                 &levels,
             );
         }
+        hatch_masked_cells(
+            &mut scene,
+            &axes,
+            &x_edges,
+            &y_edges,
+            masked_columns,
+            pal.tick,
+        );
         scene.add(SceneElement::Text {
             text: label.to_string(),
             pos: [axes.left, axes.top - 7.0],
@@ -225,5 +303,15 @@ pub fn figure_airfoil_reynolds(airfoil: &Airfoil, theme: Option<&str>) -> Scene 
             pal,
         );
     }
+    scene.add(SceneElement::Text {
+        text: masked_note(&reynolds, alpha.len()),
+        pos: [450.0, 750.0],
+        font_size: 8.0,
+        color: Color::from_hex(pal.tick),
+        align: TextAlign::Center,
+        baseline: TextBaseline::Bottom,
+        angle_deg: 0.0,
+        bold: false,
+    });
     scene
 }

@@ -21,7 +21,7 @@
 //! states them (EASA TCDS), and are flagged where only secondary sources were
 //! found. Nothing here is tuned to fuel burn or block time.
 //!
-//! # Type mapping (the owner decision D4: nearest documented type, flagged)
+//! # Type mapping (nearest documented type, flagged)
 //!
 //! A220-300, C919, E195-E2, DC-10 and AVE have no WRAP file of their own and
 //! use the proxy named in [`Ladder::proxy_note`]; the proxy is a different
@@ -42,6 +42,7 @@
 //! true airspeed; where the idle-thrust path is shallower the mission deck
 //! flies idle and the leg takes longer (it never flies below idle).
 
+use crate::presets::SpeedScheduleSource;
 use crate::{AircraftPreset, MissionProfileConfig, SpeedReference};
 
 /// Flight-path angle of the planned descent, degrees below the horizon. The
@@ -54,15 +55,18 @@ const KNOT_M_S: f64 = 1852.0 / 3600.0;
 /// Foot, m.
 const FOOT_M: f64 = 0.3048;
 /// 14 CFR 91.117(a): 250 kt indicated below 10,000 ft MSL.
-const SPEED_LIMIT_CAS_M_S: f64 = 250.0 * KNOT_M_S;
+const SPEED_LIMIT_CAS_M_S: f64 = crate::mission::SPEED_RESTRICTION_CAS_M_S;
 /// Altitude of that speed limit, m.
-const SPEED_LIMIT_ALTITUDE_M: f64 = 10_000.0 * FOOT_M;
+const SPEED_LIMIT_ALTITUDE_M: f64 = crate::mission::SPEED_RESTRICTION_ALTITUDE_M;
 /// Intermediate approach speed between 5,000 and 3,000 ft (unsourced, the
 /// A320-200 ladder's value).
 const APPROACH_INTERMEDIATE_CAS_M_S: f64 = 210.0 * KNOT_M_S;
 /// Representative climb rate the engine deck's thrust correlation is built
 /// at, m/s (the shared default profile's initial-climb rate).
 const DECK_REFERENCE_CLIMB_RATE_M_S: f64 = 12.0;
+/// Commanded climb rate above the rating of any registered type, m/s (about 9,800 ft/min): the
+/// integrator then climbs at the maximum-climb rating.
+const RATING_LIMITED_CLIMB_RATE_M_S: f64 = 50.0;
 
 /// One type's transcribed ladder numbers. The two provenance strings are data
 /// carried with the numbers and read by the tests.
@@ -114,7 +118,7 @@ const A343: Ladder = Ladder {
     approach_rate_m_s: 3.64,
     mmo: 0.86,
     vmo_kt: 0.0,
-    limits_note: "MMO 0.86: LOW confidence, not read from EASA TCDS A.015 (incident summary and OpenAP a343.yml); VMO not found",
+    limits_note: "FAA TCDS A43NM Revision 10, A340-300: VMO 330 kt, MMO 0.86 (operating_limits::A340_300)",
 };
 
 // WRAP `a388.txt`, A380-800.
@@ -132,7 +136,7 @@ const A388: Ladder = Ladder {
     approach_rate_m_s: 3.71,
     mmo: 0.89,
     vmo_kt: 0.0,
-    limits_note: "MMO 0.89: LOW confidence, EASA TCDS A.110 refers to the AFM; value from OpenAP a388.yml and secondary pages; VMO not found",
+    limits_note: "secondary source, Airbus Safety First #10 (2010): VMO 340 kt, MMO 0.89; EASA TCDS A.110 refers to the AFM",
 };
 
 // WRAP `b744.txt`, B747-400.
@@ -186,7 +190,7 @@ const E190: Ladder = Ladder {
     approach_rate_m_s: 3.57,
     mmo: 0.0,
     vmo_kt: 0.0,
-    limits_note: "MMO/VMO not in the EASA TCDS (see Airplane Flight Manual): undeclared",
+    limits_note: "FAA TCDS A57NM Revision 27, ERJ 190-400: VMO 300/320 kt, MMO 0.82 (operating_limits::E195_E2)",
 };
 
 // WRAP `a320.txt`.
@@ -223,7 +227,7 @@ const A332_PROXY: Ladder = Ladder {
     approach_rate_m_s: 3.62,
     mmo: 0.88,
     vmo_kt: 0.0,
-    limits_note: "MMO 0.88: LOW confidence, a search snippet of FAA TCDS A22WE Rev 5 (DC-10 and MD-11 not separated), A22WE itself not opened; VMO not found",
+    limits_note: "FAA TCDS A22WE Revision 13, DC-10-30: VMO 350/376 kt, MMO 0.88 (operating_limits::DC10_30)",
 };
 
 // WRAP `b789.txt` again, for the synthetic reference aircraft.
@@ -231,7 +235,7 @@ const AVE_PROXY: Ladder = Ladder {
     proxy_note: "OpenAP wrap b789 (B787-9) as the nearest documented M0.84-0.85 long-haul twin for the synthetic AVE; NOT data for this type",
     mmo: 0.0,
     vmo_kt: 0.0,
-    limits_note: "synthetic aircraft: MMO/VMO undeclared",
+    limits_note: "clean-sheet design: MMO/VMO from the ALAS design rule (no type certificate)",
     ..B789
 };
 
@@ -266,8 +270,7 @@ pub fn ladder_provenance(preset_name: &str) -> Option<(&'static str, &'static st
 }
 
 /// Overwrite the speed schedule of `profile` with the preset's CAS/Mach
-/// ladder, when it has one. A no-op for the presets with hand-written
-/// schedules (A320-200, ATR72-600, A400M).
+/// ladder, for a preset whose schedule source is a sourced ladder.
 ///
 /// `cruise_altitude_m` is the preset's declared cruise level.
 pub(in crate::presets) fn apply_registered_ladder(
@@ -275,6 +278,9 @@ pub(in crate::presets) fn apply_registered_ladder(
     profile: &mut MissionProfileConfig,
     cruise_altitude_m: f64,
 ) {
+    if preset.speed_schedule_source != SpeedScheduleSource::SourcedLadder {
+        return;
+    }
     let Some(ladder) = ladder_for(preset.name) else {
         return;
     };
@@ -294,17 +300,20 @@ fn apply_ladder(ladder: &Ladder, profile: &mut MissionProfileConfig, cruise_alti
         .unwrap_or(SPEED_LIMIT_ALTITUDE_M);
     let speed_limit_fraction = (SPEED_LIMIT_ALTITUDE_M / cruise_altitude_m).clamp(0.05, 0.9);
     profile.takeoff_altitude_gain_m = 1_500.0 * FOOT_M;
-    // The take-off segment is flown at the 250 kt climb-out speed rather than
-    // V2: the integrator charges a speed change at a segment boundary only
-    // after the first segment, and one CAS sub-rung (about 30 s) cannot pay
-    // the V2 -> 250 kt acceleration of a 400 t aeroplane while the planned
-    // climb rate keeps priority (B747-400: 1.9 GJ). The acceleration energy
-    // is therefore NOT charged (about 30 kg of fuel-equivalent for a 70 t
-    // aeroplane, about 150 kg for a 400 t one; recorded limitation).
-    profile.takeoff_air_speed_m_s = SPEED_LIMIT_CAS_M_S;
+    // The take-off band is flown at the climb-out speed rather than V2: one CAS sub-rung (about
+    // 30 s) cannot pay the V2 -> climb-out acceleration of a 400 t aeroplane at the planned climb
+    // rate, so a band flown at V2 forces the rate of the whole initial climb down (measured on the
+    // A220-300: 29 min to the top of climb against 15 min). The acceleration energy IS charged:
+    // both mission models fly the take-off climb from the field, a constant-speed climb at V2 to the
+    // acceleration height and then an acceleration along the climb to the band speed with BADA's
+    // energy share, at the take-off rating (`mission_model::takeoff_acceleration` for the priced
+    // model, `schedule/takeoff.rs` for the native flight), and the band keeps its speed from there.
+    // Below 10,000 ft the speed limit, or the type's climb CAS where that is slower.
+    let low_climb_cas_m_s = SPEED_LIMIT_CAS_M_S.min(ladder.climb_cas_m_s);
+    profile.takeoff_air_speed_m_s = low_climb_cas_m_s;
     profile.takeoff_climb_rate_m_s = ladder.initial_climb_rate_m_s;
     profile.initial_climb_altitude_fraction = speed_limit_fraction;
-    profile.initial_climb_air_speed_m_s = SPEED_LIMIT_CAS_M_S;
+    profile.initial_climb_air_speed_m_s = low_climb_cas_m_s;
     // NOT the WRAP pre-CAS rate (`ladder.pre_cas_rate_m_s`): the engine
     // deck's maximum-climb thrust correlation takes its representative rate
     // from this field (`max_climb_rate_ft_min(initial_climb_rate_m_s)`), and
@@ -341,8 +350,11 @@ fn apply_ladder(ladder: &Ladder, profile: &mut MissionProfileConfig, cruise_alti
     let rungs = [
         (descent_crossover_m / FOOT_M, ladder.descent_cas_m_s),
         (10_000.0, ladder.descent_cas_m_s),
-        (5_000.0, SPEED_LIMIT_CAS_M_S),
-        (3_000.0, APPROACH_INTERMEDIATE_CAS_M_S),
+        (5_000.0, SPEED_LIMIT_CAS_M_S.min(ladder.descent_cas_m_s)),
+        (
+            3_000.0,
+            APPROACH_INTERMEDIATE_CAS_M_S.min(ladder.descent_cas_m_s),
+        ),
     ];
     let caps = profile.descent_caps();
     let mut resolved = [(0.0, 0.0, 0.0); 4];
@@ -379,6 +391,135 @@ fn apply_ladder(ladder: &Ladder, profile: &mut MissionProfileConfig, cruise_alti
     profile.descent_4_rate_m_s = resolved[3].2;
     profile.landing_air_speed_m_s = ladder.approach_speed_m_s;
     profile.landing_descent_rate_m_s = ladder.approach_rate_m_s;
+}
+
+/// The schedule of a preset with neither a sourced ladder nor a hand-written
+/// schedule: a CAS/Mach climb and descent built from the preset's own
+/// declared numbers, through the same [`apply_ladder`] as the sourced ones.
+///
+/// - Mach hold: the declared cruise Mach, at most MMO at the cruise level.
+/// - CAS: the calibrated airspeed of that Mach at the declared cruise level,
+///   so the CAS/Mach crossover sits at the cruise level and the climb arrives
+///   at the cruise speed; at most the smallest VMO from the field to the
+///   cruise level where the preset declares one, otherwise
+///   at most the design cruise speed VC of the declared VD (CS 25.335(b);
+///   VD is an equivalent airspeed, and a CAS at or below it is an EAS at or
+///   below it), and at most 250 kt below 10,000 ft (14 CFR 91.117(a)).
+/// - Rates: the shared default profile's climb rates (the integrator caps a
+///   rate the rating cannot deliver), descent on the 3-degree path, and the
+///   shared default approach speed and rate.
+///
+/// Nothing here is a per-aircraft number: VMO, MMO, VD, the cruise Mach and
+/// the cruise level are the preset's declared inputs. A no-op for a preset
+/// with a ladder or a hand-written schedule, and for a declared cruise that
+/// does not resolve.
+pub(in crate::presets) fn apply_default_ladder(
+    preset: &AircraftPreset,
+    profile: &mut MissionProfileConfig,
+    cruise_altitude_m: f64,
+) {
+    if preset.speed_schedule_source != SpeedScheduleSource::DefaultRule {
+        return;
+    }
+    let Some(mut ladder) = default_ladder(
+        profile,
+        preset.requirements.cruise_mach,
+        preset.requirements.design_cruise_speed_eas_m_s(),
+        cruise_altitude_m,
+    ) else {
+        return;
+    };
+    // A registered type with no WRAP file climbs at its own maximum-climb rating, not at the
+    // shared 3 / 2.5 m/s: those are guidance statistics of 380,000 lb transports (a 10.9 t
+    // business jet took 58 min to climb under them; Jane's 2008-09 prints 18.5 min to FL410).
+    // The integrator caps a commanded rate the rating cannot deliver, so a rate above any
+    // rating means "climb at the rating".
+    ladder.cas_rate_m_s = RATING_LIMITED_CLIMB_RATE_M_S;
+    ladder.mach_rate_m_s = RATING_LIMITED_CLIMB_RATE_M_S;
+    apply_ladder(&ladder, profile, cruise_altitude_m);
+}
+
+/// The default rule for a brief with no preset: the same CAS/Mach climb and
+/// descent as [`apply_default_ladder`], built from the brief's declared
+/// numbers. The Mach hold is the declared climb Mach where the profile states
+/// one (`climb_mach > 0`), otherwise the cruise Mach, so the climb arrives at
+/// the cruise speed instead of overshooting it at a fixed true airspeed. The
+/// constant-CAS-then-constant-Mach form, the 250 kt limit below 10,000 ft
+/// (14 CFR 91.117(a)) and the VMO / VC-of-VD cap (CS 25.335(b)) are the
+/// default rule documented on `default_ladder`, the same schedule shape as
+/// the sourced OpenAP ladders of the registered presets.
+/// Returns whether a schedule was applied; a cruise that does not resolve
+/// leaves the profile as it was.
+pub(crate) fn apply_default_rule(
+    profile: &mut MissionProfileConfig,
+    cruise_mach: f64,
+    cruise_speed_eas_m_s: f64,
+    cruise_altitude_m: f64,
+) -> bool {
+    let mach_hold = if profile.climb_mach > 0.0 {
+        profile.climb_mach
+    } else {
+        cruise_mach
+    };
+    let Some(ladder) = default_ladder(profile, mach_hold, cruise_speed_eas_m_s, cruise_altitude_m)
+    else {
+        return false;
+    };
+    apply_ladder(&ladder, profile, cruise_altitude_m);
+    true
+}
+
+fn default_ladder(
+    profile: &MissionProfileConfig,
+    cruise_mach: f64,
+    cruise_speed_eas_m_s: f64,
+    cruise_altitude_m: f64,
+) -> Option<Ladder> {
+    // A standard-day cruise level is its own pressure altitude.
+    let mmo = profile.mmo_at_altitude(cruise_altitude_m);
+    let vmo_m_s = profile.min_vmo_cas_m_s_between(0.0, cruise_altitude_m);
+    let mach = if mmo > 0.0 {
+        cruise_mach.min(mmo)
+    } else {
+        cruise_mach
+    };
+    let ambient = alas_atmo::us1976_try_compute_values(cruise_altitude_m, 0.0).ok()?;
+    let tas_m_s = alas_atmo::airspeed::true_from_mach(mach, ambient.temperature_k).ok()?;
+    let cruise_cas_m_s = alas_atmo::airspeed::calibrated_from_true(
+        tas_m_s,
+        ambient.pressure_pa,
+        ambient.temperature_k,
+    )
+    .ok()?;
+    let ceiling_m_s = if vmo_m_s > 0.0 {
+        vmo_m_s
+    } else if cruise_speed_eas_m_s > 0.0 {
+        cruise_speed_eas_m_s
+    } else {
+        f64::INFINITY
+    };
+    let cas_m_s = cruise_cas_m_s.min(ceiling_m_s);
+    if !(mach > 0.0 && cas_m_s.is_finite() && cas_m_s > 0.0) {
+        return None;
+    }
+    let shared = MissionProfileConfig::default();
+    Some(Ladder {
+        proxy_note: "default rule: no sourced ladder; CAS of the declared cruise Mach at the declared cruise level, capped at VMO (or the CS 25.335(b) VC of VD) and MMO",
+        climb_cas_m_s: cas_m_s,
+        climb_mach: mach,
+        initial_climb_rate_m_s: shared.takeoff_climb_rate_m_s,
+        pre_cas_rate_m_s: shared.initial_climb_rate_m_s,
+        cas_rate_m_s: shared.step_climb_1_rate_m_s,
+        mach_rate_m_s: shared.step_climb_2_rate_m_s,
+        descent_cas_m_s: cas_m_s,
+        descent_mach: mach,
+        approach_speed_m_s: shared.landing_air_speed_m_s,
+        approach_rate_m_s: shared.landing_descent_rate_m_s,
+        // The declared single values, unchanged (an altitude schedule stays as declared).
+        mmo: profile.max_operating_mach,
+        vmo_kt: profile.max_operating_cas_m_s / KNOT_M_S,
+        limits_note: "the preset's declared MMO/VMO, if any",
+    })
 }
 
 // A test asserts on values it constructed here directly, so a failed unwrap
@@ -436,9 +577,122 @@ mod tests {
     }
 
     #[test]
-    fn the_hand_written_ladders_are_left_alone() {
-        for name in ["A320-200", "ATR72-600", "A400M"] {
+    fn a_preset_without_a_ladder_climbs_at_its_cruise_cas_within_its_declared_limits() {
+        for name in ["LJ60", "A350-900", "C295"] {
+            let (profile, cruise_m, cruise_mach) = defaults(name);
             assert!(ladder_provenance(name).is_none(), "{name}");
+            assert_eq!(
+                profile.climb_descent_speed_reference,
+                SpeedReference::CalibratedAirspeed,
+                "{name}"
+            );
+            let preset = crate::presets::get(name).unwrap();
+            let mmo = profile.mmo_at_altitude(cruise_m);
+            let mach = if mmo > 0.0 {
+                cruise_mach.min(mmo)
+            } else {
+                cruise_mach
+            };
+            assert_eq!(profile.climb_mach, mach, "{name}");
+            assert_eq!(profile.descent_mach, mach, "{name}");
+            let vmo = profile.min_vmo_cas_m_s_between(0.0, cruise_m);
+            let ceiling = if vmo > 0.0 {
+                vmo
+            } else {
+                preset.requirements.design_cruise_speed_eas_m_s()
+            };
+            let cas = profile.step_climb_2_air_speed_m_s;
+            assert!(
+                cas <= ceiling + 1.0e-9,
+                "{name}: {cas} m/s against {ceiling}"
+            );
+            assert!(profile.initial_climb_air_speed_m_s <= SPEED_LIMIT_CAS_M_S.min(cas));
+            // Below the ceiling the crossover is the cruise level itself.
+            if cas < ceiling {
+                let crossover_m = crate::mission::crossover_altitude_m(cas, mach).unwrap();
+                assert!(
+                    (crossover_m - cruise_m).abs() < 1.0,
+                    "{name}: {crossover_m} m"
+                );
+            }
+        }
+        // The LJ60: the published long-range M0.736 (Jane's
+        // 2008-09 p 791) at 12,500 m is about 216 kt CAS, under its VMO.
+        let (lj60, _, _) = defaults("LJ60");
+        let kcas = lj60.step_climb_2_air_speed_m_s / KNOT_M_S;
+        assert!((210.0..222.0).contains(&kcas), "LJ60 climb {kcas} kt CAS");
+        // The C295: M0.42 at 6,100 m is about 190 kt CAS, under its VMO of
+        // 220 kt there (a turboprop CAS climb, not a jet's 250 kt).
+        let (c295, _, _) = defaults("C295");
+        let kcas = c295.step_climb_2_air_speed_m_s / KNOT_M_S;
+        assert!((180.0..200.0).contains(&kcas), "C295 climb {kcas} kt CAS");
+    }
+
+    #[test]
+    fn an_altitude_vmo_bounds_every_resolved_rung_of_the_default_rule() {
+        for name in ["LJ60", "C295"] {
+            let (profile, cruise_m, _) = defaults(name);
+            assert!(!profile.vmo_schedule.is_empty(), "{name}");
+            let rungs = [
+                (profile.initial_climb_air_speed_m_s, profile.climb_caps()),
+                (profile.step_climb_1_air_speed_m_s, profile.climb_caps()),
+                (profile.step_climb_2_air_speed_m_s, profile.climb_caps()),
+                (profile.descent_1_air_speed_m_s, profile.descent_caps()),
+                (profile.descent_3_air_speed_m_s, profile.descent_caps()),
+            ];
+            for (cas_m_s, caps) in rungs {
+                for altitude_m in (0..=(cruise_m as i32)).step_by(250) {
+                    let ambient = alas_atmo::us1976_compute_values(f64::from(altitude_m), 0.0);
+                    let tas = caps
+                        .true_airspeed_m_s(
+                            SpeedReference::CalibratedAirspeed,
+                            cas_m_s,
+                            ambient.pressure_pa,
+                            ambient.temperature_k,
+                        )
+                        .unwrap();
+                    let cas = alas_atmo::airspeed::calibrated_from_true(
+                        tas,
+                        ambient.pressure_pa,
+                        ambient.temperature_k,
+                    )
+                    .unwrap();
+                    let vmo = profile.vmo_cas_m_s_at_altitude(f64::from(altitude_m));
+                    assert!(
+                        cas <= vmo + 1.0e-6,
+                        "{name}: {cas} m/s CAS at {altitude_m} m against {vmo}"
+                    );
+                }
+            }
+        }
+    }
+
+    /// A preset states its schedule source, and both registries agree in both directions: a
+    /// sourced ladder has a registered ladder and a hand-written schedule a registered applier,
+    /// and a preset with either one registered declares that source.
+    #[test]
+    fn every_preset_states_a_schedule_source_the_registries_agree_with() {
+        for preset in crate::presets::registry() {
+            let source = preset.speed_schedule_source;
+            assert_eq!(
+                ladder_provenance(preset.name).is_some(),
+                source == SpeedScheduleSource::SourcedLadder,
+                "{}: ladder registry against {source:?}",
+                preset.name
+            );
+            assert_eq!(
+                super::super::hand_written_applier(preset.name).is_some(),
+                source == SpeedScheduleSource::HandWritten,
+                "{}: hand-written registry against {source:?}",
+                preset.name
+            );
+        }
+        for name in ["A320-200", "ATR72-600", "A400M"] {
+            let preset = crate::presets::get(name).unwrap();
+            assert_eq!(
+                preset.speed_schedule_source,
+                SpeedScheduleSource::HandWritten
+            );
         }
     }
 

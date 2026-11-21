@@ -47,12 +47,30 @@ pub enum MissionEvidenceTier {
     /// characteristics/airport planning manuals, product factsheets. Direct
     /// from the designer, but free to omit the conditions a figure holds at.
     Manufacturer,
+    /// The declared design requirement of a notional aircraft, or a datum the
+    /// model defines as an output of that requirement. It defines the mission
+    /// rather than measuring a real aeroplane, so it may complete a mission
+    /// only where the preset is the requirement itself or where the datum is
+    /// stated as a model output.
+    DesignRequirement,
+    /// An operating regulation that defines the fuel a flight must carry
+    /// (EASA Air OPS CAT.OP.MPA.150, ICAO Annex 6 Part I 4.3.6). It states a
+    /// rule, not a measurement, so it is admitted for the reserve-fuel datum
+    /// only, where a reference chart prints no reserve basis and the design
+    /// mission applies the regulatory policy.
+    Regulation,
     /// A peer-reviewed third party that independently re-derives a figure
     /// rather than reprinting the manufacturer's.
     PeerReviewedThirdParty,
     /// Trade press and commercial data services: cite them, do not weight
     /// them as primary.
     SecondaryTradePress,
+    /// A published reserve standard (NBAA IFR reserves, MIL-C-5011B) that a
+    /// manufacturer's range is quoted at, where the attribution is a reference
+    /// annual rather than the manufacturer's own document. The standard
+    /// defines the rule, so it is admitted for the reserve-fuel datum only;
+    /// the reference annual carries no other datum.
+    StandardCitedViaReference,
     /// Community-maintained reference. Never sufficient alone; record it only
     /// as a labelled conflict against something stronger.
     Community,
@@ -65,6 +83,9 @@ impl MissionEvidenceTier {
         match self {
             Self::Certified => "certified",
             Self::Manufacturer => "manufacturer",
+            Self::DesignRequirement => "design requirement",
+            Self::Regulation => "regulation",
+            Self::StandardCitedViaReference => "standard cited via reference annual",
             Self::PeerReviewedThirdParty => "peer-reviewed third party",
             Self::SecondaryTradePress => "secondary trade press",
             Self::Community => "community",
@@ -79,7 +100,22 @@ impl MissionEvidenceTier {
     /// tier.
     #[must_use]
     pub const fn admits_promotion(self) -> bool {
-        matches!(self, Self::Certified | Self::Manufacturer)
+        matches!(
+            self,
+            Self::Certified | Self::Manufacturer | Self::DesignRequirement
+        )
+    }
+
+    /// Whether a datum at this tier may contribute to promoting `datum`.
+    ///
+    /// [`Self::Regulation`] and [`Self::StandardCitedViaReference`] define a
+    /// reserve rule and nothing else, so they pass for
+    /// [`MissingDesignMissionDatum::ReserveFuel`] only.
+    #[must_use]
+    pub fn admits_promotion_for(self, datum: MissingDesignMissionDatum) -> bool {
+        self.admits_promotion()
+            || (datum == MissingDesignMissionDatum::ReserveFuel
+                && matches!(self, Self::Regulation | Self::StandardCitedViaReference))
     }
 }
 
@@ -103,7 +139,41 @@ pub struct MissionDatumProvenance {
     pub source: &'static str,
 }
 
+/// The regulation the design mission's reserve fuel follows when the
+/// reference chart prints no reserve basis.
+pub const REGULATORY_RESERVE_SOURCE: &str = "EASA Air OPS, Regulation (EU) No 965/2012 Annex IV CAT.OP.MPA.150 (fuel policy: contingency, alternate and 30 min final reserve fuel); ICAO Annex 6 Part I 4.3.6";
+
 impl MissionDatumProvenance {
+    /// The reserve datum of a preset whose reference chart prints no reserve
+    /// basis: the design mission applies the regulatory policy, and the
+    /// comparison against the charted range carries that reserve-basis
+    /// uncertainty explicitly in `stated_conditions`.
+    #[must_use]
+    pub const fn regulatory_reserve(stated_conditions: &'static str) -> Self {
+        Self::exact(
+            MissionEvidenceTier::Regulation,
+            stated_conditions,
+            REGULATORY_RESERVE_SOURCE,
+        )
+    }
+
+    /// A datum read from a source about the exact registered variant, with
+    /// the conditions the source states it at.
+    #[must_use]
+    pub const fn exact(
+        tier: MissionEvidenceTier,
+        stated_conditions: &'static str,
+        source: &'static str,
+    ) -> Self {
+        Self {
+            tier,
+            stated_conditions: Some(stated_conditions),
+            relative_uncertainty: None,
+            variant_match: MissionEvidenceApplicability::ExactPreset,
+            source,
+        }
+    }
+
     /// Whether this single datum clears every promotion bar.
     ///
     /// All three conditions are independent and all three are required: a
@@ -247,7 +317,7 @@ impl DesignMissionProvenanceSet {
                 let Some(provenance) = provenance else {
                     return Some(MissionPromotionRefusal::DatumAbsent { datum });
                 };
-                if !provenance.tier.admits_promotion() {
+                if !provenance.tier.admits_promotion_for(datum) {
                     return Some(MissionPromotionRefusal::TierTooWeak {
                         datum,
                         tier: provenance.tier,
@@ -430,5 +500,30 @@ mod tests {
             set.weakest_registered_tier(),
             Some(MissionEvidenceTier::Certified)
         );
+    }
+
+    /// A regulation or a standard cited through a reference annual defines a
+    /// reserve rule and nothing else: it closes the reserve datum and is
+    /// refused for the range.
+    #[test]
+    fn reserve_only_tiers_pass_for_the_reserve_datum_alone() {
+        for tier in [
+            MissionEvidenceTier::Regulation,
+            MissionEvidenceTier::StandardCitedViaReference,
+        ] {
+            let datum = MissionDatumProvenance::exact(tier, "stated rule", "standard");
+            let mut set = complete_set();
+            set.reserve_fuel = Some(datum);
+            assert!(set.admits_source_backed_promotion(), "{tier:?} reserve");
+            let mut set = complete_set();
+            set.range = Some(datum);
+            assert_eq!(
+                set.refusals(),
+                vec![MissionPromotionRefusal::TierTooWeak {
+                    datum: MissingDesignMissionDatum::Range,
+                    tier
+                }]
+            );
+        }
     }
 }

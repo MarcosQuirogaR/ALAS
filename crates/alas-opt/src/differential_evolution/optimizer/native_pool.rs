@@ -9,7 +9,7 @@
 //! on which lane ran what or on the lane count. Each lane is a one-thread
 //! Rayon pool, so the vortex-lattice assembly's own parallel loops run
 //! sequentially inside a candidate instead of competing with the other
-//! candidates for the same cores. The coordinator waits outside the lanes,
+//! candidates for the same cores. The dispatching thread waits outside the lanes,
 //! forwarding the caller's borrowed cancellation flag into an owned token the
 //! analyses poll. Once the token is set no lane takes another candidate: a
 //! request costs at most the candidates already in flight, one per lane, and
@@ -31,7 +31,17 @@ use rayon::{ThreadPool, ThreadPoolBuildError, ThreadPoolBuilder};
 use super::{DesignObjective, OptimizationHistory, SearchObjective};
 use crate::cancellation::{CancelScope, EvaluationCancellation};
 
-type CandidateAnswer = (f64, bool, OptimizationHistory);
+/// Signed normalized margins of one candidate's hard residuals.
+type Margins = Vec<(&'static str, f64)>;
+/// `(cost, valid, history, margins, (required engine factor, measured
+/// engine slope))` of one candidate.
+type CandidateAnswer = (
+    f64,
+    bool,
+    OptimizationHistory,
+    Option<Margins>,
+    (Option<f64>, Option<f64>),
+);
 
 /// One lane's report on one candidate: its index, its answer, how long it ran
 /// and whether it finished after the request.
@@ -45,6 +55,14 @@ pub(super) struct NativeObjective<'a> {
     cancellation: EvaluationCancellation,
     telemetry: Option<Vec<(Duration, bool)>>,
     deadline: Option<Instant>,
+    /// The hard-residual margins of every history row, `None` where the
+    /// candidate produced no residual table.
+    margins: Vec<Option<Margins>>,
+    /// The factor on the selected engine every history row requires, `None`
+    /// where no engine was sized.
+    engine_factors: Vec<Option<f64>>,
+    /// The engine slope every history row measured, `None` where none was.
+    engine_slopes: Vec<Option<f64>>,
 }
 
 impl<'a> NativeObjective<'a> {
@@ -89,6 +107,9 @@ impl<'a> NativeObjective<'a> {
             cancellation,
             telemetry: None,
             deadline: None,
+            margins: Vec::new(),
+            engine_factors: Vec::new(),
+            engine_slopes: Vec::new(),
         }
     }
 
@@ -134,6 +155,41 @@ impl SearchObjective for NativeObjective<'_> {
         true
     }
 
+    fn margins(&self, row: usize) -> Option<&[(&'static str, f64)]> {
+        self.margins.get(row)?.as_deref()
+    }
+
+    fn engine_factor(&self, row: usize) -> Option<f64> {
+        self.engine_factors.get(row).copied().flatten()
+    }
+
+    fn set_engine_start(&mut self, factor: Option<f64>) {
+        Arc::make_mut(&mut self.baseline)
+            .sizing_controls
+            .initial_engine_factor = factor;
+    }
+
+    fn engine_slope(&self, row: usize) -> Option<f64> {
+        self.engine_slopes.get(row).copied().flatten()
+    }
+
+    fn set_engine_slope(&mut self, slope: Option<f64>) {
+        Arc::make_mut(&mut self.baseline)
+            .sizing_controls
+            .initial_engine_slope = slope;
+    }
+
+    fn flag_row(&mut self, row: usize, reason: &str) {
+        let history = &mut self.objective.history;
+        if let (Some(valid), Some(recorded)) = (
+            history.valid.get_mut(row),
+            history.reject_reason.get_mut(row),
+        ) {
+            *valid = false;
+            *recorded = reason.to_owned();
+        }
+    }
+
     fn take_concurrent_telemetry(&mut self) -> Option<Vec<(Duration, bool)>> {
         self.telemetry.take()
     }
@@ -160,9 +216,14 @@ impl SearchObjective for NativeObjective<'_> {
         drop(sender);
         let mut answers: Vec<Option<CandidateAnswer>> = (0..designs.len()).map(|_| None).collect();
         let mut telemetry = Vec::new();
+        // Live progress for a supervisor that asked for it (observation only).
+        let progress = crate::search_progress::progress_for(self.parent_cancel);
         for _ in 0..designs.len() {
             match self.receive(&receiver) {
                 Ok((index, answer, elapsed, after_request)) => {
+                    if let Some(progress) = &progress {
+                        progress.finished(&[(answer.0, answer.1)]);
+                    }
                     answers[index] = Some(answer);
                     telemetry.push((elapsed, after_request));
                 }
@@ -180,13 +241,26 @@ impl SearchObjective for NativeObjective<'_> {
             .into_iter()
             .zip(designs)
             .take(count)
-            .map(|(answer, values)| match answer {
-                Some((cost, valid, history)) => {
-                    self.objective.history.append(history);
-                    (cost, valid)
-                }
-                None => {
-                    record_unanalysed(self.objective, values, super::batch::CANCELLED_UNSTARTED)
+            .map(|(answer, values)| {
+                let rows = self.objective.history.n_evaluations();
+                // Rows another caller appended carry no margins.
+                self.margins.resize(rows, None);
+                self.engine_factors.resize(rows, None);
+                self.engine_slopes.resize(rows, None);
+                match answer {
+                    Some((cost, valid, history, margins, (factor, slope))) => {
+                        self.objective.history.append(history);
+                        self.margins.push(margins);
+                        self.engine_factors.push(factor);
+                        self.engine_slopes.push(slope);
+                        (cost, valid)
+                    }
+                    None => {
+                        self.margins.push(None);
+                        self.engine_factors.push(None);
+                        self.engine_slopes.push(None);
+                        record_unanalysed(self.objective, values, super::batch::CANCELLED_UNSTARTED)
+                    }
                 }
             })
             .collect()
@@ -217,9 +291,42 @@ fn run_lane(
 
 fn evaluate_independent(baseline: &DesignObjective, values: &[f64]) -> CandidateAnswer {
     let mut local = baseline.clone();
-    let cost = local.evaluate(values);
+    // `DesignObjective::evaluate` is this call's cost; the residual table
+    // it was assembled from gives the margins.
+    let (cost, assessment) = crate::mdo::evaluate_mission_sized_with_assessment(&mut local, values);
     let valid = local.history.valid.last().copied().unwrap_or(false) && cost.is_finite();
-    (cost, valid, local.history)
+    // The rating the sized engine's thrust rows require (the limit of its
+    // `engine_thrust_match` row) over the selected engine's rating: the
+    // factor the candidate requires. A held engine has no such row.
+    let selected = baseline.config.geometry.engine.scaling_rating();
+    let factor = assessment
+        .as_ref()
+        .and_then(|assessment| {
+            let row = assessment
+                .residuals
+                .iter()
+                .find(|row| row.id == "engine_thrust_match")?;
+            Some(row.limit / selected?)
+        })
+        .filter(|factor| factor.is_finite() && *factor > 0.0);
+    let slope = assessment
+        .as_ref()
+        .and_then(|assessment| assessment.sized.engine_slope)
+        .filter(|slope| slope.is_finite());
+    let margins = assessment.map(|assessment| {
+        assessment
+            .residuals
+            .iter()
+            .filter(|residual| residual.role == crate::mdo::ResidualRole::Constraint)
+            .map(|residual| {
+                // A limit of zero (a sign requirement) is scaled by the
+                // value itself, so the margin stays of order one.
+                let scale = residual.limit.abs().max(residual.actual.abs()).max(1.0e-9);
+                (residual.id, residual.raw_residual / scale)
+            })
+            .collect()
+    });
+    (cost, valid, local.history, margins, (factor, slope))
 }
 
 /// One history row for a requested design that produced no analysis.
@@ -263,7 +370,7 @@ mod tests {
                 scope.spawn(move || {
                     run_lane(points, next, token, Some(deadline), &sender, |_| {
                         std::thread::sleep(Duration::from_millis(30));
-                        (0.0, false, OptimizationHistory::new())
+                        (0.0, false, OptimizationHistory::new(), None, (None, None))
                     });
                 });
             }

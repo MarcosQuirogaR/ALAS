@@ -30,6 +30,7 @@ pub mod mdo;
 pub mod objective;
 mod search;
 mod search_methods;
+pub mod search_progress;
 pub mod transport_planform;
 
 /// Opt-in per-stage evaluation timers (`ALAS_EVAL_PROFILE=1`).
@@ -40,13 +41,15 @@ pub use cancellation::{
     StopReason,
 };
 pub use differential_evolution::{
-    BaselineComparison, PreGateReasons, ReportingBaseline, SizingWorkSummary, StageRejections,
-    StageSummary, WorkDistribution, SEARCH_SCOPE,
+    BaselineComparison, LadderPhase, PreGateReasons, ReportingBaseline, SizingWorkSummary,
+    StageRejections, StageSummary, WorkDistribution, SEARCH_SCOPE,
 };
+pub use differential_evolution::{ConvergenceIndicator, SETTLED_WINDOW_GAIN};
 pub use differential_evolution::{
     DeliveredAcceptance, DesignOptimizer, DiagnosticSearchOutcome, NoFeasibleDesign,
     OptimizationError, OptimizationResult, ParetoCandidate, RestorationDiagnostics,
-    SearchDiagnostics, CANCELLED, REPORTING_FIDELITY_FALLBACK, REPORTING_FIDELITY_REJECTED,
+    SearchDiagnostics, ViolatedConstraint, CANCELLED, REGISTERED_DESIGN_RETAINED,
+    REPORTING_FIDELITY_FALLBACK, REPORTING_FIDELITY_REJECTED, START_DESIGN_RETAINED,
 };
 pub use envelope::{
     assess_model_cg_envelope, assess_model_cg_envelope_with_ledger, check_cg_envelope,
@@ -69,7 +72,9 @@ pub use mdo::{
 pub use objective::{
     wing_fuel_volume_m3, wing_fuel_volume_m3_reference_compatibility, DesignObjective,
 };
-pub use search::fidelity_pairs::{compare_fidelities, CandidateScore, FidelityPair};
+pub use search::fidelity_pairs::{
+    anchored_box, compare_fidelities, score_designs, CandidateScore, FidelityPair,
+};
 pub use search::screening::ScreeningFidelity;
 pub use search::work_cap::{work_cap, WORK_CAP_MULTIPLE};
 pub use search_methods::product_de::{

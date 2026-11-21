@@ -162,6 +162,12 @@ pub struct Conditions {
     pub surrogate_domain: Vec<SurrogateDomainStatus>,
 
     // propulsion
+    /// Whether the propulsion deck answered this control point outside its
+    /// evidence domain (thrust and fuel flow extrapolated). Read after the
+    /// flight from [`crate::Segment::propulsion_validity`] by the pipeline,
+    /// `false` until then and on any point the deck answered in domain. It
+    /// changes no force and no fuel flow; it only labels them.
+    pub propulsion_extrapolated: Vec<bool>,
     /// Throttle: one of the two unknowns.
     pub throttle: Vec<f64>,
     /// The whole `thrust.outputs` bag at each point.
@@ -217,6 +223,7 @@ impl Conditions {
             wing_lift_coefficient: vec![Vec::new(); points],
             wing_induced_drag_coefficient: vec![Vec::new(); points],
             surrogate_domain: vec![SurrogateDomainStatus::default(); points],
+            propulsion_extrapolated: vec![false; points],
             throttle: vec![0.0; points],
             thrust: Vec::new(),
             total_mass_kg: vec![0.0; points],

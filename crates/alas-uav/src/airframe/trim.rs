@@ -3,6 +3,10 @@
 
 //! Longitudinal trim, elevator authority and tail sizing to static margin.
 //!
+//! Status: a design-study library exercised by the airframe tests; the UAV
+//! generator takes fixed tail geometry and `estimate_trim_setup`, so the sizing
+//! routines here are not called by the product pipeline.
+//!
 //! Trim about the CG (nose-up positive, body axes x aft):
 //!
 //! ```text

@@ -27,11 +27,14 @@
 pub mod clmax;
 pub mod constraints;
 pub mod cruise_climb;
+pub mod en_route;
 pub mod envelope;
 pub mod failed_engine_drag;
 pub mod field;
+pub mod fin_aspect_ratio;
 pub mod improved_climb;
 pub mod landing;
+pub mod obstacle;
 pub mod second_segment;
 pub mod segments;
 pub mod speeds;
@@ -54,10 +57,11 @@ pub use field::{
     compute_field_performance_for_propulsion, compute_propeller_landing_distance, FieldInputs,
     FieldPropulsion, VREF_OVER_VS1G,
 };
-pub use improved_climb::{select_improved_v2, ImprovedClimbSelection, MAX_IMPROVED_V2_OVER_VSR};
+pub use improved_climb::{select_improved_v2, ImprovedClimbSelection};
 pub use landing::{
-    jet_landing_deceleration_g, landing_runway_share, ws_landing_field_limit, ws_landing_limit,
-    ws_landing_limit_for, ws_landing_segment_limit, LandingSegmentModel, JET_DRY_LANDING_SHARE,
+    dry_landing_share_for, jet_landing_deceleration_g, landing_runway_share,
+    landing_segment_model_for, ws_landing_field_limit, ws_landing_limit, ws_landing_limit_for,
+    ws_landing_segment_limit, LandingSegmentModel, JET_DRY_LANDING_SHARE,
     WET_RUNWAY_LANDING_FACTOR,
 };
 pub use second_segment::{
@@ -73,7 +77,11 @@ pub use speeds::{
     compute_field_performance, compute_field_performance_at_masses, compute_v_speeds,
     compute_v_speeds_at_masses, FieldPerformance, VSpeeds,
 };
-pub use takeoff_field::{takeoff_field, TakeoffField, TakeoffFieldInputs};
+pub use takeoff_field::{
+    field_breakdown, ground_effect_beta, ground_effect_sigma, takeoff_field, vmu_margins,
+    FieldBreakdown, FieldPolar, GroundEffect, LiftOffSchedule, RunwayAirframe, TakeoffField,
+    TakeoffFieldInputs, WingRise, ROTATION_PITCH_RATE_DEG_S,
+};
 
 use alas_atmo::Atmosphere;
 

@@ -32,8 +32,8 @@ const SEA_LEVEL_DENSITY_KG_M3: f64 = alas_atmo::SEA_LEVEL_DENSITY_ICAO_KG_M3;
 /// the 14 CFR 25.149 regulatory ceiling (`V_MC <= 1.13 V_SR`) applied to
 /// every aircraft, not a declared aircraft-specific `V_MCA`, and letting
 /// that generic placeholder raise `V_R` would credit tail authority the
-/// aircraft may not have. No configuration field carries a sourced
-/// aircraft-specific `V_MCA`.
+/// aircraft may not have. The computed `V_MCA` floors the speed instead, per
+/// state ([`rotation_vmc_floor_m_s`], [`rotation_lift_coefficient_at`]).
 #[must_use]
 pub(super) fn vr_over_vs(performance: &PerformanceConfig) -> f64 {
     performance.vr_vstall_factor
@@ -44,6 +44,41 @@ pub(super) fn vr_over_vs(performance: &PerformanceConfig) -> f64 {
 #[must_use]
 pub(super) fn rotation_lift_coefficient(performance: &PerformanceConfig) -> f64 {
     performance.cl_max_to / vr_over_vs(performance).powi(2).max(1.0e-6)
+}
+
+/// The minimum-control floor of the rotation speed, m/s: `vr_vmc_factor`
+/// (1.05, CS 25.107(e)(1)(ii)) times the computed sea-level `V_MCA` the CG
+/// gate's configuration carries
+/// (`landing_gear.rotation_minimum_control_speed_m_s`); `None` without one.
+/// `V_MC` is a speed, not a stall ratio: it does not fall with weight, so it
+/// raises `V_R` at the light states.
+#[must_use]
+pub(super) fn rotation_vmc_floor_m_s(config: &AlasConfig) -> Option<f64> {
+    config
+        .landing_gear
+        .rotation_minimum_control_speed_m_s
+        .filter(|speed| speed.is_finite() && *speed > 0.0)
+        .map(|speed| config.performance.vr_vmc_factor * speed)
+        .filter(|speed| speed.is_finite() && *speed > 0.0)
+}
+
+/// The weight-support lift coefficient at this weight's own `V_R =
+/// max(V_R,stall, floor)`: `cl_r_stall` (the stall branch, weight-free) or,
+/// when the floor is faster, `2 W / (rho S V_floor^2)`.
+#[must_use]
+pub(super) fn rotation_lift_coefficient_at(
+    weight_n: f64,
+    wing_area_m2: f64,
+    cl_r_stall: f64,
+    floor_m_s: Option<f64>,
+) -> f64 {
+    let stall_branch_m_s = rotation_speed_m_s(weight_n, wing_area_m2, cl_r_stall);
+    match floor_m_s {
+        Some(floor) if floor > stall_branch_m_s => {
+            2.0 * weight_n / (SEA_LEVEL_DENSITY_KG_M3 * wing_area_m2 * floor * floor)
+        }
+        _ => cl_r_stall,
+    }
 }
 
 /// Rotation speed at sea level, standard day, m/s, from `W = q_R S CL_R`.
@@ -82,6 +117,7 @@ pub(super) struct RotationThrustModel {
     thrust_line_height_m: f64,
     wing_area_m2: f64,
     cl_r: f64,
+    vr_floor_m_s: Option<f64>,
     gravity_m_s2: f64,
 }
 
@@ -112,6 +148,7 @@ impl RotationThrustModel {
             thrust_line_height_m,
             wing_area_m2: plane.wings.first().map_or(f64::NAN, |w| w.reference_area()),
             cl_r,
+            vr_floor_m_s: rotation_vmc_floor_m_s(config),
             gravity_m_s2: requirements.gravity_m_s2,
         }
     }
@@ -122,7 +159,8 @@ impl RotationThrustModel {
             return RotationThrust::NOT_EVALUATED;
         };
         let weight_n = mass_kg * self.gravity_m_s2;
-        let vr_m_s = rotation_speed_m_s(weight_n, self.wing_area_m2, self.cl_r);
+        let vr_m_s = rotation_speed_m_s(weight_n, self.wing_area_m2, self.cl_r)
+            .max(self.vr_floor_m_s.unwrap_or(0.0));
         if !vr_m_s.is_finite() || weight_n <= 0.0 || !self.thrust_line_height_m.is_finite() {
             return RotationThrust::NOT_EVALUATED;
         }
@@ -161,6 +199,21 @@ mod tests {
             ..PerformanceConfig::default()
         };
         assert!((vr_over_vs(&performance) - 1.08).abs() < 1.0e-12);
+    }
+
+    /// The minimum-control floor raises the light weights' rotation speed and
+    /// leaves the heavy ones on the stall branch.
+    #[test]
+    fn the_minimum_control_floor_lowers_the_rotation_lift_only_where_it_is_faster() {
+        let (area_m2, cl_r) = (61.0, 1.79);
+        let heavy = 23_000.0 * 9.80665;
+        let light = 14_000.0 * 9.80665;
+        let floor = rotation_speed_m_s(0.5 * (heavy + light), area_m2, cl_r);
+        assert_eq!(rotation_lift_coefficient_at(heavy, area_m2, cl_r, Some(floor)), cl_r);
+        let floored = rotation_lift_coefficient_at(light, area_m2, cl_r, Some(floor));
+        assert!(floored < cl_r);
+        assert!((rotation_speed_m_s(light, area_m2, floored) - floor).abs() < 1.0e-9);
+        assert_eq!(rotation_lift_coefficient_at(light, area_m2, cl_r, None), cl_r);
     }
 
     #[test]

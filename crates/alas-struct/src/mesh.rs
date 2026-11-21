@@ -45,7 +45,9 @@
 mod boxed;
 mod build;
 mod cards;
+mod cover_panels;
 mod elements;
+mod engine_cg;
 mod fuel;
 mod health;
 mod load_introduction;
@@ -53,15 +55,19 @@ mod mass;
 mod nodes;
 mod product_caps;
 mod rivets;
+mod root_region;
 mod section_closure;
 mod write;
 
 pub use build::{build_wing_mesh_bdf, build_wing_mesh_bdf_product};
 pub use cards::{
-    Cbar, Conm2, Deck, Grid, Mat1, Param, ParamValue, Pbarl, Pshell, Rbe3, Shell, Spc1,
+    Cbar, Conm2, CoverStrip, Deck, Grid, Mat1, Param, ParamValue, Pbarl, Pshell, Rbe3, Shell, Spc1,
 };
+pub use cover_panels::{stress_along, CoverPanel, CoverPanelCap, CoverPanelShell, ShellStressAxes};
 pub use fuel::{add_distributed_fuel_mass, FuelMassError};
-pub use load_introduction::{assessed_peak, LOAD_INTRODUCTION_LAYERS, MIN_ASSESSED_SHARE};
+pub use load_introduction::{
+    assessed_peak, LOAD_INTRODUCTION_DEPTHS, LOAD_INTRODUCTION_LAYERS, MIN_ASSESSED_SHARE,
+};
 
 /// The shell warping coefficient above which a panel is reported as badly
 /// non-planar: `WARPING_THRESHOLD`.

@@ -821,7 +821,18 @@ def main() -> int:
     if commit != PINNED_AVIARY_COMMIT:
         raise RuntimeError(f"Aviary source is {commit}, expected pinned {PINNED_AVIARY_COMMIT}")
     dirty = run_git(aviary_source, "status", "--porcelain")
+    if dirty:
+        raise RuntimeError(f"Aviary source tree has uncommitted changes, so the pinned commit does not describe it:\n{dirty}")
+    import aviary
+
+    aviary_file = Path(aviary.__file__).resolve()
+    if not aviary_file.is_relative_to(aviary_source):
+        raise RuntimeError(
+            f"the imported aviary package ({aviary_file}) is not inside --aviary-source ({aviary_source}); "
+            "run the audit with that source tree installed in the interpreter"
+        )
     source_manifest = {
+        "imported_aviary_file": str(aviary_file),
         "source": str(aviary_source),
         "commit": commit,
         "commit_check": "exact",
@@ -860,6 +871,8 @@ def main() -> int:
 
         runtime.update({
             "aviary_version": getattr(aviary, "__version__", "unknown"),
+            "aviary_file": str(aviary_file),
+            "aviary_source_commit": commit,
             "openmdao_version": getattr(openmdao, "__version__", "unknown"),
             "numpy_version": getattr(numpy, "__version__", "unknown"),
         })
@@ -924,6 +937,7 @@ def main() -> int:
     baseline_path = args.baseline_alas_raw.resolve()
     holdout = build_holdout_artifact(baseline_path, None, record, raw_hash)
     write_json(out / "holdout.json", holdout)
+    by_component = {row["component"]: row for row in rows}
     verdict = {
         "status": "full_openmdao_mass_group" if execution["status"] == "success" else execution["status"],
         "full_openmdao_execution": execution["status"] == "success",
@@ -949,34 +963,17 @@ def main() -> int:
         "aviary_operating_mass_kg": operating_mass_row["aviary_kg"] if operating_mass_row else None,
         "reference_parity": "OEW reference is an independent anchor; no force-fit or aircraft-specific correction applied",
         "holdout_policy": "A320-214 WV017 is pinned as the unchanged ALAS deck; corrections are not applied to make Aviary agree",
-        "known_scope_gaps": [
-            "Aviary pinned branch has no separate inlet/nozzle mass outputs; ALAS retains zero rows separately.",
-            "Aviary pod mass is an installation bookkeeping diagnostic and is not added to nacelle structure a second time.",
-            "Full OpenMDAO success means the pinned mass group executed; it is equation implementation parity, not physical aircraft validation.",
-        ],
-        "adapter_findings": {
-            "cargo_containers": {
-                "alas_policy": "discrete ceiling; zero declared cargo yields 0 kg",
-                "aviary_policy": "smooth sin_int4 surrogate; zero cargo yields 27.334621794196618 kg",
-                "production_change_recommended": False,
-            },
-            "nacelle": {
-                "alas_scope": "installed total in structure",
-                "aviary_scope": "per-engine-type output multiplied by two for comparison",
-                "pod_mass_double_counted": False,
-            },
-            "engine_mass_candidate": {
-                "candidate_kg_per_engine": 2454.8,
-                "current_kg_per_engine": 2226.6894032481673,
-                "status": "conditional; starter/reverser/accessory overlap unresolved",
-                "promoted_in_run": False,
-            },
-            "empty_mass_margin": {
-                "alas_policy": "no serialized independent row; declared zero",
-                "aviary_output_kg": 0.0,
-                "scaler": 0.0,
-            },
+        "adapter_rows": {
+            name: {
+                key: by_component[name][key]
+                for key in ("alas_kg", "aviary_kg", "aviary_each_kg", "difference_kg", "difference_class")
+            }
+            for name in ("cargo_containers", "nacelle_each", "engine_core_each", "empty_mass_margin")
+            if name in by_component
         },
+        "alas_baseline_engine_mass_kg_per_engine": record["production"]["groups"]["airframe"][
+            "propulsion"
+        ]["baseline_engine_mass_kg"],
         "source_manifest": "source_manifest.json",
         "runtime": "runtime.json",
         "input_deck": "input_deck.json",

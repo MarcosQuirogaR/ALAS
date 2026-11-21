@@ -21,9 +21,7 @@ use crate::mdo::types::{CandidateFailure, SizingControls};
 /// What is bucketed under `mass_coordinates` here is the engine binding
 /// beside the mass analysis, for the reason stated at each call site.
 pub(super) fn mass_coordinates_failure() -> CandidateFailure {
-    CandidateFailure {
-        reason: "mass_coordinates",
-    }
+    CandidateFailure::new("mass_coordinates")
 }
 
 /// Build, size and trim one candidate design vector.

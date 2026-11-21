@@ -12,6 +12,7 @@ use crate::{
 
 mod dc10;
 mod outer_shape;
+mod wing_stations;
 
 pub use dc10::dc_10;
 
@@ -20,6 +21,7 @@ pub fn b787_9() -> AircraftPreset {
     AircraftPreset {
         name: "B787-9",
         display_name: "Boeing 787-9 Dreamliner",
+        class: crate::presets::AircraftClass::Transport,
         description: "Long-range composite widebody twin with GEnx-1B engines.",
         identity: AircraftVariantIdentity {
             model: "787-9",
@@ -36,22 +38,51 @@ pub fn b787_9() -> AircraftPreset {
             mrw_kg: Some(255_372.0),
             mtow_kg: Some(254_692.0),
             mlw_kg: Some(192_776.0),
+            mlw_secondary_source: None,
             mzfw_kg: Some(181_436.0),
             oew_kg: crate::oew_reference::preset_reference_oew_kg("B787-9"),
             usable_fuel_volume_l: Some(126_429.0),
             usable_fuel_mass_kg: Some(101_522.0),
             fuel_density_kg_l: Some(101_522.0 / 126_429.0),
-            reference_wing_area_m2: Some(360.464),
+            // Boeing (Wimpress) reference area 3,870 ft^2 = 359.535 m^2 (source in reference_wing below).
+            reference_wing_area_m2: Some(359.535),
             planning_seats: Some(290),
             design_point: Some(crate::PayloadRangeDesignPoint {
+                long_range_cruise: Some("Boeing 787 Airplane Characteristics for Airport Planning Rev Q section 3.2.2: payload/range at long-range cruise; the section prints no Mach for the 787-9 chart"),
+                cruise: None,
                 range_nmi: 5_300.0,
                 payload_kg: Some(52_586.0),
                 source: "Boeing 787 Airplane Characteristics for Airport Planning Rev Q section 3.2.2 (payload/range long-range cruise, 787-9 typical engines): maximum-zero-fuel-weight corner read as 5,300 nmi (+-60 nmi); payload is the preset MZFW minus its reference OEW; reserves not stated",
+                reserve: None,
             }),
             certified_max_seats: Some(420),
             certified_exit_layout: Some(crate::presets::B787_9_EXIT_LAYOUT),
             planning_cabin: Some(crate::presets::B787_9_PLANNING_CABIN),
             design_mission_evidence: crate::DesignMissionEvidence::Unverified,
+            // Design mission, one provenance row per datum: the MZFW corner of the ACAP long-range
+            // cruise chart at the 561,500 lb MTOW. 'Typical mission rules' prints no reserve terms.
+            mission_provenance: crate::DesignMissionProvenanceSet {
+                range: Some(crate::MissionDatumProvenance {
+                    tier: crate::MissionEvidenceTier::Manufacturer,
+                    stated_conditions: Some("Mach 0.85 cruise, step climb at 2,000 ft increments, standard day, zero wind, typical mission rules (reserve terms not printed): the 561,500 lb MTOW line meets the 400,000 lb MZFW line at about 5,300 nmi"),
+                    relative_uncertainty: Some(60.0 / 5_300.0),
+                    variant_match: crate::MissionEvidenceApplicability::ExactPreset,
+                    source: "Boeing 787 Airplane Characteristics for Airport Planning D6-58333 Rev Q (Oct 2025), section 3.2.2 p.3-3 (787-9, typical engines)",
+                }),
+                payload: Some(crate::MissionDatumProvenance::exact(
+                    crate::MissionEvidenceTier::Manufacturer,
+                    "maximum zero-fuel weight corner: the preset MZFW less its reference OEW, 52,586 kg",
+                    "Boeing 787 Airplane Characteristics for Airport Planning D6-58333 Rev Q, sections 2.1.2 and 3.2.2",
+                )),
+                profile: Some(crate::MissionDatumProvenance::exact(
+                    crate::MissionEvidenceTier::Manufacturer,
+                    "standard day, zero wind, Mach 0.85 cruise with step climb at 2,000 ft increments; no climb or descent schedule is printed, so the model's configured schedules apply to those phases",
+                    "Boeing 787 Airplane Characteristics for Airport Planning D6-58333 Rev Q, section 3.2.2 p.3-3 chart notes",
+                )),
+                reserve_fuel: Some(crate::MissionDatumProvenance::regulatory_reserve(
+                    "reference chart prints no reserve basis ('typical mission rules' only); the design mission applies the regulatory policy: contingency, alternate and 30 min final reserve fuel, at the alternate distance and holding height of the preset's configured fuel policy. The range comparison carries this reserve-basis uncertainty",
+                )),
+            },
             partial_design_mission_evidence: vec![PartialDesignMissionEvidence {
                 kind: PartialMissionEvidenceKind::PayloadRangeChart,
                 range: None,
@@ -72,7 +103,9 @@ pub fn b787_9() -> AircraftPreset {
             }],
             cg_evidence: CgEnvelopeEvidence::AfmRequired,
             planning_cg_envelope: None,
+            usable_cg_range: None,
             aft_cg_nose_load: Some(crate::presets::gear_load::B787_9),
+            horizontal_tail_ice_protection: None,
             sources: vec![
                 "Boeing 787 ACAP D6-58333 Rev Q, October 2025, section 2",
                 "Boeing 787 ARFF composite-content diagram, p.3: https://www.boeing.com/content/dam/boeing/v2/airports/arff/787_composite_arff_data_2025.pdf",
@@ -80,12 +113,20 @@ pub fn b787_9() -> AircraftPreset {
                 "NASA/TP-20210023843, December 2022, Table I",
                 "Boeing 787 ACAP D6-58333 Rev L, December 2015, p.2-3 (typical OEW only)",
             ],
+            operating_speed_limits: None,
+            high_speed_protection: Some(
+                crate::presets::operating_limits::B787_HIGH_SPEED_PROTECTION,
+            ),
         },
         engine_name: "GEnx-1B",
         n_engines: 2,
         landing_gear: LandingGearConfig {
             n_nlg_wheels: 2,
             n_mlg_struts: 2,
+            // Main and nose tires: 787 ACAP sec. 7.2 prints 54 x 21.0 R23 38PR (main; rated load
+            // is the 30 ply lower bound, Goodyear 2022 Sec. 4F) and 40 x 16.0 R16 26PR (nose).
+            mlg_tire: "54x21.0R23/38PR".to_owned(),
+            nlg_tire: "40x16.0R16/26PR".to_owned(),
             wheels_per_mlg_strut: 4,
             // Holds the 9.80 m track on the 5.77 m body width.
             track_diameter_factor: 9.8 / 5.77,
@@ -99,32 +140,42 @@ pub fn b787_9() -> AircraftPreset {
             // D6-58333 Rev Q section 2.3.2 (PDF p.25, ground clearances):
             // fuselage bottom ahead of the wing (D) 1.75 m minimum.
             fuselage_ground_clearance_m: Some(1.75),
-            takeoff_stabilizer_nose_up_deg: Some(crate::landing_gear::TRANSPORT_THS_TAKEOFF_NOSE_UP_DEG),
+            trimmable_stabilizer: true,
+            // FAA TCDS T00021SE (Rev 40, p.24, 787-9 "Control Surface Movements"): horizontal
+            // stabiliser +4.25/-12.75 deg, elevators +26.93/-32.54 deg, positive = trailing edge
+            // down (nose-up stop 12.75, up travel 32.54).
+            stabilizer_nose_up_travel_deg: Some(12.75),
+            elevator_up_travel_deg: Some(32.54),
             // Tail-strike attitude 9.7 deg for the 787-9 "with wheels on the runway and
             // landing gear struts extended" (UK AAIB Bulletin 11/2020, AAIB-26410,
             // VH-ZND, quoting Boeing); the compressed-strut value was not found. The
             // generic tailcone loft understates the geometric tail-down angle, so
             // this is the floor.
             min_tip_back_deg: 9.7,
+            // The same published 9.7 deg is the tail-scrape requirement; it is a
+            // struts-extended attitude, so it is compared with the gear-extended
+            // model attitude.
+            required_rotation_angle_deg: 9.7,
+            required_rotation_basis: crate::landing_gear::RotationAngleBasis::PublishedGearExtended,
             ..LandingGearConfig::default()
         },
         design_vector: DesignVector {
             span_m: 60.12,
-            // Step B (w2), D6-58333 Rev Q 2.2.2 p.22 plan view (native raster, 1 px = 0.06 m, +-0.1 m):
-            // the drawn trailing edge runs from x = 33.44 m at the centreline with 4.2 deg inboard sweep to the
-            // kink at y = 11.11 m (x = 34.25 m); with the leading edge held at the root datum below these are the
-            // chords that put both edges on the drawing. Root chord was 12.6 m (round 2), break chord 6.554 m.
-            // The gross planform area is now about 373 m2 against the published 360.464 m2: the drawn planform is
-            // wider inboard than the area the published reference closes (geometry vs reference area, DECISIONS).
-            root_chord_m: 13.3663, // step B w2; was 12.6
-            break_chord_m: 6.4692, // step B w2; was 6.55428 (no longer closes 360.464 m2, see above)
-            tip_chord_m: 1.6, // chord the straight edges reach at the tip; no rake any more (extreme chord 1.6 m, published 2.67 m: the drawn trailing edge kicks aft over the last 2.5 m, not representable with straight edges)
-            // The 32.2 deg quoted for the 787-9 (32 deg in NASA/TP-20210023843,
-            // December 2022, Table I) is the outboard quarter-chord sweep:
-            // the outboard taper converts it to this leading-edge angle, and
-            // the straight 34.7 deg leading edge of the D6-58333 Rev Q
-            // section 2.2.2 plan view confirms it.
-            sweep_deg: 34.74104381154634, // geometry round 2 (wing lane): the published c/4 sweep re-converted through the closed kink chord (was 34.7140083405483)
+            // Boeing 787 ACAP D6-58333 Rev Q 2.2.2 plan view, y measured from the drawn centreline:
+            // trailing edge 33.71 m at the side of body (y = 2.885 m) and 34.27 m at the kink y = 11.11 m. The gross drawn
+            // planform stays above the 359.535 m2 reference (geometry vs reference area).
+            root_chord_m: 13.62, // datum only: the side-of-body chord is pinned below (side_of_body_chord_ratio)
+            break_chord_m: 6.75, // leading edge 27.52 m, trailing edge 34.27 m on the drawn rounded kink
+            tip_chord_m: 2.67, // printed extreme tip: leading edge 40.69 m, trailing edge 43.36 m; the breaks below follow the drawn edge
+            // Leading-edge sweep of the D6-58333 Rev Q section 2.2.2 plan view, which prints no angle: the
+            // straight leading edge from the drawn kink (27.52 m at y = 11.11 m) to the rake start reads
+            // 34.74-34.82 deg on both wings, 34.63-34.73 deg from y = 5 m (scale +-0.05 deg), and it is
+            // fitted as one 34.74 deg line through root_datum_x_m below. The 32.2 deg
+            // outboard quarter-chord sweep quoted for the 787-9 (32 deg in NASA/TP-20210023843, December
+            // 2022, Table I) is not a manufacturer value and is not used: through the drawn 6.75 m kink and
+            // 2.67 m tip chords it converts to a 34.35 deg leading edge, 0.4 deg forward of the drawn one.
+            // This leading edge builds a 32.60 deg outboard quarter chord.
+            sweep_deg: 34.74, // Rev Q 2.2.2 plan view; was 34.74104381154634, the conversion of 32.2 deg c/4 through the earlier kink chord
             tip_twist_deg: -2.0,
             wing_x_shift_m: -1.5,
             tail_scale: 1.0,
@@ -137,26 +188,40 @@ pub fn b787_9() -> AircraftPreset {
             airfoil_camber_scale: 1.0,
             ..DesignVector::default()
         },
+        speed_schedule_source: crate::presets::SpeedScheduleSource::SourcedLadder,
         airfoil_class_source: "Design-era declaration: the 787-9 (787 EIS 2011, -9 2014) wing is of the supercritical-section generation; manufacturer section data are not public. Drawn with NASA SC(2)-0612 root and SC(2)-0410 tip sections (Harris, NASA TP-2969, 1990).",
         geometry: GeometryConfig {
             wing: WingConfig {
-                // Published reference (freeze 2026-10-12): S 360.464 (787-9 gross area); MAC EASA.IM.A.115 item 16; LEMAC D6-58333 7.4.2 statics.
-                reference_wing: crate::ReferenceWingConfig::published(360.464, Some(6.27126), Some(27.784)),
-                // Quarter-MAC: D6-58333 7.4.2 %MAC/main-gear-load two-point statics
-                // give LEMAC 27.784 m aft of nose (TCDS MAC 6.271 m; model MAC 20% longer).
-                // Step B w2: NOT moved to the drawn 21.33 m (the Rev Q plan view puts the whole leading edge 0.24 m, B,
-                // forward of the model): the LEMAC statics pin is a published-derived value that the CG and gear loads
-                // rest on and beats a drawing trace (DECISIONS); with the new chords the model quarter-MAC lies 0.06 m
-                // ahead of the round-2 station, inside the +-0.1 m reading error. Open owner decision.
-                root_datum_x_m: 21.5737, // geometry round 2 (wing lane): was 21.552; keeps the published quarter-MAC station with the swept-back tip, the closed kink chord and the re-converted sweep
-                root_z_m: -1.5210, // geometry round 2 (wing lane); was -1.8
-                break_z_m: -0.0866, // geometry round 2 (wing lane); was -0.2
-                tip_z_m: 2.65, // step B w2: front view tip upper edge 2.72 m vs model 2.45 m (B, -0.27 m, the drawn tip curls up over the last 1.2 m); was 2.3813 (round 2), 2.5 earlier
+                // Published reference: S 359.535 = 3,870 ft^2, the Boeing (Wimpress) reference area of the PIANO
+                // Boeing 787-8 (Dreamliner) sample analysis (Lissys, 2005; one reference wing for -8/-9: the TCDS MAC is the same).
+                // No Boeing, EASA or FAA document prints a 787 wing area (ACAP D6-58331 2006, D6-58333 Rev O and Rev Q, TCDS
+                // IM.A.115 Issue 30); the earlier 360.464 (3,880 ft^2) had no traceable source (-0.26 %).
+                // MAC EASA.IM.A.115 Issue 30 item 16 (787-9 section, p. 37); LEMAC D6-58333 Rev Q 7.4.2 statics.
+                reference_wing: crate::ReferenceWingConfig::published(359.535, Some(6.27126), Some(27.784)),
+                // Rev Q 2.2.2 plan view: one straight 34.74 deg leading edge from y = 5 m to the rake start (27.52 m at the kink, its
+                // extension 40.66 m at y = 30.06 m, against the printed 40.69 m tip leading edge). The published LEMAC 27.784 m
+                // (7.4.2 statics) stays in reference_wing.
+                root_datum_x_m: 21.314,
+                root_z_m: -1.371, // datum of the height line: the panels inside the body are flat at the side-of-body height
+                break_z_m: 0.063, // Rev Q 2.2.2 front view, upper and lower lines at y = 11 m, registered on the drawn fuselage section
+                tip_z_m: 2.62, // Rev Q 2.2.2 front view, upper line at the tip
                 root_twist_deg: 3.5,
                 break_twist_deg: 1.5,
                 break_span_fraction: 0.35,
-                // Step B w2: drawn trailing-edge kink at y = 11.11 m of the 30.06 m semispan (B), was 0.353_771_245_388_011_8 (y = 10.63 m).
+                // Rev Q 2.2.2: the printed body width 18 ft 11 in (5.77 m) puts the side of body at y = 2.885 m of the
+                // 30.06 m semispan; the plan view draws the wing meeting the body side line there (2.91 m at the drawing
+                // scale, +-0.03 m). Was the default 0.10 (y 3.006 m) with a derived chord.
+                side_of_body_span_fraction: Some(2.885 / 30.06),
+                // Same plan view: the drawn inboard trailing edge (straight from y = 3.5 m to the rounded kink, both wings,
+                // three fit windows) reaches 33.71 m (+-0.03 m) at y = 2.885 m. On the built 34.74 deg leading edge
+                // (21.815 m there) that is a chord of 11.895 m over the 13.62 m root datum. The drawn leading edge lies
+                // 0.10 m aft of the built one at the side of body (drawn chord 11.79 m); the trailing edge is matched.
+                side_of_body_chord_ratio: Some(0.8734),
+                // Rev Q 2.2.2 plan view: trailing-edge kink at y = 11.11 m of the 30.06 m semispan.
                 kink_span_fraction: Some(0.3696),
+                // Rev Q 2.2.2 plan view: outboard trailing edge straight (22.9 deg) from the kink to y = 22.5 m.
+                te_break_span_fraction: Some(0.75),
+                te_break_chord_offset_m: Some(-0.85),
                 outboard_sweep_decrement_deg: 2.0,
                 // Boeing publishes no 787 sections. The comparable public
                 // M 0.85 widebody wing, the NASA Common Research Model
@@ -170,8 +235,8 @@ pub fn b787_9() -> AircraftPreset {
                 // its 9.5 %.
                 root_airfoil: "sc20612".to_owned(),
                 tip_airfoil: "sc20410".to_owned(),
-                airfoil_class: crate::AirfoilClass::Supercritical,
-                                // Thickness profile (geometry round 2): the NASA Common Research Model t/c 0.154 at the
+                airfoil_class: crate::AirfoilClass::SupercriticalAdvanced,
+                                // Thickness profile: the NASA Common Research Model t/c 0.154 at the
                 // centreline, 0.138 at the side of body, 0.105 at the yehudi break and 0.095 at the tip
                 // (Vassberg, DeHaan, Rivers and Wahls, AIAA 2008-6919, Table 2) is the public transport-wing
                 // distribution; the multipliers below act on the root-kink-tip section blend above.
@@ -181,11 +246,11 @@ pub fn b787_9() -> AircraftPreset {
                         thickness_scale: 1.2838, // t/c 0.1200 -> 0.1540
                     },
                     crate::WingThicknessStation {
-                        span_fraction: 0.1000,
+                        span_fraction: 2.885 / 30.06, // on the side of body (was 0.1000)
                         thickness_scale: 1.1504, // t/c 0.1200 -> 0.1380
                     },
                     crate::WingThicknessStation {
-                        span_fraction: 0.3696, // step B w2: follows the kink (was 0.3538)
+                        span_fraction: 0.3696, // follows the kink (was 0.3538)
                         thickness_scale: 0.8753, // t/c 0.1200 -> 0.1050
                     },
                     crate::WingThicknessStation {
@@ -193,91 +258,133 @@ pub fn b787_9() -> AircraftPreset {
                         thickness_scale: 0.9539, // t/c 0.0996 -> 0.0950
                     },
                 ],
-                // Step B w2: the swept-back tip of round 2 (extreme chord 1.01 m, rake start 0.908) is removed. The Rev Q plan
-                // view draws ONE straight leading edge to the extreme tip (x = 40.69 m published, 133 ft 6 in), so the rake put
-                // the model tip leading edge 0.82 m aft of it; the drawn trailing edge kicks aft to 43.36 m, which straight
-                // edges cannot follow (tip chord 1.6 m against 2.67 m published, still wrong). Was tip_rake_tip_chord_m
-                // Some(1.01), tip_rake_start_span_fraction Some(0.9080).
-                wing_profile_interpolation: crate::WingProfileInterpolation::C2Spline, // step B w2 (loft-wing report); was Linear
-                // Spanwise dihedral (geometry round 2): leading-edge heights at interior stations fitted to the upper edge of the
-                // manufacturer front view (symmetrised drawing aligned on the fuselage crown, same measurement on the model).
+                // Raked tip, Rev Q 2.2.2 plan view: the leading edge leaves the straight line at y = 27.0 m and
+                // curves to a tip chord of about 0.5 m; the trailing edge curves aft to the printed 43.36 m from y = 22.5 m. tip_chord_m
+                // stays the chord of the straight edges, so taper, sweep and the reference wing do not see the rake. Offsets are from
+                // the lines through the kink, the break, the rake start and the tip.
+                tip_rake_tip_chord_m: Some(0.50),
+                tip_rake_start_span_fraction: Some(0.898),
+                edge_stations: vec![
+                    crate::WingEdgeStation { span_fraction: 0.336, le_offset_m: 0.00, te_offset_m: -0.10 }, // rounded kink
+                    crate::WingEdgeStation { span_fraction: 0.406, le_offset_m: 0.00, te_offset_m: -0.13 }, // rounded kink
+                    crate::WingEdgeStation { span_fraction: 0.857, le_offset_m: 0.00, te_offset_m: -0.73 },
+                    crate::WingEdgeStation { span_fraction: 0.898, le_offset_m: 0.00, te_offset_m: -1.01 },
+                    crate::WingEdgeStation { span_fraction: 0.918, le_offset_m: -0.24, te_offset_m: -0.98 },
+                    crate::WingEdgeStation { span_fraction: 0.945, le_offset_m: -0.40, te_offset_m: -0.84 },
+                    crate::WingEdgeStation { span_fraction: 0.965, le_offset_m: -0.41, te_offset_m: -0.62 },
+                    crate::WingEdgeStation { span_fraction: 0.985, le_offset_m: -0.33, te_offset_m: -0.33 },
+                ],
+                wing_profile_interpolation: crate::WingProfileInterpolation::C2Spline,
+                // Rev Q 2.2.2 front view, upper and lower lines, both halves averaged, registered on the drawn fuselage section.
                 dihedral_stations: vec![
+                    // Moved from 0.1000 (z -0.87) to the side of body: 0.004 semispans off that loft
+                    // section it would mesh a sliver panel. Same front-view line: -0.87 - 0.004025 x
+                    // (0.353 / 0.1) = -0.8842 m.
                     crate::WingDihedralStation {
-                        span_fraction: 0.1000,
-                        z_m: -1.0687,
+                        span_fraction: 2.885 / 30.06,
+                        z_m: -0.8842,
                         flight_rise_m: None,
                     },
                     crate::WingDihedralStation {
                         span_fraction: 0.2000,
-                        z_m: -0.6374,
+                        z_m: -0.517,
                         flight_rise_m: None,
                     },
                     crate::WingDihedralStation {
                         span_fraction: 0.3000,
-                        z_m: -0.2780,
+                        z_m: -0.168,
                         flight_rise_m: None,
                     },
                     crate::WingDihedralStation {
                         span_fraction: 0.5000,
-                        z_m: 0.4787,
+                        z_m: 0.609,
                         flight_rise_m: None,
                     },
                     crate::WingDihedralStation {
                         span_fraction: 0.6500,
-                        z_m: 1.0222,
+                        z_m: 1.172,
                         flight_rise_m: None,
                     },
                     crate::WingDihedralStation {
                         span_fraction: 0.8000,
-                        z_m: 1.6221,
+                        z_m: 1.70,
+                        flight_rise_m: None,
+                    },
+                    // Moved from 0.9000 (z 2.08) to the rake start 0.898: a station 0.002 semispans from
+                    // the rake-start section meshed a sliver panel the lattice cannot condition. Same
+                    // front-view line: 2.08 - 0.002 x (2.08 - 1.70) / 0.1 = 2.0724 m.
+                    crate::WingDihedralStation {
+                        span_fraction: 0.898,
+                        z_m: 2.0724,
                         flight_rise_m: None,
                     },
                 ],
                 ..WingConfig::default()
             },
             empennage: EmpennageConfig {
-                tail_airfoil: "naca0012".to_owned(),
-                // D6-58333 Rev Q section 2.2.2 (PDF p.22): tailplane span
-                // 65 ft 0 in (19.81 m) with its tip trailing edge at the
-                // 206 ft 1 in (62.81 m) overall length; this root station
-                // puts it there. Chords and sweep are not dimensioned.
-                // Apex moved 2.76 m forward with the tip leading edge held (61.0 m,
-                // tip trailing edge at the 62.81 m length): the Rev Q plan view
-                // draws a 40 deg leading edge, the former apex gave 31 deg.
-                // Step B w2 (Rev Q 2.2.2 plan view, B): centreline apex 52.78 m (62.00 - 9.22); was 9.75 (52.25 m). Replaces
-                // the pass-2 reading 54.9 m, which was the body-junction x.
-                // geo/tailfit 2026-10-11: tailplane straight-edge fit to the drawing, centreline values; was off 9.22, chords 6.27/1.65, tip (8.38, 9.905, 1.190)
-                hstab_offset_from_tail_m: 9.56,
-                hstab_z_m: 0.570, // geometry round 2 (wing lane): upper surface at the root matched to the front view; was 1.0
-                hstab_root_chord_m: 6.57, // step B w2: centreline trailing edge 59.05 m (B); was 6.5
-                hstab_tip_chord_m: 1.75, // step B w2: tip trailing edge on the published 62.81 m (B); was 1.8
+                // Drawn tip edges read off the Boeing 787 Airplane Characteristics for Airport Planning tail views; analysis stays on
+                // the trapezoid.
+                // Rev Q 2.2.2 plan and side: the tip trailing corner reaches the printed 206 ft 1 in (62.81 m); the edge lies 0.05 m aft of the straight line outboard of the root.
+                hstab_edge_stations: vec![
+                    crate::TailEdgeStation { span_fraction: 0.30, le_offset_m: 0.0, te_offset_m: 0.02165 },
+                    crate::TailEdgeStation { span_fraction: 0.97, le_offset_m: 0.0, te_offset_m: 0.07 },
+                    crate::TailEdgeStation { span_fraction: 0.98, le_offset_m: 0.15, te_offset_m: 0.09 },
+                    crate::TailEdgeStation { span_fraction: 0.99, le_offset_m: 0.3, te_offset_m: 0.12 },
+                    crate::TailEdgeStation { span_fraction: 0.995, le_offset_m: 0.5, te_offset_m: 0.15 },
+                    crate::TailEdgeStation { span_fraction: 1.0, le_offset_m: 1.0, te_offset_m: 0.19 },
+                ],
+                vstab_edge_stations: vec![
+                    crate::TailEdgeStation {
+                        span_fraction: 0.92,
+                        le_offset_m: 0.0,
+                        te_offset_m: 0.0,
+                    },
+                    crate::TailEdgeStation {
+                        span_fraction: 0.97,
+                        le_offset_m: 0.1,
+                        te_offset_m: 0.0,
+                    },
+                    crate::TailEdgeStation {
+                        span_fraction: 0.99,
+                        le_offset_m: 0.3,
+                        te_offset_m: 0.0,
+                    },
+                    crate::TailEdgeStation {
+                        span_fraction: 1.0,
+                        le_offset_m: 0.46,
+                        te_offset_m: 0.0,
+                    },
+                ],
+                // Rev Q 2.2.2 front view over the side chords: fin t/c 0.08-0.10, mean 0.09.
+                vstab_airfoil: Some("naca0009".to_owned()),
+                tail_airfoil: "naca0010".to_owned(), // Rev Q 2.2.2 front view: tailplane depth 0.46 m at y 3.2 m; 12 % drew both 0.1 m too deep
+                // Rev Q 2.2.2: tailplane span 65 ft 0 in (19.81 m), tip trailing edge at the 206 ft 1 in (62.81 m) overall length,
+                // root leading edge 52.61 m (62.00 - 9.39). Chords and sweep are not dimensioned: plan-view measures. The straight
+                // leading edge to the tip runs at 40.9 deg; the drawn one reads 40.35 deg and lies within about 0.1 m of it over the exposed span.
+                hstab_offset_from_tail_m: 9.39,
+                hstab_z_m: 0.57, // Rev Q front view: both surfaces of the 10 % section, 0.10 m above the 0.47 m of the 12 % upper surface
+                hstab_root_chord_m: 6.32,
+                // Rev Q plan: 1.43 m is the chord of the straight edges at y = 9.905 m. Lines fitted through the drawn edges over
+                // 0.35-0.90 of the semispan give 1.49-1.52 m there, because the drawn trailing edge lies aft of the straight one by
+                // the hstab_edge_stations offsets (0.02 m at 0.30 to 0.07 m at 0.97, 0.072 m on the line extended to the tip):
+                // 1.43 + 0.07 = 1.50 m on the same fitted lines.
+                hstab_tip_chord_m: 1.43,
                 hstab_root_twist_deg: -2.0,
                 hstab_tip_twist_deg: -2.0,
-                hstab_tip_le_m: (8.47, 9.905, 1.190), // tailplane dihedral matched to the front view; was z 0.8; step B w2: tip leading edge 61.16 m, sweep 40.2 deg (B), was dx 8.76 (41.5 deg)
-                // No fin station is dimensioned: the offset holds the fin root
-                // leading edge at 50.81 m on the 62.00 m body. The root line
-                // is the crown of the 5.94 m body, the tip at the 16.81 m
-                // minimum fin-top height of section 2.3.2 (PDF p.25, N), and
-                // the builder carries the edges on down to the tail cone
-                // under the root. Chords are not dimensioned.
-                // Fitted to the Rev Q side view (digitised, 16.5 px/m): crown
-                // trailing edge 58.2 m and tip trailing edge 61.6 m on the 62.0 m
-                // body, so the former 52.31 m root leading edge sat about
-                // 1.5 m too far aft (tip trailing edge past the tail cone).
-                // geo/tailfit 2026-10-11: fin straight-edge fit to the drawing at the root line (rms 0.037/0.026 m); was off 10.99, chords 7.5/2.4, tip (8.60, 0.0, 8.55)
-                vstab_offset_from_tail_m: 11.22, // step B w2: crown leading edge 51.01 m (62.00 - 10.99), 0.2 m aft of the old 50.81 m (B); was 11.19
+                // Rev Q plan: straight leading edge 52.61 + 8.58 = 61.19 m at the tip (drawn line 61.16-61.21 m); with the 1.43 m chord
+                // and the 0.19 m tip offset the trailing corner sits at the printed 206 ft 1 in (62.81 m). Height between the front
+                // view and the side view, which differ by 0.2 m at the tip.
+                hstab_tip_le_m: (8.58, 9.905, 1.40),
+                // Rev Q 2.2.2 side view: no fin station is dimensioned; root line at the crown of the 5.94 m body, top 11.62 m.
+                vstab_offset_from_tail_m: 10.79, // Rev Q side view: fin edges read 0.43 m aft; tip trailing point at the printed 62.00 m
                 vstab_z_m: 3.17,
-                vstab_root_chord_m: 7.46,
+                vstab_root_chord_m: 7.52, // Rev Q side view, trailing edge at the root line
                 vstab_tip_chord_m: 2.28,
-                // Step B w2: fin top 8.55 m above the crown (11.72 m in the body frame; B) and 45.1 deg leading-edge sweep
-                // (dx 8.60 m); the published 17.02 m is measured to the drawing's ground line, which falls 0.79 deg toward
-                // the tail, and is consistent with 8.55 m. Was (8.5, 0.0, 9.12), 43.0 deg.
-                vstab_tip_le_m: (8.53, 0.0, 8.55),
-                // Step B w2: dorsal fillet drawn in the Rev Q side view (B): the leading edge leaves the crown at x = 49.3 m and
-                // joins the straight leading edge at x = 52.3 m, z = 4.4 m (1.23 m above the crown); not in the aerodynamics.
-                // geo/tailfit 2026-10-11: dorsal re-fitted to the drawn LE; was x Some(49.3), height Some(1.23)
-                vstab_dorsal_x_start_m: Some(50.1),
-                vstab_dorsal_height_m: Some(0.97),
+                // 45.1 deg leading edge; the drawn rounded leading-edge top corner is not expressible with straight edges.
+                vstab_tip_le_m: (8.53, 0.0, 8.45),
+                // Rev Q side view: dorsal fillet leaves the crown at x 49.75 m, joins the fin LE about z 4.48 m.
+                vstab_dorsal_length_m: Some(1.46),
+                vstab_dorsal_height_m: Some(1.31),
                 ..EmpennageConfig::default()
             },
             fuselage: FuselageConfig {
@@ -298,7 +405,7 @@ pub fn b787_9() -> AircraftPreset {
                 ..outer_shape::b787_9()
             },
             engine: EngineConfig {
-                // Final merge: engines.json carries a V2 nacelle set (nacelle_shape_v2) that agrees with the measured length, diameter and inlet; was Legacy.
+                // engines.json carries a V2 nacelle set (nacelle_shape_v2) that agrees with the measured length, diameter and inlet.
                 nacelle_model: crate::NacelleModel::V2,
                 // Boeing 787 ACAP D6-58333 Rev Q, October 2025, section
                 // 2.2.2 (PDF p.22, General Dimensions: Model 787-9) plan
@@ -306,16 +413,12 @@ pub fn b787_9() -> AircraftPreset {
                 // airplane centreline, nacelle inlet face 68 ft 3 in
                 // (20.80 m) aft of the nose tip.
                 spanwise_positions_m: vec![9.91, -9.91],
-                // Section 2.3.2 (PDF p.25): GEnx nacelle low point (F) 0.69 m
-                // above the ground under the 1.70 m nacelle radius.
-                // Low point held with the drawn 1.83 m radius (nacelle lane: -1.821 ->
-                // -1.691), plus the wing lane's -0.137 m for the moved wing leading edge.
-                z_m: -1.7153, // step B w2: +0.113 m so that the nacelle low point stays at the published 0.69 m clearance (z -3.83 m) with the 3.83 m maximum diameter and the C2 wing heights; was -1.828 for D 3.66 m
-                // Puts that inlet face 20.80 m aft of the nose: the 20.052 m
-                // root leading edge (root datum plus wing shift) plus the
-                // 6.866 m the planform leading edge runs aft by y = 9.91 m,
-                // less this offset.
-                inlet_x_offset_m: 6.1466, // geometry round 2 (wing lane): was 6.118; the wing datum and sweep moved by +0.0286 m at the engine, this keeps the inlet station
+                // Offset from the wing height at the engine station. Rev Q 2.2.2: nacelle centre z -2.03 m, low point -3.95 m in the
+                // body frame (side view -3.99 m, front view -3.94 m), 1.16 m below the keel; section 2.3.2 prints the 0.69 m
+                // ground clearance (F) against 1.75 m at the keel (D), consistent on the drawn sloping ground line.
+                z_m: -1.96,
+                // Puts that inlet face 20.80 m aft of the nose: the leading edge runs to 26.69 m at y = 9.91 m.
+                inlet_x_offset_m: 5.888,
                 ..EngineConfig::default()
             },
             ..GeometryConfig::default()
@@ -333,6 +436,8 @@ pub fn b787_9() -> AircraftPreset {
             // Maximum zero-fuel weight 181.4 t less an operating empty weight
             // of 128.8 t.
             max_structural_payload_kg: 52_586.0,
+            // Superseded at registration: the profile declares the TCDS VMO/MMO, so VD is the
+            // CS 25.335(b) value on VC = VMO (`crate::design_speeds`, `registry`).
             dive_speed_m_s: 210.0,
             ..DesignRequirements::default()
         },

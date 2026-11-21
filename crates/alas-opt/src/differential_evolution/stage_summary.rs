@@ -293,6 +293,18 @@ pub struct BaselineComparison {
     pub winner_block_fuel_kg: Option<f64>,
 }
 
+/// One phase of the reporting-fidelity ladder and its wall time, in the
+/// order the ladder ran them: what a reader needs to see where the delivery
+/// time went without rerunning under a profiler.
+#[derive(Debug, Clone, PartialEq, Serialize, Deserialize)]
+pub struct LadderPhase {
+    /// The phase: `replay_screen`, `verification`, `hold_to_nominal`,
+    /// `ranking`, `engine_start_guard`, `baseline` or `worst_violation`.
+    pub phase: String,
+    /// Wall-clock seconds the phase took.
+    pub wall_time_s: f64,
+}
+
 /// The unmodified baseline re-evaluated at reporting fidelity beside the
 /// delivered design: the same-model delta a release gate reads.
 #[derive(Debug, Clone, PartialEq, Serialize, Deserialize)]

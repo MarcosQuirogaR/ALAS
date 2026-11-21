@@ -50,17 +50,27 @@ pub(crate) fn evaluate(
     admits: Option<&crate::search_methods::Admission<'_>>,
     evaluate_batch: &mut EvaluateBatch<'_>,
 ) -> Vec<ScoredPoint> {
-    // A replay may end inside a generation. The pre-gate is owned by the
-    // evaluator, so its last prefix is dispatched one point at a time until
-    // the recorded number of admitted scores has been reached. Trailing
-    // pre-gate rejects belong to that same prefix and require no analysis.
+    // A replay may end inside a generation: its last prefix holds the
+    // recorded number of admitted scores. Trailing pre-gate rejects belong to
+    // that same prefix and require no analysis. With the admission check the
+    // prefix is known before any analysis and goes out as one batch, so a
+    // stage's last generation runs on every lane rather than one candidate
+    // at a time (the same points, in the same order, with the same scores).
+    // Without it the evaluator's pre-gate decides, one point at a time.
     let evaluated = if remaining >= points.len() {
         evaluate_batch(points)
+    } else if let Some(admits) = admits {
+        let end = admitted_prefix(points, remaining, admits);
+        if end == 0 {
+            Vec::new()
+        } else {
+            evaluate_batch(&points[..end])
+        }
     } else {
         let mut scores = Vec::new();
         let mut admitted = 0;
         for point in points {
-            if admitted >= remaining && admits.is_none_or(|admits| admits(point)) {
+            if admitted >= remaining {
                 break;
             }
             let answer = evaluate_batch(std::slice::from_ref(point));
@@ -75,6 +85,26 @@ pub(crate) fn evaluate(
     let mut scores: Vec<ScoredPoint> = evaluated.into_iter().map(ScoredPoint::sanitized).collect();
     scores.truncate(points.len());
     scores
+}
+
+/// Length of the prefix of `points` that holds `remaining` admitted points
+/// and the pre-gate rejects that follow the last of them, up to the next
+/// admitted point.
+fn admitted_prefix(
+    points: &[Vec<f64>],
+    remaining: usize,
+    admits: &crate::search_methods::Admission<'_>,
+) -> usize {
+    let mut admitted = 0;
+    for (index, point) in points.iter().enumerate() {
+        if admits(point) {
+            if admitted >= remaining {
+                return index;
+            }
+            admitted += 1;
+        }
+    }
+    points.len()
 }
 
 pub(super) fn prefix_termination(evaluations: usize, stop_after: usize) -> Termination {

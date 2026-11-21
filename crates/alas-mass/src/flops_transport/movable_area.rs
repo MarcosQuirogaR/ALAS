@@ -15,8 +15,8 @@ use alas_geom::aircraft::wing::Wing;
 
 use super::product::main_wing;
 
-/// The share of a wing's projected planform area that lies between two
-/// spanwise control-surface stations.
+/// The projected planform area of both semispans of a wing between two spanwise
+/// control-surface stations, m^2.
 ///
 /// [`alas_config::ControlSurfacesConfig`] declares each run as "a fraction of
 /// wing semi-span from the root", and the semi-span it means is the
@@ -34,15 +34,12 @@ use super::product::main_wing;
 /// against the semi-span and push every declared station inboard.
 ///
 /// On a tapered or cranked planform the band's area is not the span fraction
-/// times the reference area: it is the chord integral over the band divided
-/// by the chord integral over the whole wing. Taking the ratio, rather than
-/// an absolute integral, keeps the wing's own authoritative area convention
-/// and makes the full-span band return exactly 1.
+/// times the wing's: it is the chord integral over the band.
 ///
 /// Returns `None` (never a clamped or silently reordered answer) when
 /// `start` or `end` is non-finite, outside `0..=1`, or out of order, or when
 /// the planform spans no projected `y`.
-pub(super) fn chord_band_fraction(wing: &Wing, start: f64, end: f64) -> Option<f64> {
+pub(super) fn chord_band_area(wing: &Wing, start: f64, end: f64) -> Option<f64> {
     if !start.is_finite() || !end.is_finite() {
         return None;
     }
@@ -89,7 +86,8 @@ pub(super) fn chord_band_fraction(wing: &Wing, start: f64, end: f64) -> Option<f
         let (c0, c1) = (pair[0].chord, pair[1].chord);
         banded += span * (c0 * (t_hi - t_lo) + (c1 - c0) * (t_hi * t_hi - t_lo * t_lo) / 2.0);
     }
-    Some(banded / full)
+    let sides = if wing.symmetric { 2.0 } else { 1.0 };
+    Some(sides * banded)
 }
 
 /// FLOPS `SFLAP` for the built aircraft, m^2, under the **wing-only**
@@ -116,10 +114,10 @@ pub(super) fn chord_band_fraction(wing: &Wing, start: f64, end: f64) -> Option<f
 /// establish it as physically correct:
 ///
 /// * The memorandum's only published default is the ratio `FLAPR = 0.333` of
-///   the *wing* reference area, and the registered presets' wing movables
-///   integrate to 0.362-0.377 of wing area against 0.446-0.505 once elevator
-///   and rudder are added. A default ratio is a starting value, not evidence
-///   about what the fitted coefficients absorbed.
+///   the *wing* reference area, and the registered aircraft's declared wing
+///   movables are 0.23-0.42 of wing area (A320 0.368, 747-400 0.327). A default
+///   ratio is a starting value, not evidence about what the fitted coefficients
+///   absorbed.
 /// * Equation 35's `W2` is a wing structural term, so tail area sits oddly in
 ///   it, but equation 97's `WSC` is an all-aircraft flight-controls group,
 ///   where tail movables plainly belong, and FLOPS feeds both from the same
@@ -134,34 +132,34 @@ pub(super) fn chord_band_fraction(wing: &Wing, start: f64, end: f64) -> Option<f
 ///
 /// One `SFLAP` feeds both the surface-controls group (equation 97) and the
 /// wing shear and control-surface material `W2` (equation 35), as FLOPS does.
-/// Each movable's area is its chord fraction times the projected planform
-/// area of the band its declared span stations cut from the wing, integrated
-/// over the real chord distribution rather than assumed proportional to span.
-/// A non-finite or out-of-range chord fraction or span station is rejected,
-/// not clamped.
+/// Each movable's area is its chord fraction times the projected planform area
+/// of the band its declared span stations cut from the box
+/// ([`Wing::carried_box`]), integrated over the real chord distribution rather
+/// than assumed proportional to span. It is a physical area: it reads neither
+/// the reference area, which is a quoted number with the blend bodies in it, nor
+/// the blends, and no movable sits in either. A non-finite or out-of-range chord
+/// fraction or span station is rejected, not clamped.
 pub(super) fn movable_surface_area(
     plane: &Airplane,
     controls: &ControlSurfacesConfig,
 ) -> Option<f64> {
     let wing = main_wing(plane)?;
-    // FLOPS receives planform areas on the aircraft reference plane. Keep
-    // control-surface fractions tied to the wing's projected reference area;
-    // the unfolded area would add a dihedral-dependent bias.
-    let area = wing.reference_area();
-    if !area.is_finite() || area <= 0.0 {
-        return None;
-    }
+    // No movable surface sits in the body. FLOPS receives planform areas on the
+    // aircraft reference plane: the bands are projected, as the unfolded area would
+    // add a dihedral-dependent bias.
+    let wing = wing.carried_box();
+    let wing: &Wing = &wing;
     let mut movable = 0.0;
     for (chord, start, end) in [
+        (
+            controls.inboard_aileron_chord_fraction,
+            controls.inboard_aileron_span_start_frac,
+            controls.inboard_aileron_span_end_frac,
+        ),
         (
             controls.slat_chord_fraction,
             controls.slat_span_start_frac,
             controls.slat_span_end_frac,
-        ),
-        (
-            controls.flap_chord_fraction,
-            controls.flap_span_start_frac,
-            controls.flap_span_end_frac,
         ),
         (
             controls.aileron_chord_fraction,
@@ -177,7 +175,22 @@ pub(super) fn movable_surface_area(
         if !chord.is_finite() || !(0.0..=1.0).contains(&chord) {
             return None;
         }
-        movable += area * chord * chord_band_fraction(wing, start, end)?;
+        movable += chord * chord_band_area(wing, start, end)?;
+    }
+    // The flap bands exclude the inboard aileron between two flaps, which the
+    // aileron term above already counts.
+    let flap_chord = controls.flap_chord_fraction;
+    if !flap_chord.is_finite() || !(0.0..=1.0).contains(&flap_chord) {
+        return None;
+    }
+    // The whole flap run is checked, as the bands of a reversed run are empty.
+    chord_band_area(
+        wing,
+        controls.flap_span_start_frac,
+        controls.flap_span_end_frac,
+    )?;
+    for (start, end) in controls.flap_bands() {
+        movable += flap_chord * chord_band_area(wing, start, end)?;
     }
     (movable.is_finite() && movable > 0.0).then_some(movable)
 }
@@ -199,6 +212,11 @@ mod tests {
             name: "Main Wing".to_owned(),
             symmetric: true,
             reference: None,
+            planform_datum: None,
+            dynamic_pressure_ratio: 1.0,
+            reference_xsecs: None,
+            tip_te_flare_m: 0.0,
+            twist_about_pitch_axis: false,
             xsecs: vec![
                 WingXSec::new([0.0, 0.0, 0.0], 6.0, 0.0, airfoil.clone()),
                 WingXSec::new([2.0, 9.0, 0.0], 4.5, 0.0, airfoil.clone()),
@@ -220,6 +238,11 @@ mod tests {
             name: "Main Wing".to_owned(),
             symmetric: true,
             reference: None,
+            planform_datum: None,
+            dynamic_pressure_ratio: 1.0,
+            reference_xsecs: None,
+            tip_te_flare_m: 0.0,
+            twist_about_pitch_axis: false,
             xsecs: vec![
                 WingXSec::new([0.0, 0.0, 0.0], 6.0, 0.0, airfoil.clone()),
                 WingXSec::new([2.0, 9.0, 0.0], 4.5, 0.0, airfoil.clone()),
@@ -228,6 +251,40 @@ mod tests {
                 WingXSec::new([8.6, 30.05, rise + 2.5], 0.9, 0.0, airfoil),
             ],
         }
+    }
+
+    /// The share of the whole wing a band holds, for the integration tests below.
+    fn chord_band_fraction(wing: &Wing, start: f64, end: f64) -> Option<f64> {
+        Some(chord_band_area(wing, start, end)? / chord_band_area(wing, 0.0, 1.0)?)
+    }
+
+    /// A movable is a physical area: the number the reference area is quoted at does
+    /// not reach it.
+    #[test]
+    fn the_movables_read_the_bands_of_the_box_and_not_the_reference_area() {
+        let preset = alas_config::presets::registry()
+            .iter()
+            .find(|preset| preset.name == "B747-400")
+            .unwrap_or_else(|| panic!("registered preset"));
+        let plane = AircraftBuilder::new(Some(preset.geometry.clone()))
+            .build(Some(&preset.design_vector), false)
+            .unwrap_or_else(|error| panic!("preset builds: {error}"));
+        let controls = ControlSurfacesConfig::default();
+        let kept = movable_surface_area(&plane, &controls)
+            .unwrap_or_else(|| panic!("the preset has movables"));
+
+        let mut quoted = plane.clone();
+        let reference = quoted.wings[0]
+            .reference
+            .as_mut()
+            .unwrap_or_else(|| panic!("the preset has a reference wing"));
+        reference.area_m2 *= 1.02;
+        let moved = movable_surface_area(&quoted, &controls)
+            .unwrap_or_else(|| panic!("the preset has movables"));
+        assert!(
+            (moved - kept).abs() < 1e-12 * kept,
+            "{moved} against {kept}"
+        );
     }
 
     #[test]
@@ -350,6 +407,7 @@ mod tests {
         // Reconstruct the same sum term by term, so the equation-97 and
         // equation-35 input is auditable.
         let wing = main_wing(&plane).unwrap_or_else(|| panic!("main wing"));
+        let carried = wing.carried_box();
         let expected: f64 = [
             (
                 controls.slat_chord_fraction,
@@ -374,9 +432,7 @@ mod tests {
         ]
         .into_iter()
         .map(|(chord, start, end)| {
-            wing.reference_area()
-                * chord
-                * chord_band_fraction(wing, start, end).unwrap_or_else(|| panic!("integrates"))
+            chord * chord_band_area(&carried, start, end).unwrap_or_else(|| panic!("integrates"))
         })
         .sum();
         assert!(
@@ -391,9 +447,8 @@ mod tests {
             .iter()
             .find(|surface| surface.name == "Horizontal Stabilizer")
             .unwrap_or_else(|| panic!("horizontal stabilizer"));
-        let elevator = hstab.reference_area()
-            * controls.elevator_chord_fraction
-            * chord_band_fraction(
+        let elevator = controls.elevator_chord_fraction
+            * chord_band_area(
                 hstab,
                 controls.elevator_span_start_frac,
                 controls.elevator_span_end_frac,
@@ -409,5 +464,59 @@ mod tests {
             (0.20..=0.45).contains(&ratio),
             "SFLAP is {ratio:.3} of the wing area, outside the FLAPR neighbourhood"
         );
+    }
+
+    /// `SFLAP` of the declared runs on the built wing against the printed totals
+    /// (Jane's All the World's Aircraft 2008-09, AREAS blocks), and the one rule on
+    /// all 14: no aircraft is short of or above a physical movable share.
+    // The areas are printed data in m^2; 3.14 m^2 is one of them, not pi.
+    #[allow(clippy::approx_constant)]
+    #[test]
+    fn the_declared_runs_reproduce_the_printed_movable_totals() {
+        let area = |name: &str| {
+            let preset = alas_config::presets::get(name).unwrap();
+            let config =
+                alas_config::AlasConfig::from_value(&serde_json::json!({"preset": name})).unwrap();
+            let plane = AircraftBuilder::new(Some(config.geometry.clone()))
+                .build(Some(&preset.design_vector), true)
+                .unwrap();
+            (
+                movable_surface_area(&plane, &config.control_surfaces).unwrap(),
+                plane.s_ref,
+            )
+        };
+        for (name, printed) in [
+            ("A320-200", 2.74 + 21.10 + 12.64 + 8.64),
+            ("A400M", 2.0 * (3.94 + 20.24 + 6.90)),
+            ("ATR72-600", 3.75 + 12.28 + 1.34),
+            ("B747-400", 20.90 + 78.69 + 43.85 + 12.78 + 15.46),
+            ("C295", 3.14 + 10.87),
+        ] {
+            let (built, _) = area(name);
+            assert!(
+                (built / printed - 1.0).abs() < 0.03,
+                "{name} {built} {printed}"
+            );
+        }
+        for name in [
+            "A320-200",
+            "A340-300",
+            "A380-800",
+            "A350-900",
+            "B747-400",
+            "B787-9",
+            "DC-10",
+            "A220-300",
+            "C919",
+            "E195-E2",
+            "ATR72-600",
+            "A400M",
+            "LJ60",
+            "C295",
+        ] {
+            let (built, s_ref) = area(name);
+            let share = built / s_ref;
+            assert!((0.20..0.45).contains(&share), "{name} {share}");
+        }
     }
 }

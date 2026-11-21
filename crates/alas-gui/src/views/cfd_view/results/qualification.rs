@@ -110,7 +110,7 @@ fn show_qualification_findings(qualification: &alas_cfd::MeshQualification, ui: 
             egui::Grid::new("airfoil_cfd_mesh_check_grid")
                 .num_columns(5)
                 .striped(true)
-                .spacing([10.0, 3.0])
+                .spacing(crate::theme::space::GRID_SPACING)
                 .show(ui, |ui| {
                     for heading in ["Check", "Status", "Declared limit", "Measured", "Evidence"] {
                         ui.label(RichText::new(tr(heading)).strong().small());

@@ -184,6 +184,9 @@ pub fn download_files(
                 &connect_timeout,
                 "--max-time",
                 &timeout,
+                // Upper bound on one asset; `min_bytes` is the lower bound.
+                "--max-filesize",
+                "2147483648",
                 "--retry",
                 "2",
                 "--retry-delay",

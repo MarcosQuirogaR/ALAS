@@ -26,7 +26,7 @@ const TYPICAL_CRUISE_FUEL_BURN_FRACTION_PER_HOUR: f64 = 0.0325;
 
 /// Nominal cruise-level interval used by the route recommendation, 2,000 ft
 /// expressed in SI units.
-pub(super) const CRUISE_LEVEL_INTERVAL_M: f64 = 2000.0 * alas_units::FOOT;
+pub const CRUISE_LEVEL_INTERVAL_M: f64 = 2000.0 * alas_units::FOOT;
 
 /// Cruise time after a step needed to drift one level interval, in seconds.
 /// This allows the aircraft to use the higher level and continue losing mass
@@ -41,7 +41,7 @@ pub(super) const CRUISE_LEVEL_INTERVAL_M: f64 = 2000.0 * alas_units::FOOT;
 /// the midpoint to the next level.
 /// The prior and threshold are intentionally centralized so calibration can
 /// replace them when ALAS has a solved per-aircraft fuel-flow estimate.
-pub(super) fn minimum_cruise_time_for_step_s(step_m: f64) -> f64 {
+pub fn minimum_cruise_time_for_step_s(step_m: f64) -> f64 {
     if !step_m.is_finite() || step_m <= 0.0 {
         return 0.0;
     }
@@ -116,6 +116,12 @@ pub fn configure_cruise_legs(
     }
     let count = count.clamp(1, 3);
     let steps = count.saturating_sub(1);
+    if steps == 0 {
+        // One cruise leg, at the top. The altitude fractions stay what the profile has them: they
+        // are the altitudes at which the climb schedule changes speed, and the climb goes through
+        // them.
+        return;
+    }
     let final_level_m = (cruise_altitude_m - 0.5).max(0.0);
     let floor_m = departure_elevation_m + 3000.0;
     let available_step_m = if steps == 0 {
@@ -207,7 +213,7 @@ pub(super) fn estimate_non_cruise_distance(
     cruise_altitude_m: f64,
     departure_elevation_m: f64,
     arrival_elevation_m: f64,
-    active_cruise_legs: usize,
+    _active_cruise_legs: usize,
 ) -> Result<f64, String> {
     let mut current_m = departure_elevation_m;
     let mut distance_m = 0.0;
@@ -265,7 +271,9 @@ pub(super) fn estimate_non_cruise_distance(
         profile.initial_climb_rate_m_s,
         first_level_midpoint_m,
     )?;
-    if active_cruise_legs >= 2 {
+    // The climb schedule's rungs are climbed through to the top whatever the number of cruise legs
+    // (a cruise leg is flown at a step of the ladder, never at a rung boundary lower down).
+    {
         let second_level_midpoint_m = 0.5 * (current_m + second_level_m);
         leg(
             &mut current_m,
@@ -276,7 +284,7 @@ pub(super) fn estimate_non_cruise_distance(
             second_level_midpoint_m,
         )?;
     }
-    if active_cruise_legs >= 3 {
+    {
         let cruise_midpoint_m = 0.5 * (current_m + cruise_altitude_m);
         leg(
             &mut current_m,
@@ -366,9 +374,14 @@ pub(super) fn step_climb_levels_m(
     cruise_altitude_m: f64,
     departure_elevation_m: f64,
 ) -> [f64; 3] {
+    // The levels the native schedule climbs to (`schedule::reach::levels`): the profile's fractions
+    // of the cruise altitude, the first no lower than the take-off band plus a minimum rung.
+    let floor_m = departure_elevation_m + profile.takeoff_altitude_gain_m + 30.0;
     let first_level_m = (cruise_altitude_m * profile.initial_climb_altitude_fraction)
-        .max(departure_elevation_m + 3000.0);
-    let second_level_m =
-        (cruise_altitude_m * profile.step_climb_1_altitude_fraction).max(first_level_m + 300.0);
+        .max(floor_m)
+        .min(cruise_altitude_m);
+    let second_level_m = (cruise_altitude_m * profile.step_climb_1_altitude_fraction)
+        .max(first_level_m)
+        .min(cruise_altitude_m);
     [first_level_m, second_level_m, cruise_altitude_m]
 }

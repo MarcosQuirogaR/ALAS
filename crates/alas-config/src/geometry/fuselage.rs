@@ -183,7 +183,8 @@ pub struct FuselageConfig {
     #[config(
         label = "Belly upsweep length",
         unit = "m",
-        help = "Distance ahead of the tail tip at which the lower fuselage line starts to rise, as a straight line to the tail-tip bottom, while the crown and the width keep the tailcone taper. On a transport the belly rises from near the aft cargo hold, well ahead of the crown taper, and this sets the tail-down (tail-strike) angle at rotation. Leave unset, or no longer than the tailcone, to keep the tailcone law."
+        help = "Distance ahead of the tail tip where the lower fuselage line starts rising straight to the tail tip [m]; sets the tail-strike angle. Unset keeps the tailcone law.",
+        long_help = "Distance ahead of the tail tip at which the lower fuselage line starts to rise, as a straight line to the tail-tip bottom, while the crown and the width keep the tailcone taper. On a transport the belly rises from near the aft cargo hold, well ahead of the crown taper, and this sets the tail-down (tail-strike) angle at rotation. Leave unset, or no longer than the tailcone, to keep the tailcone law."
     )]
     pub belly_upsweep_length_m: Option<f64>,
 
@@ -192,7 +193,8 @@ pub struct FuselageConfig {
     #[config(
         label = "Nose windshield angle",
         unit = "deg",
-        help = "Side-view angle of the straight windshield to the waterline, between the radome and the crown blend. Setting any nose field replaces the single-ellipsoid nose with upper, lower and plan profiles; fields left unset take narrow-body class estimates (about 32 deg). Valid 15 to 60 deg."
+        help = "Side-view angle of the straight windshield to the waterline [deg].",
+        long_help = "Side-view angle of the straight windshield to the waterline, between the radome and the crown blend. Setting any nose field replaces the single-ellipsoid nose with upper, lower and plan profiles; fields left unset take narrow-body class estimates (about 32 deg). Valid 15 to 60 deg."
     )]
     pub nose_windshield_angle_deg: Option<f64>,
 
@@ -200,7 +202,8 @@ pub struct FuselageConfig {
     #[serde(default, skip_serializing_if = "Option::is_none")]
     #[config(
         label = "Nose crown end",
-        help = "Fraction of the nose length at which the upper line reaches the cabin crown with zero slope; the windshield blends into the crown there. Unset takes a narrow-body class estimate (about 0.8). Valid 0.55 to 1."
+        help = "Fraction of the nose length at which the upper line reaches the cabin crown with zero slope (dimensionless).",
+        long_help = "Fraction of the nose length at which the upper line reaches the cabin crown with zero slope; the windshield blends into the crown there. Unset takes a narrow-body class estimate (about 0.8). Valid 0.55 to 1."
     )]
     pub nose_crown_end_fraction: Option<f64>,
 
@@ -216,7 +219,8 @@ pub struct FuselageConfig {
     #[serde(default, skip_serializing_if = "Option::is_none")]
     #[config(
         label = "Nose keel exponent",
-        help = "Exponent of the lower nose line from the tip to the cabin keel: larger values give a deeper chin radome, smaller a straighter underside. Unset takes a narrow-body class estimate (about 2.2). Valid 1.3 to 4."
+        help = "Exponent of the lower nose line from tip to cabin keel (dimensionless): larger gives a deeper chin radome.",
+        long_help = "Exponent of the lower nose line from the tip to the cabin keel: larger values give a deeper chin radome, smaller a straighter underside. Unset takes a narrow-body class estimate (about 2.2). Valid 1.3 to 4."
     )]
     pub nose_keel_exponent: Option<f64>,
 
@@ -232,7 +236,8 @@ pub struct FuselageConfig {
     #[serde(default, skip_serializing_if = "Option::is_none")]
     #[config(
         label = "Nose section exponent",
-        help = "Peak superellipse exponent of the nose cross-sections, reached mid-nose and returning to 2 (elliptical) at the tip and the cabin; larger values give flatter-sided cockpit sections. Unset takes a narrow-body class estimate (about 2.4). Valid 2 to 3.5."
+        help = "Peak superellipse exponent of the nose cross-sections (dimensionless), reached mid-nose; larger gives flatter cockpit sides. Unset about 2.4. Valid 2-3.5.",
+        long_help = "Peak superellipse exponent of the nose cross-sections, reached mid-nose and returning to 2 (elliptical) at the tip and the cabin; larger values give flatter-sided cockpit sections. Unset takes a narrow-body class estimate (about 2.4). Valid 2 to 3.5."
     )]
     pub nose_section_exponent: Option<f64>,
 
@@ -241,7 +246,8 @@ pub struct FuselageConfig {
     #[config(
         label = "Nose loft length",
         unit = "m",
-        help = "Distance from the nose tip at which the lofted body reaches its full section, read from the drawing (tip to the start of the constant section). Unset takes the cabin start X position. Setting it reshapes only the outer loft: the cabin, the seats and the mass stations stay referred to the cabin start X position."
+        help = "Distance from the nose tip at which the lofted body reaches full section [m], read from the drawing. Unset takes the cabin start X.",
+        long_help = "Distance from the nose tip at which the lofted body reaches its full section, read from the drawing (tip to the start of the constant section). Unset takes the cabin start X position. Setting it reshapes only the outer loft: the cabin, the seats and the mass stations stay referred to the cabin start X position."
     )]
     pub nose_length_m: Option<f64>,
 
@@ -250,7 +256,8 @@ pub struct FuselageConfig {
     #[config(
         label = "Tail end width",
         unit = "m",
-        help = "Full width of the finite closing section at the tail end (the APU exhaust or tail-cone cap) instead of a point. Unset closes the body to a point, the tailcone law. Needs the tail end height as well to take effect on the profile."
+        help = "Full width of the finite closing section at the tail end (APU exhaust or tail-cone cap) instead of a point [m]. Unset closes to a point.",
+        long_help = "Full width of the finite closing section at the tail end (the APU exhaust or tail-cone cap) instead of a point. Unset closes the body to a point, the tailcone law. Needs the tail end height as well to take effect on the profile."
     )]
     pub tail_end_width_m: Option<f64>,
 
@@ -268,7 +275,8 @@ pub struct FuselageConfig {
     #[config(
         label = "Tail end vertical offset",
         unit = "m",
-        help = "Vertical offset of the centre of the closing section at the tail end relative to the fuselage centerline. Unset takes the tail vertical offset. It is separate so that the tail end can be placed on the drawing without moving the tail-mounted engine, which is referred to the tail vertical offset."
+        help = "Vertical offset of the closing section centre at the tail end relative to the fuselage centreline [m].",
+        long_help = "Vertical offset of the centre of the closing section at the tail end relative to the fuselage centerline. Unset takes the tail vertical offset. It is separate so that the tail end can be placed on the drawing without moving the tail-mounted engine, which is referred to the tail vertical offset."
     )]
     pub tail_end_z_m: Option<f64>,
 
@@ -276,9 +284,39 @@ pub struct FuselageConfig {
     #[serde(default, skip_serializing_if = "Option::is_none")]
     #[config(
         label = "Belly upsweep exponent",
-        help = "Exponent of the belly line that rises to the tail end: z = keel + (end bottom - keel) t^p with t the fraction of the belly upsweep length. 1 is the straight ramp; larger values start the rise gently and steepen it, as on most transports. Unset takes 1. Valid 1 to 3."
+        help = "Exponent of the belly line rising to the tail end (dimensionless): 1 is a straight ramp, larger starts gently and steepens. Unset takes 1. Valid 1-3.",
+        long_help = "Exponent of the belly line that rises to the tail end: z = keel + (end bottom - keel) t^p with t the fraction of the belly upsweep length. 1 is the straight ramp; larger values start the rise gently and steepen it, as on most transports. Unset takes 1. Valid 1 to 3."
     )]
     pub aft_belly_exponent: Option<f64>,
+
+    /// Main-gear sponsons of a high wing, as drawn. They are not lofted (the
+    /// built body is the hull); the three lengths only give the parasite
+    /// buildup their wetted area.
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    #[config(
+        label = "Gear sponson length",
+        unit = "m",
+        help = "Length of the main-gear sponsons of a high wing. Not drawn on the built body: it only adds their wetted area to the parasite drag. Unset for a body without sponsons."
+    )]
+    pub gear_sponson_length_m: Option<f64>,
+
+    /// See [`Self::gear_sponson_length_m`].
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    #[config(
+        label = "Gear sponson half width",
+        unit = "m",
+        help = "Largest half width over the main-gear sponsons, from the centreline. Not drawn on the built body."
+    )]
+    pub gear_sponson_half_width_m: Option<f64>,
+
+    /// See [`Self::gear_sponson_length_m`].
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    #[config(
+        label = "Gear sponson depth",
+        unit = "m",
+        help = "Depth of the main-gear sponsons below the keel of the body. Not drawn on the built body."
+    )]
+    pub gear_sponson_depth_m: Option<f64>,
 
     /// Optional aft-body plan taper; see `aft_body`.
     #[serde(default, skip_serializing_if = "Option::is_none")]
@@ -293,7 +331,8 @@ pub struct FuselageConfig {
     #[serde(default, skip_serializing_if = "Option::is_none")]
     #[config(
         label = "Aft plan taper exponent",
-        help = "Exponent of the plan-view half-width taper, half-width = end + (cabin - end)(1 - t^p) with t the fraction of the taper length: 1 is a straight cone, larger values keep the width longer. Unset takes 1.5. Valid 1 to 3."
+        help = "Exponent of the plan-view half-width taper (dimensionless): 1 is a straight cone, larger keeps the width longer. Unset takes 1.5. Valid 1-3.",
+        long_help = "Exponent of the plan-view half-width taper, half-width = end + (cabin - end)(1 - t^p) with t the fraction of the taper length: 1 is a straight cone, larger values keep the width longer. Unset takes 1.5. Valid 1 to 3."
     )]
     pub aft_plan_exponent: Option<f64>,
 
@@ -302,7 +341,8 @@ pub struct FuselageConfig {
     #[config(
         label = "Aft crown drop length",
         unit = "m",
-        help = "Length of the upper-line (crown) drop ahead of the tail end. Unset takes the tailcone length. On most transports the crown stays level until close to the tail and then drops to the closing section."
+        help = "Length of the crown (upper line) drop ahead of the tail end [m]. Unset takes the tailcone length.",
+        long_help = "Length of the upper-line (crown) drop ahead of the tail end. Unset takes the tailcone length. On most transports the crown stays level until close to the tail and then drops to the closing section."
     )]
     pub aft_crown_length_m: Option<f64>,
 
@@ -310,7 +350,8 @@ pub struct FuselageConfig {
     #[serde(default, skip_serializing_if = "Option::is_none")]
     #[config(
         label = "Aft crown drop exponent",
-        help = "Exponent of the crown drop, z = cabin top + (end top - cabin top) t^p with t the fraction of the drop length: 1 is straight, larger values keep the crown level longer. Unset takes 1.5. Valid 1 to 3."
+        help = "Exponent of the crown drop (dimensionless): 1 is straight, larger keeps the crown level longer. Unset takes 1.5. Valid 1-3.",
+        long_help = "Exponent of the crown drop, z = cabin top + (end top - cabin top) t^p with t the fraction of the drop length: 1 is straight, larger values keep the crown level longer. Unset takes 1.5. Valid 1 to 3."
     )]
     pub aft_crown_exponent: Option<f64>,
 
@@ -319,7 +360,8 @@ pub struct FuselageConfig {
     #[config(
         label = "Hold interior end",
         unit = "m",
-        help = "Distance from the nose tip up to which the loadable interior (cargo hold and ramp floor) keeps the full cabin keel, whatever the outer belly line does. Unset follows the outer lofted body, so a belly that rises early ends the hold early. Set it where the loadable floor ends (the rear of the ramp of a military transport) to decouple the interior from the keel upsweep; it moves no outer surface."
+        help = "Distance from the nose tip up to which the loadable interior (hold, ramp floor) keeps the full cabin keel [m].",
+        long_help = "Distance from the nose tip up to which the loadable interior (cargo hold and ramp floor) keeps the full cabin keel, whatever the outer belly line does. Unset follows the outer lofted body, so a belly that rises early ends the hold early. Set it where the loadable floor ends (the rear of the ramp of a military transport) to decouple the interior from the keel upsweep; it moves no outer surface."
     )]
     pub hold_interior_end_x_m: Option<f64>,
 
@@ -328,7 +370,8 @@ pub struct FuselageConfig {
     #[config(
         label = "Upper-deck hump height",
         unit = "m",
-        help = "Rise of the crown above the main crown over the full-height part of an upper-deck hump (Boeing 747 type). Only the crown line rises; the keel, the width and the main deck are unchanged. The hump needs this height and all four hump stations; leave unset for a body without a hump."
+        help = "Rise of the crown above the main crown over the full-height part of an upper-deck hump (Boeing 747 type) [m].",
+        long_help = "Rise of the crown above the main crown over the full-height part of an upper-deck hump (Boeing 747 type). Only the crown line rises; the keel, the width and the main deck are unchanged. The hump needs this height and all four hump stations; leave unset for a body without a hump."
     )]
     pub hump_height_m: Option<f64>,
 
@@ -372,7 +415,8 @@ pub struct FuselageConfig {
     #[serde(default, skip_serializing_if = "Option::is_none")]
     #[config(
         label = "Hump fairing exponent",
-        help = "Exponent of both hump fairings: 2 is tangent to the hump crown with a slope break at the fairing ends, larger values give a fuller hump, 1 a straight ramp. Unset takes 2. Valid 1 to 4."
+        help = "Exponent of both hump fairings (dimensionless): 2 is tangent to the hump crown, larger gives a fuller hump, 1 a straight ramp. Unset takes 2. Valid 1-4.",
+        long_help = "Exponent of both hump fairings: 2 is tangent to the hump crown with a slope break at the fairing ends, larger values give a fuller hump, 1 a straight ramp. Unset takes 2. Valid 1 to 4."
     )]
     pub hump_fairing_exponent: Option<f64>,
 
@@ -381,7 +425,8 @@ pub struct FuselageConfig {
     #[config(
         label = "Upper-deck floor height",
         unit = "m",
-        help = "Height of the upper-deck floor above the main-deck floor under the hump. Setting it makes the hump a passenger deck with its own floor, seats, exits and furnishings; unset leaves the hump as fairing only."
+        help = "Height of the upper-deck floor above the main-deck floor under the hump [m].",
+        long_help = "Height of the upper-deck floor above the main-deck floor under the hump. Setting it makes the hump a passenger deck with its own floor, seats, exits and furnishings; unset leaves the hump as fairing only."
     )]
     pub upper_deck_floor_height_m: Option<f64>,
 
@@ -403,8 +448,7 @@ pub struct FuselageConfig {
     )]
     pub upper_deck_end_x_m: Option<f64>,
 
-    /// Optional user-defined sections inserted into the generated nose/cabin/
-    /// tail station list.
+    /// Optional user-defined sections inserted into the generated stations.
     #[serde(default, skip_serializing_if = "Vec::is_empty")]
     #[config(
         hidden,
@@ -412,18 +456,18 @@ pub struct FuselageConfig {
     )]
     pub custom_sections: Vec<FuselageSection>,
 
-    /// Optional per-station overrides for the generated nose/cabin/tail
-    /// stations.  The vector is empty until a sandbox user edits a generated
-    /// row; once present it contains the complete generated station list in
-    /// builder order.  Station X positions remain owned by the body
-    /// parameters, while width, height, Z, and shape are independently
-    /// editable here.
+    /// Optional per-station overrides of the generated stations: empty until a
+    /// sandbox user edits a row, then the complete station list in builder
+    /// order (X stays with the body parameters; width, height, Z and shape are
+    /// editable here).
     #[serde(default, skip_serializing_if = "Vec::is_empty")]
-    #[config(
-        hidden,
-        help = "Per-station overrides for the generated fuselage loft, written by the sandbox section editor."
-    )]
+    #[config(hidden, help = "Per-station overrides of the generated fuselage loft.")]
     pub generated_sections: Vec<FuselageSection>,
+
+    /// The drawn cabin floor and underfloor hold; unset takes the class section.
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    #[config(hidden, help = "Drawn cabin cross-section: floor and hold polygon.")]
+    pub cabin_section: Option<super::CabinSectionConfig>,
 
     /// Embedded lofted surface; `None` keeps the parametric laws.
     #[serde(default, skip_serializing_if = "Option::is_none")]
@@ -441,50 +485,7 @@ pub struct FuselageConfig {
     pub n_subdivisions: i64,
 }
 
-impl Default for FuselageConfig {
-    fn default() -> Self {
-        // Circular twin-aisle body: 6 m nose taper, long cabin, 14 m upswept tailcone.
-        Self {
-            diameter_m: 6.2,
-            height_m: None,
-            nose_z_m: -0.5,
-            cabin_start_x_m: 6.0,
-            cabin_z_m: 0.2,
-            tailcone_length_m: 14.0,
-            tail_z_m: 1.8,
-            belly_upsweep_length_m: None,
-            nose_windshield_angle_deg: None,
-            nose_crown_end_fraction: None,
-            nose_radome_length_fraction: None,
-            nose_keel_exponent: None,
-            nose_plan_exponent: None,
-            nose_section_exponent: None,
-            nose_length_m: None,
-            tail_end_width_m: None,
-            tail_end_height_m: None,
-            tail_end_z_m: None,
-            aft_belly_exponent: None,
-            aft_plan_length_m: None,
-            aft_plan_exponent: None,
-            aft_crown_length_m: None,
-            aft_crown_exponent: None,
-            hold_interior_end_x_m: None,
-            hump_height_m: None,
-            hump_start_x_m: None,
-            hump_crown_start_x_m: None,
-            hump_crown_end_x_m: None,
-            hump_end_x_m: None,
-            hump_fairing_exponent: None,
-            upper_deck_floor_height_m: None,
-            upper_deck_start_x_m: None,
-            upper_deck_end_x_m: None,
-            custom_sections: Vec::new(),
-            generated_sections: Vec::new(),
-            loft: None,
-            n_subdivisions: 12,
-        }
-    }
-}
+mod defaults;
 
 impl FuselageConfig {
     /// The vertical cross-section dimension, falling back to the diameter.

@@ -189,7 +189,11 @@ pub(super) fn reconcile_against_reference(
                 primary_declaration,
             ))
         }
-        Err(_) => Err(WingReconciliationError::StructuralSizing),
+        Err(error) => Err(super::sizing_cause::reconciliation(
+            super::ReconciliationBasis::Reference,
+            &error,
+        )
+        .into()),
     }
 }
 

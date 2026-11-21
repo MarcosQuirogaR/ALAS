@@ -43,6 +43,7 @@ pub const B787_9_EXIT_LAYOUT: CertifiedExitLayout = CertifiedExitLayout {
         },
     ],
     // EASA TCDS body length, the preset's own (`american.rs`).
+    upper_deck_pairs: &[],
     station_body_length_m: Some(62.00),
     source: "Boeing 787 ACAP D6-58333 Rev Q, October 2025, section 2.7.1 (door locations, 787-9: doors 1-4 at 20-8/6.30, 60-3/18.36, 116-3/35.43, 162-11/49.66 ft-in/m) and section 2.1.2 (FAA exit limit 420 seats)",
 };
@@ -97,6 +98,7 @@ pub const B777_9_EXIT_LAYOUT: CertifiedExitLayout = CertifiedExitLayout {
             station_m: Some(61.80),
         },
     ],
+    upper_deck_pairs: &[],
     station_body_length_m: Some(76.73),
     source: "Boeing 777X ACAP D6-86073 Rev G, September 2025, Table 2-3 (door locations and clear openings, 777-9: main entry/service doors 1-4 at 22-2/6.76, 77-0/23.47, 140-2/42.72, 202-9/61.80 ft-in/m, 42 x 74 in) and Figure 2-1 (length 251 ft 9 in, 76.73 m)",
 };
@@ -157,25 +159,37 @@ pub const ATR72_600_EXIT_LAYOUT: CertifiedExitLayout = CertifiedExitLayout {
             station_m: Some(20.35),
         },
     ],
+    upper_deck_pairs: &[],
     station_body_length_m: Some(27.166),
     source: "ATR 72-600 Factsheet (PW127M/N edition, 2020-07) p.22 cabin plan scaled by its printed 29 in seat pitch (exit centres 6.11 m and 20.35 m aft of the nose, +/-0.15 m) on the 27.166 m overall length; Type III forward exits from EASA TCDS A.084 Issue 14 pp.30 and 32; aft Type I inferred from the 78-seat maximum (TCDS p.38) against the CS 25.807(g) pair ratings",
 };
 
 /// The ATR 72-600's main-deck baggage compartments, forward to aft, as
-/// `(name, forward station, aft station)` in metres aft of the nose tip on
-/// the 27.166 m body.
+/// `(name, forward station, aft station, volume)` in metres aft of the nose tip
+/// on the 27.166 m body and cubic metres.
 ///
 /// Read off the same factsheet p.22 cabin plan, at the same scale and
 /// uncertainty, as [`ATR72_600_EXIT_LAYOUT`]: the forward compartment
 /// between the flight deck and the forward exits (3.47-5.51 m, the LH and RH
 /// blocks either side of the entry vestibule), and the aft compartment from
 /// the aft doors to the aft pressure bulkhead (20.72-22.95 m). The aft
-/// compartment also houses the lavatory, so the enclosed volume over its
-/// extent is an upper bound. ATR prints no volume or net-mass limit for
-/// either, so both come from the built geometry and stay unlimited.
-pub const ATR72_600_BAGGAGE_COMPARTMENTS: [(&str, f64, f64); 2] = [
-    ("Forward baggage", 3.47, 5.51),
-    ("Aft baggage", 20.72, 22.95),
+/// compartment also houses the lavatory. The volumes are those of the cabin
+/// the preset seats, 72 at 29 in (factsheet p.22): the forward partition
+/// moves on the seat tracks with the seat block (Jane's All the World's
+/// Aircraft 2008-2009, ATR 72, Accommodation and DIMENSIONS, INTERNAL,
+/// p.302), so the forward volume follows the seat-block length. ATR's
+/// 72-seat Cargo flex baseline (ATR Marketing, "Cargo flex solution", Nov
+/// 2015, p.1; its LOPA is 60 seats at 29 in and 12 at 30 in) prints 10.6 m3,
+/// the same as the 68-seat 31 in cabin of ATR's EWADE 2011 presentation (p.3
+/// volumes table) and of Jane's (front 5.8 m3 at 68 passengers, rear 4.8,
+/// total 10.6); these seat blocks are 17 x 29 = 493 in and 16 x 31 = 496 in
+/// long. The 9.4 m3 the EWADE table prints for 72 seats at 30 in is a seat
+/// block 17 in (0.43 m) longer, which takes 1.2 m3 off the forward
+/// compartment; it is not this cabin. Split as Jane's prints it. ATR prints
+/// no net-mass limit.
+pub const ATR72_600_BAGGAGE_COMPARTMENTS: [(&str, f64, f64, f64); 2] = [
+    ("Forward baggage", 3.47, 5.51, 5.8),
+    ("Aft baggage", 20.72, 22.95, 4.8),
 ];
 
 /// ATR's standard 72-seat cabin.
@@ -194,14 +208,20 @@ pub const ATR72_600_PLANNING_CABIN: SourcedPlanningCabin = SourcedPlanningCabin 
 pub fn atr72_600_baggage_holds() -> Vec<crate::HoldCompartmentConfig> {
     ATR72_600_BAGGAGE_COMPARTMENTS
         .iter()
-        .map(|&(name, x_start_m, x_end_m)| crate::HoldCompartmentConfig {
-            name: name.to_owned(),
-            x_start_m,
-            x_end_m,
-            volume_m3: None,
-            max_net_kg: None,
-            deck: crate::HoldDeck::Main,
-        })
+        .map(
+            |&(name, x_start_m, x_end_m, volume_m3)| crate::HoldCompartmentConfig {
+                name: name.to_owned(),
+                x_start_m,
+                x_end_m,
+                volume_m3: Some(volume_m3),
+                max_net_kg: None,
+                deck: crate::HoldDeck::Main,
+                container_rows: None,
+                clear_width_m: None,
+                narrow_forward_part_m: None,
+                behind_seats: false,
+            },
+        )
         .collect()
 }
 
@@ -213,5 +233,40 @@ pub(super) fn seed_freight_hold(name: &str, cabin: &mut crate::CabinConfig) {
     if name == "A400M" {
         cabin.cargo.freight_hold = Some(super::military::A400M_FREIGHT_HOLD);
         cabin.cargo.main_deck_uld = "463L".to_owned();
+    }
+    if name == "C295" {
+        cabin.cargo.freight_hold = Some(super::c295::C295_FREIGHT_HOLD);
+        cabin.cargo.main_deck_uld = "463L".to_owned();
+    }
+}
+
+/// The inset from the outer skin to the usable cabin wall, m, of the bodies
+/// whose interior cabin width a source prints and whose lining is not drawn:
+/// the model's skin width less the printed cabin width, halved. Jane's All the
+/// World's Aircraft 2008-2009 (Jane's Information Group, 2008), DIMENSIONS,
+/// INTERNAL cabin maximum width:
+///
+/// - Learjet 60, p.853-854: 1.80 m cabin, 1.98 m skin, 0.09 m.
+/// - C-295, p.545 (the preset's `J1`): 2.70 m cabin, 2.82 m skin, 0.06 m.
+///
+/// Sourced but NOT applied, because the printed width is the maximum, read at
+/// the equator, while the model's elliptical lining falls away from it toward
+/// the armrests and its class lining scale was calibrated against the 0.15 m
+/// default wall: applying the wall would count the lining twice. Measured on
+/// this revision (seats, container positions against the published figures):
+/// A380-800, p.285-286, 6.58 m cabin / 7.14 m skin, 0.28 m: 34 to 32 lower-hold
+/// LD3 positions against the 36 the A380 AC prints; A350-900, p.282-283, 5.61 m
+/// / 5.96 m, 0.175 m: 12 to 11 containers loaded; 747-400, p.686 (the 747-8
+/// entry prints the identical section's 6.12 m, the 747-400 entry only the 6.50
+/// m skin), 0.19 m: 394 to 385 seats against the preset's 394. They need a
+/// drawn `cabin_section`, as the A320, A220-300, E195-E2, ATR 72-600, A340-300,
+/// 787-9 and DC-10 have. The 787's printed 5.74 m would leave a 0.015 m wall.
+/// The A400M's printed 4.00 m is its freight hold, declared separately. No
+/// interior width was found for the C919 or AVE, which keep the default.
+pub(super) fn sourced_wall_thickness_m(name: &str) -> Option<f64> {
+    match name {
+        "LJ60" => Some(0.09),
+        "C295" => Some(0.06),
+        _ => None,
     }
 }

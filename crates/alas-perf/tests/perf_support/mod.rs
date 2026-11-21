@@ -32,7 +32,7 @@ pub fn section<T: for<'de> Deserialize<'de>>(key: &str) -> Vec<T> {
 pub fn perf_config_for(overrides: &Map<String, Value>) -> PerformanceConfig {
     // The fixture replays the frozen translated schedule: its approach factor
     // 1.30, its take-off flap increment 0.025 and its V2 = max(factor * VS,
-    // VR). The product defaults moved (lane A1: CS 25.107(b) V2MIN, CS 25.125
+    // VR). The product defaults moved (CS 25.107(b) V2MIN, CS 25.125
     // VREF 1.23 VSR0, handbook flap drag), so the replay sets them explicitly.
     let mut pc = PerformanceConfig {
         legacy_field_correlations: true,

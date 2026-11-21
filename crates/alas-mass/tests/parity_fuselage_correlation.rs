@@ -172,6 +172,13 @@ fn reference_requirements_view(
         Some(Value::from(0.0)),
         "the reference replay must carry no cargo objective"
     );
+    // The CS 25.337(b) switch is a product addition the fixture has no field
+    // for; off, the declared ultimate load factor is the frozen one.
+    assert_eq!(
+        object.remove("ultimate_load_factor_from_mtow"),
+        Some(Value::from(false)),
+        "the reference replay must keep the declared ultimate load factor"
+    );
     let optimized_capacity =
         serde_json::to_value(requirements.optimize_passenger_capacity).unwrap();
     assert_eq!(

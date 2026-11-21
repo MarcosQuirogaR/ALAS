@@ -67,7 +67,7 @@ fn summary_card(result: &CompetitionResult, ui: &mut Ui) {
         ui.add_space(6.0);
         Grid::new("uav_competition_summary")
             .num_columns(2)
-            .spacing([20.0, 8.0])
+            .spacing(crate::theme::space::GRID_SPACING)
             .show(ui, |ui| {
                 ui.label(tr("Competition preset"));
                 ui.monospace(result.preset_name.as_str());
@@ -148,7 +148,7 @@ fn geometry_card(best: &CompetitionCandidate, ui: &mut Ui) {
         let variables = best.variables;
         Grid::new("uav_competition_geometry")
             .num_columns(2)
-            .spacing([20.0, 8.0])
+            .spacing(crate::theme::space::GRID_SPACING)
             .show(ui, |ui| {
                 result_measure(ui, "Wing area", variables.wing_area_m2, "m2");
                 result_value(ui, "Wing aspect ratio", variables.wing_aspect_ratio);

@@ -2,8 +2,10 @@
 // Copyright (C) 2026 Marcos Quiroga Rodriguez
 
 //! Geometry-based sampling couplings, followed by the unchanged hard gates.
-//! The tank-volume proxy and gross-mass Korn estimate guide draws only;
-//! neither substitutes for the candidate's sized tank, trim or CG assessment.
+//! The gross-mass Korn estimate guides the sweep draw only; it does not
+//! substitute for the candidate's sized tank, trim or CG assessment. Every
+//! design mode holds the section thickness at its nominal, so the repair
+//! moves sweep and the wing station, never the thickness.
 
 use alas_aero::analysis::AeroAnalysis;
 use alas_config::{presets, AlasConfig};
@@ -53,30 +55,9 @@ impl CoupledGeometry {
         anchor: &[f64],
         sweep_fraction: f64,
     ) {
-        let nominal_volume = projection.chord_integrals(&self.nominal).2;
-        let candidate_volume = projection.chord_integrals(point).2;
-        let mut minimum_thickness = bounds[THICKNESS].0;
-        if candidate_volume > 0.0 {
-            let minimum = nominal_volume / candidate_volume * self.nominal[THICKNESS];
-            minimum_thickness = minimum.clamp(bounds[THICKNESS].0, bounds[THICKNESS].1);
-            point[THICKNESS] = point[THICKNESS]
-                .max(minimum)
-                .clamp(bounds[THICKNESS].0, bounds[THICKNESS].1);
-        }
         if self.mach >= self.onset_mach && self.divergence(projection, point, point[4]) < self.mach
         {
             let (mut lower, mut upper) = (point[4], bounds[4].1);
-            if self.divergence(projection, point, upper) < self.mach {
-                let cos = self.sweep_cos(projection, point, upper);
-                let cl = self.lift_area_m2 / projection.area_m2(point);
-                let maximum = cos.powi(2)
-                    * (self.kappa / cos - cl / (10.0 * cos.powi(3)) - self.mach)
-                    / self.thickness
-                    * self.nominal[THICKNESS];
-                point[THICKNESS] = point[THICKNESS]
-                    .min(maximum)
-                    .clamp(minimum_thickness, bounds[THICKNESS].1);
-            }
             if self.divergence(projection, point, upper) >= self.mach {
                 for _ in 0..48 {
                     let middle = 0.5 * (lower + upper);
@@ -113,40 +94,5 @@ impl CoupledGeometry {
         let quarter_slope = sweep.to_radians().tan()
             + 0.25 * (point[3] - point[2]) / projection.outboard_span_m(point);
         quarter_slope.atan().cos()
-    }
-}
-
-#[cfg(test)]
-// Registered configuration and geometry failures are assertion failures.
-#[allow(clippy::expect_used)]
-mod tests {
-    use super::*;
-    use crate::DesignOptimizer;
-
-    #[test]
-    fn volume_repair_changes_thickness_and_preserves_independent_camber() {
-        for preset in presets::registry() {
-            let config = AlasConfig::from_value(&serde_json::json!({"preset":preset.name}))
-                .expect("registered preset");
-            let optimizer = DesignOptimizer::new(config.clone());
-            let (bounds, nominal) = optimizer.anchored_search_space().expect("anchored box");
-            let nominal = nominal.to_array();
-            let projection = PlanformProjection::new(&config, &bounds).expect("planform");
-            let mut point = nominal.clone();
-            for chord in &mut point[1..=3] {
-                *chord *= 0.9;
-            }
-            point[THICKNESS] = bounds[THICKNESS].0;
-            point[11] = bounds[11].0;
-            let camber_bits = point[11].to_bits();
-            let minimum = (projection.chord_integrals(&nominal).2
-                / projection.chord_integrals(&point).2
-                * nominal[THICKNESS])
-                .clamp(bounds[THICKNESS].0, bounds[THICKNESS].1);
-            assert!(minimum > point[THICKNESS], "{} volume deficit", preset.name);
-            projection.repair_coupled(&mut point, &bounds, &nominal, 0.5);
-            assert!(point[THICKNESS] >= minimum, "{} thickness", preset.name);
-            assert_eq!(point[11].to_bits(), camber_bits, "{} camber", preset.name);
-        }
     }
 }

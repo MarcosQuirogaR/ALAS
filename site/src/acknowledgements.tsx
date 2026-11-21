@@ -1,6 +1,5 @@
 import { StrictMode } from 'react'
 import { createRoot } from 'react-dom/client'
-import './fonts'
 import './index.css'
 import Masthead from './components/Masthead'
 import Acknowledgements from './components/Acknowledgements'

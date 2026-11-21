@@ -374,12 +374,7 @@ fn airfoil() -> Airfoil {
 
 #[test]
 fn public_mses_polar_rejects_each_malformed_transcript_shape() {
-    for (mode, point_count) in [
-        ("missing", 1),
-        ("ragged", 3),
-        ("malformed", 1),
-        ("nonfinite", 1),
-    ] {
+    for (mode, point_count) in [("missing", 1), ("malformed", 1), ("nonfinite", 1)] {
         let root = temporary_directory(mode);
         fake_mses_installation(&root, mode);
         let config = MsesConfig {
@@ -408,6 +403,44 @@ fn public_mses_polar_rejects_each_malformed_transcript_shape() {
         );
         let _ = fs::remove_dir_all(root);
     }
+}
+
+#[test]
+fn a_malformed_transcript_after_a_converged_point_keeps_that_point_as_partial() {
+    // An unreadable transcript mid-sweep stops the sweep but keeps the angles
+    // converged before it: the result is partial, its
+    // columns stay equal in length, and the stop carries the parser diagnostic.
+    let root = temporary_directory("ragged");
+    fake_mses_installation(&root, "ragged");
+    let config = MsesConfig {
+        mses_dir: root.display().to_string(),
+        alpha_sweep_n_points: 3,
+        ..MsesConfig::default()
+    };
+
+    let result = run_mses_polar(&airfoil(), 0.3, 5.0e6, 2.0, &config, &root);
+
+    assert_eq!(result.status, MsesStatus::PartialConvergence);
+    assert_eq!(result.converged_alpha_count, 1);
+    assert_eq!(result.alpha_deg.len(), 1);
+    for column in [&result.cl, &result.cd, &result.cm, &result.cdv, &result.cdw] {
+        assert_eq!(
+            column.len(),
+            result.alpha_deg.len(),
+            "a ragged column leaked"
+        );
+    }
+    let stop = result
+        .stopped
+        .as_ref()
+        .expect("the parse failure stops the sweep");
+    assert_eq!(stop.status, MsesStatus::ParseFailure);
+    assert!(
+        stop.message.contains("mplot"),
+        "the stop should retain a parser diagnostic: {}",
+        stop.message
+    );
+    let _ = fs::remove_dir_all(root);
 }
 
 #[test]
@@ -488,8 +521,8 @@ fn sweep_never_initializes_zero_or_center_large_incidence_jump() {
             attempt.purpose
         );
         // Every attempt must remain within the bounded bracket, widened below
-        // by the lower-lift anchor of a stalled cold start. Re-pinned
-        // 2026-10-16 by probe (tools3, 28c0f8c6): a stalled Mach walk is
+        // by the lower-lift anchor of a stalled cold start. Measured
+        // by probe: a stalled Mach walk is
         // repeated 2 x MAX_CONTINUATION_STEP_DEG = 1.0 deg below the requested
         // angle (MSES guide order: converge the lower-CL case first), so the
         // lowest point 4.0 deg is anchored at 3.0 deg. A bounded, documented

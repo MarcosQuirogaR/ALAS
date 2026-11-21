@@ -24,7 +24,8 @@
 //!
 //! The design range is the objective's explicit value, else the registered
 //! preset's charted payload/range point; `PayloadAdjusted` closes on the route
-//! only when neither exists.
+//! only when neither exists. It flies the configured payload, on the charted
+//! point no more than the charted payload.
 //!
 //! "cap" is `requirements.mtow_kg`; `T` is `mtow_target_kg` (zero means the
 //! cap) and `p` is `mtow_band_fraction`. `MtowBand` is `FixedRequirement`
@@ -85,6 +86,14 @@ pub enum DesignRange {
     /// Neither is declared: the great-circle distance between the selected
     /// aerodromes, which the evaluator resolves from their records.
     Route,
+    /// A payload-defined mission (`reference.design_point` with a payload and
+    /// no range): the range is the model's own output at the declared
+    /// takeoff mass, the largest range whose full reserve fuel plan fits the
+    /// fuel left after the closure's empty mass and the design payload
+    /// (capped by the usable tanks less taxi fuel). It is recomputed every
+    /// closure pass and reported as the sized design range; no number is
+    /// declared.
+    AtCertifiedMtow,
 }
 
 impl DesignRange {
@@ -94,8 +103,13 @@ impl DesignRange {
             Self::Objective(nmi) | Self::ChartedPoint(nmi) | Self::FlopsDesignRange(nmi) => {
                 Some(nmi)
             }
-            Self::Route => None,
+            Self::Route | Self::AtCertifiedMtow => None,
         }
+    }
+
+    /// Whether the closure computes the range from the declared takeoff mass.
+    pub const fn is_model_defined(self) -> bool {
+        matches!(self, Self::AtCertifiedMtow)
     }
 }
 
@@ -110,6 +124,10 @@ pub enum DesignPayloadSource {
     /// The configured load case: passengers at the combined passenger and
     /// baggage mass, or the cargo payload of a freighter.
     ConfiguredPayload,
+    /// The configured load case, but no more than the payload charted with
+    /// the design range (`payload_kg`, kg): a charted range is a point of
+    /// the aircraft's payload/range envelope only up to its charted payload.
+    ConfiguredWithinChart,
 }
 
 /// A mission the takeoff mass is closed on instead of the selected route.
@@ -127,6 +145,22 @@ pub struct DesignMission {
     pub payload_kg: Option<f64>,
     /// Where `payload_kg` comes from.
     pub payload_source: DesignPayloadSource,
+    /// The reserve rule the charted range is quoted under, when the range is
+    /// the preset's charted point and its source states one
+    /// (`reference.design_point.reserve`).
+    pub reserve: Option<crate::DesignPointReserve>,
+}
+
+impl DesignMission {
+    /// The fuel policy the design mission is flown under: the configured
+    /// policy with the charted point's stated reserve terms in place of its
+    /// own. The route keeps the configured policy.
+    pub fn fuel_policy(&self, configured: &crate::FuelPolicyConfig) -> crate::FuelPolicyConfig {
+        self.reserve.map_or_else(
+            || configured.clone(),
+            |reserve| reserve.applied_to(configured),
+        )
+    }
 }
 
 /// Every number a takeoff-mass sizing mode resolves to.
@@ -189,19 +223,45 @@ impl MtowPlan {
 }
 
 impl AlasConfig {
-    /// The registered preset's charted design point, when it has one.
-    fn charted_design_point(&self) -> Option<crate::PayloadRangeDesignPoint> {
+    /// The registered preset's design point when it fixes a mission: a
+    /// charted range, or a payload with the range left to the model.
+    ///
+    /// The point is read from the registered variant's own payload/range
+    /// chart. A file that turns the preset into another aircraft type (a
+    /// freighter flown on its passenger donor's preset) describes an aircraft
+    /// that chart was never drawn for and inherits none, the rule
+    /// [`crate::presets::published_mzfw_kg`] applies to the MZFW: its design
+    /// range is then the objective's or the declared FLOPS one. The DC-10-30F
+    /// otherwise closed its 73.9 t cargo on the passenger chart's 4,120 nmi
+    /// corner (read at 46.0 t) instead of its declared 3,300 nmi.
+    fn declared_design_point(&self) -> Option<crate::PayloadRangeDesignPoint> {
         crate::presets::get(&self.preset)
             .ok()
+            .filter(|preset| self.requirements.aircraft_type == preset.requirements.aircraft_type)
             .and_then(|preset| preset.reference.design_point)
-            .filter(|point| point.range_nmi.is_finite() && point.range_nmi > 0.0)
+            .filter(|point| {
+                (point.range_nmi.is_finite() && point.range_nmi > 0.0) || point.is_payload_defined()
+            })
+    }
+
+    /// The design range the preset's own design point declares: its charted
+    /// range, or the model's output at the certified mass for a
+    /// payload-defined point.
+    fn design_point_range(&self) -> Option<DesignRange> {
+        self.declared_design_point().map(|point| {
+            if point.is_payload_defined() {
+                DesignRange::AtCertifiedMtow
+            } else {
+                DesignRange::ChartedPoint(point.range_nmi)
+            }
+        })
     }
 
     /// The design range when the objective declares none: the preset's
     /// charted range, otherwise the declared FLOPS range, otherwise the route.
     fn design_range_default(&self) -> DesignRange {
-        if let Some(point) = self.charted_design_point() {
-            return DesignRange::ChartedPoint(point.range_nmi);
+        if let Some(range) = self.design_point_range() {
+            return range;
         }
         match self.mass_model.flops_transport.design_range_nmi {
             Some(nmi) if nmi.is_finite() && nmi > 0.0 => DesignRange::FlopsDesignRange(nmi),
@@ -236,24 +296,52 @@ impl AlasConfig {
             range,
             payload_kg: Some(payload_kg),
             payload_source,
+            reserve: self.charted_reserve(range),
         }
     }
 
+    /// The charted point's stated reserve rule when `range` is that point's
+    /// range: a range declared any other way carries no quoted rule.
+    fn charted_reserve(&self, range: DesignRange) -> Option<crate::DesignPointReserve> {
+        match range {
+            DesignRange::ChartedPoint(_) | DesignRange::AtCertifiedMtow => {
+                self.declared_design_point().and_then(|point| point.reserve)
+            }
+            _ => None,
+        }
+    }
+
+    /// The fuel policy the closure's design mission is flown under (see
+    /// [`DesignMission::fuel_policy`]), or the configured policy when the
+    /// mode flies no design mission.
+    pub fn design_mission_fuel_policy(&self) -> crate::FuelPolicyConfig {
+        self.mtow_plan().design_mission.map_or_else(
+            || self.fuel_policy.clone(),
+            |mission| mission.fuel_policy(&self.fuel_policy),
+        )
+    }
+
     /// Design payload, kg, and its source (see [`Self::design_mission`]).
+    ///
+    /// A charted point's payload comes first, for a freighter too: the design
+    /// mission flies the published point (the C295's 2,940 kg normal-weights
+    /// point, Jane's 2008-09 p.546), while the configured cargo payload stays
+    /// the analysed load case. A freighter without a charted payload flies
+    /// its configured cargo payload.
     pub fn design_payload_kg(&self) -> (f64, DesignPayloadSource) {
         let requirements = &self.requirements;
+        if let Some(payload_kg) = self
+            .declared_design_point()
+            .and_then(|point| point.payload_kg)
+            .filter(|kg| kg.is_finite() && *kg > 0.0)
+        {
+            return (payload_kg, DesignPayloadSource::ChartedPoint);
+        }
         if requirements.aircraft_type == "cargo" {
             return (
                 requirements.cargo_payload_kg.max(0.0),
                 DesignPayloadSource::ConfiguredPayload,
             );
-        }
-        if let Some(payload_kg) = self
-            .charted_design_point()
-            .and_then(|point| point.payload_kg)
-            .filter(|kg| kg.is_finite() && *kg > 0.0)
-        {
-            return (payload_kg, DesignPayloadSource::ChartedPoint);
         }
         let freight_kg = self.cabin.passenger.belly_cargo_kg.max(0.0);
         let planning_seats = crate::presets::get(&self.preset)
@@ -414,18 +502,44 @@ impl AlasConfig {
                 let range = if explicit_range.is_finite() && explicit_range > 0.0 {
                     Some(DesignRange::Objective(explicit_range))
                 } else {
-                    self.charted_design_point()
-                        .map(|point| DesignRange::ChartedPoint(point.range_nmi))
+                    self.design_point_range()
+                };
+                // The configured payload is flown, but on the charted range no
+                // more than the payload its chart pairs with it: above that
+                // payload the charted range is not a point of the aircraft's
+                // own payload/range envelope (LJ60: 2,493 nmi charted with
+                // four passengers, configured with eight and their baggage).
+                // A lighter configured load stays inside the envelope and is
+                // flown as configured, so the mode keeps its meaning of
+                // closing the takeoff mass on the user's payload.
+                let mission = |range: DesignRange| {
+                    let charted_kg = match (range, self.design_payload_kg()) {
+                        (
+                            DesignRange::ChartedPoint(_) | DesignRange::AtCertifiedMtow,
+                            (kg, DesignPayloadSource::ChartedPoint),
+                        ) => Some(kg),
+                        _ => None,
+                    };
+                    match charted_kg {
+                        Some(kg) => DesignMission {
+                            range,
+                            payload_kg: Some(kg),
+                            payload_source: DesignPayloadSource::ConfiguredWithinChart,
+                            reserve: self.charted_reserve(range),
+                        },
+                        None => DesignMission {
+                            range,
+                            payload_kg: None,
+                            payload_source: DesignPayloadSource::ConfiguredPayload,
+                            reserve: self.charted_reserve(range),
+                        },
+                    }
                 };
                 MtowPlan {
                     dispatch_ceiling_kg: UNBOUNDED_DISPATCH_MTOW_KG,
                     aitken_ceiling_kg: f64::INFINITY,
                     upper_bound_kg: None,
-                    design_mission: range.map(|range| DesignMission {
-                        range,
-                        payload_kg: None,
-                        payload_source: DesignPayloadSource::ConfiguredPayload,
-                    }),
+                    design_mission: range.map(mission),
                     structural_basis: design_structure,
                     ..base
                 }
@@ -610,10 +724,10 @@ mod tests {
 
     #[test]
     fn the_design_payload_uses_planning_seats_when_the_preset_declares_them() {
-        let config = AlasConfig::from_value(&json!({"preset": "ATR72-600"})).unwrap();
+        let config = AlasConfig::from_value(&json!({"preset": "AVE"})).unwrap();
         let (payload_kg, source) = config.design_payload_kg();
-        assert_eq!(source, DesignPayloadSource::PlanningSeats(72));
-        let expected = 72.0 * config.requirements.passenger_mass_kg
+        assert_eq!(source, DesignPayloadSource::PlanningSeats(350));
+        let expected = 350.0 * config.requirements.passenger_mass_kg
             + config.cabin.passenger.belly_cargo_kg.max(0.0);
         assert!((payload_kg - expected).abs() < 1e-9);
 
@@ -632,10 +746,18 @@ mod tests {
         for name in crate::presets::available() {
             let preset = crate::presets::get(name).unwrap();
             let point = preset.reference.design_point.expect(name);
-            assert!(point.range_nmi > 0.0 && !point.source.is_empty(), "{name}");
+            assert!(
+                (point.range_nmi > 0.0 || point.is_payload_defined()) && !point.source.is_empty(),
+                "{name}"
+            );
+            let expected_range = if point.is_payload_defined() {
+                DesignRange::AtCertifiedMtow
+            } else {
+                DesignRange::ChartedPoint(point.range_nmi)
+            };
             let config = AlasConfig::from_value(&json!({ "preset": name })).unwrap();
             let mission = config.design_mission();
-            assert_eq!(mission.range, DesignRange::ChartedPoint(point.range_nmi));
+            assert_eq!(mission.range, expected_range, "{name}");
             let (payload_kg, _) = config.design_payload_kg();
             if let Some(charted_kg) = point.payload_kg {
                 assert_eq!(payload_kg, charted_kg, "{name}");
@@ -643,21 +765,150 @@ mod tests {
                     charted_kg <= 1.05 * config.requirements.max_structural_payload_kg,
                     "{name}: {charted_kg} kg"
                 );
-                // A cargo aircraft (the A400M) takes its configured payload,
-                // which the preset declares equal to the charted one.
-                let expected_source = if config.requirements.aircraft_type == "cargo" {
-                    DesignPayloadSource::ConfiguredPayload
-                } else {
-                    DesignPayloadSource::ChartedPoint
-                };
-                assert_eq!(mission.payload_source, expected_source);
+                // A charted payload is the design payload for a freighter
+                // too (the A400M and C295); the configured cargo payload is
+                // the analysed load case.
+                assert_eq!(
+                    mission.payload_source,
+                    DesignPayloadSource::ChartedPoint,
+                    "{name}"
+                );
             }
             let adjusted = with_mode(config, MtowSizing::PayloadAdjusted).mtow_plan();
             assert_eq!(
                 adjusted.design_mission.map(|mission| mission.range),
-                Some(DesignRange::ChartedPoint(point.range_nmi)),
+                Some(expected_range),
                 "{name}"
             );
+            // The charted range carries the configured payload, limited to
+            // the charted payload when the chart pairs one with it.
+            let adjusted_mission = adjusted.design_mission.unwrap();
+            if mission.payload_source == DesignPayloadSource::ChartedPoint {
+                assert_eq!(adjusted_mission.payload_kg, Some(payload_kg), "{name}");
+                assert_eq!(
+                    adjusted_mission.payload_source,
+                    DesignPayloadSource::ConfiguredWithinChart,
+                    "{name}"
+                );
+            } else {
+                assert_eq!(adjusted_mission.payload_kg, None, "{name}");
+                assert_eq!(
+                    adjusted_mission.payload_source,
+                    DesignPayloadSource::ConfiguredPayload,
+                    "{name}"
+                );
+            }
+        }
+    }
+
+    /// The C295 design mission is payload-defined: the payload is the
+    /// normal-weights range point of Jane's 2008-09 p.546 (2,940 kg, 45 min
+    /// hold), flown at the TCDS-certified MTOW (EASA.A.186 Issue 08, item 13,
+    /// printed p.79), and no range is declared: the closure computes it. The
+    /// analysed load case stays the 6,000 kg cargo requirement.
+    #[test]
+    fn the_c295_design_mission_is_payload_defined_at_the_certified_mtow() {
+        let config = AlasConfig::from_value(&json!({ "preset": "C295" })).unwrap();
+        assert_eq!(config.requirements.mtow_kg, 21_000.0);
+        assert_eq!(config.requirements.cargo_payload_kg, 6_000.0);
+        assert_eq!(config.requirements.max_structural_payload_kg, 7_050.0);
+        let mission = config.design_mission();
+        assert_eq!(mission.range, DesignRange::AtCertifiedMtow);
+        assert_eq!(mission.range.declared_nmi(), None);
+        assert!(mission.range.is_model_defined());
+        assert_eq!(config.design_payload_kg().0, 2_940.0);
+        let adjusted = with_mode(config, MtowSizing::PayloadAdjusted).mtow_plan();
+        assert_eq!(adjusted.declared_mtow_kg, 21_000.0);
+        assert_eq!(
+            adjusted.design_mission.map(|mission| mission.range),
+            Some(DesignRange::AtCertifiedMtow)
+        );
+        // An explicit objective range still overrides the preset.
+        let mut ranged = AlasConfig::from_value(&json!({ "preset": "C295" })).unwrap();
+        ranged.optimizer.objective.design_range_nmi = 1_000.0;
+        assert_eq!(
+            ranged.design_mission().range,
+            DesignRange::Objective(1_000.0)
+        );
+    }
+
+    /// A charted point quoted under a stated reserve rule flies that rule on
+    /// the design mission; the configured policy is untouched (the route
+    /// flies it), and a range declared by the objective carries no quoted
+    /// rule.
+    #[test]
+    fn the_design_mission_flies_the_reserve_its_charted_point_is_quoted_under() {
+        let adjusted = |name: &str| {
+            with_mode(
+                AlasConfig::from_value(&json!({ "preset": name })).unwrap(),
+                MtowSizing::PayloadAdjusted,
+            )
+        };
+        // MIL-C-5011B: 5 % trip fuel and a 30 min hold at 1,500 ft, no alternate.
+        let a400m = adjusted("A400M");
+        let policy = a400m.design_mission_fuel_policy();
+        assert_eq!(policy.scheme, crate::FuelScheme::StudyConvention);
+        assert_eq!(policy.contingency_trip_fraction, 0.05);
+        assert_eq!(policy.contingency_minimum_hold_min, 0.0);
+        assert_eq!(policy.alternate_distance_nmi, 0.0);
+        assert_eq!(policy.final_reserve_hold_min, 30.0);
+        assert_eq!(policy.holding_altitude_ft, 1_500.0);
+        assert_eq!(a400m.fuel_policy, crate::FuelPolicyConfig::default());
+        // Jane's 2008-09 p.546 (C-295M): 45 min hold at 460 m and nothing else,
+        // read as given: no EASA 15 min no-alternate hold on the zero alternate.
+        let c295 = adjusted("C295");
+        let policy = c295.design_mission_fuel_policy();
+        assert_eq!(policy.scheme, crate::FuelScheme::StudyConvention);
+        assert_eq!(policy.contingency_trip_fraction, 0.0);
+        assert_eq!(policy.alternate_distance_nmi, 0.0);
+        assert_eq!(policy.final_reserve_hold_min, 45.0);
+        // Embraer APM Figure 3.3: 100 nm alternate + 45 min, no contingency;
+        // the holding height and scheme are configured.
+        let e195 = adjusted("E195-E2");
+        let policy = e195.design_mission_fuel_policy();
+        assert_eq!(policy.alternate_distance_nmi, 100.0);
+        assert_eq!(policy.final_reserve_hold_min, 45.0);
+        assert_eq!(policy.contingency_trip_fraction, 0.0);
+        assert_eq!(
+            crate::FuelPolicyConfig {
+                alternate_distance_nmi: e195.fuel_policy.alternate_distance_nmi,
+                final_reserve_hold_min: e195.fuel_policy.final_reserve_hold_min,
+                contingency_trip_fraction: e195.fuel_policy.contingency_trip_fraction,
+                contingency_minimum_hold_min: e195.fuel_policy.contingency_minimum_hold_min,
+                ..policy
+            },
+            e195.fuel_policy
+        );
+        // FAR 121.645 at a 200 nmi alternate.
+        for name in ["DC-10", "B747-400"] {
+            let policy = adjusted(name).design_mission_fuel_policy();
+            assert_eq!(
+                policy.scheme,
+                crate::FuelScheme::FaaFlagSupplemental,
+                "{name}"
+            );
+            assert_eq!(policy.alternate_distance_nmi, 200.0, "{name}");
+            assert_eq!(policy.flag_flight_time_fraction, 0.10, "{name}");
+        }
+        // A point with no stated rule, and a range the objective declares, fly
+        // the configured policy.
+        let a320 = adjusted("A320-200");
+        assert_eq!(a320.design_mission_fuel_policy(), a320.fuel_policy);
+        let mut declared = adjusted("A400M");
+        declared.optimizer.objective.design_range_nmi = 2_000.0;
+        assert_eq!(declared.design_mission_fuel_policy(), declared.fuel_policy);
+        // Every stated rule names its source and validates.
+        for name in crate::presets::available() {
+            let preset = crate::presets::get(name).unwrap();
+            if let Some(reserve) = preset
+                .reference
+                .design_point
+                .and_then(|point| point.reserve)
+            {
+                assert!(!reserve.source.is_empty(), "{name}");
+                let policy = reserve.applied_to(&crate::FuelPolicyConfig::default());
+                assert!(policy.validate().is_ok(), "{name}");
+            }
         }
     }
 

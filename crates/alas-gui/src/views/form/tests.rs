@@ -3,8 +3,9 @@
 
 use super::display_unit;
 use super::editors::optional_value_from_text;
-use super::layout::{form_column_count, label_text_size};
-use super::options::{display_option, format_number, readonly_unless, resolved_options};
+use super::layout::form_column_count;
+use super::number_text::format_number;
+use super::options::{display_option, readonly_unless, resolved_options};
 use super::options::{optional_hint, parse_number_or_sentinel, sentinel_word};
 use alas_config::{AlasConfig, ConfigNode, Entry, Field, Kind, LeafField, Node, OptionalValueKind};
 use serde_json::{json, Value};
@@ -111,10 +112,15 @@ fn a_declared_sentinel_reads_as_its_word_and_can_be_typed_back() {
     let schema = config.schema();
     for (name, word) in [
         ("n_nlg_wheels", "Auto"),
+        ("abreast", "Auto"),
         ("n_mlg_struts", "Auto"),
         ("wheels_per_mlg_strut", "Auto"),
         ("design_range_nmi", "From route"),
         ("max_approach_speed_kt", "No limit"),
+        // A door at 0 m is a door the layout places, not one at the datum.
+        ("main_door_x_m", "Auto"),
+        ("fwd_door_x_m", "Auto"),
+        ("aft_door_x_m", "Auto"),
     ] {
         let field = leaf_named(&schema.fields, name)
             .unwrap_or_else(|| panic!("{name} is not in the schema"));
@@ -182,6 +188,15 @@ fn one_dimensionless_convention_replaces_the_four_that_reached_the_screen() {
     }
     // A fraction of a named reference keeps the reference, in one spelling.
     assert_eq!(display_unit("fraction of semi-span"), "of semi-span");
+    assert_eq!(
+        display_unit("fraction of MAC aft of MAC LE"),
+        "MAC aft of the MAC leading edge"
+    );
+    assert_eq!(
+        display_unit("fraction of reference value"),
+        "of reference value"
+    );
+    assert_eq!(display_unit("fraction of chord"), "of chord");
     assert_eq!(display_unit("0-1 of semispan"), "of semi-span");
     assert_eq!(display_unit("fraction of critical"), "of critical");
     assert_eq!(display_unit("fraction of MAC"), "of MAC");
@@ -218,8 +233,11 @@ fn every_fraction_reference_in_the_schema_reads_in_spanish() {
         let english = display_unit(unit);
         alas_i18n::set_language(Some("es"));
         let spanish = display_unit(unit);
+        // The main gear's position reads as a phrase, not as "of ...".
+        let phrase = unit == "fraction of MAC aft of MAC LE";
         assert!(
-            english.starts_with("of ") && spanish.starts_with("de"),
+            (phrase && english.starts_with("MAC aft of") && spanish != english)
+                || (english.starts_with("of ") && spanish.starts_with("de")),
             "{unit}: {english:?} / {spanish:?}"
         );
     }
@@ -228,9 +246,10 @@ fn every_fraction_reference_in_the_schema_reads_in_spanish() {
 
 #[test]
 fn physical_units_keep_their_value_and_gain_conventional_typography() {
-    for unit in ["m", "kg", "deg", "s", "Pa", "nmi", "kt", "K", "% MAC"] {
+    for unit in ["m", "kg", "deg", "s", "Pa", "nmi", "kt", "K"] {
         assert_eq!(display_unit(unit), unit, "{unit} must not be rewritten");
     }
+    assert_eq!(display_unit("% MAC"), "% of MAC");
     assert_eq!(display_unit("m^2"), "m\u{b2}");
     assert_eq!(display_unit("m2"), "m\u{b2}");
     assert_eq!(display_unit("kg/m^3"), "kg/m\u{b3}");
@@ -261,6 +280,10 @@ fn a_rendered_number_does_not_depend_on_the_display_scale() {
     // Beyond the field's declared places the value is shown rounded, not cut.
     assert_eq!(format_number(0.123_456, 3), "0.123");
     assert!(format_number(f64::NAN, 3).contains("NaN"));
+    // Table cells share this rendering: no negative zero, no padding zeros.
+    assert_eq!(format_number(-0.0, 3), "0");
+    assert_eq!(format_number(-2.1, 3), "-2.1");
+    assert_eq!(format_number(0.3412, 4), "0.3412");
 }
 
 #[test]
@@ -303,6 +326,21 @@ fn tire_and_cabin_preset_lists_include_the_declared_values() {
         &*resolved_options(tire, gear_values).expect("tire options"),
         vec!["auto", "light", "narrowbody", "widebody", "heavy"]
     );
+    let main_tire = gear.field("mlg_tire").expect("main tire field");
+    let listed = resolved_options(main_tire, gear_values).expect("main tire options");
+    assert_eq!(
+        listed.len(),
+        1 + alas_config::landing_gear::CERTIFIED_TIRE_CODES.len()
+    );
+    for preset in alas_config::presets::registry() {
+        for code in [&preset.landing_gear.mlg_tire, &preset.landing_gear.nlg_tire] {
+            assert!(
+                listed.contains(code),
+                "{}: {code} is not selectable",
+                preset.name
+            );
+        }
+    }
 
     let cabin = schema.field("requirements").expect("requirements group");
     let Entry::Node(requirements) = &cabin.entry else {
@@ -351,7 +389,11 @@ fn cargo_choice_lists_cover_the_loader_inputs() {
         .expect("loading strategy field");
 
     let main_options = resolved_options(main, cargo_values).expect("main-deck ULD options");
-    assert_eq!(main_options.len(), alas_payload::cargo::ULD_DATABASE.len());
+    assert_eq!(
+        main_options.len(),
+        alas_payload::cargo::ULD_DATABASE.len() + 1
+    );
+    assert_eq!(main_options.first(), Some(&"AUTO".to_owned()));
     assert!(main_options.contains(&"PMC".to_owned()));
     assert!(main_options.contains(&"M1".to_owned()));
 
@@ -376,25 +418,24 @@ fn nested_readonly_conditions_can_use_a_dotted_path_from_an_ancestor() {
     let root = json!({"requirements": {"cabin_preset": "Custom"}});
     assert!(!readonly_unless(
         &json!({"share_pct": 20.0}),
-        &[root],
+        &[&root],
         condition
     ));
+    let iberia = json!({"requirements": {"cabin_preset": "Iberia"}});
     assert!(readonly_unless(
         &json!({"share_pct": 20.0}),
-        &[json!({"requirements": {"cabin_preset": "Iberia"}})],
+        &[&iberia],
         condition
     ));
 }
 
 #[test]
-fn form_columns_and_label_text_stay_within_readability_bounds() {
+fn form_columns_stay_within_readability_bounds() {
     assert_eq!(form_column_count(299.0), 1);
     assert_eq!(form_column_count(600.0), 2);
-    assert_eq!(form_column_count(1_200.0), 3);
-    assert_eq!(label_text_size(200.0), 11.0);
-    assert_eq!(label_text_size(900.0), 15.0);
-    assert!(label_text_size(500.0) > 11.0);
-    assert!(label_text_size(500.0) < 15.0);
+    assert_eq!(form_column_count(1_200.0), 4);
+    // One page grid: the count follows the width up to eight columns.
+    assert_eq!(form_column_count(2_800.0), 8);
 }
 
 fn layout_test_leaf(name: &'static str, label: &'static str, kind: Kind, value: Value) -> Field {
@@ -403,7 +444,9 @@ fn layout_test_leaf(name: &'static str, label: &'static str, kind: Kind, value: 
         label,
         unit: "",
         help: "",
+        long_help: "",
         advanced: false,
+        visible_if: None,
         entry: Entry::Leaf(LeafField {
             kind,
             optional_value_kind: None,
@@ -474,6 +517,26 @@ fn optional_numbers_and_text_keep_their_declared_json_types() {
     assert_eq!(decoded.mass_model.flops_turboprop.engine_dry_mass_kg, None);
 }
 
+#[test]
+fn a_stated_viscous_margin_can_be_cleared_back_to_the_class_default() {
+    let schema = AlasConfig::default().schema();
+    let margin = leaf_named(&schema.fields, "viscous_margin").expect("viscous margin field");
+    let kind = match &margin.entry {
+        Entry::Leaf(leaf) => leaf.optional_value_kind.expect("declared optional type"),
+        Entry::Node(_) => panic!("expected a leaf"),
+    };
+    assert_eq!(kind, OptionalValueKind::Float);
+    let mut values = serde_json::to_value(AlasConfig::default()).expect("default JSON");
+    values["drag_model"]["viscous_margin"] =
+        optional_value_from_text("1.02", kind, margin).expect("numeric edit");
+    let decoded: AlasConfig = serde_json::from_value(values.clone()).expect("typed config");
+    assert_eq!(decoded.drag_model.viscous_margin, Some(1.02));
+    values["drag_model"]["viscous_margin"] =
+        optional_value_from_text("", kind, margin).expect("cleared edit");
+    let decoded: AlasConfig = serde_json::from_value(values).expect("typed config after clear");
+    assert_eq!(decoded.drag_model.viscous_margin, None);
+}
+
 fn rendered_label_positions(fields: &[Field], open_root_nodes: bool) -> Vec<(String, egui::Pos2)> {
     fn visit(shape: &egui::Shape, out: &mut Vec<(String, egui::Pos2)>) {
         match shape {
@@ -526,7 +589,7 @@ fn rendered_label_positions(fields: &[Field], open_root_nodes: bool) -> Vec<(Str
 fn label_position(labels: &[(String, egui::Pos2)], label: &str) -> egui::Pos2 {
     labels
         .iter()
-        .find(|(text, _)| text == label)
+        .find(|(text, _)| text == label || *text == crate::views::label_case(label))
         .map(|(_, position)| *position)
         .unwrap_or_else(|| panic!("{label} was not painted: {labels:?}"))
 }
@@ -554,13 +617,15 @@ fn a_tall_editor_does_not_hold_up_the_next_field_in_another_column() {
 }
 
 #[test]
-fn expandable_groups_stack_across_the_page_instead_of_sharing_a_row() {
+fn short_groups_stack_on_the_page_grid_with_one_left_edge() {
     let node = |name, label| Field {
         name,
         label,
         unit: "",
         help: "",
+        long_help: "",
         advanced: false,
+        visible_if: None,
         entry: Entry::Node(Node {
             type_name: "Layout test group",
             fields: vec![layout_test_leaf("value", "Value", Kind::Float, json!(1.0))],
@@ -570,9 +635,11 @@ fn expandable_groups_stack_across_the_page_instead_of_sharing_a_row() {
     let labels = rendered_label_positions(&fields, true);
     let first = label_position(&labels, "First group");
     let second = label_position(&labels, "Second group");
+    // One page grid: sibling cards stack one under another on the
+    // page column, so their titles share one left edge whatever their length.
     assert!(
-        (second.x - first.x).abs() < 5.0 && second.y > first.y + 40.0,
-        "groups should use full-width, consecutive rows: {first:?}, {second:?}"
+        (second.x - first.x).abs() < 1.0 && second.y > first.y + 20.0,
+        "short groups should stack on one left edge: {first:?}, {second:?}"
     );
 }
 
@@ -828,7 +895,7 @@ fn a_three_column_form_has_no_overlapping_editors_and_keeps_its_rows_aligned() {
     let label_top = |label: &str| {
         texts
             .iter()
-            .find(|(text, _)| text == label)
+            .find(|(text, _)| text == label || *text == crate::views::label_case(label))
             .map(|(_, rect)| rect.top())
     };
     let tops: Vec<f32> = fields
@@ -898,5 +965,180 @@ fn an_empty_optional_box_is_as_tall_as_the_numeric_box_beside_it() {
         "optional {} vs numeric {}",
         heights.0,
         heights.1
+    );
+}
+
+/// Frame `ctx` with the pointer at `pointer` and the clock at `time`, returning
+/// the output; `events` are extra input events of this frame.
+fn interaction_frame(
+    ctx: &egui::Context,
+    fields: &[Field],
+    values: &mut Value,
+    time: f64,
+    events: Vec<egui::Event>,
+) -> egui::FullOutput {
+    ctx.run(
+        egui::RawInput {
+            screen_rect: Some(egui::Rect::from_min_size(
+                egui::Pos2::ZERO,
+                egui::vec2(780.0, 900.0),
+            )),
+            time: Some(time),
+            events,
+            ..Default::default()
+        },
+        |ctx| {
+            egui::CentralPanel::default().show(ctx, |ui| {
+                super::dynamic_form_with_open_root_nodes(
+                    ui,
+                    fields,
+                    values,
+                    &Default::default(),
+                    Some("en"),
+                    false,
+                    true,
+                );
+            });
+        },
+    )
+}
+
+fn text_rect_in(output: &egui::FullOutput, contains: &str) -> Option<egui::Rect> {
+    fn visit(shape: &egui::Shape, contains: &str) -> Option<egui::Rect> {
+        match shape {
+            egui::Shape::Vec(shapes) => shapes.iter().find_map(|shape| visit(shape, contains)),
+            egui::Shape::Text(text) if text.galley.text().contains(contains) => {
+                Some(egui::Rect::from_min_size(text.pos, text.galley.size()))
+            }
+            _ => None,
+        }
+    }
+    output
+        .shapes
+        .iter()
+        .find_map(|clipped| visit(&clipped.shape, contains))
+}
+
+/// Hovering a schema field's label shows its help after the tooltip delay, the
+/// pointer can travel into the popup, and a click on "Docs" asks the platform
+/// to open the online documentation.
+#[test]
+fn hovering_a_field_label_shows_help_whose_docs_link_opens_the_documentation() {
+    let state = crate::state::AppState::default();
+    let requirements = match &state
+        .schema
+        .field("requirements")
+        .expect("requirements group")
+        .entry
+    {
+        Entry::Node(node) => node.fields.clone(),
+        Entry::Leaf(_) => panic!("requirements is a group"),
+    };
+    let ctx = egui::Context::default();
+    crate::theme::apply_theme(crate::theme::AppTheme::Dark, &ctx);
+    let mut values = serde_json::to_value(AlasConfig::default())
+        .expect("config")
+        .get("requirements")
+        .cloned()
+        .expect("requirements values");
+    let mut time = 0.0;
+    let mut output = interaction_frame(&ctx, &requirements, &mut values, time, vec![]);
+    for _ in 0..2 {
+        time += 0.05;
+        output = interaction_frame(&ctx, &requirements, &mut values, time, vec![]);
+    }
+    let label = text_rect_in(&output, "Cruise Mach number").expect("the label is painted");
+    assert!(text_rect_in(&output, "Docs").is_none(), "no popup yet");
+
+    // Rest the pointer on the label past the delay.
+    let on_label = label.center();
+    time += 0.05;
+    output = interaction_frame(
+        &ctx,
+        &requirements,
+        &mut values,
+        time,
+        vec![egui::Event::PointerMoved(on_label)],
+    );
+    for _ in 0..12 {
+        time += 0.05;
+        output = interaction_frame(&ctx, &requirements, &mut values, time, vec![]);
+    }
+    let docs = text_rect_in(&output, "Docs")
+        .expect("hovering the label shows the help popup with a Docs link");
+
+    // Travel into the popup in steps, then click.
+    let steps = 6;
+    for step in 1..=steps {
+        time += 0.03;
+        let at = on_label + (docs.center() - on_label) * (step as f32 / steps as f32);
+        output = interaction_frame(
+            &ctx,
+            &requirements,
+            &mut values,
+            time,
+            vec![egui::Event::PointerMoved(at)],
+        );
+    }
+    let docs =
+        text_rect_in(&output, "Docs").expect("the popup stays open while the pointer travels");
+    let click = |pressed: bool| egui::Event::PointerButton {
+        pos: docs.center(),
+        button: egui::PointerButton::Primary,
+        pressed,
+        modifiers: egui::Modifiers::NONE,
+    };
+    time += 0.03;
+    interaction_frame(&ctx, &requirements, &mut values, time, vec![click(true)]);
+    time += 0.03;
+    let output = interaction_frame(&ctx, &requirements, &mut values, time, vec![click(false)]);
+    let opened = output.platform_output.open_url.expect("Docs opens a URL");
+    assert_eq!(opened.url, "https://alas.uvigo.es/docs/");
+}
+
+/// Resting the pointer on a field's value box shows the same help popup.
+#[test]
+fn hovering_a_value_box_shows_the_field_help() {
+    let state = crate::state::AppState::default();
+    let requirements = match &state
+        .schema
+        .field("requirements")
+        .expect("requirements group")
+        .entry
+    {
+        Entry::Node(node) => node.fields.clone(),
+        Entry::Leaf(_) => panic!("requirements is a group"),
+    };
+    let ctx = egui::Context::default();
+    crate::theme::apply_theme(crate::theme::AppTheme::Dark, &ctx);
+    let mut values = serde_json::to_value(AlasConfig::default())
+        .expect("config")
+        .get("requirements")
+        .cloned()
+        .expect("requirements values");
+    let mut time = 0.0;
+    let mut output = interaction_frame(&ctx, &requirements, &mut values, time, vec![]);
+    for _ in 0..2 {
+        time += 0.05;
+        output = interaction_frame(&ctx, &requirements, &mut values, time, vec![]);
+    }
+    let label = text_rect_in(&output, "Cruise Mach number").expect("the label is painted");
+    // The value box sits under the label: 30 px down is inside it.
+    let on_box = label.left_bottom() + egui::vec2(30.0, 18.0);
+    time += 0.05;
+    output = interaction_frame(
+        &ctx,
+        &requirements,
+        &mut values,
+        time,
+        vec![egui::Event::PointerMoved(on_box)],
+    );
+    for _ in 0..12 {
+        time += 0.05;
+        output = interaction_frame(&ctx, &requirements, &mut values, time, vec![]);
+    }
+    assert!(
+        text_rect_in(&output, "Docs").is_some(),
+        "hovering the value box shows the help popup"
     );
 }

@@ -688,14 +688,27 @@ pub fn handles(
         .enumerate()
         .find(|(_, y)| **y > 0.0)
     {
-        if let Ok(planform) = g.wing.transport_planform(design) {
+        let prop = Discipline::Propulsion;
+        let length = g.engine.nacelle_length_m();
+        if let Some(mount) = g.engine.rear_fuselage_mount() {
+            // Hung from the fuselage: the wing-referenced inlet offset and height
+            // do not move these engines, so only the spanwise station has a handle.
+            let x_inlet = design.fuselage_length_m - mount.inlet_ahead_of_tail_m;
+            out.push(handle(
+                HandleKind::NacelleSpan,
+                prop,
+                "geometry.engine.spanwise_positions_m",
+                "Engine spanwise position",
+                [x_inlet + 0.5 * length, y_pos, mount.axis_z_m],
+                [0.0, 1.0, 0.0],
+                1.0,
+            ));
+        } else if let Ok(planform) = g.wing.transport_planform(design) {
             let x0 = g.wing.root_datum_x_m + design.wing_x_shift_m;
             let le = planform.leading_edge_x_at(y_pos).unwrap_or(0.0);
-            let x_inlet = x0 + le - g.engine.inlet_x_offset_m;
+            let x_inlet = x0 + le - g.engine.inlet_x_offset_for_engine_m(engine_index);
             let z_wing = interpolated_wing_z(config, &planform, y_pos);
             let z = z_wing + g.engine.z_for_engine_m(engine_index);
-            let length = g.engine.nacelle_length_m();
-            let prop = Discipline::Propulsion;
             out.push(handle(
                 HandleKind::NacelleInlet,
                 prop,

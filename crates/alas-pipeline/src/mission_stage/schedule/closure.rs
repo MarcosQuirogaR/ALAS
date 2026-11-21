@@ -3,9 +3,11 @@
 
 //! Altitude fitting and horizontal distance closure for mission schedules.
 
+use super::junction::{family, join_speeds, merge_pieces};
+use super::speed_change::{is_speed_change, SpeedMemory};
 use super::{ALTITUDE_TOLERANCE_M, DISTANCE_TOLERANCE_M, PROFILE_SCALE_ITERATIONS};
 use alas_atmo::us1976_try_compute_values;
-use alas_config::mission::{SpeedCaps, SpeedReference, MIN_CRUISE_ROUTE_FRACTION};
+use alas_config::mission::{SpeedCaps, SpeedReference};
 use alas_mission::segments::{SegmentKind, SegmentSpec};
 use alas_mission::{MissionRequest, Numerics};
 
@@ -20,17 +22,18 @@ use alas_mission::{MissionRequest, Numerics};
 pub(crate) fn close_schedule_distance(
     schedule: &mut Vec<SegmentSpec>,
     request: &MissionRequest,
+    memory: &SpeedMemory,
 ) -> Result<(), String> {
     let refitted = fit_altitude_profile(
         schedule,
         request.departure_elevation_m,
         request.arrival_elevation_m,
         request.route_distance_m,
+        memory,
     )?;
     *schedule = refitted;
 
-    let non_cruise_distance_m =
-        profile_horizontal_distance_of_schedule(schedule, request.departure_elevation_m);
+    let non_cruise_distance_m = footprint_of_schedule(schedule, request.departure_elevation_m);
     if !non_cruise_distance_m.is_finite() {
         return Err(
             "revised mission profile produces a non-finite climb/descent horizontal distance"
@@ -48,7 +51,8 @@ pub(crate) fn close_schedule_distance(
         .iter()
         .enumerate()
         .filter_map(|(index, segment)| {
-            matches!(segment.kind, SegmentKind::Cruise { .. }).then_some(index)
+            (matches!(segment.kind, SegmentKind::Cruise { .. }) && !is_speed_change(segment))
+                .then_some(index)
         })
         .collect();
     let cruise_distance_total_m: f64 = cruise_indices
@@ -108,7 +112,7 @@ pub(crate) fn close_schedule_distance(
 }
 
 /// Return the highest-altitude version of `nominal` whose non-cruise legs fit
-/// the route and leave [`MIN_CRUISE_ROUTE_FRACTION`] of it for cruise.
+/// the route and leave the memory's minimum cruise share of it for cruise.
 /// Intermediate climb altitudes scale from the departure elevation;
 /// descent altitudes scale from the arrival elevation. Thus a scale of zero is
 /// the irreducible direct elevation transition and a scale of one is the
@@ -118,26 +122,44 @@ pub(crate) fn fit_altitude_profile(
     departure_elevation_m: f64,
     arrival_elevation_m: f64,
     route_distance_m: f64,
+    memory: &SpeedMemory,
 ) -> Result<Vec<SegmentSpec>, String> {
-    let limit_m = route_distance_m * (1.0 - MIN_CRUISE_ROUTE_FRACTION);
-    let full_profile =
-        scaled_altitude_profile(nominal, departure_elevation_m, arrival_elevation_m, 1.0);
-    let full_distance_m =
-        profile_horizontal_distance_of_schedule(&full_profile, departure_elevation_m);
+    let limit_m = route_distance_m * (1.0 - memory.min_cruise_fraction());
+    let full_profile = scaled_altitude_profile(
+        nominal,
+        departure_elevation_m,
+        arrival_elevation_m,
+        1.0,
+        memory,
+    );
+    let full_distance_m = footprint_of_schedule(&full_profile, departure_elevation_m);
     if full_distance_m.is_finite() && full_distance_m <= limit_m {
         return Ok(full_profile);
     }
 
-    let minimum_profile =
-        scaled_altitude_profile(nominal, departure_elevation_m, arrival_elevation_m, 0.0);
-    let minimum_distance_m =
-        profile_horizontal_distance_of_schedule(&minimum_profile, departure_elevation_m);
+    let minimum_profile = scaled_altitude_profile(
+        nominal,
+        departure_elevation_m,
+        arrival_elevation_m,
+        0.0,
+        memory,
+    );
+    let minimum_distance_m = footprint_of_schedule(&minimum_profile, departure_elevation_m);
     if !minimum_distance_m.is_finite() {
         return Err(
             "mission profile produces a non-finite climb/descent horizontal distance".to_owned(),
         );
     }
     if minimum_distance_m > limit_m + DISTANCE_TOLERANCE_M {
+        // A route too short for the level speed changes between the legs does
+        // not fly them; only the climbs and descents themselves have to fit.
+        let mut stripped = minimum_profile.clone();
+        stripped.retain(|spec| !is_speed_change(spec));
+        let stripped_distance_m = footprint_of_schedule(&stripped, departure_elevation_m);
+        if stripped_distance_m.is_finite() && stripped_distance_m <= limit_m + DISTANCE_TOLERANCE_M
+        {
+            return Ok(stripped);
+        }
         return Ok(minimum_profile);
     }
 
@@ -151,9 +173,9 @@ pub(crate) fn fit_altitude_profile(
             departure_elevation_m,
             arrival_elevation_m,
             candidate_scale,
+            memory,
         );
-        let candidate_distance_m =
-            profile_horizontal_distance_of_schedule(&candidate, departure_elevation_m);
+        let candidate_distance_m = footprint_of_schedule(&candidate, departure_elevation_m);
         if candidate_distance_m.is_finite() && candidate_distance_m <= limit_m {
             lower_scale = candidate_scale;
             best_profile = candidate;
@@ -169,11 +191,13 @@ fn scaled_altitude_profile(
     departure_elevation_m: f64,
     arrival_elevation_m: f64,
     scale: f64,
+    memory: &SpeedMemory,
 ) -> Vec<SegmentSpec> {
+    let merged = merge_pieces(nominal.to_vec());
     let mut profile = Vec::with_capacity(nominal.len());
     let mut current_altitude_m = departure_elevation_m;
 
-    for segment in nominal {
+    for segment in &merged {
         let (nominal_end_m, vertical_rate_m_s, is_final, is_climb) = match segment.kind {
             SegmentKind::Climb {
                 altitude_end_m,
@@ -187,7 +211,7 @@ fn scaled_altitude_profile(
             } => (
                 altitude_end_m,
                 descent_rate_m_s.abs(),
-                segment.tag == "final_landing",
+                family(&segment.tag).starts_with("final_landing"),
                 false,
             ),
             SegmentKind::Cruise {
@@ -209,10 +233,22 @@ fn scaled_altitude_profile(
         } else {
             arrival_elevation_m
         };
+        // The speed-restriction altitude (14 CFR 91.117(a)) is a fixed level, not a fraction of
+        // the profile: a fit that shortens the profile does not move the climb that meets it, and
+        // no descent flown faster than the restriction speed may end below it. Scaled below
+        // 10,000 ft, such a descent would fly above 250 kt where that is not allowed, along a band
+        // whose vertical rate was not set for it (A350-900 diversion: 266 KCAS down to 6,000 ft,
+        // below flight idle), and the rung that does meet 10,000 ft would then be dropped.
+        let restriction_m = alas_config::mission::SPEED_RESTRICTION_ALTITUDE_M;
+        let scaled_end_m = anchor_m + scale * (nominal_end_m - anchor_m);
         let altitude_end_m = if is_final {
             arrival_elevation_m
+        } else if is_climb && (nominal_end_m - restriction_m).abs() < 1.0 {
+            nominal_end_m
+        } else if !is_climb && faster_than_restriction(segment) {
+            scaled_end_m.max(nominal_end_m.min(restriction_m))
         } else {
-            anchor_m + scale * (nominal_end_m - anchor_m)
+            scaled_end_m
         };
         let altitude_change_m = altitude_end_m - current_altitude_m;
         if altitude_change_m.abs() <= ALTITUDE_TOLERANCE_M
@@ -239,7 +275,32 @@ fn scaled_altitude_profile(
         profile.push(adapted);
         current_altitude_m = altitude_end_m;
     }
+    join_speeds(&mut profile, departure_elevation_m, memory);
     profile
+}
+
+/// Whether the descent `segment` flies the 10,000 ft speed-restriction altitude above the
+/// restriction's 250 kt calibrated airspeed (14 CFR 91.117(a)), on its own day.
+pub(super) fn faster_than_restriction(segment: &SegmentSpec) -> bool {
+    use alas_config::mission::{SPEED_RESTRICTION_ALTITUDE_M, SPEED_RESTRICTION_CAS_M_S};
+    let cas_m_s = match segment.air_speed_reference {
+        SpeedReference::CalibratedAirspeed => segment.air_speed_m_s,
+        SpeedReference::TrueAirspeed => {
+            let Ok(ambient) = us1976_try_compute_values(
+                SPEED_RESTRICTION_ALTITUDE_M,
+                segment.temperature_deviation_k,
+            ) else {
+                return false;
+            };
+            alas_atmo::airspeed::calibrated_from_true(
+                segment.air_speed_m_s,
+                ambient.pressure_pa,
+                ambient.temperature_k,
+            )
+            .unwrap_or(f64::INFINITY)
+        }
+    };
+    cas_m_s > SPEED_RESTRICTION_CAS_M_S + super::speed_change::SPEED_IDENTITY_M_S
 }
 
 /// Horizontal distance covered by the profile legs in `schedule`.
@@ -320,6 +381,20 @@ pub(super) fn profile_horizontal_distance_of_schedule(
     distance_m
 }
 
+/// Horizontal distance of everything that is not a cruise share: the climb and
+/// descent legs and the level speed-change legs between them.
+pub(crate) fn footprint_of_schedule(schedule: &[SegmentSpec], initial_altitude_m: f64) -> f64 {
+    let changes: f64 = schedule
+        .iter()
+        .filter(|spec| is_speed_change(spec))
+        .map(|spec| match spec.kind {
+            SegmentKind::Cruise { distance_m, .. } => distance_m,
+            _ => 0.0,
+        })
+        .sum();
+    profile_horizontal_distance_of_schedule(schedule, initial_altitude_m) + changes
+}
+
 /// Still-air horizontal distance of one climb or descent leg, m.
 ///
 /// In [`SpeedReference::TrueAirspeed`] mode the true airspeed is constant and
@@ -351,7 +426,9 @@ pub(super) fn profile_horizontal_distance(
     let altitude_change_m = (altitude_end_m - altitude_start_m).abs();
     let capped = spec.speed_caps != SpeedCaps::default();
     match spec.air_speed_reference {
-        SpeedReference::TrueAirspeed if !capped => {
+        SpeedReference::TrueAirspeed
+            if !capped && spec.entry_speed_m_s <= 0.0 && spec.exit_speed_m_s <= 0.0 =>
+        {
             let horizontal_speed_m_s =
                 (spec.air_speed_m_s * spec.air_speed_m_s - rate_m_s * rate_m_s).sqrt();
             altitude_change_m / rate_m_s * horizontal_speed_m_s
@@ -370,21 +447,39 @@ pub(super) fn profile_horizontal_distance(
             };
             let span_s = altitude_change_m / rate_m_s;
             let mut distance_m = 0.0;
+            // The speed the leg flies at `altitude_m` on its own schedule.
+            let nominal = |altitude_m: f64| -> Option<f64> {
+                let atmosphere =
+                    us1976_try_compute_values(altitude_m, spec.temperature_deviation_k).ok()?;
+                spec.speed_caps
+                    .true_airspeed_m_s(
+                        spec.air_speed_reference,
+                        spec.air_speed_m_s,
+                        atmosphere.pressure_pa,
+                        atmosphere.temperature_k,
+                    )
+                    .ok()
+            };
+            let (Some(nominal_start_m_s), Some(nominal_end_m_s)) =
+                (nominal(altitude_start_m), nominal(altitude_end_m))
+            else {
+                return f64::NAN;
+            };
+            let ends = alas_mission::segments::PathEnds {
+                entry_m_s: spec.entry_speed_m_s,
+                exit_m_s: spec.exit_speed_m_s,
+                start_altitude_m: altitude_start_m,
+                end_altitude_m: altitude_end_m,
+                nominal_start_m_s,
+                nominal_end_m_s,
+            };
             for (&weight, &node) in last_row.iter().zip(&numerics.dimensionless.control_points) {
                 let altitude_m = altitude_start_m + node * (altitude_end_m - altitude_start_m);
-                let Ok(atmosphere) =
-                    us1976_try_compute_values(altitude_m, spec.temperature_deviation_k)
-                else {
+                let Some(nominal_m_s) = nominal(altitude_m) else {
                     return f64::NAN;
                 };
-                let Ok(true_air_speed_m_s) = spec.speed_caps.true_airspeed_m_s(
-                    spec.air_speed_reference,
-                    spec.air_speed_m_s,
-                    atmosphere.pressure_pa,
-                    atmosphere.temperature_k,
-                ) else {
-                    return f64::NAN;
-                };
+                let true_air_speed_m_s =
+                    alas_mission::segments::ramp_speed(&ends, altitude_m, nominal_m_s);
                 let horizontal_sq = true_air_speed_m_s * true_air_speed_m_s - rate_m_s * rate_m_s;
                 if !horizontal_sq.is_finite() || horizontal_sq <= 0.0 {
                     return f64::NAN;

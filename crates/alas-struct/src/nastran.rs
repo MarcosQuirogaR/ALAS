@@ -29,7 +29,9 @@ mod results;
 mod run;
 pub(crate) mod static_spanwise;
 mod static_stress;
+pub(crate) use static_stress::cover_panel_case;
 pub use static_stress::{
+    StaticCoverPanelCase, StaticCoverPanelStress, StaticCoverPanelStressResponse,
     StaticShellStressCase, StaticShellStressResponse, StaticShellStressSample,
 };
 pub(crate) mod text;
@@ -40,7 +42,10 @@ pub use decks::{
     build_sol111_sine_bulk, build_sol111_sine_bulk_msc,
 };
 pub(crate) use decks::{FORCE_SID_BASE, GRAVITY_SID_BASE};
-pub use forces::{elliptic_forces_by_y, elliptic_forces_by_y_trapezoid};
+pub(crate) use forces::product_lift_forces;
+pub use forces::{
+    elliptic_forces_by_y, elliptic_forces_by_y_consistent, shaped_forces_by_y_consistent,
+};
 pub use format::free_field;
 pub use results::{
     read_force_psd_rms, read_harmonic_response, read_modes, read_static, read_vibration,
@@ -49,7 +54,7 @@ pub use results::{
 };
 pub use run::{
     fatal_lines, msc_solver_arguments, real_eigenvalue_cycles, run_nastran,
-    run_nastran_with_solver, solver_arguments, tail, NastranRunOutcome,
+    run_nastran_with_memory, run_nastran_with_solver, solver_arguments, tail, NastranRunOutcome,
 };
 pub use static_spanwise::{
     read_static_product, StaticCaseIdentity, StaticSpanwiseCase, StaticSpanwiseResponse,

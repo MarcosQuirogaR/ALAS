@@ -2,7 +2,7 @@
 // Copyright (C) 2026 Marcos Quiroga Rodriguez
 
 //! `cargo xtask dev-env`: the development-shell environment that shortens the
-//! edit-build-test loop (rust-lld linker, an optional per-lane target
+//! edit-build-test loop (rust-lld linker, an optional per-checkout target
 //! directory, optional sccache), printed for the shell to evaluate or applied
 //! to one command.
 //!

@@ -16,6 +16,10 @@ use super::*;
 
 /// ISA sea-level static temperature, K.
 const ISA_SEA_LEVEL_TEMPERATURE_K: f64 = 288.15;
+/// Ratio of specific heats of air.
+const AIR_GAMMA: f64 = 1.4;
+/// Specific gas constant of dry air, J/(kg K).
+const AIR_GAS_CONSTANT_J_KG_K: f64 = 287.052_87;
 /// ISA tropopause temperature, K (11 km).
 const ISA_TROPOPAUSE_TEMPERATURE_K: f64 = 216.65;
 /// ISA tropospheric density-temperature exponent, `g / (L R) - 1`, with
@@ -55,17 +59,55 @@ impl Pw127m568fModel {
     /// 1,110 m). This is a derivation on sourced data, not a TCDS altitude.
     ///
     /// The climb and cruise ratings are installation limits with no published
-    /// flat-rating temperature. They take the maximum-continuous corner, on
-    /// this evidence: the PW120 maximum-cruise chart fit
-    /// `P_CR = 0.9 P_TO sigma^0.728` (Nita 2008 eq. 3.5.11, from McCormick
-    /// 1995) lies above the PW120A's own sea-level cruise/take-off ratio of
-    /// 1,651/2,000 = 0.83 (Majeed 2009 section 2), so the cruise rating is
-    /// flat up to `sigma = (0.83/0.9)^(1/0.728) = 0.89`, the same corner as the
-    /// PW127M's maximum-continuous `sigma = 0.897` to within 1 %. The flight
-    /// idle surrogate is a fraction of maximum-continuous power and follows
-    /// it.
+    /// flat-rating temperature, and no climb or cruise ITT limit is published
+    /// (EASA TCDS IM.E.041: 800 C for maximum continuous and maximum take-off,
+    /// 765 C for normal take-off). They take the flat-rating rule of
+    /// Torenbeek, Synthesis of Subsonic Airplane Design (1982), Sec. 4.4,
+    /// Fig. 4-41, p. 134, on the one temperature-limited line the certificate
+    /// defines: the line through the maximum-continuous corner,
+    /// `P_lim = P_MC (rho / rho_MC)^n`. A rating below maximum continuous is
+    /// flat until it meets that line, at
+    /// `rho = rho_MC (P_rating / P_MC)^(1/n)`, and follows it below; so above
+    /// the corner the maximum-climb and maximum-cruise power are the
+    /// maximum-continuous lapse itself (the engine at its 800 C limit), not
+    /// the rating's sea-level fraction of it. This is the same rule the
+    /// stated-thermodynamic-power branch below applies (TP400-D6), with the
+    /// line taken from the certificate corner where no thermodynamic power is
+    /// declared: 2,018 kW at sea level for the PW127M (1,864 kW to 48 C) and
+    /// 2,287 kW for the PW127G (2,178 kW to 35 C; Pratt & Whitney Canada
+    /// quote the PW127 as a 3,200 eshp thermodynamic class). It replaces the
+    /// earlier interim form (rating times the maximum-continuous lapse), which
+    /// gave 0.88 (PW127M) and 0.80 (PW127G) of this power above the corner.
+    ///
+    /// Check on published climb: the ATR 72-600 fact sheet gives 1,355 ft/min
+    /// at sea level and 17.5 min to FL170 at 170 KCAS, MTOW, ISA, which needs
+    /// about 670 ft/min at FL170 and so 1,380 to 1,500 kW per engine there
+    /// (drag at L/D 14.5 to 16, propeller efficiency 0.85 to 0.87); this rule
+    /// gives 1,372 kW, the earlier form 1,203 kW. The PW120 maximum-cruise
+    /// chart fit `P_CR = 0.9 P_TO sigma^0.728` (Nita 2008 eq. 3.5.11 on
+    /// McCormick 1995, Figs. 3.6-3.7) is the older 2,000 shp engine of the
+    /// family and reads 1,130 kW at FL170 on the PW127M take-off rating; it
+    /// supplies the exponent only. The engine's own climb and cruise ITT and
+    /// torque schedule (ATR 72-600 FCOM power-plant limitations) would lower
+    /// the climb and cruise lines below the maximum-continuous one if they
+    /// were published: this rule is the upper bound the certificate allows.
+    ///
+    /// The flight idle surrogate is a fraction of maximum-continuous power and
+    /// follows it.
+    ///
+    /// With [`Self::thermodynamic_power_w`] stated, each rating but the idle
+    /// surrogate instead takes the density at which that power, lapsed by
+    /// the density exponent, falls to the rating:
+    /// `rho_ref (P_rating / P_thermo)^(1/n)` (flat rating, Torenbeek,
+    /// Synthesis of Subsonic Airplane Design (1982), Sec. 4.4, Fig. 4-41,
+    /// p. 134).
     #[must_use]
     pub fn flat_rating_corner_density_kg_m3(self, rating: Pw127mRating) -> f64 {
+        if self.thermodynamic_power_w > 0.0 && rating != Pw127mRating::FlightIdleSurrogate {
+            return self.power_lapse_reference_density_kg_m3
+                * (self.rated_shaft_power_w(rating) / self.thermodynamic_power_w)
+                    .powf(1.0 / self.power_lapse_density_exponent);
+        }
         let flat_rating_temperature_k = match rating {
             Pw127mRating::NormalTakeoff | Pw127mRating::MaximumTakeoffReserve => {
                 self.takeoff_flat_rating_temperature_k
@@ -77,8 +119,21 @@ impl Pw127m568fModel {
                 self.maximum_continuous_flat_rating_temperature_k
             }
         };
-        self.power_lapse_reference_density_kg_m3 * ISA_SEA_LEVEL_TEMPERATURE_K
-            / flat_rating_temperature_k
+        let corner_kg_m3 = self.power_lapse_reference_density_kg_m3 * ISA_SEA_LEVEL_TEMPERATURE_K
+            / flat_rating_temperature_k;
+        match rating {
+            // Flat until the rating meets the maximum-continuous line.
+            Pw127mRating::MaximumClimb | Pw127mRating::MaximumCruise => {
+                let share = self.rated_shaft_power_w(rating)
+                    / self.rated_shaft_power_w(Pw127mRating::MaximumContinuous);
+                if share.is_finite() && share > 0.0 && share < 1.0 {
+                    corner_kg_m3 * share.powf(1.0 / self.power_lapse_density_exponent)
+                } else {
+                    corner_kg_m3
+                }
+            }
+            _ => corner_kg_m3,
+        }
     }
 
     /// The share of `rating`'s sea-level power available at an ambient
@@ -95,6 +150,61 @@ impl Pw127m568fModel {
         ratio
             .powf(self.power_lapse_density_exponent)
             .max(self.minimum_power_lapse_fraction)
+    }
+
+    /// Ram factor on the thermodynamically limited shaft power at a flight
+    /// condition: `(1 + 0.2 M^2)^k` at the flight Mach number, divided by the
+    /// same factor's altitude growth along the lapse fit's own speed
+    /// schedule, `[(1 + 0.2 M_ref^2) / (1 + 0.2 M_ref,0^2)]^k`, where
+    /// `M_ref` is [`Self::power_lapse_fit_reference_true_airspeed_m_s`] at
+    /// this temperature's speed of sound and `M_ref,0` the same speed at ISA
+    /// sea level. Exactly 1 when [`Self::ram_power_exponent`] is 0.
+    ///
+    /// The form is the corrected-parameter similarity of Torenbeek,
+    /// Advanced Aircraft Design (1st ed., 2013), eq. 3.30, p. 69; see
+    /// [`Self::ram_power_exponent`].
+    #[must_use]
+    pub fn ram_power_factor(self, true_airspeed_m_s: f64, ambient_temperature_k: f64) -> f64 {
+        if self.ram_power_exponent == 0.0 {
+            return 1.0;
+        }
+        let ram = |speed_m_s: f64, temperature_k: f64| {
+            let mach_squared =
+                speed_m_s * speed_m_s / (AIR_GAMMA * AIR_GAS_CONSTANT_J_KG_K * temperature_k);
+            1.0 + 0.5 * (AIR_GAMMA - 1.0) * mach_squared
+        };
+        let reference_m_s = self.power_lapse_fit_reference_true_airspeed_m_s;
+        let schedule_growth = ram(reference_m_s, ambient_temperature_k)
+            / ram(reference_m_s, ISA_SEA_LEVEL_TEMPERATURE_K);
+        (ram(true_airspeed_m_s, ambient_temperature_k) / schedule_growth)
+            .powf(self.ram_power_exponent)
+    }
+
+    /// The share of `rating`'s sea-level power available at a flight
+    /// condition: [`Self::power_lapse_fraction`] with the lapsed part lifted
+    /// by [`Self::ram_power_factor`], capped at the rating and never under the
+    /// declared floor. Above [`Self::rating_temperature_limit_k`] the density
+    /// ratio is bounded by `T_limit / T`. With neither a ram factor nor a
+    /// temperature limit it is [`Self::power_lapse_fraction`] exactly.
+    #[must_use]
+    pub fn power_lapse_fraction_in_flight(
+        self,
+        rating: Pw127mRating,
+        density_kg_m3: f64,
+        true_airspeed_m_s: f64,
+        ambient_temperature_k: f64,
+    ) -> f64 {
+        if self.ram_power_exponent == 0.0 && self.rating_temperature_limit_k == 0.0 {
+            return self.power_lapse_fraction(rating, density_kg_m3);
+        }
+        let mut ratio = (density_kg_m3 / self.flat_rating_corner_density_kg_m3(rating)).min(1.0);
+        if self.rating_temperature_limit_k > 0.0 {
+            ratio = ratio.min(self.rating_temperature_limit_k / ambient_temperature_k);
+        }
+        (self.ram_power_factor(true_airspeed_m_s, ambient_temperature_k)
+            * ratio.powf(self.power_lapse_density_exponent))
+        .min(1.0)
+        .max(self.minimum_power_lapse_fraction)
     }
 
     /// Power-specific fuel consumption at an ambient static temperature,
@@ -117,6 +227,10 @@ impl Pw127m568fModel {
             * (ambient_temperature_k / self.psfc_reference_temperature_k).sqrt()
     }
 
+    /// NEEDS-DATA(PR2c, m-5): idle-to-lowest-running-point fuel data for the
+    /// PW127M are not on disk; the part-power rise below the knee is a class
+    /// shape, and the idle fuel it feeds is unvalidated until they land.
+    ///
     /// Part-power multiplier on the flat-band PSFC at `power_fraction`, the
     /// shaft power over the take-off power available at the same ambient
     /// density: 1 at and above [`Self::part_power_knee_fraction`], then

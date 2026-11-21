@@ -105,6 +105,11 @@ pub struct DirCache {
     before: BTreeMap<String, String>,
 }
 
+/// Serialises the tests that switch the process-wide cache setting on against
+/// every launch that consults it.
+#[cfg(test)]
+static CACHE_SETTING_GATE: std::sync::RwLock<()> = std::sync::RwLock::new(());
+
 impl DirCache {
     /// Prepare a cached invocation, or `None` when the cache is disabled or an
     /// input cannot be read (in which case the caller simply runs the tool).
@@ -117,6 +122,23 @@ impl DirCache {
     /// * `options` are length-prefixed byte fields (arguments, stdin, thread
     ///   count, environment overrides) that change the answer.
     pub fn begin(
+        tool: &str,
+        exe: &Path,
+        dir: &Path,
+        inputs: &[PathBuf],
+        options: &[&[u8]],
+    ) -> Option<Self> {
+        // Tests only: a test that switches the process-wide cache on holds the
+        // write side, so no other test's launch snapshots a shared directory
+        // while it is on.
+        #[cfg(test)]
+        let _gate = CACHE_SETTING_GATE
+            .read()
+            .unwrap_or_else(|poisoned| poisoned.into_inner());
+        Self::begin_unlocked(tool, exe, dir, inputs, options)
+    }
+
+    fn begin_unlocked(
         tool: &str,
         exe: &Path,
         dir: &Path,
@@ -323,11 +345,29 @@ mod tests {
         }
     }
 
-    fn enable(cache: &Path) {
-        RuntimeSettings::set_override(Some(RuntimeSettings {
+    /// Holds the write side of [`CACHE_SETTING_GATE`] while the process-wide
+    /// override is set, and clears it on drop, also when the test panics.
+    struct OverrideGuard(#[allow(dead_code)] std::sync::RwLockWriteGuard<'static, ()>);
+    impl OverrideGuard {
+        fn set(settings: RuntimeSettings) -> Self {
+            let gate = CACHE_SETTING_GATE
+                .write()
+                .unwrap_or_else(|poisoned| poisoned.into_inner());
+            RuntimeSettings::set_override(Some(settings));
+            Self(gate)
+        }
+    }
+    impl Drop for OverrideGuard {
+        fn drop(&mut self) {
+            RuntimeSettings::set_override(None);
+        }
+    }
+
+    fn enable(cache: &Path) -> OverrideGuard {
+        OverrideGuard::set(RuntimeSettings {
             cache_dir: Some(cache.to_path_buf()),
             ..RuntimeSettings::default()
-        }));
+        })
     }
 
     #[test]
@@ -339,10 +379,10 @@ mod tests {
         fs::write(work.join("deck.in"), b"deck v1").ok();
         let exe = scratch.0.join("tool.exe");
         fs::write(&exe, b"binary v1").ok();
-        enable(&cache_root);
+        let override_guard = enable(&cache_root);
         let inputs = [work.join("deck.in")];
 
-        let first = DirCache::begin("unit", &exe, &work, &inputs, &[b"-a"]);
+        let first = DirCache::begin_unlocked("unit", &exe, &work, &inputs, &[b"-a"]);
         let first = first.expect("cache enabled");
         assert!(first.restore().is_none(), "empty cache misses");
         fs::write(work.join("out.ft"), b"forces").ok();
@@ -352,7 +392,8 @@ mod tests {
 
         fs::remove_file(work.join("out.ft")).ok();
         fs::remove_dir_all(work.join("sub")).ok();
-        let again = DirCache::begin("unit", &exe, &work, &inputs, &[b"-a"]).expect("enabled");
+        let again =
+            DirCache::begin_unlocked("unit", &exe, &work, &inputs, &[b"-a"]).expect("enabled");
         assert_eq!(again.restore().as_deref(), Some(&b"stdout text"[..]));
         assert_eq!(
             fs::read(work.join("out.ft")).ok().as_deref(),
@@ -363,19 +404,22 @@ mod tests {
             Some(&b"log"[..])
         );
 
-        let other_option = DirCache::begin("unit", &exe, &work, &inputs, &[b"-b"]).expect("on");
+        let other_option =
+            DirCache::begin_unlocked("unit", &exe, &work, &inputs, &[b"-b"]).expect("on");
         assert!(other_option.restore().is_none());
         fs::write(work.join("deck.in"), b"deck v2").ok();
-        let other_deck = DirCache::begin("unit", &exe, &work, &inputs, &[b"-a"]).expect("on");
+        let other_deck =
+            DirCache::begin_unlocked("unit", &exe, &work, &inputs, &[b"-a"]).expect("on");
         assert!(other_deck.restore().is_none());
         fs::write(&exe, b"binary v2 longer").ok();
-        let other_exe = DirCache::begin("unit", &exe, &work, &inputs, &[b"-a"]).expect("on");
+        let other_exe =
+            DirCache::begin_unlocked("unit", &exe, &work, &inputs, &[b"-a"]).expect("on");
         assert!(other_exe.restore().is_none());
         // Off by default (the override is process-wide, so this stays in the
         // one test that owns it).
         RuntimeSettings::set_override(Some(RuntimeSettings::default()));
-        assert!(DirCache::begin("unit", &exe, &work, &[], &[]).is_none());
-        RuntimeSettings::set_override(None);
+        assert!(DirCache::begin_unlocked("unit", &exe, &work, &[], &[]).is_none());
+        drop(override_guard);
     }
 
     #[test]

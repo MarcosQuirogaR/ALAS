@@ -297,3 +297,27 @@ fn translate_shifts_every_xsec_leading_edge() {
         assert_eq!(moved.twist, original.twist);
     }
 }
+
+#[test]
+fn a_pitch_axis_twist_keeps_the_root_chord_in_the_plane_of_symmetry() {
+    // 10 deg dihedral, root on the plane of symmetry, -6 deg incidence.
+    let dihedral = 10.0_f64.to_radians();
+    let tip = [4.0, 5.0 * dihedral.cos(), 5.0 * dihedral.sin()];
+    let mut wing = Wing::new(
+        "Tail",
+        vec![
+            WingXSec::new([0.0, 0.0, 0.0], 8.0, -6.0, naca("naca0012")),
+            WingXSec::new(tip, 3.0, -6.0, naca("naca0012")),
+        ],
+        true,
+    );
+    let sideways = 8.0 * 6.0_f64.to_radians().sin() * dihedral.sin();
+    let te = wing.xyz_of_xsec(0, 1.0, 0.0);
+    assert!((te[1].abs() - sideways).abs() < 1.0e-9, "{te:?}");
+    wing.twist_about_pitch_axis = true;
+    let te = wing.xyz_of_xsec(0, 1.0, 0.0);
+    let pitch = 6.0_f64.to_radians();
+    assert!(te[1].abs() < 1.0e-12, "{te:?}");
+    assert!((te[0] - 8.0 * pitch.cos()).abs() < 1.0e-12, "{te:?}");
+    assert!((te[2].abs() - 8.0 * pitch.sin()).abs() < 1.0e-12, "{te:?}");
+}

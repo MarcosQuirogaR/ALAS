@@ -13,7 +13,7 @@ use alas_pipeline::structural::StructuralAnalysisResult;
 
 use super::layout::panel_rects;
 use super::status::{load_case_color, resolve_structural_result, status_message_scene};
-use crate::chart_kit::{draw_legend, LegendMarker};
+use crate::chart_kit::{draw_horizontal_legend_columns, LegendMarker};
 use crate::scene::{Axes2D, Color, Scene, SceneElement, Stroke, TextAlign, TextBaseline};
 use crate::theme::get_palette;
 
@@ -51,7 +51,7 @@ pub fn figure_structures_stress(
     // +10 px below the automatic figure title compared to the original 55.0,
     // on top of that title's own existing ~28 px clearance.
     let margin_top = 65.0;
-    let margin_bottom = 55.0;
+    let margin_bottom = 85.0;
     let plot_height = 330.0;
     let n_f = n_spars.max(1) as f64;
     let width = margin_left + n_f * panel_w + (n_f - 1.0) * gutter + margin_right;
@@ -79,6 +79,7 @@ pub fn figure_structures_stress(
         gutter,
     );
 
+    let mut shared_legend = Vec::new();
     for (i, rect) in rects.into_iter().enumerate() {
         let axes = Axes2D::new(rect, (y_min, y_max), (MS_MIN, MS_MAX));
         axes.draw_frame_with_labels(
@@ -122,14 +123,17 @@ pub fn figure_structures_stress(
             angle_deg: 0.0,
             bold: true,
         });
-        draw_legend(
-            &mut scene,
-            [rect.0 + 8.0, rect.1 + 8.0],
-            &legend_entries,
-            pal,
-            8.0,
-        );
+        shared_legend = legend_entries;
     }
+    // One legend for all panels (they share the entries), below the frames so
+    // no curve, several of which clamp at the top of the range, is covered.
+    draw_horizontal_legend_columns(
+        &mut scene,
+        [margin_left, margin_top + plot_height + 50.0],
+        &shared_legend,
+        pal,
+        7.5,
+    );
 
     scene
 }
@@ -158,11 +162,15 @@ mod tests {
         let sizing = WingboxSizing {
             y_stations: y.clone(),
             axis_cos: Vec::new(),
+            cover_shape: Vec::new(),
+            cover_depth_m: Vec::new(),
+            cover_shear_flow_n_per_m: Vec::new(),
             eta_stations: vec![0.0, 0.5, 1.0],
             chord: vec![6.0, 4.0, 2.0],
             spar_fracs: vec![0.2],
             spars: vec![spar],
             t_skin: 0.004,
+            skin_gauge_m: Vec::new(),
             num_ribs: 10,
             rib_spacing_m: 1.8,
             mass_breakdown_kg: MassBreakdown {
@@ -188,6 +196,7 @@ mod tests {
             shear_n: vec![0.0, 0.0, 0.0],
             moment_nm: vec![0.0, 0.0, 0.0],
             deflection_m: vec![0.0, 0.0, 0.0],
+            shear_deflection_m: Vec::new(),
             tip_deflection_m: 0.0,
             spar_stress: vec![spar_stress],
         };
@@ -210,7 +219,7 @@ mod tests {
             nastran: None,
             nastran95: None,
             patran: None,
-            torenbeek_wing_mass_kg: 400.0,
+            ledger_complete_wing_mass_kg: 400.0,
             wing_mass: None,
             evaluation_inputs: None,
         }

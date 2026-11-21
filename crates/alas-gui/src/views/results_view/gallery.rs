@@ -4,6 +4,7 @@
 //! Result-gallery geometry: responsive card columns, and each card's scene
 //! with the canvas height that shows its drawing without empty bands.
 
+use crate::figure_jobs::FigureLookup;
 use crate::state::AppState;
 use crate::views::result_3d;
 use alas_report::scene::Scene;
@@ -64,6 +65,9 @@ pub(super) fn figure_gallery_layout(
 /// One result card's scene and the keys it is cached and viewed under.
 pub(super) struct TileScene {
     pub(super) scene: Option<std::sync::Arc<Scene>>,
+    /// The figure is queued or building on a worker: show a placeholder, not
+    /// the "unavailable" text.
+    pub(super) pending: bool,
     pub(super) view_key: String,
     pub(super) camera_key: String,
     pub(super) orbitable: bool,
@@ -71,26 +75,22 @@ pub(super) struct TileScene {
 
 pub(super) fn tile_scene(
     state: &mut AppState,
-    config: &alas_config::AlasConfig,
+    _config: &alas_config::AlasConfig,
     descriptor: &alas_report::FigureDescriptor,
 ) -> TileScene {
     let id = descriptor.id;
     let theme = state.theme.figure_theme_name().to_owned();
-    let language = alas_i18n::get_language();
-    let view_key = format!(
-        "run={};solver={:?};theme={theme};language={language};figure={id}",
-        state.run_identity, state.selected_solver_view
-    );
+    let view_key = state.gallery_figure_key(id);
     let orbitable = result_3d::is_orbitable_result(id);
     let camera_key = result_3d::result_camera_key(state.run_identity, id);
-    let scene = if orbitable {
-        let camera = result_3d::result_camera(state, &camera_key);
-        state.cached_result_figure_with_camera(&view_key, id, config, &theme, Some(camera))
-    } else {
-        state.cached_result_figure(&view_key, id, config, &theme)
+    let camera = orbitable.then(|| result_3d::result_camera(state, &camera_key));
+    let (scene, pending) = match state.result_figure_background(&view_key, id, &theme, camera) {
+        FigureLookup::Ready(scene) => (scene, false),
+        FigureLookup::Pending => (None, true),
     };
     TileScene {
         scene,
+        pending,
         view_key,
         camera_key,
         orbitable,

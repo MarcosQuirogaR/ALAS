@@ -36,7 +36,13 @@ pub(in super::super) fn place_exits(
     product_exit_capacity: bool,
     source_exit_layout: Option<CertifiedExitLayout>,
 ) -> Exits {
-    let default_spec = select_exit_type(g.diameter_m);
+    let seated: i64 = cabin_deck_segments(g)
+        .into_iter()
+        .map(|segment| seating.on_deck(segment.deck.name))
+        .sum();
+    let default_spec = small_cabin_exit(seated)
+        .filter(|_| product_exit_capacity)
+        .unwrap_or_else(|| select_exit_type(g.diameter_m));
     let default_capacity_per_pair = if product_exit_capacity {
         effective_pair_capacity(default_spec, pax)
     } else {
@@ -48,11 +54,20 @@ pub(in super::super) fn place_exits(
     let mut items = Vec::new();
     let mut pairs = 0i64;
     let mut capacity_total = 0i64;
+    // The exits of a side are those of every deck together: the seat bands of
+    // CS 25.807(g)(1)-(g)(8) rate them as a whole.
+    let mut letters: Vec<&'static str> = Vec::new();
 
     for (deck_index, segment) in cabin_deck_segments(g).into_iter().enumerate() {
         let deck = segment.deck;
         let deck_pax = seating.on_deck(deck.name);
-        if deck_pax <= 0 {
+        // A declared arrangement is the airframe's: its doors are there however
+        // few seats this case fills, and their sum is the evacuation ceiling.
+        // Each deck takes its own declared pairs, an unseated deck included;
+        // a deck the source declares none for keeps the generic rule.
+        let declared =
+            source_exit_layout.and_then(|layout| crate::cabin::deck_pairs(&layout, deck_index));
+        if deck_pax <= 0 && declared.is_none() {
             continue;
         }
         if deck_index == 0 && !g.door_stations.is_empty() {
@@ -60,12 +75,11 @@ pub(in super::super) fn place_exits(
             items.extend(door_items);
             pairs += g.door_stations.len() as i64;
             capacity_total += rating;
+            letters.extend(g.door_stations.iter().map(|door| door.spec.name));
             continue;
         }
-        let n_pairs = if let Some(source_exit_layout) = source_exit_layout {
-            ceil_div(deck_pax, largest_pair_rating(&source_exit_layout))
-                .max(min_exit_pairs(deck_pax))
-                .clamp(1, source_exit_layout.pairs.len().max(1) as i64)
+        let n_pairs = if let Some(pairs) = declared {
+            (pairs.len() as i64).max(1)
         } else {
             min_exit_pairs(deck_pax).max(ceil_div(deck_pax, default_capacity_per_pair.max(1)))
         };
@@ -81,7 +95,7 @@ pub(in super::super) fn place_exits(
         // four model bays and three source pairs, rounding 1.5 upward would
         // select stations [0, 2, 3] and leave an avoidable over-spacing gap,
         // while [0, 1, 3] preserves the same physical bay candidates.
-        let bay_indices = if source_exit_layout.is_some() {
+        let bay_indices = if declared.is_some() {
             source_spread_bay_indices(n_pairs, deck_bays.len())
         } else {
             spread_bay_indices(n_pairs, deck_bays.len())
@@ -98,27 +112,30 @@ pub(in super::super) fn place_exits(
         }
 
         for (pair_index, xe) in exit_xs.into_iter().enumerate() {
-            let pair_spec = source_exit_layout
-                .and_then(|layout| layout.pairs.get(pair_index))
+            let pair_spec = declared
+                .and_then(|pairs| pairs.get(pair_index))
                 .and_then(|pair| exit_spec(pair.exit_type))
                 .unwrap_or(default_spec);
-            let pair_capacity = source_exit_layout
-                .and_then(|layout| layout.pairs.get(pair_index))
-                .map_or(
-                    if product_exit_capacity {
-                        default_capacity_per_pair
-                    } else {
-                        // The frozen summary recorded two side ratings per
-                        // pair; this conversion is deliberately confined to
-                        // the compatibility branch.
-                        default_capacity_per_pair * 2
-                    },
-                    |pair| pair_rating(pair.exit_type),
-                );
+            let pair_capacity = declared.and_then(|pairs| pairs.get(pair_index)).map_or(
+                if product_exit_capacity {
+                    default_capacity_per_pair
+                } else {
+                    // The frozen summary recorded two side ratings per
+                    // pair; this conversion is deliberately confined to
+                    // the compatibility branch.
+                    default_capacity_per_pair * 2
+                },
+                |pair| pair_rating(pair.exit_type),
+            );
             capacity_total += pair_capacity;
+            letters.push(pair_spec.name);
             items.extend(exit_pair_items(g, deck, xe, pair_spec));
         }
         pairs += n_pairs;
+    }
+
+    if product_exit_capacity {
+        capacity_total = capacity_total.min(band_limit(&letters));
     }
 
     Exits {

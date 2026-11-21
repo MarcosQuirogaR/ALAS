@@ -18,6 +18,7 @@
 
 mod build;
 mod flops_items;
+mod freight_items;
 
 use alas_config::MassModelConfig;
 
@@ -147,6 +148,8 @@ pub struct PayloadItemSummary {
     pub position_m: [f64; 3],
     /// Item bounding extent `[length_x, width_y, height_z]`, m.
     pub extent_m: [f64; 3],
+    /// For a seat row: its FLOPS class and occupied seats.
+    pub seats: Option<(crate::flops_transport::seats::SeatClass, usize)>,
 }
 
 /// A named aircraft mass state.

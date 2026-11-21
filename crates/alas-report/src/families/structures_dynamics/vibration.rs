@@ -15,7 +15,7 @@ use alas_pipeline::structural::StructuralAnalysisResult;
 use alas_struct::nastran::ResultStatus;
 
 use super::layout::panel_rects;
-use super::status::{resolve_structural_result, status_message_scene};
+use super::status::{resolve_structural_result, tool_not_configured_scene};
 use crate::chart_kit::{
     draw_axes_without_x_tick_labels, draw_categorical_x_axis, draw_legend, LegendMarker,
 };
@@ -42,6 +42,20 @@ pub fn figure_structures_vibration(
         return unavailable_vibration(pal, "NASTRAN was not run for this design.");
     };
     let vib = &nastran.vibration;
+    if vib.status == ResultStatus::NotConfigured {
+        return tool_not_configured_scene(
+            TITLE,
+            "NASTRAN SOL 111 (modal frequency response)",
+            &format!(
+                "No sine-sweep or random-vibration result exists for this design. Reported status: {}",
+                vib.error.as_deref().unwrap_or("backend not configured")
+            ),
+            pal,
+        );
+    }
+    if vib.status == ResultStatus::NotRun {
+        return unavailable_vibration(pal, "NASTRAN vibration was not run for this design.");
+    }
     if vib.status != ResultStatus::Ok {
         return unavailable_vibration(
             pal,
@@ -61,12 +75,12 @@ pub fn figure_structures_vibration(
 }
 
 fn unavailable_vibration(pal: &crate::theme::Palette, detail: &str) -> Scene {
-    status_message_scene(
+    // The solve was not run: a neutral note, not a failure.
+    crate::status_figure::skipped_status_scene(
         TITLE,
         &format!(
             "Requires a real NASTRAN sine/random-vibration solve (no analytical fallback exists for this check): {detail}"
         ),
-        false,
         pal,
     )
 }
@@ -380,5 +394,59 @@ mod tests {
         assert!(scene.elements.iter().any(|element| {
             matches!(element, SceneElement::Text { text, .. } if text == "1.00e-3 m")
         }));
+    }
+    fn title_color(scene: &Scene, title: &str) -> Option<Color> {
+        scene.elements.iter().find_map(|e| match e {
+            SceneElement::Text { text, color, .. } if text == title => Some(*color),
+            _ => None,
+        })
+    }
+
+    fn has_text(scene: &Scene, needle: &str) -> bool {
+        scene.elements.iter().any(|e| {
+            matches!(e, SceneElement::Text { text, .. } | SceneElement::TextBlock { text, .. } if text.contains(needle))
+        })
+    }
+
+    fn with_vibration(vibration: VibrationResult) -> StructuralAnalysisResult {
+        StructuralAnalysisResult {
+            status: "ok".to_owned(),
+            nastran: Some(alas_struct::nastran::NastranResults {
+                vibration,
+                ..alas_struct::nastran::NastranResults::default()
+            }),
+            ..StructuralAnalysisResult::default()
+        }
+    }
+
+    #[test]
+    fn a_real_sol111_solver_failure_keeps_the_red_card_and_its_error() {
+        let error =
+            "SOL 111 did not return complex displacement data for the force-PSD RMS calculation";
+        let result = with_vibration(VibrationResult {
+            status: ResultStatus::Error,
+            error: Some(error.to_owned()),
+            ..VibrationResult::default()
+        });
+        let scene = figure_structures_vibration(Some(&result), None);
+        let pal = get_palette(None);
+        assert_ne!(title_color(&scene, TITLE), Some(Color::from_hex(pal.title)));
+        assert!(has_text(&scene, "vibration solve failed"));
+        assert!(has_text(&scene, error));
+    }
+
+    #[test]
+    fn a_missing_backend_shows_the_neutral_card_with_the_original_text() {
+        let error = "NASTRAN-95 backend does not provide the modern SOL 111 modal frequency-response contract";
+        let result = with_vibration(VibrationResult {
+            status: ResultStatus::NotConfigured,
+            error: Some(error.to_owned()),
+            ..VibrationResult::default()
+        });
+        let scene = figure_structures_vibration(Some(&result), None);
+        let pal = get_palette(None);
+        assert_eq!(title_color(&scene, TITLE), Some(Color::from_hex(pal.title)));
+        assert!(has_text(&scene, "not configured"));
+        assert!(has_text(&scene, error));
     }
 }

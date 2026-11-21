@@ -10,8 +10,8 @@
 //! and the sandbox use ([`crate::mission_stage::dispatch::select_route_load_case`]):
 //! the segment mission model, a trip plan frozen for the route, the
 //! configured fuel policy, the report's own zero-fuel mass (operating empty
-//! plus the payload the report carries), and the takeoff mass the policy
-//! closure settles at. Block fuel is the gate-to-gate consumption of the
+//! plus the payload the report carries, less what a landing-weight-limited
+//! route leaves behind), and the takeoff mass the policy closure settles at. Block fuel is the gate-to-gate consumption of the
 //! nominal flight: taxi out, trip and taxi in
 //! ([`alas_mass::fuel_plan::FuelPlan::block_fuel_kg`]).
 
@@ -38,6 +38,9 @@ pub struct ReferenceRouteFuel {
     pub taxi_out_fuel_kg: f64,
     /// Operating empty plus payload of the priced load case, kg.
     pub zero_fuel_mass_kg: f64,
+    /// Payload of the report the priced route leaves behind, kg: zero unless
+    /// it is landing-weight limited (`mission_stage::dispatch::landing_limit`).
+    pub offloaded_payload_kg: f64,
     /// Takeoff mass the closure settled at, kg.
     pub takeoff_mass_kg: f64,
     /// Flight time from brake release to landing, s.
@@ -70,7 +73,7 @@ pub fn reference_route_fuel(
     let (_, load_case) = select_route_load_case(config, report, origin, destination, range_m)?;
     let reason = match &load_case.selection {
         crate::LoadCaseSelection::MaximumAvailableFuel { reason, .. } => reason.clone(),
-        crate::LoadCaseSelection::PolicyClosure(_) => None,
+        crate::LoadCaseSelection::PolicyClosure(_) | crate::LoadCaseSelection::Plan(_) => None,
     };
     let case = load_case.route_case().ok_or_else(|| {
         reason.unwrap_or_else(|| "the route could not be priced on the segment model".to_owned())
@@ -87,7 +90,8 @@ pub fn reference_route_fuel(
         takeoff_fuel_kg: plan.takeoff_fuel_kg(),
         reserve_fuel_kg: plan.reserve_fuel_kg(),
         taxi_out_fuel_kg: plan.taxi.kg,
-        zero_fuel_mass_kg: load_case.zero_fuel_mass_kg,
+        zero_fuel_mass_kg: case.analytic.zero_fuel_mass_kg,
+        offloaded_payload_kg: case.offloaded_payload_kg,
         takeoff_mass_kg: case.analytic.takeoff_mass_kg,
         trip_time_s: plan.trip_time_s,
         converged: case.converged,

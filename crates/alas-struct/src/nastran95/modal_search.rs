@@ -29,6 +29,45 @@ const MODAL_BAND_LADDER_HZ: [f64; 5] = [4.0, 8.0, 16.0, 32.0, 64.0];
 /// patchy and, on a B747-400 wingbox, cost minutes per band.
 const MODAL_TARGET_CONFIRMED: i64 = 4;
 
+/// Roots the structural-modes figure would like confirmed, beyond
+/// [`MODAL_TARGET_CONFIRMED`]. The search only reaches for them after the
+/// default four are confirmed (so a wider band never costs the default result),
+/// only while [`MODAL_FIGURE_BUDGET_S`] allows another band, and falls back to
+/// the best confirmed prefix when it does not get there. The environment
+/// variable [`MODAL_FIGURE_TARGET_ENV`] overrides the count; `0` or any value
+/// at or below the default disables the extension.
+const MODAL_FIGURE_TARGET: i64 = 6;
+
+/// Environment override of [`MODAL_FIGURE_TARGET`].
+const MODAL_FIGURE_TARGET_ENV: &str = "ALAS_N95_FIGURE_MODES";
+
+/// Wall-clock allowance, seconds, for the whole band search before the
+/// figure extension stops widening. A further band is started only if the
+/// time already spent plus twice the last band's run time fits inside it.
+const MODAL_FIGURE_BUDGET_S: f64 = 420.0;
+
+static FIGURE_REQUESTED: std::sync::atomic::AtomicBool = std::sync::atomic::AtomicBool::new(false);
+
+/// Declare that the structural-modes figure will be generated from this
+/// process's NASTRAN-95 modal solves (the GUI, or the CLI with plots). Only
+/// then does the search reach for [`MODAL_FIGURE_TARGET`] roots; matrix,
+/// optimisation and other batch runs keep the default
+/// [`MODAL_TARGET_CONFIRMED`].
+pub fn request_modes_figure(requested: bool) {
+    FIGURE_REQUESTED.store(requested, std::sync::atomic::Ordering::Relaxed);
+}
+
+fn figure_target() -> i64 {
+    if !FIGURE_REQUESTED.load(std::sync::atomic::Ordering::Relaxed) {
+        return MODAL_TARGET_CONFIRMED;
+    }
+    std::env::var(MODAL_FIGURE_TARGET_ENV)
+        .ok()
+        .and_then(|value| value.trim().parse::<i64>().ok())
+        .unwrap_or(MODAL_FIGURE_TARGET)
+        .min(8)
+}
+
 /// Fewest roots requested per band (`ND` and `NE`).
 const MODAL_MIN_EXTRACTED: i64 = 12;
 
@@ -54,13 +93,25 @@ pub(super) fn solve_modes(
     node_index: &MeshNodeIndex,
     config: &StructuresConfig,
 ) -> ModesResult {
-    let output_nodes = node_index
+    // Eigenvectors are printed at the front-spar grids (the shape the report
+    // has always drawn) and at the rear-spar grids, so bending and twist can
+    // be separated.
+    let mut output_nodes: Vec<i64> = node_index
         .spar_upper_nids
         .first()
-        .map(Vec::as_slice)
+        .cloned()
         .unwrap_or_default();
+    if node_index.spar_upper_nids.len() >= 2 {
+        if let Some(rear) = node_index.spar_upper_nids.last() {
+            output_nodes.extend(rear.iter().copied());
+        }
+    }
+    let output_nodes = output_nodes.as_slice();
     let requested = config.n_modes.max(1);
     let target = requested.min(MODAL_TARGET_CONFIRMED) as usize;
+    let stretch = requested.min(figure_target()).max(target as i64) as usize;
+    let started = std::time::Instant::now();
+    let mut last_run_s: f64;
     let mut extract = (target as i64 + 4).max(MODAL_MIN_EXTRACTED);
     let mut ladder = 0;
     let mut upper_hz = MODAL_BAND_LADDER_HZ[0];
@@ -81,7 +132,10 @@ pub(super) fn solve_modes(
             PRODUCT_UNITS,
             band,
         );
-        let print = match solve_and_retain(solver, work_dir, SOL103, &text, config) {
+        let run_started = std::time::Instant::now();
+        let solved = solve_and_retain(solver, work_dir, SOL103, &text, config);
+        last_run_s = run_started.elapsed().as_secs_f64();
+        let print = match solved {
             Ok(print) => print,
             Err(detail) => {
                 return ModesResult {
@@ -103,8 +157,16 @@ pub(super) fn solve_modes(
         if best.as_ref().is_none_or(|(_, count)| confirmed > *count) {
             best = Some((print, confirmed));
         }
-        if confirmed >= target {
+        if confirmed >= stretch {
             break;
+        }
+        if confirmed >= target {
+            // The default is met; a wider band is attempted for the figure
+            // only if the budget allows, and `best` already holds the
+            // confirmed prefix to fall back on.
+            if started.elapsed().as_secs_f64() + 2.0 * last_run_s > MODAL_FIGURE_BUDGET_S {
+                break;
+            }
         }
         if confirmed == 0 && missed > 0 && lowest_hz.is_finite() {
             skipped_below_lowest = Some((missed, lowest_hz));

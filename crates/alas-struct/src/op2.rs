@@ -83,7 +83,7 @@ pub struct ComplexVectorTable {
 /// `[fiber_distance, oxx, oyy, txy, angle, major, minor, von_mises]` is kept so
 /// the reader is faithful rather than pre-digested. `element_ids[i]` and
 /// `node_ids[i]` name row `i` (node id `0` is the centroid).
-#[derive(Debug, Clone, PartialEq)]
+#[derive(Debug, Clone, Default, PartialEq)]
 pub struct StressTable {
     /// The element id of each row.
     pub element_ids: Vec<i64>,
@@ -141,6 +141,11 @@ pub struct Op2 {
     pub complex_displacements: BTreeMap<i64, ComplexVectorTable>,
     /// CQUAD4 corner stress, by subcase.
     pub cquad4_stress: BTreeMap<i64, StressTable>,
+    /// CTRIA3 centroid stress (type 74), by subcase: node id `0`, two fiber
+    /// rows per element in the CQUAD4 row layout.
+    pub ctria3_stress: BTreeMap<i64, StressTable>,
+    /// CBAR axial stress (type 34), by subcase: `(element id, axial stress)`.
+    pub cbar_axial_stress: BTreeMap<i64, Vec<(i64, f64)>>,
     /// Result tables intentionally not decoded by this scoped reader.
     pub unread_result_tables: Vec<UnreadResultTable>,
 }

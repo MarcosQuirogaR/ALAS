@@ -11,8 +11,7 @@ use std::collections::BTreeMap;
 
 use alas_config::{
     fidelity_presets, performance_presets, presets, solver_presets, validate, AlasConfig,
-    DesignMode, EngineConfig, FuelPolicyConfig, FuelTankLayoutConfig, SolverSettings,
-    DESIGN_VARIABLE_SPECS,
+    DesignMode, EngineConfig, SolverSettings, DESIGN_VARIABLE_SPECS,
 };
 use alas_exec::ToolPreferences;
 use serde_json::Value;
@@ -22,37 +21,28 @@ use crate::state::{AppState, LogKind};
 use crate::views::design_space_view::design_mode_display_name;
 use crate::views::{tr, tr_fields};
 
+#[path = "config_edit_clean_sheet.rs"]
+mod config_edit_clean_sheet;
+pub use config_edit_clean_sheet::CleanSheetBrief;
 #[path = "config_edit_custom.rs"]
 mod config_edit_custom;
+pub use config_edit_custom::{read_custom_airports, read_store_file, write_custom_airports};
 #[path = "config_edit_design_space.rs"]
 mod config_edit_design_space;
+#[path = "config_edit_machine.rs"]
+mod config_edit_machine;
+pub(crate) use config_edit_machine::preserve_machine_locations;
+#[path = "config_edit_values.rs"]
+mod config_edit_values;
+pub(crate) use config_edit_values::full_config_values;
 
-/// The desktop application keeps wall-clock-limited, clock-seeded searches
-/// (audit SIZ-06, decision D6); the library default is the reproducible
-/// evaluation-budget search used by presets, the command line and the
-/// validation runs. A user who wants a reproducible GUI run sets a seed and
-/// switches on "Stop on evaluation budgets only".
+/// The desktop application starts from the library default: the seeded
+/// candidate plan sized for at most five minutes on a 16-thread desktop,
+/// which stops on its candidate counts and never on a clock, so the same
+/// case gives the same design on every run and machine. A user who wants a
+/// wall-clock-limited search switches off "Stop on evaluation budgets only".
 pub(crate) fn apply_interactive_solver(config: &mut AlasConfig) {
-    config.optimizer.solver = SolverSettings::interactive();
-}
-
-/// Serialize a configuration for the generic form editor, which edits this
-/// JSON directly and needs every schema field present to find it back.
-///
-/// `fuel_policy` and `fuel_tanks` skip serialization when they equal their
-/// default, so a fresh or reloaded configuration, which starts at that
-/// default, would otherwise be missing both keys entirely.
-pub(crate) fn full_config_values(config: &AlasConfig) -> Value {
-    let mut value = serde_json::to_value(config).unwrap_or(Value::Null);
-    if let Some(map) = value.as_object_mut() {
-        map.entry("fuel_policy").or_insert_with(|| {
-            serde_json::to_value(FuelPolicyConfig::default()).unwrap_or(Value::Null)
-        });
-        map.entry("fuel_tanks").or_insert_with(|| {
-            serde_json::to_value(FuelTankLayoutConfig::default()).unwrap_or(Value::Null)
-        });
-    }
-    value
+    config.optimizer.solver = SolverSettings::default();
 }
 
 impl AppState {
@@ -101,10 +91,12 @@ impl AppState {
         // Start fresh rather than copying an allowlist of aircraft fields:
         // every physical model, constraint, mission and numerical setting
         // (including future schema groups) must belong to this new case.
-        let mut config = match AlasConfig::from_value(&serde_json::json!({
+        // The same loader as the command line: the route-derived profile
+        // included.
+        let mut config = match alas_mission::preset_load::load_document(&serde_json::json!({
             "preset": preset.name,
         })) {
-            Ok(reference) => reference,
+            Ok((reference, _)) => reference,
             Err(error) => {
                 self.log(error.to_string(), LogKind::Error);
                 return;
@@ -113,24 +105,26 @@ impl AppState {
         apply_interactive_solver(&mut config);
         if let Some(previous) = previous {
             preserve_machine_locations(&mut config, &previous);
+            config_edit_machine::preserve_tool_toggles(&mut config, &previous);
             if previous.optimizer.design_space.mode == DesignMode::BaselineSandbox {
                 config.optimizer.design_space.mode = DesignMode::BaselineSandbox;
             }
         }
 
         self.config_values = full_config_values(&config);
+        crate::flops_cabin_mirror::sync(&mut self.config_values);
+        self.bump_config_revision();
         self.active_preset = preset.name.to_owned();
         self.files.active_aircraft = None;
         self.selected_aux_preset.clear();
-        // Preset operational profiles are automatic route-linked inputs.
-        // Initialize their cruise-leg count from the route-aware mission
-        // proposal, then keep automatic regeneration enabled until the user
-        // edits a phase or selects a different count.
+        // The preset's profile is already the route-derived one (the loader
+        // above). Keep automatic regeneration enabled until the user edits a
+        // phase or selects a different cruise-leg count.
         self.mission_profile_manual_edit = false;
-        self.mission_profile_route_signature.clear();
         self.mission_profile_regeneration_prompt = false;
         self.mission_profile_retained_validation = None;
-        crate::views::mission_profile_inputs::initialize_route_profile(self);
+        self.mission_profile_route_signature =
+            crate::views::mission_profile_inputs::route_signature(&self.config_values);
 
         // Recenter the design space on the preset's own design vector, using
         // the selected design-mode envelope rather than a fixed
@@ -158,6 +152,12 @@ impl AppState {
             LogKind::Info,
         );
         self.on_config_modified();
+        // "Modified" compares with the design as loaded (route-derived profile,
+        // interactive solver budget and cabin mirror included), not with a
+        // regenerated copy of the preset that lacks those load-time steps.
+        static LOADS: std::sync::atomic::AtomicU64 = std::sync::atomic::AtomicU64::new(0);
+        let serial = LOADS.fetch_add(1, std::sync::atomic::Ordering::Relaxed);
+        self.loaded_baseline = Some((preset.name.to_owned(), serial, self.config_values.clone()));
     }
 
     /// Set the selected engine on the geometry group.
@@ -219,6 +219,7 @@ impl AppState {
                 config.preset.clear();
                 self.active_preset.clear();
                 self.config_values = full_config_values(&config);
+                self.bump_config_revision();
                 self.on_config_modified();
             }
             self.reset_design_space_after_mode_change(mode, from_preset);
@@ -232,6 +233,7 @@ impl AppState {
             self.active_preset.clear();
         }
         self.config_values = full_config_values(&config);
+        self.bump_config_revision();
         self.run_options.optimize = mode != DesignMode::BaselineSandbox;
         if mode == DesignMode::BaselineSandbox {
             self.run_options.compare_baseline = false;
@@ -299,6 +301,9 @@ impl AppState {
     /// geometry is restored and automatic cruise speeds follow an edited Mach
     /// first; a sandbox edit goes to the sandbox's revision bookkeeping.
     pub fn on_config_modified(&mut self) {
+        crate::flops_cabin_mirror::sync(&mut self.config_values);
+        self.bump_config_revision();
+        self.note_autosave_due();
         if self.sandbox.active() {
             self.on_sandbox_model_changed();
             return;
@@ -412,9 +417,24 @@ impl AppState {
                     );
                     return;
                 }
+                let previous = self.typed_config().unwrap_or_default();
                 match self.apply_workspace_document(&value) {
                     Ok(()) => {
-                        self.save_tool_preferences();
+                        // Program and data locations are this machine's own;
+                        // a document never replaces them.
+                        if let Some(mut config) = self.typed_config() {
+                            let loaded = config.clone();
+                            preserve_machine_locations(&mut config, &previous);
+                            if config != loaded {
+                                self.config_values = full_config_values(&config);
+                                self.bump_config_revision();
+                                self.on_config_modified();
+                                self.log(
+                                    tr("The file named tool or data locations; this machine's own locations were kept. Set them on the External Tools page."),
+                                    LogKind::Warn,
+                                );
+                            }
+                        }
                         self.log(
                             tr_fields("Loaded configuration from {path}.", &[("path", path)]),
                             LogKind::Info,
@@ -444,36 +464,6 @@ impl AppState {
     }
 }
 
-/// Preserve installed tools, local data and machine memory budgets. Do not
-/// retain solver switches, physics settings or the dispatch account: the
-/// latter can override the new aircraft's route with an unrelated flight.
-pub(crate) fn preserve_machine_locations(config: &mut AlasConfig, previous: &AlasConfig) {
-    config.mses.mses_dir.clone_from(&previous.mses.mses_dir);
-    config.mses.osmap_path.clone_from(&previous.mses.osmap_path);
-    let mission = &mut config.mission;
-    mission
-        .navdata_dir
-        .clone_from(&previous.mission.navdata_dir);
-    mission.routes_dir.clone_from(&previous.mission.routes_dir);
-    mission
-        .texture_path
-        .clone_from(&previous.mission.texture_path);
-    macro_rules! preserve_structure_location {
-        ($($field:ident),+ $(,)?) => { $(
-            config.structures.$field.clone_from(&previous.structures.$field);
-        )+ };
-    }
-    preserve_structure_location!(
-        nastran_exe_path,
-        nastran_solver_path,
-        nastran_memory_mb,
-        nastran95_dir_path,
-        nastran95_runtime_path,
-        nastran95_rf_stage_path,
-        nastran95_open_core_words,
-        patran_exe_path,
-    );
-}
 fn nonempty(value: &str) -> Option<String> {
     (!value.trim().is_empty()).then(|| value.to_owned())
 }

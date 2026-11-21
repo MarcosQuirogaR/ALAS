@@ -184,7 +184,7 @@ pub static RESULT_FIGURES: &[FigureDescriptor] = &[
     ),
     descriptor(
         "cg_envelope",
-        "LOAD & TRIM SHEET",
+        "Load & trim sheet",
         "Weight & Balance",
         "Model-derived aggregate CG loading-state check; not an AFM/WBM operational envelope.",
     ),

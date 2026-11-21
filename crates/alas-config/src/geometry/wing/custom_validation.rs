@@ -65,12 +65,26 @@ impl WingConfig {
         planform: &TransportPlanform,
     ) -> Result<(), WingSectionError> {
         self.validate_custom_sections()?;
+        // An edge station already is a section there: two would make a step in the loft.
+        if let Some(station) = self.custom_sections.iter().find_map(|section| {
+            planform
+                .edge_stations
+                .iter()
+                .find(|station| (station.span_fraction - section.span_fraction).abs() <= 1.0e-9)
+        }) {
+            return Err(WingSectionError::DuplicatePlanformStation {
+                span_fraction: station.span_fraction,
+                kind: station.kind,
+            });
+        }
         let planform_stations = planform.stations();
+        let root_is_datum = self.root_chord_is_only_a_datum();
         let mut stations: Vec<(f64, f64)> = planform_stations
             .iter()
             .filter(|station| {
-                station.kind != MainWingStationKind::SideOfBody
-                    || self.side_of_body_chord_ratio.is_some()
+                (station.kind != MainWingStationKind::SideOfBody
+                    || self.side_of_body_chord_ratio.is_some())
+                    && !(root_is_datum && station.kind == MainWingStationKind::Root)
             })
             .map(|station| (station.span_fraction, station.chord_m))
             .collect();
@@ -99,6 +113,27 @@ impl WingConfig {
                 return Err(WingSectionError::NonMonotoneChord {
                     inboard: pair[0].1,
                     outboard: pair[1].1,
+                });
+            }
+        }
+        Ok(())
+    }
+
+    /// Refuse a user-defined section at or inboard of the side of body. The wing there
+    /// is the side-of-body section on the two edge lines, and the product build would
+    /// have to move or ignore the section to keep that.
+    pub fn validate_custom_sections_outboard_of_side_of_body(
+        &self,
+    ) -> Result<(), WingSectionError> {
+        let Some(side_of_body) = self.side_of_body_span_fraction else {
+            return Ok(());
+        };
+        for (index, section) in self.custom_sections.iter().enumerate() {
+            if section.span_fraction <= side_of_body + 1.0e-9 {
+                return Err(WingSectionError::AtOrInboardOfSideOfBody {
+                    index,
+                    span_fraction: section.span_fraction,
+                    side_of_body,
                 });
             }
         }

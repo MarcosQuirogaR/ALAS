@@ -38,9 +38,7 @@ pub(super) fn plots_dir(output_dir: Option<&Path>) -> PathBuf {
 /// second id-to-family mapping while allowing headless runs to use a caller's
 /// output directory. Every registered ID is attempted, and unavailable scenes
 /// are retained in `plot_manifest.json` with the stage metadata that explains
-/// why no SVG was emitted. Scene serialization is used only as the bridge to
-/// this crate's SVG writer; it preserves the report scene primitives and does
-/// not invent plot data.
+/// why no SVG was emitted. The SVG is written by `alas_report::render_svg`, as in the GUI export.
 pub(super) fn save_result_plots(
     result: &PipelineResult,
     output_dir: Option<&Path>,
@@ -68,7 +66,10 @@ pub(super) fn save_result_plots(
             "dark",
         ) {
             Some(Some(scene)) => {
-                let svg = alas_pipeline::render_scene_svg(&scene)?;
+                // The canonical writer the GUI export uses, so a figure saved
+                // from the command line is the same file as one exported from
+                // the desktop (multi-line labels, point-sized fonts).
+                let svg = alas_report::render_svg(&alas_gui::export::embed_globe_textures(&scene));
                 let path = dir.join(format!("{}.svg", descriptor.id));
                 fs::write(&path, svg)
                     .map_err(|e| format!("failed to write {}: {e}", path.display()))?;

@@ -35,11 +35,11 @@ use alas_geom::aircraft::fuselage::{Fuselage, FuselageXSec};
 use alas_geom::aircraft::wing::{Wing, WingXSec};
 
 /// The drag model this bit-identity baseline was captured with: viscous
-/// margin 1.10 and no lift-dependent term. The product defaults moved with the
-/// kappa calibration; the baseline guards the code path, not the defaults.
+/// margin 1.10 and no lift-dependent term. The product defaults moved to the sourced
+/// class margin and fraction; the baseline guards the code path, not the defaults.
 fn frozen_drag_model() -> DragModelConfig {
     DragModelConfig {
-        viscous_margin: 1.10,
+        viscous_margin: Some(1.10),
         lift_dependent_viscous_fraction: 0.0,
         ..DragModelConfig::default()
     }
@@ -82,34 +82,93 @@ fn check_baseline(name: &str, actual: &str) {
     );
 }
 
-/// Like [`check_baseline`], but off Windows the baseline is compared to a
-/// numeric tolerance instead of bit for bit.
+/// What decides the bits of a host-dependent solve: operating system,
+/// architecture and the SIMD instruction sets the dense LU dispatches on at
+/// run time.
+fn host_fingerprint() -> String {
+    let mut fingerprint = format!("{} {}", std::env::consts::OS, std::env::consts::ARCH);
+    #[cfg(target_arch = "x86_64")]
+    for (name, detected) in [
+        ("sse4.2", std::arch::is_x86_feature_detected!("sse4.2")),
+        ("avx", std::arch::is_x86_feature_detected!("avx")),
+        ("avx2", std::arch::is_x86_feature_detected!("avx2")),
+        ("fma", std::arch::is_x86_feature_detected!("fma")),
+        ("avx512f", std::arch::is_x86_feature_detected!("avx512f")),
+    ] {
+        if detected {
+            fingerprint.push(' ');
+            fingerprint.push_str(name);
+        }
+    }
+    fingerprint
+}
+
+/// Relative tolerance of a host-dependent value on a host other than the
+/// one the baseline was captured on: about twice the largest drift measured
+/// between hosts (3.8e-4 in `f64` loads, 3.6e-4 in `f32` `cp`).
+const OTHER_HOST_RELATIVE_TOLERANCE: f64 = 8.0e-4;
+
+/// Like [`check_baseline`], but on a host other than the one the baseline
+/// was captured on it is compared to a numeric tolerance instead of bit for
+/// bit.
 ///
-/// The baseline was captured on a Windows host. The vorlax solve feeds
-/// single-precision circulations through a dense LU whose bits follow the
-/// host's math runtime and SIMD dispatch, so a Linux runner reproduces the
-/// training grid to a small relative error but not bit for bit: the hosted
-/// ubuntu run fails the bit comparison while hosted Windows passes it. Windows
-/// keeps the strict bit check; elsewhere the tolerances still catch a gross
-/// change in the grid but not a last-bit drift.
+/// The vorlax solve feeds single-precision circulations through a dense LU
+/// whose bits follow the host's math runtime and SIMD dispatch, so another
+/// host reproduces the training grid to a small relative error but not bit
+/// for bit: a hosted ubuntu run fails the bit comparison while hosted Windows
+/// passes it. The capturing host's [`host_fingerprint`] is stored next to
+/// the baseline (`<name>.host`, written with the baseline, or alone with
+/// `PERF_AERO_RECORD_HOST=1` once the bit comparison has passed). A host with
+/// that fingerprint keeps the strict bit check; any other is held to the
+/// tolerances below. Without a stored fingerprint Windows is strict and
+/// other systems tolerant.
 ///
 /// - `residual_norm` / `normalized_residual` are roundoff-level (about 1e-14
 ///   and 1e-16): absolute tolerance 1e-10.
-/// - Other `f64` values: relative 5e-3 with an absolute floor of 1e-9. The
-///   ubuntu-22.04 run showed spanwise loads and coefficients differing from the
-///   Windows baseline by up to 3.8e-4 relative (cancellation amplifies the
-///   single-precision `gamma` differences), `pivot_ratio` by 1.2e-7.
-/// - `f32` values (the 10-hex-digit lines, `gamma` and `cp`): relative 5e-3
-///   (the ubuntu run differed by up to 3.6e-4 in `cp`) with an
-///   absolute floor of 5e-5.
+/// - Other `f64` values: relative [`OTHER_HOST_RELATIVE_TOLERANCE`] with an
+///   absolute floor of 1e-9. The ubuntu-22.04 run showed spanwise loads and
+///   coefficients differing from the Windows baseline by up to 3.8e-4
+///   relative (cancellation amplifies the single-precision `gamma`
+///   differences), `pivot_ratio` by 1.2e-7.
+/// - `f32` values (the 10-hex-digit lines, `gamma` and `cp`): the same
+///   relative tolerance (the ubuntu run differed by up to 3.6e-4 in `cp`)
+///   with an absolute floor of 5e-5.
 fn check_baseline_host_tolerant(name: &str, actual: &str) {
-    if cfg!(windows) || std::env::var_os("PERF_AERO_WRITE_BASELINE").is_some() {
-        check_baseline(name, actual);
-        return;
-    }
     let path = Path::new(env!("CARGO_MANIFEST_DIR"))
         .join("tests/fixtures/perf_aero")
         .join(name);
+    let host_path = path.with_extension("host");
+    let host = host_fingerprint();
+    if std::env::var_os("PERF_AERO_WRITE_BASELINE").is_some() {
+        check_baseline(name, actual);
+        std::fs::write(
+            &host_path,
+            format!(
+                "{host}
+"
+            ),
+        )
+        .expect("write host fingerprint");
+        return;
+    }
+    let captured_here = match std::fs::read_to_string(&host_path) {
+        Ok(recorded) => recorded.trim() == host,
+        Err(_) => cfg!(windows),
+    };
+    if captured_here {
+        check_baseline(name, actual);
+        if std::env::var_os("PERF_AERO_RECORD_HOST").is_some() {
+            std::fs::write(
+                &host_path,
+                format!(
+                    "{host}
+"
+                ),
+            )
+            .expect("write host fingerprint");
+        }
+        return;
+    }
     let expected = std::fs::read_to_string(&path)
         .unwrap_or_else(|e| panic!("read baseline {}: {e}", path.display()))
         .replace("\r\n", "\n");
@@ -144,9 +203,9 @@ fn check_baseline_host_tolerant(name: &str, actual: &str) {
             if label.ends_with("residual_norm") || label.ends_with("normalized_residual") {
                 1.0e-10
             } else if single {
-                5.0e-3 * want.abs().max(1.0e-2)
+                (OTHER_HOST_RELATIVE_TOLERANCE * want.abs()).max(5.0e-5)
             } else {
-                5.0e-3 * want.abs() + 1.0e-9
+                OTHER_HOST_RELATIVE_TOLERANCE * want.abs() + 1.0e-9
             };
         if !(got.is_finite() && (got - want).abs() <= tolerance) {
             failures.push(format!(
@@ -339,7 +398,18 @@ fn probe_airplane() -> Airplane {
     }
 }
 
-/// Task 2: the geometry-only thickness caching `drag_components` reads.
+/// The geometry-only thickness caching `drag_components` reads.
+///
+/// The product parasite build-up adds its items
+/// (wing-body fairing, pylons, upsweep and base drag areas, Raymer Eqs.
+/// 12.36-12.37, Torenbeek 2013 App. A) where this geometry has them; the base
+/// takes Torenbeek's small-base drag (1982, Eq. F-42) and the superellipse
+/// section area; these move only `cd_parasite` and `cd_total`. With the product
+/// Shevell-Kroo law `cd_wave` is no longer zero below divergence on the product path, because
+/// Shevell's curve `0.0019 cos^3 L (M/M_cc)^14.641` carries its drag creep at
+/// every Mach and has no onset (Kroo, AA241 notes sec. 4.3; Shevell,
+/// *Fundamentals of Flight*): 1e-10 to 1e-9 at Mach 0.3. The reference path
+/// keeps its Lock-rise bits.
 #[test]
 fn drag_components_sweep_is_bit_identical() {
     let plane = probe_airplane();

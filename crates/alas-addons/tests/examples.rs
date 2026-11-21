@@ -2,8 +2,8 @@
 // Copyright (C) 2026 Marcos Quiroga Rodriguez
 
 //! The shipped examples end to end. The process example needs a Python
-//! interpreter: set `ALAS_TEST_PYTHON` to its path to run it; without the
-//! variable the test is skipped, so CI does not depend on Python.
+//! interpreter: those tests are `#[ignore]`d (listed in the ignored count) and
+//! run with `--include-ignored` and `ALAS_TEST_PYTHON` set to its path.
 
 #![allow(clippy::unwrap_used, clippy::expect_used, clippy::print_stderr)]
 
@@ -50,11 +50,10 @@ fn the_rhai_example_reproduces_the_independent_evaluation() {
 }
 
 #[test]
+#[ignore = "needs ALAS_TEST_PYTHON; run with --include-ignored"]
 fn a_process_addon_is_refused_until_enabled_and_round_trips_json() {
-    let Some(python) = std::env::var_os("ALAS_TEST_PYTHON") else {
-        eprintln!("skipped: ALAS_TEST_PYTHON is not set");
-        return;
-    };
+    let python = std::env::var_os("ALAS_TEST_PYTHON")
+        .expect("ALAS_TEST_PYTHON must name a Python interpreter for this ignored test");
     let dir = examples_dir("process");
     let found = discover(&dir);
     let addon = find(&found, "raymer_wing_weight_py");
@@ -86,11 +85,10 @@ fn a_process_addon_is_refused_until_enabled_and_round_trips_json() {
 }
 
 #[test]
+#[ignore = "needs ALAS_TEST_PYTHON; run with --include-ignored"]
 fn process_failures_are_reported_not_hung() {
-    let Some(python) = std::env::var_os("ALAS_TEST_PYTHON") else {
-        eprintln!("skipped: ALAS_TEST_PYTHON is not set");
-        return;
-    };
+    let python = std::env::var_os("ALAS_TEST_PYTHON")
+        .expect("ALAS_TEST_PYTHON must name a Python interpreter for this ignored test");
     let python = PathBuf::from(python);
     let dir = std::env::temp_dir().join(format!("alas-addons-it-fail-{}", std::process::id()));
     let _ = std::fs::remove_dir_all(&dir);
@@ -160,11 +158,10 @@ fn a_missing_interpreter_is_a_clean_error() {
 }
 
 #[test]
+#[ignore = "needs ALAS_TEST_PYTHON; run with --include-ignored"]
 fn a_timeout_kills_the_grandchild_too() {
-    let Some(python) = std::env::var_os("ALAS_TEST_PYTHON") else {
-        eprintln!("skipped: ALAS_TEST_PYTHON is not set");
-        return;
-    };
+    let python = std::env::var_os("ALAS_TEST_PYTHON")
+        .expect("ALAS_TEST_PYTHON must name a Python interpreter for this ignored test");
     let dir = std::env::temp_dir().join(format!("alas-addons-it-tree-{}", std::process::id()));
     let _ = std::fs::remove_dir_all(&dir);
     let folder = dir.join("tree");

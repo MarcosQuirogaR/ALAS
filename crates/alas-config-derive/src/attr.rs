@@ -24,6 +24,10 @@ pub struct FieldConfig {
     pub label: Option<syn::LitStr>,
     pub unit: Option<syn::LitStr>,
     pub help: Option<syn::LitStr>,
+    /// The full explanation when `help` is only a short summary of it.
+    pub long_help: Option<syn::LitStr>,
+    /// The dotted path and accepted values that make the field visible.
+    pub visible_if: Option<(syn::LitStr, Vec<syn::LitStr>)>,
     /// Kept as literals rather than numbers so an integer bound stays an
     /// integer: a field counting seats has a minimum of `0`, not of `0.0`,
     /// and the two are different values once the schema is serialized.
@@ -107,6 +111,10 @@ impl FieldConfig {
             self.unit = Some(meta.value()?.parse()?);
         } else if path.is_ident("help") {
             self.help = Some(meta.value()?.parse()?);
+        } else if path.is_ident("long_help") {
+            self.long_help = Some(meta.value()?.parse()?);
+        } else if path.is_ident("visible_if") {
+            self.visible_if = Some(visible_if(meta)?);
         } else if path.is_ident("min") {
             self.min = Some(number(meta)?);
         } else if path.is_ident("max") {
@@ -151,6 +159,36 @@ fn string_list(meta: &syn::meta::ParseNestedMeta<'_>) -> syn::Result<Vec<syn::Li
             other => Err(syn::Error::new(other.span(), "expected a string literal")),
         })
         .collect()
+}
+
+/// `visible_if(path = "geometry.engine.propulsion_technology", equals = "turboprop")`
+/// or `visible_if(path = "...", any_of = ["a", "b"])`.
+///
+/// The path is dotted from the configuration root. The form renderer resolves
+/// it against the values it holds and hides the field while the value found is
+/// not among the accepted ones.
+fn visible_if(
+    meta: &syn::meta::ParseNestedMeta<'_>,
+) -> syn::Result<(syn::LitStr, Vec<syn::LitStr>)> {
+    let mut path = None;
+    let mut accepted: Option<Vec<syn::LitStr>> = None;
+    meta.parse_nested_meta(|inner| {
+        if inner.path.is_ident("path") {
+            path = Some(inner.value()?.parse()?);
+        } else if inner.path.is_ident("equals") {
+            accepted = Some(vec![inner.value()?.parse()?]);
+        } else if inner.path.is_ident("any_of") {
+            accepted = Some(string_list(&inner)?);
+        } else {
+            return Err(inner.error("expected `path`, `equals` or `any_of`"));
+        }
+        Ok(())
+    })?;
+
+    match (path, accepted) {
+        (Some(path), Some(accepted)) if !accepted.is_empty() => Ok((path, accepted)),
+        _ => Err(meta.error("visible_if needs `path` and `equals` or a non-empty `any_of`")),
+    }
 }
 
 /// `readonly_unless(field = "class_mix_mode", value = "count")`.

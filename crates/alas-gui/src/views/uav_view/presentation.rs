@@ -7,7 +7,7 @@
 //! small helpers keep that density readable by using the desktop's card and
 //! responsive-column language instead of a single unbounded form.
 
-use egui::{CollapsingHeader, RichText, Ui};
+use egui::{CollapsingHeader, Ui};
 
 use crate::theme::card_frame;
 
@@ -25,11 +25,11 @@ pub(super) fn card(
 ) {
     card_frame(ui).show(ui, |ui| {
         ui.set_min_width(ui.available_width());
-        let heading = ui.label(RichText::new(tr(title)).strong());
+        let title = crate::theme::card_title(ui, tr(title));
+        let heading = crate::theme::header_label(ui, title);
         if let Some(description) = description {
             heading.on_hover_text(tr(description));
         }
-        ui.add_space(4.0);
         contents(ui);
     });
 }
@@ -45,12 +45,13 @@ pub(super) fn collapsing_card(
 ) {
     card_frame(ui).show(ui, |ui| {
         ui.set_min_width(ui.available_width());
-        let response = CollapsingHeader::new(RichText::new(tr(title)).strong())
+        let header = CollapsingHeader::new(crate::theme::card_title(ui, tr(title)))
             .id_salt(id)
             .default_open(default_open)
-            .show(ui, |ui| {
-                contents(ui);
-            });
+            .open(crate::perf_tour::force_open());
+        let response = crate::theme::show_header(ui, header, |ui| {
+            contents(ui);
+        });
         if let Some(description) = description {
             response.header_response.on_hover_text(tr(description));
         }

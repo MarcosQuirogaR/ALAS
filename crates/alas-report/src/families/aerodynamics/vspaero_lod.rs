@@ -14,7 +14,7 @@ use std::collections::BTreeMap;
 use alas_pipeline::VspaeroAnalysisResult;
 
 use super::status::figure_status_message;
-use super::support::padded_range;
+use super::support::{file_failure_reason, file_name_of, padded_range};
 use crate::chart_kit::{draw_horizontal_legend_columns, LegendMarker};
 use crate::scene::{Axes2D, Color, Fill, Scene, SceneElement, Stroke, TextAlign, TextBaseline};
 use crate::theme::get_palette;
@@ -182,7 +182,7 @@ pub fn figure_vspaero_load_distribution(
         Err(error) => {
             return figure_status_message(
                 "VSPAERO native load distribution unavailable",
-                &format!("{}: {error}", path.display()),
+                &format!("{}: {}", file_name_of(&path), file_failure_reason(&error)),
                 false,
                 theme,
             )

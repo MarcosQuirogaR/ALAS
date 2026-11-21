@@ -38,7 +38,9 @@ mod defaults;
 use defaults::{
     default_seed, default_stop_on_evaluations_only, is_default_stop_on_evaluations_only,
 };
-pub use defaults::{DEFAULT_REPRODUCIBLE_EVALUATIONS, DEFAULT_SEED};
+pub use defaults::{
+    DEFAULT_REFINEMENT_EVALUATIONS, DEFAULT_REPRODUCIBLE_EVALUATIONS, DEFAULT_SEED,
+};
 
 /// Settings for the differential-evolution solver.
 #[derive(Debug, Clone, PartialEq, Serialize, Deserialize, ConfigNode)]
@@ -53,7 +55,8 @@ pub struct SolverSettings {
     #[config(
         options = OptimizerMethod,
         label = "Optimization profile",
-        help = "The search that runs: mission-sized differential evolution (L-SHADE under epsilon constraints), seeded by a screening sample of the design box, with bounded feasibility restoration."
+        help = "The search that runs: mission-sized differential evolution (L-SHADE, epsilon constraints), seeded by a screening sample, with bounded feasibility restoration.",
+        long_help = "The search that runs: mission-sized differential evolution (L-SHADE under epsilon constraints), seeded by a screening sample of the design box, with bounded feasibility restoration."
     )]
     pub method: String,
 
@@ -111,7 +114,8 @@ pub struct SolverSettings {
     #[serde(default, skip_serializing_if = "std::ops::Not::not")]
     #[config(
         label = "Adapt mutation and crossover (L-SHADE)",
-        help = "Off: static F = 0.5 and CR = 0.9, which outperformed parameter adaptation below 800 evaluations per design variable in a published benchmark (Tanabe and Fukunaga 2020). On: L-SHADE success-history adaptation, recommended only for refinement budgets above 800 evaluations per free design variable."
+        help = "Off: static F = 0.5 and CR = 0.9, better than adaptation below 800 evaluations per variable (Tanabe and Fukunaga 2020).",
+        long_help = "Off: static F = 0.5 and CR = 0.9, which outperformed parameter adaptation below 800 evaluations per design variable in a published benchmark (Tanabe and Fukunaga 2020). On: L-SHADE success-history adaptation, recommended only for refinement budgets above 800 evaluations per free design variable."
     )]
     pub parameter_adaptation: bool,
 
@@ -132,7 +136,8 @@ pub struct SolverSettings {
     #[config(
         label = "Stagnation window",
         min = 1,
-        help = "Refinement generations in which the best feasible objective improves by less than 1e-4 (relative) before the search stops as converged or stagnated. The window used is at least 2 N_init / 8 generations (two initial populations of trials at the final population size of 8), and stagnation never stops a run before half its planned budget is spent."
+        help = "Refinement generations with best feasible objective improving by less than 1e-4 (relative) before the search stops as converged or stagnated.",
+        long_help = "Refinement generations in which the best feasible objective improves by less than 1e-4 (relative) before the search stops as converged or stagnated. The window used is at least 2 N_init / 8 generations (two initial populations of trials at the final population size of 8), and stagnation never stops a run before half its planned budget is spent."
     )]
     pub convergence_stagnation_generations: i64,
 
@@ -155,7 +160,8 @@ pub struct SolverSettings {
     #[config(
         zero_means = AllThreads,
         label = "Native compute worker threads",
-        help = "Threads a generation's candidates are spread across; 0 uses every thread the machine reports. Each candidate runs on one thread. The product search evaluates deterministic whole-generation batches: with evaluation-budget stops or replay counts the result is bit-identical at any worker count. Time-limited: the stopping point depends on machine speed and worker count; replay with the recorded evaluation counts for a bit-identical result at any worker count. External evaluator adapters remain serial because they own mutable process/session state."
+        help = "Threads a generation's candidates are spread across; 0 uses every thread the machine reports.",
+        long_help = "Threads a generation's candidates are spread across; 0 uses every thread the machine reports. Each candidate runs on one thread. The product search evaluates deterministic whole-generation batches: with evaluation-budget stops or replay counts the result is bit-identical at any worker count. Time-limited: the stopping point depends on machine speed and worker count; replay with the recorded evaluation counts for a bit-identical result at any worker count. External evaluator adapters remain serial because they own mutable process/session state."
     )]
     pub workers: i64,
 
@@ -167,7 +173,8 @@ pub struct SolverSettings {
     )]
     #[config(
         label = "Stop on evaluation budgets only",
-        help = "Off: each stage also stops at its time limit. Time-limited: the stopping point depends on machine speed and worker count; replay with the recorded evaluation counts for a bit-identical result at any worker count. On: the time limits are ignored and each stage runs to its evaluation budget, so a seeded run is bit-identical at any worker count however long it takes."
+        help = "Off: each stage also stops at its time limit (result depends on machine speed).",
+        long_help = "Off: each stage also stops at its time limit. Time-limited: the stopping point depends on machine speed and worker count; replay with the recorded evaluation counts for a bit-identical result at any worker count. On: the time limits are ignored and each stage runs to its evaluation budget, so a seeded run is bit-identical at any worker count however long it takes."
     )]
     pub stop_on_evaluations_only: bool,
 }
@@ -222,7 +229,8 @@ pub struct StageBudget {
     #[config(
         label = "Replay evaluation count",
         min = 1,
-        help = "Leave blank for a normal run. To replay a run, enter the replay count it recorded for this stage (pre-gate-passed candidates, including repeats; results card, report figure and run manifest), and for the refinement also its recorded planned budget: the stage then ignores its time limit and stops after exactly that many candidates, with the same schedule, reproducing the run bit-identically at any worker count."
+        help = "Blank for a normal run.",
+        long_help = "Leave blank for a normal run. To replay a run, enter the replay count it recorded for this stage (pre-gate-passed candidates, including repeats; results card, report figure and run manifest), and for the refinement also its recorded planned budget: the stage then ignores its time limit and stops after exactly that many candidates, with the same schedule, reproducing the run bit-identically at any worker count."
     )]
     pub replay_evaluations: Option<i64>,
 
@@ -233,7 +241,8 @@ pub struct StageBudget {
     #[config(
         label = "Replay planned budget",
         min = 1,
-        help = "Refinement only. Leave blank for a normal run. To replay a time-limited run, enter the planned budget it recorded (results card, report figure and run manifest) beside the replay count: the refinement then sets its initial population and population reduction on exactly that budget instead of planning one from the measured throughput."
+        help = "Refinement only. Blank for a normal run.",
+        long_help = "Refinement only. Leave blank for a normal run. To replay a time-limited run, enter the planned budget it recorded (results card, report figure and run manifest) beside the replay count: the refinement then sets its initial population and population reduction on exactly that budget instead of planning one from the measured throughput."
     )]
     pub replay_planned_evaluations: Option<i64>,
 
@@ -244,7 +253,8 @@ pub struct StageBudget {
     #[config(
         label = "Replay restoration count",
         min = 0,
-        help = "Refinement only. Leave blank for a normal run, or to replay a run whose refinement did not enter feasibility restoration. To replay one that did, enter the restoration count it recorded beside the replay count: the search kernel then stops after the replay count less this number and restoration after exactly this number, as in the recorded run."
+        help = "Refinement only. Blank for a normal run or one without feasibility restoration.",
+        long_help = "Refinement only. Leave blank for a normal run, or to replay a run whose refinement did not enter feasibility restoration. To replay one that did, enter the restoration count it recorded beside the replay count: the search kernel then stops after the replay count less this number and restoration after exactly this number, as in the recorded run."
     )]
     pub replay_restoration_evaluations: Option<i64>,
 
@@ -256,7 +266,8 @@ pub struct StageBudget {
     #[config(
         label = "Pre-gate rejection cap",
         min = 1,
-        help = "Largest number of candidates the design-vector pre-gate may reject in this stage before the stage stops. Leave blank for 20 times the evaluation budget. A rejection costs microseconds and never counts against the evaluation budget."
+        help = "Largest number of candidates the design-vector pre-gate may reject in this stage before it stops. Blank is 20 times the evaluation budget.",
+        long_help = "Largest number of candidates the design-vector pre-gate may reject in this stage before the stage stops. Leave blank for 20 times the evaluation budget. A rejection costs microseconds and never counts against the evaluation budget."
     )]
     pub max_pregate_rejects: Option<i64>,
 }
@@ -544,7 +555,7 @@ mod tests {
 
     #[test]
     fn the_defaults_are_reproducible_and_the_interactive_search_is_time_limited() {
-        // Audit SIZ-06/SIZ-07, decision D6.
+        // The reproducible and the interactive default searches.
         let reproducible = SolverSettings::default();
         assert_eq!(reproducible.seed, Some(DEFAULT_SEED));
         assert!(reproducible.stop_on_evaluations_only);
@@ -555,7 +566,7 @@ mod tests {
         );
         assert_eq!(
             reproducible.refinement.max_evaluations,
-            DEFAULT_REPRODUCIBLE_EVALUATIONS
+            DEFAULT_REFINEMENT_EVALUATIONS
         );
         let interactive = SolverSettings::interactive();
         assert_eq!(interactive.seed, None);

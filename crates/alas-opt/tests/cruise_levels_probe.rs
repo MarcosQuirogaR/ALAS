@@ -1,8 +1,8 @@
 // SPDX-License-Identifier: AGPL-3.0-or-later
 // Copyright (C) 2026 Marcos Quiroga Rodriguez
 
-//! Probe of the `cruise_thrust` check at the levels the mission plan flies
-//! (owner decision 2026-10-14): for each registered jet, the design-level
+//! Probe of the `cruise_thrust` check at the levels the mission plan flies:
+//! for each registered jet, the design-level
 //! requirement at the mid-cruise mass (the earlier definition), then every
 //! level of the frozen plan with its mass, Mach, required and available
 //! static T/W, the governing level, and the highest level reachable at the

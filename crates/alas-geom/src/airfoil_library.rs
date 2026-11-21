@@ -27,9 +27,12 @@ use crate::aircraft::airfoil::{numpy_interp, Airfoil};
 use crate::aircraft::spacing::linspace;
 use crate::airfoil_data;
 use crate::airfoil_io;
+use crate::digitised_sections;
 use crate::selig;
 use alas_config::DesignVector;
 use alas_math::CubicSplineError;
+
+mod mean_line;
 
 /// The chordwise centres (x/c) of the four bump functions [`apply_bumps`]
 /// applies: `_BUMP_CENTERS` in the Python source.
@@ -66,7 +69,8 @@ impl AirfoilLibrary {
     ///
     /// Tries, in order: registered custom airfoils (case-insensitive), the
     /// Selig zip corpus (case-insensitive), built-in named reference sections
-    /// (exact case), and native aerodynamic model's NACA-only fallback. Each hit is normalized with
+    /// (exact case; the Python registry, then the digitised sections), and
+    /// native aerodynamic model's NACA-only fallback. Each hit is normalized with
     /// [`normalize_coordinates`] before being returned.
     ///
     /// Returns `None` when none of the four resolve `name`. Upstream's
@@ -81,6 +85,10 @@ impl AirfoilLibrary {
     /// `docs/PORTING.md`, Geometry), so this path is not reachable from this
     /// program's own inputs.
     pub fn get(name: &str) -> Option<Airfoil> {
+        // NACA 64A109, built from the 64A thickness form and the a = 0.8 mean line.
+        if name.eq_ignore_ascii_case("naca64a109") {
+            return mean_line::cambered_64a(0.09, 0.8, 0.1);
+        }
         if let Some(airfoil) = airfoil_io::get(name) {
             return Some(airfoil);
         }
@@ -96,6 +104,12 @@ impl AirfoilLibrary {
                 normalize_coordinates(coordinates),
             ));
         }
+        if let Some(coordinates) = digitised_sections::get(name) {
+            return Some(Airfoil::from_coordinates(
+                name,
+                normalize_coordinates(coordinates),
+            ));
+        }
         if let Some(airfoil) = Airfoil::from_name(name) {
             let normalized = normalize_coordinates(&airfoil.coordinates);
             return Some(Airfoil::from_coordinates(airfoil.name, normalized));
@@ -103,13 +117,18 @@ impl AirfoilLibrary {
         None
     }
 
-    /// Return the list of all available airfoil names in the Selig corpus and named registry.
+    /// Return the list of all available airfoil names in the Selig corpus,
+    /// the named registry and the digitised sections.
     pub fn get_available_airfoils() -> Vec<&'static str> {
         let mut names = Vec::with_capacity(
-            selig::stems().len() + airfoil_data::names().len() + airfoil_io::names().len(),
+            selig::stems().len()
+                + airfoil_data::names().len()
+                + digitised_sections::names().len()
+                + airfoil_io::names().len(),
         );
         names.extend(selig::stems());
         names.extend_from_slice(airfoil_data::names());
+        names.extend_from_slice(digitised_sections::names());
         names.extend(airfoil_io::names());
         names.sort_unstable();
         names.dedup();

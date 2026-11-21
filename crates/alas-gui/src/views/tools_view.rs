@@ -1,9 +1,9 @@
 // SPDX-License-Identifier: AGPL-3.0-or-later
 // Copyright (C) 2026 Marcos Quiroga Rodriguez
 
-//! Setup > External Tools: the integration paths and credentials for the
+//! Workspace > External Tools: the integration paths and credentials for the
 //! optional external solvers, consolidated in one place rather than spread
-//! across their own Advanced Settings pages.
+//! across their own Advanced sections.
 //!
 //! Navigation data is
 //! downloaded through the shared windowless curl boundary in `alas-exec`, so
@@ -21,10 +21,12 @@ use crate::views::{tr, tr_fields};
 
 mod cards;
 mod cfd;
+mod field_row;
+mod installer_card;
 mod layout;
 mod status;
 
-use layout::{card, card_row, section_heading, split_body, sub_heading, text_row};
+use layout::{block_gap, card, framed, group, masonry, sub_heading, text_row, tool_block, CardFn};
 
 pub(crate) use cfd::save_cfd_environment_preferences;
 
@@ -35,44 +37,37 @@ pub fn show_tools_view(state: &mut AppState, ui: &mut Ui) {
         "Integration paths and credentials for the optional external tools ALAS can drive \
          during a run. Set once; saved in user preferences.",
     ));
-    ui.add_space(6.0);
+    // The rule under the title is the scroll area's top edge: content that
+    // scrolls up is cut at a visible line, never under the title text.
+    ui.add_space(4.0);
+    ui.separator();
 
-    ScrollArea::vertical()
-        .auto_shrink([false, false])
-        .show(ui, |ui| {
-            // Cards are grouped by discipline. Paired cards share one height
-            // and wide cards split their own body, so a wide window is used
-            // across its width instead of leaving ragged gaps.
-            section_heading(ui, "Mission routing and data");
-            cards::routing_card(state, ui);
-
-            section_heading(ui, "Structural solvers");
-            cards::nastran_card(state, ui);
-            ui.add_space(8.0);
-            cards::patran_card(state, ui);
-
-            section_heading(ui, "Aerodynamic solvers");
-            card_row(
-                ui,
-                "mses_openvsp",
-                state,
-                cards::mses_card,
-                cards::openvsp_card,
-            );
-            ui.add_space(8.0);
-            card_row(
-                ui,
-                "avl_flowunsteady",
-                state,
-                cards::avl_card,
-                cards::flowunsteady_card,
-            );
-
-            section_heading(ui, "CFD");
-            cards::openfoam_card(state, ui);
-
-            section_heading(ui, "Availability for the next run");
-            status_card(state, ui);
+    // A page that was not drawn on the previous pass has just been opened: it
+    // starts at its top, not where the page last left its scroll offset.
+    let seen_id = egui::Id::new("tools_view_last_pass");
+    let pass = ui.ctx().cumulative_pass_nr();
+    let reopened = ui
+        .ctx()
+        .data(|data| data.get_temp::<u64>(seen_id))
+        .is_none_or(|last| pass > last + 2);
+    ui.ctx().data_mut(|data| data.insert_temp(seen_id, pass));
+    let mut area = ScrollArea::vertical().auto_shrink([false, false]);
+    if reopened {
+        area = area.vertical_scroll_offset(0.0);
+    }
+    area.show(ui, |ui| {
+            // One overview of every tool, then the tool groups as cards in a
+            // masonry: two columns on a wide page, each card as tall as its
+            // own content, one item spacing apart like the cards of a form.
+            overview_card(state, ui);
+            let cards: [(&'static str, CardFn); 5] = [
+                ("install", installer_card::installer_card),
+                ("structural", cards::structural_card),
+                ("aero", cards::aero_card),
+                ("cfd", cards::cfd_card),
+                ("flight", cards::flight_card),
+            ];
+            masonry(ui, state, &cards);
         });
 }
 
@@ -84,20 +79,17 @@ pub(crate) fn show_tool_configuration(state: &mut AppState, ui: &mut Ui, tool: E
             show_tools_view(state, ui);
             return;
         }
-        ExternalToolConfig::Mses => cards::mses_card(state, ui),
-        ExternalToolConfig::MscNastran | ExternalToolConfig::Nastran95 => {
-            cards::nastran_card(state, ui)
-        }
-        ExternalToolConfig::MscPatran => cards::patran_card(state, ui),
-        ExternalToolConfig::OpenVsp => cards::openvsp_card(state, ui),
+        ExternalToolConfig::Mses => framed(ui, |ui| cards::mses_card(state, ui)),
+        ExternalToolConfig::MscNastran => framed(ui, |ui| cards::nastran_card(state, ui)),
+        ExternalToolConfig::Nastran95 => framed(ui, |ui| cards::nastran95_card(state, ui)),
+        ExternalToolConfig::MscPatran => framed(ui, |ui| cards::patran_card(state, ui)),
+        ExternalToolConfig::OpenVsp => framed(ui, |ui| cards::openvsp_card(state, ui)),
         ExternalToolConfig::OpenFoam | ExternalToolConfig::Gmsh | ExternalToolConfig::ParaView => {
-            cards::openfoam_card(state, ui)
+            framed(ui, |ui| cards::openfoam_card(state, ui));
         }
-        ExternalToolConfig::FlowUnsteady => cards::flowunsteady_card(state, ui),
+        ExternalToolConfig::FlowUnsteady => framed(ui, |ui| cards::flowunsteady_card(state, ui)),
     }
-    ui.add_space(10.0);
-    section_heading(ui, "Availability for the next run");
-    status_card(state, ui);
+    overview_card(state, ui);
 }
 
 pub(crate) fn apply_completed_path_selection(state: &mut AppState) {
@@ -242,10 +234,12 @@ fn save_direct_tool_preferences(state: &mut AppState) {
 /// explicit editable preference: discovery never guesses an installation as a
 /// successful solver run.
 pub(crate) fn open_in_file_explorer(value: &str, directory: bool) -> Result<(), String> {
+    use alas_exec::process::NoConsoleWindow;
     let (target, select_file) = explorer_target(value, directory)?;
     #[cfg(target_os = "windows")]
     {
         let mut command = std::process::Command::new("explorer.exe");
+        command.no_window();
         if select_file {
             command.arg(format!("/select,{}", target.display()));
         } else {
@@ -253,25 +247,27 @@ pub(crate) fn open_in_file_explorer(value: &str, directory: bool) -> Result<(), 
         }
         command
             .spawn()
-            .map(|_| ())
+            .map(alas_exec::process::reap_in_background)
             .map_err(|error| error.to_string())
     }
     #[cfg(target_os = "macos")]
     {
         let _ = select_file;
         std::process::Command::new("open")
+            .no_window()
             .arg(&target)
             .spawn()
-            .map(|_| ())
+            .map(alas_exec::process::reap_in_background)
             .map_err(|error| error.to_string())
     }
     #[cfg(all(not(target_os = "windows"), not(target_os = "macos")))]
     {
         let _ = select_file;
         std::process::Command::new("xdg-open")
+            .no_window()
             .arg(&target)
             .spawn()
-            .map(|_| ())
+            .map(alas_exec::process::reap_in_background)
             .map_err(|error| error.to_string())
     }
 }
@@ -322,17 +318,9 @@ fn set_bool(config: &mut Value, group: &str, name: &str, value: bool) {
     }
 }
 
-fn status_card(state: &AppState, ui: &mut Ui) {
-    crate::theme::card_frame(ui).show(ui, |ui| {
-        ui.set_min_width(ui.available_width());
-        status::resolved_status(state, ui);
-    });
-}
-
-fn status_row(ui: &mut Ui, label: &str, value: String) {
-    ui.label(RichText::new(tr(label)).strong());
-    ui.label(RichText::new(value).weak());
-    ui.end_row();
+/// The status overview: every tool with its chip and resolved path.
+fn overview_card(state: &AppState, ui: &mut Ui) {
+    group(ui, "Tool status", |ui| status::overview(state, ui));
 }
 
 fn describe_executable(discovery: &ExecutableDiscovery) -> String {
@@ -351,7 +339,9 @@ fn describe_executable(discovery: &ExecutableDiscovery) -> String {
 
 fn describe_flowunsteady(discovery: &ExecutableDiscovery) -> String {
     match discovery {
-        ExecutableDiscovery::Absent => tr("not configured (ALAS_FLOWUNSTEADY_EXE not set)"),
+        ExecutableDiscovery::Absent => {
+            tr("not configured: set the executable in the FLOWUnsteady card")
+        }
         ExecutableDiscovery::Ready(path) => path.display().to_string(),
         ExecutableDiscovery::Incomplete { directory, .. } => tr_fields(
             "configured path not found: {path}",
@@ -385,18 +375,49 @@ fn describe_nastran_solver(configured: &str, resolved: Option<&std::path::Path>)
     )
 }
 
-fn describe_optional_directory(configured: &str) -> String {
-    if configured.trim().is_empty() {
-        return tr("not configured");
-    }
-    let path = std::path::Path::new(configured);
-    if path.is_dir() {
-        path.display().to_string()
+fn describe_nastran95(
+    config: &alas_config::structures::StructuresConfig,
+) -> (status::Tone, String) {
+    use self::status::Tone;
+    use alas_struct::nastran95::Nastran95Solver;
+    let directory = config.nastran95_dir_path.trim();
+    let runtime = config.nastran95_runtime_path.trim();
+    let rf_stage = config.nastran95_rf_stage_path.trim();
+    let open_core = config.nastran95_open_core_words.trim();
+    let solver = if directory.is_empty() {
+        Nastran95Solver::from_env()
+            .or_else(Nastran95Solver::from_adjacent_bundle)
+            .or_else(Nastran95Solver::from_installed_tool)
     } else {
-        tr_fields(
-            "invalid directory: {path}",
-            &[("path", path.display().to_string())],
+        Nastran95Solver::from_paths(
+            std::path::Path::new(directory),
+            (!runtime.is_empty()).then(|| std::path::Path::new(runtime)),
+            (!rf_stage.is_empty()).then(|| std::path::Path::new(rf_stage)),
+            (!open_core.is_empty()).then_some(open_core),
         )
+    };
+    match solver {
+        Some(solver) => (
+            Tone::Ready,
+            tr_fields(
+                "{path} (executable and rigid formats found)",
+                &[("path", solver.exe.display().to_string())],
+            ),
+        ),
+        None if directory.is_empty() => (Tone::Neutral, tr("not configured or discovered")),
+        None => (
+            Tone::Warn,
+            tr_fields(
+                "not found under {path} (need {executable} and rf/NASINFO)",
+                &[
+                    ("path", directory.to_owned()),
+                    (
+                        "executable",
+                        Nastran95Solver::EXECUTABLE_RELATIVE.to_owned(),
+                    ),
+                ],
+            ),
+        ),
     }
 }
 
@@ -467,7 +488,12 @@ mod tests {
                     *rect = rect.intersect(clipped.clip_rect);
                 }
             }
-            assert!(texts.iter().any(|(text, _)| text == "Structural solvers"));
+            assert!(texts
+                .iter()
+                .any(|(text, _)| *text == crate::views::tr_label("Structural solvers")));
+            assert!(texts
+                .iter()
+                .any(|(text, _)| *text == crate::views::tr_label("Tool status")));
             for (i, (text_a, a)) in texts.iter().enumerate() {
                 for (text_b, b) in &texts[i + 1..] {
                     let overlap = a.intersect(*b);

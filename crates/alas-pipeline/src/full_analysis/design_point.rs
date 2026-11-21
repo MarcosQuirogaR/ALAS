@@ -85,7 +85,14 @@ impl FullAnalysis {
         polar: &PolarSweep,
         cl_target: f64,
     ) -> Result<DesignPoint, String> {
-        design_point_nearest(polar, cl_target)
+        // The frozen reference path keeps the nearest sweep sample its
+        // fixtures were generated with; the product reports the polar at the
+        // lift it names.
+        if self.reference_compatibility {
+            design_point_nearest(polar, cl_target)
+        } else {
+            design_point_at_cl(polar, cl_target)
+        }
     }
 
     pub(super) fn fit_polar(&self, plane: &Airplane, polar: &PolarSweep) -> PolarFit {
@@ -118,9 +125,16 @@ impl FullAnalysis {
         Self::fit_polar_with_origin(polar, ar, cfg, false)
     }
 
-    /// Frozen fixtures retain their two-term fit. Native wakes need the
-    /// linear CL term: forcing a shifted parabola through zero slope at
-    /// CL=0 biases both the intercept and the induced curvature.
+    /// Frozen fixtures retain their two-term fit of the total drag. Native
+    /// wakes need the linear CL term: forcing a shifted parabola through zero
+    /// slope at CL=0 biases both the intercept and the induced curvature.
+    ///
+    /// The product fit takes the polar without its wave term. Wave drag is a
+    /// quartic in `M - M_crit(CL)`, not a parabola in CL: three or four points
+    /// of the window interpolate its steep rise exactly, which reads as a
+    /// large curvature (a Boeing 747-400 at M 0.85 fitted e = 0.37 with it and
+    /// 0.78 without) and a CD0 that moves with the point count, itself a
+    /// function of the sweep. Wave drag keeps its own table and its own column.
     fn fit_polar_with_origin(
         polar: &PolarSweep,
         ar: f64,
@@ -148,6 +162,14 @@ impl FullAnalysis {
                 .collect();
         }
 
+        let fit_drag = |i: usize| {
+            let wave = if parity_only {
+                0.0
+            } else {
+                polar.cd_wave.get(i).copied().unwrap_or(0.0)
+            };
+            polar.cd[i] - wave
+        };
         let columns = if parity_only { 2 } else { 3 };
         let (cd0, c1, k, status) = if selected_indices.len() >= columns {
             // Keep a non-finite selected polar point from entering the QR
@@ -157,9 +179,9 @@ impl FullAnalysis {
             // and look like a successful fit.
             let selected_values_are_finite = selected_indices
                 .iter()
-                .all(|&i| polar.cl[i].is_finite() && polar.cd[i].is_finite());
+                .all(|&i| polar.cl[i].is_finite() && fit_drag(i).is_finite());
             if !selected_values_are_finite {
-                (0.02, 0.0, 0.04, PolarFitStatus::FallbackLeastSquaresFailure)
+                Self::failed_polar_fit(PolarFitStatus::FallbackLeastSquaresFailure)
             } else {
                 let a_mat: Vec<Vec<f64>> = selected_indices
                     .iter()
@@ -171,8 +193,18 @@ impl FullAnalysis {
                         }
                     })
                     .collect();
-                let b_vec: Vec<f64> = selected_indices.iter().map(|&i| polar.cd[i]).collect();
+                let b_vec: Vec<f64> = selected_indices.iter().map(|&i| fit_drag(i)).collect();
                 match least_squares(&a_mat, &b_vec) {
+                    // A drag polar with a non-positive zero-lift intercept
+                    // or a non-positive curvature is not a drag polar: the
+                    // solve succeeded on data that does not support one.
+                    Ok(sol)
+                        if sol.len() == columns
+                            && sol.iter().all(|value| value.is_finite())
+                            && !(sol[0] > 0.0 && sol[columns - 1] > 0.0) =>
+                    {
+                        Self::failed_polar_fit(PolarFitStatus::NonPhysicalCoefficients)
+                    }
                     Ok(sol)
                         if sol.len() == columns && sol.iter().all(|value| value.is_finite()) =>
                     {
@@ -188,12 +220,12 @@ impl FullAnalysis {
                         )
                     }
                     Ok(_) | Err(_) => {
-                        (0.02, 0.0, 0.04, PolarFitStatus::FallbackLeastSquaresFailure)
+                        Self::failed_polar_fit(PolarFitStatus::FallbackLeastSquaresFailure)
                     }
                 }
             }
         } else {
-            (0.02, 0.0, 0.04, PolarFitStatus::FallbackInsufficientPoints)
+            Self::failed_polar_fit(PolarFitStatus::FallbackInsufficientPoints)
         };
 
         let oswald_e = if k > 0.0 {
@@ -210,6 +242,12 @@ impl FullAnalysis {
             aspect_ratio: ar,
             status,
         }
+    }
+
+    /// The coefficients of a fit that could not be made: not a number, so no
+    /// consumer can present or use them as a result, with the reason.
+    const fn failed_polar_fit(status: PolarFitStatus) -> (f64, f64, f64, PolarFitStatus) {
+        (f64::NAN, f64::NAN, f64::NAN, status)
     }
 
     pub(super) fn compute_trimmed_design_point(
@@ -249,11 +287,36 @@ impl FullAnalysis {
             cl_alpha: trim.cl_alpha,
         };
 
-        let trim_perf = match aero.trimmed_performance(
-            &trim_point,
-            req.cruise_mach,
-            req.cruise_altitude_m,
-        ) {
+        // The flight attitude is the compressible solution when the trim ran
+        // on the Goethert-stretched lattice (AERL-02): the true body angle and
+        // the stabilizer incidence that balance the compressible moment. Lift,
+        // Trefftz drag and the moment residual are then evaluated on that same
+        // stretched lattice at that attitude (A1F), so the trimmed point and
+        // the polar are on one basis; otherwise on the incompressible lattice.
+        let flight = trim.attitude();
+        if !flight.converged || !flight.alpha_deg.is_finite() || !flight.incidence_deg.is_finite() {
+            return None;
+        }
+        let trim_perf = if flight.compressible && !self.reference_compatibility {
+            let beta = alas_stab::neutral_point::beta_for_mach(req.cruise_mach);
+            let stretched = alas_stab::neutral_point::goethert_stretch(plane, beta);
+            let point = TrimPoint {
+                trim_alpha_deg: flight.alpha_deg,
+                trim_ih_deg: flight.incidence_deg,
+                cl_alpha: flight.cl_alpha,
+            };
+            aero.trimmed_stretched_performance(
+                &stretched,
+                &point,
+                req.cruise_mach,
+                req.cruise_altitude_m,
+                beta,
+                flight.cm_body_per_deg,
+            )
+        } else {
+            aero.trimmed_performance(&trim_point, req.cruise_mach, req.cruise_altitude_m)
+        };
+        let trim_perf = match trim_perf {
             Ok(perf) => perf,
             Err(error) => {
                 tracing::warn!(%error, "trimmed design point unavailable: trimmed performance failed");
@@ -264,15 +327,6 @@ impl FullAnalysis {
             return None;
         }
 
-        // The flight attitude is the compressible solution when the trim ran
-        // on the Goethert-stretched lattice (AERL-02): the true body angle and
-        // the stabilizer incidence that balance the compressible moment. The
-        // lift, drag and moment residual stay the incompressible-lattice
-        // solve's (Trefftz drag is evaluated there, as before).
-        let flight = trim.attitude();
-        if !flight.converged || !flight.alpha_deg.is_finite() || !flight.incidence_deg.is_finite() {
-            return None;
-        }
         Some(TrimmedDesignPoint {
             alpha_deg: if flight.compressible {
                 flight.alpha_deg
@@ -333,8 +387,19 @@ impl FullAnalysis {
             map.insert("reference_span_m".to_owned(), projected_span_m);
             map.insert("reference_area_m2".to_owned(), projected_area_m2);
             map.insert("aspect_ratio".to_owned(), reference_aspect_ratio);
+            // The one MAC of the report is the chord `%MAC` and the coefficients are
+            // quoted on. The loft's own value is not that chord on a wing whose sections
+            // are not its reference wing.
             map.insert(
                 "mean_aerodynamic_chord_m".to_owned(),
+                if self.reference_compatibility {
+                    wing.mean_aerodynamic_chord()
+                } else {
+                    plane.c_ref
+                },
+            );
+            map.insert(
+                "loft_mean_aerodynamic_chord_m".to_owned(),
                 wing.mean_aerodynamic_chord(),
             );
         }
@@ -343,6 +408,23 @@ impl FullAnalysis {
             design.tip_chord_m / design.root_chord_m,
         );
         let wing = &self.config.geometry.wing;
+        // Quarter-chord sweep of the straight outer panel (kink to the start of the tip rake, or to the
+        // tip without one), degrees: the measure a published outer-panel sweep states. `quarter_chord_sweep_deg`
+        // of the weights export is the whole-wing root-to-tip line, centre section included.
+        if !self.reference_compatibility {
+            if let Ok(planform) = wing.transport_planform(design) {
+                let end = planform.tip_rake.unwrap_or(planform.tip);
+                let quarter = |station: &alas_config::MainWingStation| {
+                    station.leading_edge_x_m + 0.25 * station.chord_m
+                };
+                map.insert(
+                    "outer_panel_quarter_chord_sweep_deg".to_owned(),
+                    (quarter(&end) - quarter(&planform.kink))
+                        .atan2(end.y_m - planform.kink.y_m)
+                        .to_degrees(),
+                );
+            }
+        }
         let break_semi_span_m = wing.break_span_fraction * wing.wing_span_m(design.span_m) / 2.0;
         let (
             break_span_m,
@@ -401,7 +483,7 @@ impl FullAnalysis {
             // collapses a vertical tail to zero.  The vertical surface needs
             // its own XZ planform area in both product and compatibility
             // mission/report views.
-            let area = plane.wings[2].unfolded_area();
+            let area = plane.wings[2].reference_planform().unfolded_area();
             map.insert("v_stab_area_m2".to_owned(), area);
         }
         map
@@ -433,6 +515,7 @@ mod reported_cruise_tests {
         PolarSweep {
             alpha_deg: vec![0.0; n],
             geometric_alpha_deg: vec![0.0; n],
+            compressible_mach: None,
             cd_induced: vec![0.0; n],
             cd_wave: vec![0.0; n],
             cd_parasite: vec![0.0; n],

@@ -65,8 +65,13 @@ pub struct LoadCaseResult {
     pub shear_n: Vec<f64>,
     /// Bending moment, N.m.
     pub moment_nm: Vec<f64>,
-    /// Euler-Bernoulli spanwise deflection curve, m.
+    /// Spanwise deflection curve, m: Euler-Bernoulli bending plus the web shear
+    /// part below.
     pub deflection_m: Vec<f64>,
+    /// The web shear part of `deflection_m` (and of the tip deflection), m,
+    /// signed like it; empty when the response carries none. Kinematic gates
+    /// that judge the bending curvature subtract it.
+    pub shear_deflection_m: Vec<f64>,
     /// Tip deflection, m.
     pub tip_deflection_m: f64,
     /// Per-spar stress.
@@ -158,6 +163,39 @@ fn rayleigh_frequencies(
         shapes.push(phi.iter().map(|&v| v / norm).collect());
     }
     (freqs, shapes)
+}
+
+/// Deflection of the sized box under one vertical force at span `y_load`,
+/// m per station: the same section stiffness (`EI_n cos^3 L`) and web shear
+/// compliance the load cases use, for checking the beam against a test
+/// article loaded at its tip.
+pub fn point_load_deflection(
+    sizing: &WingboxSizing,
+    skin_mat: &MaterialSpec,
+    web_mat: &MaterialSpec,
+    cap_mat: &MaterialSpec,
+    y_load: f64,
+    force_n: f64,
+) -> Vec<f64> {
+    let y = &sizing.y_stations;
+    let ei: Vec<f64> = (0..y.len())
+        .map(|j| crate::sizing::section::station_ei_spanwise(sizing, j, skin_mat, web_mat, cap_mat))
+        .collect();
+    let m: Vec<f64> = y
+        .iter()
+        .map(|&yj| force_n * (y_load - yj).max(0.0))
+        .collect();
+    let v: Vec<f64> = y
+        .iter()
+        .map(|&yj| if yj < y_load { force_n } else { 0.0 })
+        .collect();
+    let compliance = crate::sizing::shear_flex::shear_compliance_per_m(sizing, web_mat);
+    let shear = crate::sizing::shear_flex::shear_deflection(y, &v, &compliance);
+    deflection_curve(y, &m, &ei)
+        .iter()
+        .zip(&shear)
+        .map(|(b, s)| b + s)
+        .collect()
 }
 
 /// Analyze the sized wingbox: deflection, stress and modal response:
@@ -377,14 +415,11 @@ fn analyze_structure_with_rib_mass(
     } else {
         ei_curve(sizing, cap_mat, skin_mat)
     };
-    // Product static response: the stiff root triangle of the swept box does not
-    // bend (sizing::swept::root_zone_length_m). The reference law keeps its beam.
-    // The Rayleigh modes below keep the full-length beam: the stiff root was
-    // checked against the shell decks for static tip deflection only, and
-    // clamping the trial shape at its end moved the first frequency 6-15 percent
-    // further from the shell decks' (A380-800 0.99 Hz shell, 1.13 Hz clamped,
-    // 0.99 Hz unclamped).
-    let ei_response = crate::sizing::swept::response_ei(sizing, y, &ei, credit_cover_skin);
+    // The static response integrates the section stiffness over the full span.
+    // The empirical stiff root triangle (W tan L, fitted against straight-cover
+    // shell decks, no source for its length) was removed: Obert, 2009, p. 175,
+    // only says the root area is a secondary effect.
+    let ei_response = ei.clone();
     let mut m_y = structural_running_mass_kg_m.map_or_else(
         || {
             mass_per_length(
@@ -421,13 +456,27 @@ fn analyze_structure_with_rib_mass(
     let mut load_cases: Vec<LoadCaseResult> = Vec::new();
     for case in loads::load_cases(req, cfg.additional_safety_factor) {
         let sign = if case.total_force_n >= 0.0 { 1.0 } else { -1.0 };
-        let l_total = case.total_force_n.abs();
         let n_factor = case.load_factor.abs();
 
         // Magnitudes throughout: `q_aero`, `n_factor` and `m` are all positive
         // here and `sign` is restored below, which is the sign convention
         // `loads::net_distributed_load` documents.
-        let q_aero = loads::elliptic_distributed_load(y, semi_span, l_total);
+        // Physical (signed) lift of the case, folded to the magnitude convention
+        // of the relief below (the sign is restored on the results).
+        let q_aero: Vec<f64> = if credit_cover_skin {
+            loads::wing_lift_distribution(
+                wsg,
+                y,
+                case.total_force_n,
+                loads::level_semi_wing_lift_n(req),
+            )
+            .into_iter()
+            .map(|q| q * sign)
+            .collect()
+        } else {
+            // The frozen reference law keeps the half-ellipse.
+            loads::elliptic_distributed_load(y, semi_span, case.total_force_n.abs())
+        };
         let q_net = loads::net_distributed_load(&q_aero, n_factor, g, &m_y);
         let (mut v, mut m) = loads::cantilever_shear_moment(y, &q_net);
         loads::apply_point_mass_relief(y, &mut m, n_factor, g, &engine_loads);
@@ -435,12 +484,25 @@ fn analyze_structure_with_rib_mass(
             loads::apply_point_mass_shear_relief(y, &mut v, n_factor, g, &engine_loads);
         }
 
+        // Web shear deflection (product law): added to the bending curve.
+        let shear_defl = if credit_cover_skin {
+            let compliance = crate::sizing::shear_flex::shear_compliance_per_m(sizing, web_mat);
+            let v_mag: Vec<f64> = v.iter().map(|x| x.abs()).collect();
+            crate::sizing::shear_flex::shear_deflection(y, &v_mag, &compliance)
+        } else {
+            vec![0.0; n]
+        };
         let tip_terms: Vec<f64> = (0..n)
             .map(|j| m[j] * m_bar_tip[j] / ei_response[j])
             .collect();
-        let tip_deflection_m = trapezoid(&tip_terms, y) * sign;
+        let tip_deflection_m =
+            (trapezoid(&tip_terms, y) + shear_defl.last().copied().unwrap_or(0.0)) * sign;
         let defl_curve = deflection_curve(y, &m, &ei_response);
-        let deflection_m: Vec<f64> = defl_curve.iter().map(|&d| d * sign).collect();
+        let deflection_m: Vec<f64> = defl_curve
+            .iter()
+            .zip(&shear_defl)
+            .map(|(&d, &s)| (d + s) * sign)
+            .collect();
         let m_signed: Vec<f64> = m.iter().map(|&mj| mj * sign).collect();
 
         // Stress follows the moment about the section normal to the swept
@@ -468,6 +530,7 @@ fn analyze_structure_with_rib_mass(
             shear_n: v.iter().map(|&vj| vj * sign).collect(),
             moment_nm: m_signed,
             deflection_m,
+            shear_deflection_m: shear_defl.iter().map(|s| s * sign).collect(),
             tip_deflection_m,
             spar_stress,
         });
@@ -534,11 +597,15 @@ mod tests {
         let sizing = WingboxSizing {
             y_stations: vec![0.0, 5.0],
             axis_cos: Vec::new(),
+            cover_shape: Vec::new(),
+            cover_depth_m: Vec::new(),
+            cover_shear_flow_n_per_m: Vec::new(),
             eta_stations: vec![0.0, 1.0],
             chord: vec![2.0, 2.0],
             spar_fracs: Vec::new(),
             spars: Vec::new(),
             t_skin: 0.1,
+            skin_gauge_m: Vec::new(),
             num_ribs: 6,
             rib_spacing_m: 1.0,
             mass_breakdown_kg: MassBreakdown {

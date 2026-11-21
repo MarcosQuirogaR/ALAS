@@ -49,7 +49,7 @@ dependencies = [
 
 [[package]]
 name = "alas-acceptance"
-version = "1.4.1"
+version = "1.3.2"
 dependencies = [
  "alas-aero",
  "alas-app",
@@ -63,8 +63,12 @@ dependencies = [
  "alas-payload",
  "alas-perf",
  "alas-pipeline",
+ "alas-plausibility",
+ "alas-prop",
  "alas-report",
+ "alas-route",
  "alas-screen",
+ "alas-stab",
  "alas-struct",
  "serde",
  "serde_json",
@@ -74,7 +78,7 @@ dependencies = [
 
 [[package]]
 name = "alas-addons"
-version = "1.4.1"
+version = "1.3.2"
 dependencies = [
  "alas-exec",
  "rhai",
@@ -86,7 +90,7 @@ dependencies = [
 
 [[package]]
 name = "alas-aero"
-version = "1.4.1"
+version = "1.3.2"
 dependencies = [
  "alas-atmo",
  "alas-config",
@@ -102,14 +106,16 @@ dependencies = [
 
 [[package]]
 name = "alas-app"
-version = "1.4.1"
+version = "1.3.2"
 dependencies = [
  "alas-config",
  "alas-exec",
  "alas-gui",
+ "alas-mission",
  "alas-pipeline",
  "alas-report",
  "alas-route",
+ "alas-struct",
  "alas-testkit",
  "serde",
  "serde_json",
@@ -120,9 +126,8 @@ dependencies = [
 
 [[package]]
 name = "alas-atmo"
-version = "1.4.1"
+version = "1.3.2"
 dependencies = [
- "alas-math",
  "alas-testkit",
  "alas-units",
  "serde",
@@ -132,7 +137,7 @@ dependencies = [
 
 [[package]]
 name = "alas-cfd"
-version = "1.4.1"
+version = "1.3.2"
 dependencies = [
  "alas-exec",
  "alas-geom",
@@ -143,7 +148,7 @@ dependencies = [
 
 [[package]]
 name = "alas-config"
-version = "1.4.1"
+version = "1.3.2"
 dependencies = [
  "alas-atmo",
  "alas-config-derive",
@@ -158,7 +163,7 @@ dependencies = [
 
 [[package]]
 name = "alas-config-derive"
-version = "1.4.1"
+version = "1.3.2"
 dependencies = [
  "proc-macro2",
  "quote",
@@ -167,7 +172,7 @@ dependencies = [
 
 [[package]]
 name = "alas-exec"
-version = "1.4.1"
+version = "1.3.2"
 dependencies = [
  "serde",
  "serde_json",
@@ -177,11 +182,11 @@ dependencies = [
 
 [[package]]
 name = "alas-fonts"
-version = "1.4.1"
+version = "1.3.2"
 
 [[package]]
 name = "alas-geom"
-version = "1.4.1"
+version = "1.3.2"
 dependencies = [
  "alas-config",
  "alas-math",
@@ -193,8 +198,9 @@ dependencies = [
 
 [[package]]
 name = "alas-gui"
-version = "1.4.1"
+version = "1.3.2"
 dependencies = [
+ "alas-acceptance",
  "alas-addons",
  "alas-aero",
  "alas-cfd",
@@ -203,6 +209,7 @@ dependencies = [
  "alas-fonts",
  "alas-geom",
  "alas-i18n",
+ "alas-mass",
  "alas-mission",
  "alas-opt",
  "alas-payload",
@@ -213,6 +220,7 @@ dependencies = [
  "alas-screen",
  "alas-struct",
  "alas-uav",
+ "alas-units",
  "alas-viz",
  "eframe",
  "egui",
@@ -224,7 +232,7 @@ dependencies = [
 
 [[package]]
 name = "alas-i18n"
-version = "1.4.1"
+version = "1.3.2"
 dependencies = [
  "alas-testkit",
  "serde",
@@ -234,7 +242,7 @@ dependencies = [
 
 [[package]]
 name = "alas-mass"
-version = "1.4.1"
+version = "1.3.2"
 dependencies = [
  "alas-atmo",
  "alas-config",
@@ -249,7 +257,7 @@ dependencies = [
 
 [[package]]
 name = "alas-math"
-version = "1.4.1"
+version = "1.3.2"
 dependencies = [
  "alas-testkit",
  "faer",
@@ -259,7 +267,7 @@ dependencies = [
 
 [[package]]
 name = "alas-mission"
-version = "1.4.1"
+version = "1.3.2"
 dependencies = [
  "alas-aero",
  "alas-atmo",
@@ -276,7 +284,7 @@ dependencies = [
 
 [[package]]
 name = "alas-opt"
-version = "1.4.1"
+version = "1.3.2"
 dependencies = [
  "alas-aero",
  "alas-atmo",
@@ -301,7 +309,7 @@ dependencies = [
 
 [[package]]
 name = "alas-payload"
-version = "1.4.1"
+version = "1.3.2"
 dependencies = [
  "alas-config",
  "alas-geom",
@@ -311,11 +319,12 @@ dependencies = [
  "serde",
  "serde_json",
  "thiserror 2.0.19",
+ "tracing",
 ]
 
 [[package]]
 name = "alas-perf"
-version = "1.4.1"
+version = "1.3.2"
 dependencies = [
  "alas-atmo",
  "alas-config",
@@ -327,7 +336,7 @@ dependencies = [
 
 [[package]]
 name = "alas-pipeline"
-version = "1.4.1"
+version = "1.3.2"
 dependencies = [
  "alas-aero",
  "alas-atmo",
@@ -350,13 +359,29 @@ dependencies = [
  "roxmltree",
  "serde",
  "serde_json",
+ "serde_yaml",
  "thiserror 2.0.19",
  "tracing",
 ]
 
 [[package]]
+name = "alas-plausibility"
+version = "1.3.2"
+dependencies = [
+ "alas-config",
+ "alas-mass",
+ "alas-mission",
+ "alas-opt",
+ "alas-payload",
+ "alas-perf",
+ "alas-pipeline",
+ "alas-report",
+ "serde_json",
+]
+
+[[package]]
 name = "alas-prop"
-version = "1.4.1"
+version = "1.3.2"
 dependencies = [
  "alas-atmo",
  "alas-config",
@@ -367,7 +392,7 @@ dependencies = [
 
 [[package]]
 name = "alas-report"
-version = "1.4.1"
+version = "1.3.2"
 dependencies = [
  "alas-aero",
  "alas-atmo",
@@ -386,6 +411,7 @@ dependencies = [
  "alas-stab",
  "alas-struct",
  "alas-testkit",
+ "alas-units",
  "base64",
  "rayon",
  "serde",
@@ -395,7 +421,7 @@ dependencies = [
 
 [[package]]
 name = "alas-route"
-version = "1.4.1"
+version = "1.3.2"
 dependencies = [
  "alas-config",
  "alas-testkit",
@@ -407,7 +433,7 @@ dependencies = [
 
 [[package]]
 name = "alas-screen"
-version = "1.4.1"
+version = "1.3.2"
 dependencies = [
  "alas-aero",
  "alas-atmo",
@@ -422,7 +448,7 @@ dependencies = [
 
 [[package]]
 name = "alas-stab"
-version = "1.4.1"
+version = "1.3.2"
 dependencies = [
  "alas-aero",
  "alas-atmo",
@@ -435,14 +461,16 @@ dependencies = [
 
 [[package]]
 name = "alas-struct"
-version = "1.4.1"
+version = "1.3.2"
 dependencies = [
  "alas-aero",
  "alas-atmo",
  "alas-config",
  "alas-exec",
  "alas-geom",
+ "alas-struct",
  "alas-testkit",
+ "rayon",
  "serde",
  "serde_json",
  "thiserror 2.0.19",
@@ -450,7 +478,7 @@ dependencies = [
 
 [[package]]
 name = "alas-testkit"
-version = "1.4.1"
+version = "1.3.2"
 dependencies = [
  "serde",
  "serde_json",
@@ -458,7 +486,7 @@ dependencies = [
 
 [[package]]
 name = "alas-uav"
-version = "1.4.1"
+version = "1.3.2"
 dependencies = [
  "alas-aero",
  "alas-atmo",
@@ -472,7 +500,7 @@ dependencies = [
 
 [[package]]
 name = "alas-uav-db"
-version = "1.4.1"
+version = "1.3.2"
 dependencies = [
  "serde",
  "serde_json",
@@ -481,20 +509,26 @@ dependencies = [
 
 [[package]]
 name = "alas-units"
-version = "1.4.1"
+version = "1.3.2"
 dependencies = [
  "alas-testkit",
 ]
 
 [[package]]
 name = "alas-viz"
-version = "1.4.1"
+version = "1.3.2"
 dependencies = [
+ "alas-config",
  "alas-fonts",
+ "alas-geom",
+ "alas-pipeline",
  "alas-report",
+ "alas-units",
+ "base64",
  "egui",
  "rayon",
  "resvg",
+ "serde_json",
  "tiny-skia",
 ]
 
@@ -4880,9 +4914,10 @@ checksum = "ec7a2a501ed189703dba8b08142f057e887dfc4b2cc4db2d343ac6376ba3e0b9"
 
 [[package]]
 name = "xtask"
-version = "1.4.1"
+version = "1.3.2"
 dependencies = [
  "proc-macro2",
+ "quote",
  "serde_json",
  "syn 2.0.119",
 ]

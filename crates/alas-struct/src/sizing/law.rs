@@ -171,6 +171,9 @@ pub(super) enum SizingLaw {
     /// strength, which the fixtures record. The load carries no inertia relief
     /// and the skin and ribs run the whole chord, both of which the fixtures
     /// also record.
+    // Constructed only by the parity-reference entry point (feature gate in
+    // `sizing.rs`); the variant stays so every law match is exhaustive.
+    #[cfg_attr(not(any(test, feature = "parity-reference")), allow(dead_code))]
     Frozen,
 }
 

@@ -24,6 +24,53 @@ const DEFAULT_AISLE_M: f64 = 0.51;
 /// Most seats abreast a single aisle may serve (CS 25.817), then twin.
 const MAX_SINGLE_AISLE_ABREAST: i64 = 6;
 
+/// The declared abreast counts and the drawn cabin section, each against the
+/// fuselage they are laid out in.
+pub(super) fn cabin_inputs_fit_the_fuselage(config: &AlasConfig) -> Vec<ValidationIssue> {
+    let mut issues = declared_abreast_fits_the_fuselage(config);
+    issues.extend(cabin_section_is_physical(config));
+    issues.extend(stowage_density_is_physical(config));
+    issues
+}
+
+/// Densest freight accepted, kg/m3: solid aluminium is 2,700 kg/m3, and no
+/// packed air freight stows above a fraction of it.
+const MAX_STOWAGE_DENSITY_KG_M3: f64 = 2_700.0;
+
+/// A declared stowage density has to be finite and positive: the container
+/// and bulk limits are the volume times it, and the overflow rooms divide by it.
+fn stowage_density_is_physical(config: &AlasConfig) -> Vec<ValidationIssue> {
+    let Some(density) = config.cabin.cargo.stowage_density_kg_m3 else {
+        return Vec::new();
+    };
+    if density.is_finite() && density > 0.0 && density <= MAX_STOWAGE_DENSITY_KG_M3 {
+        return Vec::new();
+    }
+    vec![ValidationIssue {
+        field_path: "cabin.cargo.stowage_density_kg_m3".to_owned(),
+        message: format!(
+            "Stowage density {density:?} kg/m3 must be finite and within (0, {MAX_STOWAGE_DENSITY_KG_M3}] kg/m3."
+        ),
+        severity: Severity::Error,
+    }]
+}
+
+fn cabin_section_is_physical(config: &AlasConfig) -> Vec<ValidationIssue> {
+    let fuselage = &config.geometry.fuselage;
+    // Without a stated height the section is only known once the fuselage is
+    // lofted, where the same shares are enforced against it.
+    fuselage
+        .cabin_section
+        .and_then(|section| section.issue(fuselage.height_m))
+        .map(|message| ValidationIssue {
+            field_path: "geometry.fuselage.cabin_section".to_owned(),
+            message,
+            severity: Severity::Error,
+        })
+        .into_iter()
+        .collect()
+}
+
 pub(super) fn passenger_and_bag_masses_are_physical(config: &AlasConfig) -> Vec<ValidationIssue> {
     if config.requirements.aircraft_type != "passenger" {
         return Vec::new();
@@ -120,6 +167,24 @@ mod tests {
         let config = AlasConfig::default();
         assert!(passenger_and_bag_masses_are_physical(&config).is_empty());
         assert!(declared_abreast_fits_the_fuselage(&config).is_empty());
+    }
+
+    #[test]
+    fn a_zero_negative_or_non_finite_stowage_density_is_an_error() {
+        let mut config = AlasConfig::default();
+        assert!(stowage_density_is_physical(&config).is_empty());
+        config.cabin.cargo.stowage_density_kg_m3 = Some(300.0);
+        assert!(stowage_density_is_physical(&config).is_empty());
+        for bad in [0.0, -161.0, f64::NAN, f64::INFINITY, 1.0e6] {
+            config.cabin.cargo.stowage_density_kg_m3 = Some(bad);
+            assert!(
+                stowage_density_is_physical(&config).iter().any(|issue| {
+                    issue.field_path == "cabin.cargo.stowage_density_kg_m3"
+                        && issue.severity == Severity::Error
+                }),
+                "{bad}"
+            );
+        }
     }
 
     #[test]

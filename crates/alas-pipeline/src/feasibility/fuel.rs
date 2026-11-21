@@ -75,6 +75,9 @@ pub enum CarriedFuelBasis {
     /// The fuel the policy requires for the flown route, bounded by the
     /// takeoff-mass limit and the tanks.
     ReservePolicyClosure,
+    /// The fuel a user-defined mission plan closed on (stages, mass events,
+    /// contingency), bounded by the take-off-mass limit and the tanks.
+    MissionPlanClosure,
 }
 
 /// Distinct fuel masses governing one analyzed aircraft load case.
@@ -145,6 +148,23 @@ impl Default for FuelLoadingAssessment {
             dispatch: None,
             unusable_fuel_kg: None,
         }
+    }
+}
+
+impl FuelLoadingAssessment {
+    /// Payload of the analysed load the dispatched route leaves behind, kg:
+    /// zero unless the route is landing-weight limited
+    /// (`mission_stage::dispatch::landing_limit`).
+    pub fn offloaded_payload_kg(&self) -> f64 {
+        self.dispatch
+            .map_or(0.0, |dispatch| dispatch.offloaded_payload_kg)
+    }
+
+    /// Operating empty plus payload of the dispatched route, kg:
+    /// [`Self::zero_fuel_mass_kg`] (the analysed load, which the MZFW and
+    /// weight-hierarchy checks read) less [`Self::offloaded_payload_kg`].
+    pub fn flown_zero_fuel_mass_kg(&self) -> f64 {
+        self.zero_fuel_mass_kg - self.offloaded_payload_kg()
     }
 }
 
@@ -606,9 +626,13 @@ mod tests {
             fuel_loading.mtow_closure_fuel_kg,
             config.requirements.mtow_kg - design.zero_fuel_mass_kg
         );
-        assert_eq!(
-            fuel_loading.mtow_closure_fuel_kg - gross_fuel_kg,
-            design.mtow_margin_kg
+        // `MtowFuelLoading` forms the margin as MTOW - (ZFW + fuel); the
+        // closure side is (MTOW - ZFW) - fuel. The two groupings differ by
+        // the rounding of ZFW + fuel at MTOW scale (ulp ~1.5e-11 kg), so the
+        // identity holds to that rounding, not bit for bit.
+        assert!(
+            (fuel_loading.mtow_closure_fuel_kg - gross_fuel_kg - design.mtow_margin_kg).abs()
+                < 1.0e-6
         );
         assert_eq!(
             fuel_loading.analyzed_takeoff_mass_kg,

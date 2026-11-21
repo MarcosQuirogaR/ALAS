@@ -4,7 +4,7 @@
 //! Owned cancellation and borrowed-flag forwarding for coupled evaluations.
 use super::*;
 
-/// Owned cancellation shared by a coordinator and its native evaluation workers.
+/// Owned cancellation shared by the dispatching thread and its native evaluation workers.
 #[derive(Debug, Clone)]
 pub(crate) struct EvaluationCancellation(Arc<CancelWatch>);
 impl PartialEq for EvaluationCancellation {

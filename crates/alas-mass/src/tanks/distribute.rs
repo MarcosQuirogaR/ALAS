@@ -185,7 +185,13 @@ impl FuelTankLayout {
         levels
             .into_iter()
             .filter_map(|fuel_kg| {
-                let state = self.distribute(fuel_kg).ok()?;
+                // An empty tank set has no centre of gravity (the combined
+                // properties of nothing are the origin). The curve's empty
+                // end carries the CG of the first tank to fill instead, the
+                // limit of the loading curve as the fuel mass goes to zero.
+                let state = self
+                    .distribute(fuel_kg.max(EMPTY_END_PROBE_KG.min(capacity_kg)))
+                    .ok()?;
                 Some(FuelCgPoint {
                     fuel_kg,
                     cg_m: state.properties(self).cg_m,
@@ -195,11 +201,45 @@ impl FuelTankLayout {
     }
 }
 
+/// Fuel mass at which the empty end of the loading curve is evaluated, kg:
+/// small enough that only the first tank in the loading order holds fuel.
+const EMPTY_END_PROBE_KG: f64 = 1.0e-3;
+
+/// The CG of the fuel alone at `fuel_kg`, interpolated linearly along an
+/// ascending loading `curve` and held at the end points outside it. `None`
+/// for an empty curve or a non-finite `fuel_kg`. A leading point at zero fuel
+/// that carries the origin placeholder (no CG) is skipped, so a curve from an
+/// older producer cannot pull the fuel CG toward the nose.
+#[must_use]
+pub fn fuel_cg_at(curve: &[FuelCgPoint], fuel_kg: f64) -> Option<[f64; 3]> {
+    if !fuel_kg.is_finite() {
+        return None;
+    }
+    let placeholder = |p: &FuelCgPoint| p.fuel_kg <= 0.0 && p.cg_m == [0.0; 3];
+    let curve = match curve.split_first() {
+        Some((first, rest)) if placeholder(first) && !rest.is_empty() => rest,
+        _ => curve,
+    };
+    let (first, last) = (curve.first()?, curve.last()?);
+    if fuel_kg <= first.fuel_kg {
+        return Some(first.cg_m);
+    }
+    if fuel_kg >= last.fuel_kg {
+        return Some(last.cg_m);
+    }
+    curve.windows(2).find_map(|w| {
+        (fuel_kg <= w[1].fuel_kg && w[1].fuel_kg > w[0].fuel_kg).then(|| {
+            let t = (fuel_kg - w[0].fuel_kg) / (w[1].fuel_kg - w[0].fuel_kg);
+            std::array::from_fn(|k| w[0].cg_m[k] + t * (w[1].cg_m[k] - w[0].cg_m[k]))
+        })
+    })
+}
+
 /// One fuel load: how much sits in each tank of a [`FuelTankLayout`].
 #[derive(Debug, Clone, PartialEq)]
 pub struct FuelState {
     /// Fill of each tank, in the same order as [`FuelTankLayout::tanks`].
-    fills_kg: Vec<f64>,
+    pub(super) fills_kg: Vec<f64>,
 }
 
 impl FuelState {

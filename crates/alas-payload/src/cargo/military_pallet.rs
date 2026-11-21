@@ -4,7 +4,16 @@
 //! The military air-cargo pallet of a freight hold, kept out of the airliner
 //! container catalogue in [`super`].
 
-use super::{UldType, NAS3610_PALLET_CONTOUR};
+use super::{ContourFidelity, UldContour, UldType};
+
+/// The 463L pallet is a flat rectangle, 88 x 108 in, carrying its load to a
+/// rectangular envelope: its contour is that rectangle, drawn as one.
+const P463L_CONTOUR: UldContour = UldContour {
+    vertices: &[[-1.0, 0.0], [1.0, 0.0], [1.0, 1.0], [-1.0, 1.0]],
+    source: "Jane's All the World's Aircraft 2008-2009, A400M entry p.297 and C-295 entry p.544: 463L pallet 88 x 108 in; rectangular footprint and load envelope",
+    fidelity: ContourFidelity::VisualizationOnly,
+    mirrorable: false,
+};
 
 /// The 463L master pallet, the military air-cargo pallet, loaded in a single
 /// row down a freight hold.
@@ -33,10 +42,30 @@ pub(super) const P463L: UldType = UldType {
     name: "463L Master Pallet (88x108)",
     length: 2.2352,
     width: 2.7432,
+    top_width: 2.7432,
     height: 2.44,
     max_gross_weight: 4536.0,
     tare_weight: 0.0,
     color: "#556b2f",
     volume_m3: 13.6,
-    contour: NAS3610_PALLET_CONTOUR,
+    contour: P463L_CONTOUR,
 };
+
+/// The same pallet turned a quarter, 88 in across and 108 in along the aircraft:
+/// how a hold narrower than 108 in takes it. Not a catalogue entry of its own,
+/// since nobody chooses it: [`pallet_for_hold`] does.
+pub(super) static P463L_TURNED: UldType = UldType {
+    length: P463L.width,
+    width: P463L.length,
+    top_width: P463L.length,
+    ..P463L
+};
+
+/// The orientation of `uld` that stands across a hold of `clear_width_m`.
+pub(super) fn pallet_for_hold(uld: &'static UldType, clear_width_m: f64) -> &'static UldType {
+    if uld.key == P463L.key && clear_width_m < uld.width && clear_width_m >= P463L_TURNED.width {
+        &P463L_TURNED
+    } else {
+        uld
+    }
+}

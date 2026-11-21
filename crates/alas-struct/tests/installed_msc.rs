@@ -16,14 +16,15 @@ mod support;
 use std::path::{Path, PathBuf};
 
 use alas_config::{DesignRequirements, EngineConfig, MassModelConfig, StructuresConfig};
-use alas_struct::mesh::build_wing_mesh_bdf;
+use alas_struct::mesh::{add_distributed_fuel_mass, build_wing_mesh_bdf_product};
 use alas_struct::nastran::{
-    build_sol101_bulk, build_sol103_bulk, build_sol111_sine_bulk_msc, fatal_lines,
-    read_force_psd_rms, read_harmonic_response, read_modes, read_static, run_nastran_with_solver,
+    build_sol101_bulk_product, build_sol103_bulk, build_sol111_sine_bulk_msc, fatal_lines,
+    read_force_psd_rms, read_harmonic_response, read_modes, read_static, run_nastran_with_memory,
     ResultStatus,
 };
 use alas_struct::op2::{read_op2, Op2, UnreadResultTable};
-use alas_struct::sizing::size_wingbox;
+use alas_struct::sizing::{box_chord_band, size_wingbox, sizing_stations};
+use alas_struct::tanks::{integral_fuel_running_mass_kg_m, JET_FUEL_DENSITY_KG_M3};
 use support::{build_geometry, materials_for, MaterialsRecord};
 
 #[test]
@@ -61,7 +62,8 @@ fn retained_msc_sol101_and_sol103_op2_files_are_consumed_without_solver_reexecut
         assert_eq!(stress.data.len(), 7_290);
         assert!(stress.data.iter().flatten().all(|value| value.is_finite()));
     }
-    assert_eq!(static_results.unread_result_tables.len(), 12);
+    // OQG and OPG per subcase; the CBAR and CTRIA3 stresses are decoded.
+    assert_eq!(static_results.unread_result_tables.len(), 6);
     assert_eq!(
         static_results.unread_result_tables[0],
         UnreadResultTable::Vector {
@@ -73,13 +75,16 @@ fn retained_msc_sol101_and_sol103_op2_files_are_consumed_without_solver_reexecut
 
     let modal_results = parsed_op2(&root.join("sol103/wing_sol103.op2"));
     let modes = modal_results.eigenvectors.get(&1).expect("modal subcase 1");
-    assert_eq!(modes.modes.len(), 36);
+    // The configured modes plus RESVEC's six residual vectors, as the
+    // installed test below writes them (the default is 16 modes).
+    let retained_modes = StructuresConfig::default().n_modes as usize + 6;
+    assert_eq!(modes.modes.len(), retained_modes);
     assert_eq!(modes.node_ids.len(), 568);
     assert!(modes
         .mode_cycles
         .windows(2)
         .all(|pair| pair[0] > 0.0 && pair[0] < pair[1]));
-    assert_eq!(modal_results.unread_result_tables.len(), 36);
+    assert_eq!(modal_results.unread_result_tables.len(), retained_modes);
     assert!(modal_results.unread_result_tables.iter().all(|table| {
         matches!(table, UnreadResultTable::Vector { name, subcase: 1, num_wide: 8 } if name == "OQG1")
     }));
@@ -113,7 +118,13 @@ fn installed_msc_sol101_sol103_and_harmonic_sol111_are_consumed() {
     };
     let [skin, web, cap, rib] = materials_for(&named);
     let sizing = size_wingbox(&geometry, &config, &requirements, skin, web, cap, rib);
-    let (deck, _, node_index) = build_wing_mesh_bdf(
+    // The product path: the mesh the pipeline builds, carrying the same
+    // integral-tank fuel the sizing law credits as inertia relief
+    // (`size_wingbox` takes the reference tank estimate at the reference
+    // density when no distribution is supplied), solved with the product
+    // static deck. The loads the box is sized for are then the loads the FE
+    // model carries, and the static pins are a relieved strength state.
+    let (mut deck, _, node_index) = build_wing_mesh_bdf_product(
         &geometry,
         &sizing,
         &config,
@@ -126,6 +137,17 @@ fn installed_msc_sol101_sol103_and_harmonic_sol111_are_consumed() {
         rib,
     )
     .expect("the validation wingbox meshes");
+    let stations = sizing_stations(&geometry, &config);
+    let (box_front, box_rear) = box_chord_band(&geometry);
+    let fuel = integral_fuel_running_mass_kg_m(
+        &geometry,
+        &stations,
+        box_front,
+        box_rear,
+        JET_FUEL_DENSITY_KG_M3,
+    );
+    add_distributed_fuel_mass(&mut deck, &node_index, &stations, &fuel)
+        .expect("the sizing fuel maps onto the spar grids");
     assert!(deck.write_bulk_msc().contains("RBE3    "));
 
     let output = scratch_dir();
@@ -134,7 +156,7 @@ fn installed_msc_sol101_sol103_and_harmonic_sol111_are_consumed() {
     assert_clean_solve(
         &output,
         "sol101",
-        build_sol101_bulk(
+        build_sol101_bulk_product(
             &deck,
             &node_index,
             &requirements,
@@ -144,6 +166,7 @@ fn installed_msc_sol101_sol103_and_harmonic_sol111_are_consumed() {
         &launcher,
         &solver,
         config.timeout_s,
+        config.nastran_memory_mb,
     );
     assert_clean_solve(
         &output,
@@ -152,6 +175,7 @@ fn installed_msc_sol101_sol103_and_harmonic_sol111_are_consumed() {
         &launcher,
         &solver,
         config.timeout_s,
+        config.nastran_memory_mb,
     );
     assert_clean_solve(
         &output,
@@ -160,6 +184,7 @@ fn installed_msc_sol101_sol103_and_harmonic_sol111_are_consumed() {
         &launcher,
         &solver,
         config.timeout_s,
+        config.nastran_memory_mb,
     );
 
     let static_results = parsed_op2(&output.join("sol101/wing_sol101.op2"));
@@ -169,7 +194,7 @@ fn installed_msc_sol101_sol103_and_harmonic_sol111_are_consumed() {
     let mut peak_stress = Vec::new();
     for subcase in 1..=3 {
         let displacement = static_results.displacements.get(&subcase).unwrap();
-        assert_eq!(displacement.node_ids.len(), 568);
+        assert_eq!(displacement.node_ids.len(), deck.grids().len());
         assert!(displacement
             .data
             .iter()
@@ -191,7 +216,7 @@ fn installed_msc_sol101_sol103_and_harmonic_sol111_are_consumed() {
         tip_t3.push(displacement.data[tip][2]);
 
         let stress = static_results.cquad4_stress.get(&subcase).unwrap();
-        assert_eq!(stress.data.len(), 7_290);
+        assert_eq!(stress.data.len(), 10 * deck.quads().len()); // centre + 4 corners, two fibres
         let peak_von_mises = stress.data.iter().map(|row| row[7]).fold(0.0f64, f64::max);
         assert!(peak_von_mises.is_finite());
         assert!((1e5..1e10).contains(&peak_von_mises));
@@ -202,12 +227,42 @@ fn installed_msc_sol101_sol103_and_harmonic_sol111_are_consumed() {
     assert!(tip_t3
         .iter()
         .all(|value| (1e-6..100.0).contains(&value.abs())));
-    assert!((4.0..5.0).contains(&tip_t3[0]));
-    assert!((-2.0..-1.0).contains(&tip_t3[1]));
-    assert!((1.0..1.3).contains(&tip_t3[2]));
-    assert!((1.0e9..1.2e9).contains(&peak_stress[0]));
-    assert!((4.0e8..4.8e8).contains(&peak_stress[1]));
-    assert!((2.5e8..3.3e8).contains(&peak_stress[2]));
+    // Bands around the product path: `build_wing_mesh_bdf_product`, the
+    // sizing fuel as distributed mass (`add_distributed_fuel_mass`, the
+    // integral tank at 800 kg/m3 that `size_wingbox` credits) and the
+    // inertia-relieved SOL101 cases of `build_sol101_bulk_product`, solved
+    // under the product memory ceiling. Measured: tip 8.83 /
+    // -3.53 / 2.35 m, peak 531 / 212 / 142 MPa; modes 1.085 and 33.17 Hz.
+    // The same product deck without the fuel gives 10.22 / -4.09 / 2.73 m,
+    // 793 / 317 / 211 MPa and 1.81 Hz, so the relief takes 14 % off the
+    // tip and 33 % off the peak, and the fuel mass lowers the first mode by
+    // the square root of the mass ratio. Values from the unrelieved reference mesh (8.45 m,
+    // 1228 MPa, 1.518 Hz) are not comparable. Bands are +-4 %: a solver,
+    // unit or load-path regression, not a strength check.
+    assert!(
+        (8.5..9.2).contains(&tip_t3[0]),
+        "tip {tip_t3:?} m, peak {peak_stress:?} Pa"
+    );
+    assert!(
+        (-3.68..-3.39).contains(&tip_t3[1]),
+        "tip {tip_t3:?} m, peak {peak_stress:?} Pa"
+    );
+    assert!(
+        (2.26..2.45).contains(&tip_t3[2]),
+        "tip {tip_t3:?} m, peak {peak_stress:?} Pa"
+    );
+    assert!(
+        (5.1e8..5.5e8).contains(&peak_stress[0]),
+        "tip {tip_t3:?} m, peak {peak_stress:?} Pa"
+    );
+    assert!(
+        (2.04e8..2.21e8).contains(&peak_stress[1]),
+        "tip {tip_t3:?} m, peak {peak_stress:?} Pa"
+    );
+    assert!(
+        (1.36e8..1.47e8).contains(&peak_stress[2]),
+        "tip {tip_t3:?} m, peak {peak_stress:?} Pa"
+    );
 
     let cases = alas_struct::loads::load_cases(&requirements, config.additional_safety_factor);
     let static_report = read_static(&static_results, &node_index, &cases);
@@ -221,7 +276,7 @@ fn installed_msc_sol101_sol103_and_harmonic_sol111_are_consumed() {
     // vectors in this run; the OP2 must retain both sets rather than truncate
     // to EIGRL ND.
     assert_eq!(modes.modes.len(), config.n_modes as usize + 6);
-    assert_eq!(modes.node_ids.len(), 568);
+    assert_eq!(modes.node_ids.len(), deck.grids().len());
     assert!(modes
         .mode_cycles
         .windows(2)
@@ -230,8 +285,15 @@ fn installed_msc_sol101_sol103_and_harmonic_sol111_are_consumed() {
         .mode_cycles
         .last()
         .is_some_and(|frequency| *frequency < 500.0));
-    assert!((1.70..1.72).contains(&modes.mode_cycles[0]));
-    assert!((127.0..127.1).contains(modes.mode_cycles.last().unwrap()));
+    let first_last = (modes.mode_cycles[0], *modes.mode_cycles.last().unwrap());
+    assert!(
+        (1.06..1.11).contains(&first_last.0),
+        "modes {first_last:?} Hz"
+    );
+    assert!(
+        (32.5..33.8).contains(&first_last.1),
+        "modes {first_last:?} Hz"
+    );
     assert!(modes
         .data
         .iter()
@@ -273,8 +335,12 @@ fn installed_msc_sol101_sol103_and_harmonic_sol111_are_consumed() {
         harmonic_report.frf_tip_abs_m_per_n.as_ref().map(Vec::len),
         Some(60)
     );
-    assert!((4.9..5.1).contains(&harmonic_report.peak_freq_hz));
-    assert!((6.2e-7..6.4e-7).contains(&harmonic_report.peak_frf));
+    let peak = (harmonic_report.peak_freq_hz, harmonic_report.peak_frf);
+    assert!((2.5..3.5).contains(&peak.0), "FRF peak {peak:?} (Hz, m/N)");
+    assert!(
+        (1.68e-6..1.82e-6).contains(&peak.1),
+        "FRF peak {peak:?} (Hz, m/N)"
+    );
     assert!(harmonic_report.miles_rms_m.is_empty());
     assert!(harmonic_report.nastran_rms_m.is_empty());
 
@@ -309,12 +375,15 @@ fn assert_clean_solve(
     launcher: &Path,
     solver: &Path,
     timeout_seconds: f64,
+    memory_mb: i64,
 ) {
     let solve_dir = output.join(solution);
     std::fs::create_dir_all(&solve_dir).expect("create solution directory");
     let bdf = solve_dir.join(format!("wing_{solution}.bdf"));
     std::fs::write(&bdf, deck).expect("write solution deck");
-    let outcome = run_nastran_with_solver(&bdf, launcher, Some(solver), timeout_seconds);
+    // The product ceiling (`StructuresConfig::nastran_memory_mb`): without it MSC
+    // reserves half the host RAM and fails to start beside any other job.
+    let outcome = run_nastran_with_memory(&bdf, launcher, Some(solver), timeout_seconds, memory_mb);
     assert!(outcome.ok, "MSC {solution} failed: {}", outcome.detail);
     let f06_path = bdf.with_extension("f06");
     let f06 = std::fs::read_to_string(&f06_path).expect("MSC wrote an .f06");

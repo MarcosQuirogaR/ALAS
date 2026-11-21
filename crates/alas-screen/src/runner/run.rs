@@ -90,7 +90,7 @@ pub(super) fn run_airfoil_screening_with_mass_model(
     let mut cancelled = false;
 
     // Stage 1: 2-D screening. Scoring one candidate touches nothing shared,
-    // so the sweep runs one candidate per core. The coordinator alone reports
+    // so the sweep runs one candidate per core. The controlling thread alone reports
     // progress, and the results come back in library order by index, so the
     // ranking does not depend on completion timing.
     let stage1_workers = thread::available_parallelism().map_or(4, |n| n.get());

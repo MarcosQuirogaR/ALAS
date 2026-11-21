@@ -156,6 +156,17 @@ pub enum ParamValue {
     Int(i64),
 }
 
+/// The cover shells one skin strip added between two consecutive skin ribs
+/// on one surface: the rib bay of a stiffened cover panel
+/// ([`super::CoverPanel`]).
+#[derive(Debug, Clone, Default, PartialEq)]
+pub struct CoverStrip {
+    /// Whether the strip is on the upper surface (extrados).
+    pub upper: bool,
+    /// Its shell elements, in the order they were added.
+    pub shells: Vec<i64>,
+}
+
 /// A `PARAM` card.
 #[derive(Debug, Clone, PartialEq)]
 pub struct Param {
@@ -183,11 +194,21 @@ pub struct Deck {
     pub(crate) rigid_elements: Vec<Rbe3>,
     pub(crate) constraints: Vec<Spc1>,
     pub(crate) params: Vec<Param>,
+    /// Cover shells grouped by rib bay and surface, as the skin strips were
+    /// added.
+    pub(crate) cover_strips: Vec<CoverStrip>,
     /// Grid identifier to its position in `grids`, so a coordinate lookup does
     /// not scan. The builder's own coordinate-keyed deduplication map is
     /// separate and lives with the builder: it is how the deck gets built, not
     /// something the deck itself has to remember.
     positions: HashMap<i64, usize>,
+    /// Spanwise lift shape the static deck distributes (VLM strip lift); `None`
+    /// keeps the half-ellipse.
+    pub(crate) lift_shape: Option<alas_geom::wing_structure::SpanLoadShape>,
+    /// Share of each spanwise lift force applied on the rear-spar node line so
+    /// the resultant sits on the section quarter chord: `(0.25 - f_front) /
+    /// (f_rear - f_front)`, zero when the front spar is at the quarter chord.
+    pub(crate) quarter_chord_rear_share: f64,
 }
 
 impl Deck {

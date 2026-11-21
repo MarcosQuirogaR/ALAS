@@ -17,6 +17,7 @@ use crate::state::AppState;
 use crate::views::{tr, tr_fields};
 
 use super::fields::{self, FieldKind, SandboxField};
+use super::list_editors::{list_editor, pair_list_editor};
 
 /// How an edit reached the model.
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
@@ -41,15 +42,18 @@ pub fn commit_field(
     gesture: Gesture,
 ) -> bool {
     if !fields::value_in_domain(field, &value) {
-        state.sandbox.rejected_edit = Some(tr_fields(
-            "{label} must stay between {min} and {max} {unit}; the edit was not applied.",
-            &[
-                ("label", tr(&field.label)),
-                ("min", format!("{}", field.min)),
-                ("max", format!("{}", field.max)),
-                ("unit", field.unit.clone()),
-            ],
-        ));
+        state.sandbox.rejected_edit = Some(
+            tr_fields(
+                "{label} must stay between {min} and {max} {unit}; the edit was not applied.",
+                &[
+                    ("label", tr(&field.label)),
+                    ("min", format!("{}", field.min)),
+                    ("max", format!("{}", field.max)),
+                    ("unit", shown_unit(&field.unit)),
+                ],
+            )
+            .replace(" ;", ";"),
+        );
         return false;
     }
     let before = state.edit_snapshot();
@@ -133,7 +137,7 @@ pub fn reset_group_to_reference(state: &mut AppState, group: &[SandboxField]) {
 
 fn display_value(field: &SandboxField, value: &Value) -> String {
     match value {
-        Value::Number(n) => format!("{n} {}", field.unit),
+        Value::Number(n) => format!("{n}{}", unit_suffix(&field.unit)),
         Value::String(s) => s.clone(),
         Value::Null => tr("unset"),
         other => other.to_string(),
@@ -146,12 +150,33 @@ fn range_hint(field: &SandboxField) -> String {
         &[
             ("min", format!("{}", field.min)),
             ("max", format!("{}", field.max)),
-            ("unit", field.unit.clone()),
+            ("unit", shown_unit(&field.unit)),
         ],
     )
+    .trim_end()
+    .to_owned()
 }
 
-fn gesture_of(response: &egui::Response) -> Option<Gesture> {
+/// The unit as shown: a dimensionless field (unit `-`, `1` or none) shows
+/// nothing, instead of a stray dash after the value.
+pub(super) fn shown_unit(unit: &str) -> String {
+    match unit.trim() {
+        "" | "-" | "\u{2013}" | "\u{2014}" | "1" | "[-]" => String::new(),
+        unit => unit.to_owned(),
+    }
+}
+
+/// The unit with its leading space, or nothing for a dimensionless field.
+pub(super) fn unit_suffix(unit: &str) -> String {
+    let unit = shown_unit(unit);
+    if unit.is_empty() {
+        unit
+    } else {
+        format!(" {unit}")
+    }
+}
+
+pub(super) fn gesture_of(response: &egui::Response) -> Option<Gesture> {
     if response.drag_started() {
         Some(Gesture::DragStarted)
     } else if response.drag_stopped() {
@@ -177,7 +202,7 @@ fn numeric_editor(state: &mut AppState, ui: &mut Ui, field: &SandboxField, mut v
             .range(field.min..=field.max)
             .speed(step)
             .max_decimals(field.decimals)
-            .suffix(format!(" {}", field.unit)),
+            .suffix(unit_suffix(&field.unit)),
     );
     let response = response.on_hover_text(range_hint(field));
     if let Some(gesture) = gesture_of(&response) {
@@ -198,6 +223,12 @@ fn optional_editor(state: &mut AppState, ui: &mut Ui, field: &SandboxField, curr
             .on_hover_text(tr("Unset leaves the derived value in force."))
             .changed()
         {
+            // The hump is only drawn as a complete ordered set: enabling its
+            // height fills the whole set (and asks first on a lofted body).
+            if set && field.id == super::hump_defaults::HEIGHT_ID {
+                super::hump_defaults::request_enable(state);
+                return;
+            }
             let value = if set {
                 Value::from(field.min.max(0.0).min(field.max))
             } else {
@@ -214,7 +245,7 @@ fn optional_editor(state: &mut AppState, ui: &mut Ui, field: &SandboxField, curr
 /// An on/off field; a missing value (defaults are not serialised) reads off.
 fn bool_editor(state: &mut AppState, ui: &mut Ui, field: &SandboxField, current: &Value) {
     let mut on = current.as_bool().unwrap_or(false);
-    if ui.checkbox(&mut on, "").changed() {
+    if crate::checkbox::checkbox(ui, &mut on, "").changed() {
         commit_field(state, field, Value::Bool(on), Gesture::Committed);
     }
 }
@@ -223,14 +254,20 @@ fn airfoil_editor(state: &mut AppState, ui: &mut Ui, field: &SandboxField, curre
     let mut text = current.as_str().unwrap_or_default().to_owned();
     let search_id = ui.make_persistent_id(("sandbox_airfoil_search", &field.id));
     ui.horizontal(|ui| {
-        let response = ui.add(egui::TextEdit::singleline(&mut text).desired_width(140.0));
+        let optional = field.kind == FieldKind::OptionalAirfoil;
+        let mut edit = egui::TextEdit::singleline(&mut text).desired_width(140.0);
+        if optional {
+            edit = edit.hint_text(tr("tail section"));
+        }
+        let response = ui.add(edit);
         if response.lost_focus() && ui.input(|i| i.key_pressed(egui::Key::Enter)) {
-            commit_field(
-                state,
-                field,
-                Value::String(text.clone()),
-                Gesture::Committed,
-            );
+            // An optional section left empty is unset, not an empty name.
+            let value = if optional && text.trim().is_empty() {
+                Value::Null
+            } else {
+                Value::String(text.clone())
+            };
+            commit_field(state, field, value, Gesture::Committed);
         }
         ui.menu_button("v", |ui| {
             let mut search = ui
@@ -305,109 +342,6 @@ fn engine_editor(state: &mut AppState, ui: &mut Ui, field: &SandboxField, curren
     }
 }
 
-fn list_editor(
-    state: &mut AppState,
-    ui: &mut Ui,
-    field: &SandboxField,
-    current: &Value,
-    labels: Option<[&str; 3]>,
-) {
-    let mut items: Vec<f64> = current
-        .as_array()
-        .map(|a| a.iter().filter_map(Value::as_f64).collect())
-        .unwrap_or_default();
-    let mut gesture = None;
-    ui.horizontal_wrapped(|ui| {
-        for (index, item) in items.iter_mut().enumerate() {
-            if let Some(labels) = labels {
-                if let Some(label) = labels.get(index) {
-                    ui.label(RichText::new(*label).weak().small());
-                }
-            }
-            let response = ui.add(
-                DragValue::new(item)
-                    .range(field.min..=field.max)
-                    .speed(10f64.powi(-(field.decimals as i32)))
-                    .max_decimals(field.decimals),
-            );
-            if let Some(g) = gesture_of(&response) {
-                gesture = Some(g);
-            }
-        }
-        if field.kind == FieldKind::FloatList {
-            if ui
-                .small_button("+")
-                .on_hover_text(tr("Add a mirrored engine pair"))
-                .clicked()
-            {
-                let outermost = items.iter().fold(0.0f64, |m, v| m.max(v.abs()));
-                items.push(outermost + 3.0);
-                items.push(-(outermost + 3.0));
-                gesture = Some(Gesture::Committed);
-            }
-            if items.len() >= 2
-                && ui
-                    .small_button("-")
-                    .on_hover_text(tr("Remove the outermost engine pair"))
-                    .clicked()
-            {
-                items.truncate(items.len() - 2);
-                gesture = Some(Gesture::Committed);
-            }
-        }
-    });
-    if let Some(gesture) = gesture {
-        commit_field(state, field, Value::from(items), gesture);
-    }
-}
-
-fn pair_list_editor(state: &mut AppState, ui: &mut Ui, field: &SandboxField, current: &Value) {
-    let mut rows: Vec<[f64; 2]> = current
-        .as_array()
-        .map(|rows| {
-            rows.iter()
-                .filter_map(|row| {
-                    let row = row.as_array()?;
-                    Some([row.first()?.as_f64()?, row.get(1)?.as_f64()?])
-                })
-                .collect()
-        })
-        .unwrap_or_default();
-    let mut gesture = None;
-    ui.horizontal(|ui| {
-        ui.label(RichText::new(tr("x-station [m]")).weak().small());
-        ui.label(RichText::new(tr("radius fraction [0-1]")).weak().small());
-    });
-    for row in rows.iter_mut() {
-        ui.horizontal(|ui| {
-            for (index, value) in row.iter_mut().enumerate() {
-                let (lo, hi) = if index == 0 {
-                    (0.0, field.max)
-                } else {
-                    (0.0, 1.0)
-                };
-                let response = ui.add(
-                    DragValue::new(value)
-                        .range(lo..=hi)
-                        .speed(0.01)
-                        .max_decimals(3),
-                );
-                if let Some(g) = gesture_of(&response) {
-                    gesture = Some(g);
-                }
-            }
-        });
-    }
-    if let Some(gesture) = gesture {
-        let value = Value::from(
-            rows.into_iter()
-                .map(|r| Value::from(r.to_vec()))
-                .collect::<Vec<_>>(),
-        );
-        commit_field(state, field, value, gesture);
-    }
-}
-
 /// Render one field: label with help and range on hover, the editor, and
 /// the reset to the AVE reference.
 pub fn show_field(state: &mut AppState, ui: &mut Ui, field: &SandboxField) {
@@ -418,6 +352,7 @@ pub fn show_field(state: &mut AppState, ui: &mut Ui, field: &SandboxField) {
         .validation_findings
         .iter()
         .any(|f| f.field_path.rsplit('.').next() == Some(leaf));
+    let top_left = ui.cursor().min;
     ui.horizontal(|ui| {
         let mut text = RichText::new(tr(&field.label)).size(12.5);
         if has_error {
@@ -448,12 +383,21 @@ pub fn show_field(state: &mut AppState, ui: &mut Ui, field: &SandboxField) {
         }
         FieldKind::OptionalFloat => optional_editor(state, ui, field, &current),
         FieldKind::Bool => bool_editor(state, ui, field, &current),
-        FieldKind::Airfoil => airfoil_editor(state, ui, field, &current),
+        FieldKind::Airfoil | FieldKind::OptionalAirfoil => {
+            airfoil_editor(state, ui, field, &current);
+        }
         FieldKind::Engine => engine_editor(state, ui, field, &current),
         FieldKind::Vec3 => list_editor(state, ui, field, &current, Some(["x", "y", "z"])),
         FieldKind::FloatList => list_editor(state, ui, field, &current, None),
         FieldKind::PairList => pair_list_editor(state, ui, field, &current),
     }
+    // The palette's jump: scroll this field into view and pulse it.
+    let bottom_right = egui::pos2(ui.max_rect().right(), ui.cursor().top());
+    crate::search::focus_anchor(
+        ui,
+        &field.id,
+        egui::Rect::from_two_pos(top_left, bottom_right),
+    );
 }
 
 /// Render one titled group of fields with its group reset.
@@ -467,12 +411,19 @@ pub fn show_group(
 ) {
     crate::theme::card_frame(ui).show(ui, |ui| {
         ui.set_min_width(ui.available_width());
-        egui::CollapsingHeader::new(RichText::new(tr(title)).strong())
+        // A group that holds the field the palette jumped to opens for it.
+        let wanted = group
+            .iter()
+            .any(|field| crate::search::focus_wants(ui.ctx(), &field.id));
+        let mut header = egui::CollapsingHeader::new(crate::theme::card_title(ui, tr(title)))
             .id_salt(id_salt)
-            .default_open(default_open)
-            .show(ui, |ui| {
+            .default_open(default_open).open(crate::perf_tour::force_open());
+        if wanted {
+            header = header.open(Some(true));
+        }
+        crate::theme::show_header(ui, header, |ui| {
                 if ui
-                    .add(egui::Button::new(tr("Reset group to AVE")).small().frame(false))
+                    .add(crate::theme::selectable_button(tr("Reset group to AVE"), false).min_size(egui::vec2(0.0, ui.spacing().interact_size.y)))
                     .on_hover_text(tr("Restore every value in this group, and the values that depend on them, to the AVE reference."))
                     .clicked()
                 {

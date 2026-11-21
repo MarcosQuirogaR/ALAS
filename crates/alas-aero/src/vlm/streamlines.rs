@@ -52,6 +52,22 @@ pub struct PanelSample {
     pub is_trailing_edge: bool,
     /// Which `airplane.wings` entry this panel came from.
     pub wing_index: usize,
+    /// The unit flow-tangency normal the lattice imposes at this panel's
+    /// collocation point (geometry axes, before any per-solve incidence
+    /// offset): it carries the collocation camber slope, so a section law
+    /// rebuilt from the panels matches the lattice's own boundary condition.
+    pub normal_direction: [f64; 3],
+}
+
+/// [`induced_velocity_field`] for a caller outside the trace: the total
+/// velocity at `points` of a solved lattice, geometry axes.
+pub fn velocity_at_points(
+    points: &[[f64; 3]],
+    panels: &[PanelSample],
+    vortex_strengths: &[f64],
+    op_point: &OperatingPoint,
+) -> Vec<[f64; 3]> {
+    induced_velocity_field(points, panels, vortex_strengths, op_point)
 }
 
 /// The velocity every horseshoe (`panels[i]`, strength `vortex_strengths[i]`)
@@ -153,6 +169,7 @@ mod tests {
             vortex_center: [0.75, 0.0, 0.0],
             is_trailing_edge: true,
             wing_index: 0,
+            normal_direction: [0.0, 0.0, 1.0],
         }
     }
 

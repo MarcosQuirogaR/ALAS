@@ -46,6 +46,16 @@ pub enum RequirementsError {
     UnknownAircraftType(String),
 }
 
+/// One leg of a declared departure track.
+#[derive(Debug, Clone, PartialEq, Serialize, Deserialize)]
+#[serde(deny_unknown_fields)]
+pub struct DepartureTrackLeg {
+    /// True heading of the leg, degrees.
+    pub heading_deg: f64,
+    /// Length of the leg, m.
+    pub distance_m: f64,
+}
+
 /// Top-level mission targets and constraints supplied by the user.
 #[derive(Debug, Clone, PartialEq, Serialize, Deserialize, ConfigNode)]
 #[serde(deny_unknown_fields)]
@@ -64,6 +74,34 @@ pub struct DesignRequirements {
         help = "Design cruise altitude, used to compute air density/speed of sound for the cruise design point."
     )]
     pub cruise_altitude_m: f64,
+
+    /// A declared initial cruise altitude (ICA) requirement, m: the level a
+    /// jet must reach from brake release at [`Self::initial_cruise_mass_kg`]
+    /// and still hold the planner's 300 ft/min residual climb at
+    /// maximum-climb thrust, at the top-of-climb mass the mission's own
+    /// integrated climb leaves. Unset (the default), nothing is required and
+    /// the achievable ICA is only reported.
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    #[config(
+        advanced,
+        label = "Required initial cruise altitude (ICA)",
+        unit = "m",
+        help = "Optional requirement: the initial cruise level a jet must reach with a 300 ft/min residual climb at maximum-climb thrust. Empty: the achievable ICA is only reported.",
+        long_help = "Optional initial cruise altitude (ICA) requirement for a turbofan: climbing from brake release at the ICA mass basis (empty: the maximum take-off weight), the aircraft must still have a 300 ft/min residual rate of climb at maximum-climb thrust on reaching this level, at the top-of-climb mass the mission's own integrated climb leaves (the 300 ft/min criterion of Airbus, Getting to Grips with Aircraft Performance, 2002, Maximum altitude, which the cruise-level planner also uses). When set, a jet whose engine is sized by the requirements is sized to meet it, and a held engine that misses it fails the check. Empty (default): nothing is required and the report shows the achievable ICA as information."
+    )]
+    pub initial_cruise_altitude_m: Option<f64>,
+
+    /// The brake-release mass the [`Self::initial_cruise_altitude_m`]
+    /// requirement is stated at, kg; unset, the maximum take-off weight.
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    #[config(
+        advanced,
+        label = "ICA mass basis",
+        unit = "kg",
+        help = "Brake-release mass the required initial cruise altitude is stated at. Empty: the maximum take-off weight.",
+        long_help = "Brake-release mass the required initial cruise altitude is stated at, as published ICA figures are (for example at MTOW, or at a typical take-off weight). The top-of-climb mass is this mass less the take-off roll and climb fuel the mission integrates. Empty (default): the maximum take-off weight. Ignored when no initial cruise altitude is required."
+    )]
+    pub initial_cruise_mass_kg: Option<f64>,
 
     /// The weight the whole sizing pipeline is anchored to.
     #[config(
@@ -91,7 +129,8 @@ pub struct DesignRequirements {
     #[config(
         options = CabinPreset,
         label = "Cabin preset",
-        help = "Named seating/payload layout preset ('High-density single-class', 'Two-class (Business/Economy)', 'Three-class (First/Business/Economy)' for passenger; 'Max payload', 'Dense payload' for cargo). 'Custom' lets you hand-edit the Cabin & Payload tab."
+        help = "Named seating/payload layout preset (passenger: high-density, two-class, three-class; cargo: max or dense payload).",
+        long_help = "Named seating/payload layout preset ('High-density single-class', 'Two-class (Business/Economy)', 'Three-class (First/Business/Economy)' for passenger; 'Max payload', 'Dense payload' for cargo). 'Custom' lets you hand-edit the Cabin & Payload tab."
     )]
     pub cabin_preset: String,
 
@@ -99,6 +138,16 @@ pub struct DesignRequirements {
     #[serde(default = "default_optimize_passenger_capacity", skip_serializing)]
     #[config(skip)]
     pub optimize_passenger_capacity: bool,
+
+    /// The operator's planned departure track after the runway, for the en-route obstacle
+    /// rule (CAT.POL.A.215 applies along the planned route): legs of a true heading and a
+    /// length, flown in order from the end of the take-off path. `None` (the default; no
+    /// preset declares one) means no route is declared: the en-route check and the take-off
+    /// obstacle check beyond the first allowed turn (CAT.POL.A.210 (b)(2)) then assume the
+    /// straight-out track, as a diagnostic.
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    #[config(skip)]
+    pub departure_track: Option<Vec<DepartureTrackLeg>>,
 
     /// Derived passenger capacity, retained in the serialized model.
     #[config(
@@ -131,7 +180,8 @@ pub struct DesignRequirements {
         advanced,
         label = "Cargo capacity objective",
         unit = "kg",
-        help = "Cargo capacity objective: the cargo payload mass requested of a freighter (aircraft_type 'cargo'), which the search is rewarded for getting closer to. It stays separate from the cargo payload capacity above and from the payload a candidate actually carries, so it redefines neither, and it is not a floor a candidate must clear: mass, volume, structural-loading and mission feasibility are judged exactly as before. 0 = disabled (the default), and the objective then follows the configured cargo payload capacity."
+        help = "Cargo payload mass requested of a freighter, which the search is rewarded for approaching [kg].",
+        long_help = "Cargo capacity objective: the cargo payload mass requested of a freighter (aircraft_type 'cargo'), which the search is rewarded for getting closer to. It stays separate from the cargo payload capacity above and from the payload a candidate actually carries, so it redefines neither, and it is not a floor a candidate must clear: mass, volume, structural-loading and mission feasibility are judged exactly as before. 0 = disabled (the default), and the objective then follows the configured cargo payload capacity."
     )]
     pub cargo_objective_kg: f64,
 
@@ -140,40 +190,116 @@ pub struct DesignRequirements {
         advanced,
         label = "Max structural payload",
         unit = "kg",
-        help = "Maximum structural payload (= MZFW - OEW), i.e. the most the airframe may carry regardless of how much the belly could physically hold. In passenger mode the detailed layout fills the lower-deck belly with revenue freight (on top of passengers + checked bags) up to this structural limit, so the payload, and therefore the residual fuel (MTOW - OEW - payload), matches the real aircraft's max-payload point. A widebody belly can volumetrically hold far more than this structural cap, so without it 'fill the belly' overshoots. 0 = disabled (use the explicit Cabin & Payload belly_cargo_kg instead)."
+        help = "Maximum structural payload (MZFW - OEW) [kg].",
+        long_help = "Maximum structural payload (= MZFW - OEW), i.e. the most the airframe may carry regardless of how much the belly could physically hold. In passenger mode the detailed layout fills the lower-deck belly with revenue freight (on top of passengers + checked bags) up to this structural limit, so the payload, and therefore the residual fuel (MTOW - OEW - payload), matches the real aircraft's max-payload point. A widebody belly can volumetrically hold far more than this structural cap, so without it 'fill the belly' overshoots. 0 = disabled (use the explicit Cabin & Payload belly_cargo_kg instead)."
     )]
     pub max_structural_payload_kg: f64,
+
+    /// The certified maximum landing mass of the variant flown, kg: an explicit
+    /// requirement that governs the landing-mass limit in every design mode,
+    /// ahead of the preset's declared MLW and the mass-model fraction
+    /// ([`crate::AlasConfig::landing_mass_limit_kg`]). Unset (the default),
+    /// those apply. A freighter flown on its passenger donor's preset needs
+    /// it when the two are certified to different landing weights.
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    #[config(
+        advanced,
+        label = "Max landing weight (MLW)",
+        unit = "kg",
+        help = "Optional requirement: the certified maximum landing weight of the variant flown. Empty: the preset's declared MLW, or the mass-model fraction of MTOW.",
+        long_help = "Optional maximum landing weight (MLW) requirement: the certified landing-weight limit of the variant being flown, for example a freighter or an optional weight column whose MLW differs from the registered preset's. When set it is the landing-mass limit in every design mode (never above the candidate's take-off mass) and the mass model's landing-mass ratio follows it. Empty (default): reference-anchored modes use the preset's declared MLW and a clean-sheet design the mass-model fraction of MTOW. Must be finite, positive and not above the MTOW."
+    )]
+    pub mlw_kg: Option<f64>,
+
+    /// The certified maximum zero-fuel weight of the variant flown, kg: an
+    /// explicit requirement that governs the zero-fuel check and the payload
+    /// corner of the range chart ([`crate::presets::published_mzfw_kg`]),
+    /// ahead of the registered preset's declared MZFW and whatever the
+    /// geometry. Unset (the default), the preset's value applies to the
+    /// unchanged registered variant only, and the feasibility report says so
+    /// when none applies. A freighter flown on its passenger donor's preset
+    /// needs it: the donor's MZFW belongs to another aircraft type.
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    #[config(
+        advanced,
+        label = "Max zero-fuel weight (MZFW)",
+        unit = "kg",
+        help = "Optional requirement: the certified maximum zero-fuel weight of the variant flown. Empty: the registered preset's declared MZFW for its own variant; otherwise none is defined.",
+        long_help = "Optional maximum zero-fuel weight (MZFW) requirement: the certified zero-fuel limit of the variant being flown, for example a freighter or an optional weight column whose MZFW differs from the registered preset's. When set it is the limit of the zero-fuel check and of the payload corner of the payload-range chart, whatever the geometry. Empty (default): the registered preset's declared MZFW applies to its own variant only (same aircraft type, no more structural payload than registered, unchanged geometry); where none applies the feasibility report carries a 'maximum zero-fuel weight undefined' warning instead of skipping the check. Must be finite, positive and not above the MTOW."
+    )]
+    pub mzfw_kg: Option<f64>,
 
     /// The fewest passengers a candidate's geometry-resolved cabin may carry.
     #[config(
         advanced,
         label = "Minimum passenger capacity",
-        help = "Hard floor on the geometry-resolved passenger capacity: a candidate whose class-mix and geometry produce fewer than this many seats is infeasible. 0 = disabled (the default): capacity is otherwise always dynamic, whatever the configured cabin class-mix percentages and the candidate's actual fuselage/cabin geometry produce, with no minimum."
+        help = "Hard floor on the geometry-resolved passenger capacity: a candidate with fewer seats is infeasible. 0 disables it (default).",
+        long_help = "Hard floor on the geometry-resolved passenger capacity: a candidate whose class-mix and geometry produce fewer than this many seats is infeasible. 0 = disabled (the default): capacity is otherwise always dynamic, whatever the configured cabin class-mix percentages and the candidate's actual fuselage/cabin geometry produce, with no minimum."
     )]
     pub min_passenger_capacity: i64,
 
     /// Limit load factor with the certification safety margin applied.
+    ///
+    /// Read it through [`Self::design_ultimate_load_factor`], which follows the
+    /// design MTOW when [`Self::ultimate_load_factor_from_mtow`] is set.
     #[config(
         advanced,
         label = "Ultimate load factor (n_ult)",
-        help = "Structural screening input fed into the Torenbeek mass formulas. The shipped 3.75 is 1.5 x 2.5; verify the selected certification basis, amendment, aircraft category and load case before treating it as an airworthiness value."
+        help = "Structural screening input for the Torenbeek mass formulas (ultimate load factor, dimensionless).",
+        long_help = "Structural screening input fed into the Torenbeek mass formulas. The shipped 3.75 is 1.5 x 2.5; verify the selected certification basis, amendment, aircraft category and load case before treating it as an airworthiness value."
     )]
     pub ultimate_load_factor: f64,
+
+    /// Whether the ultimate load factor follows the design MTOW by CS 25.337(b).
+    #[serde(default)]
+    #[config(
+        advanced,
+        label = "Load factor from MTOW (CS 25.337(b))",
+        help = "Derive the ultimate load factor from the design MTOW by CS 25.337(b) and CS 25.303. Off uses the declared ultimate load factor.",
+        long_help = "Derive the ultimate load factor from the design MTOW: 1.5 x (2.1 + 24,000 / (W + 10,000)), W in lb, the limit held between 2.5 and 3.8 (CS 25.337(b), CS 25.303). Off uses the declared ultimate load factor."
+    )]
+    pub ultimate_load_factor_from_mtow: bool,
 
     /// The structural design dive speed.
     #[config(
         advanced,
         label = "Design dive speed (V_dive)",
         unit = "m/s",
-        help = "Structural screening dive speed, fed into the Torenbeek mass formulas and the V-n diagram. The project may derive VC as VD/1.25 for this study; verify speed type, altitude/Mach envelope, certification basis and amendment before treating that relation as an airworthiness result."
+        help = "Structural screening dive speed for the Torenbeek mass formulas and the V-n diagram.",
+        long_help = "Structural screening dive speed, fed into the Torenbeek mass formulas and the V-n diagram. VC is the least value CS 25.335(b) admits for it: the larger of 0.8 VD and the VC whose upset-criterion margin gives VD; presets that declare a VMO derive VD from it by that rule. Verify speed type, altitude/Mach envelope, certification basis and amendment before treating it as an airworthiness result."
     )]
     pub dive_speed_m_s: f64,
+
+    /// MMO, the maximum operating Mach number, taken as the design cruise Mach
+    /// number MC (CS 25.1505); MD is `MC + 0.07` (CS 25.335(b)(2)). Unset, the
+    /// cruise Mach number stands for MC. Read it through
+    /// [`Self::design_cruise_mach_limit`] and [`Self::design_dive_mach`].
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    #[config(
+        advanced,
+        label = "Max operating Mach (MMO)",
+        help = "Optional: the maximum operating Mach number, taken as the design cruise Mach MC of the gust and dive cases; MD = MMO + 0.07. Empty: the cruise Mach number.",
+        long_help = "Optional maximum operating Mach number (MMO). CS 25.1505 requires MMO not above the design cruise Mach MC, so the least MC is MMO; the dive Mach MD is MC + 0.07, the CS 25.335(b)(2) margin that AMC 25.335(b)(2) accepts without further analysis. The gust loads at VC and VD and the wing stiffness increment are limited by these Mach numbers at altitude. Presets fill it from the declared operating limits. Empty (default): the cruise Mach number stands for MC. Must be finite, positive and below 1 when set."
+    )]
+    pub max_operating_mach: Option<f64>,
+
+    /// Whether the certification basis carries a high speed protection function, which puts the
+    /// VD margin on CS 25.335(b)(1)(ii) instead of (b)(1)(i) (see [`crate::design_speeds`]).
+    #[serde(default, skip_serializing_if = "std::ops::Not::not")]
+    #[config(
+        advanced,
+        label = "High speed protection (CS 25.335(b)(1)(ii))",
+        help = "The flight controls carry a high speed protection function: the dive speed margin follows CS 25.335(b)(1)(ii). Off: CS 25.335(b)(1)(i).",
+        long_help = "Set when the certification basis carries a high speed protection function (for a type, the special condition or CRI on design dive speed; for a new design, a function the design declares and must certify). The VD margin is then the greater of the CS 25.335(b)(1)(ii) manoeuvres, (A) the 7.5 deg upset with the path held and (B) the 15 deg upset recovered 3 s after the speed warning, instead of the (b)(1)(i) 20 s upset. Presets set it from their certification basis. Off (default): CS 25.335(b)(1)(i)."
+    )]
+    pub high_speed_protection: bool,
 
     /// The negative limit load factor.
     #[config(
         advanced,
         label = "Limit load factor, negative (n_lim,neg)",
-        help = "Negative V-n screening input. The shipped -1.0 follows the large-aeroplane CS-25 reference case up to VC; verify the selected certification basis, amendment, speed range and category before using it for qualification. The positive limit value is derived as ultimate_load_factor / 1.5."
+        help = "Negative V-n screening load factor (dimensionless). The shipped -1.0 follows the large-aeroplane CS-25 case up to VC; the positive limit is ultimate_load_factor / 1.5.",
+        long_help = "Negative V-n screening input. The shipped -1.0 follows the large-aeroplane CS-25 reference case up to VC; verify the selected certification basis, amendment, speed range and category before using it for qualification. The positive limit value is derived as ultimate_load_factor / 1.5."
     )]
     pub limit_load_factor_neg: f64,
 
@@ -210,7 +336,8 @@ pub struct DesignRequirements {
         advanced,
         label = "Target static margin",
         unit = "fraction of MAC",
-        help = "Preferred static margin at the aerodynamic aft CG limit: Aft CG Limit (%MAC) = Neutral Point (%MAC) - target_static_margin*100. This is a design preference used by the frozen reference CG-envelope path and report figures; the product feasibility gate enforces the (typically smaller) min_physical_static_margin below, measured at the actual mass-model CG, not this aerodynamic-reference target. The two boundaries can differ by (target_static_margin - min_physical_static_margin)*100 %MAC."
+        help = "Preferred static margin at the aerodynamic aft CG limit (fraction of MAC): aft limit [%MAC] = neutral point - target*100.",
+        long_help = "Preferred static margin at the aerodynamic aft CG limit: Aft CG Limit (%MAC) = Neutral Point (%MAC) - target_static_margin*100. This is a design preference used by the frozen reference CG-envelope path and report figures; the product feasibility gate enforces the (typically smaller) min_physical_static_margin below, measured at the actual mass-model CG, not this aerodynamic-reference target. The two boundaries can differ by (target_static_margin - min_physical_static_margin)*100 %MAC."
     )]
     pub target_static_margin: f64,
 
@@ -226,11 +353,20 @@ pub struct DesignRequirements {
     /// The stability floor a design is hard-rejected below: the boundary
     /// the product feasibility gate actually enforces (see
     /// `target_static_margin` for the separate, larger design preference).
+    ///
+    /// Basis of the 0.05 default: a typical value, not a requirement.
+    /// Raymer, *Aircraft Design: A Conceptual Approach*, 6th ed., sec. 16.3,
+    /// printed p. 593: at the most aft CG "a typical transport aircraft has a
+    /// positive static margin of 5-10%"; 0.05 is the low end of that range.
+    /// The requirement itself is only a positive margin, the CG ahead of the
+    /// neutral point: Torenbeek, *Advanced Aircraft Design*, 2013,
+    /// sec. 6.3.1, printed p. 167.
     #[config(
         advanced,
         label = "Minimum physical static margin",
         unit = "fraction of MAC",
-        help = "Minimum static margin measured using the actual mass-model (physical) CG, not the aerodynamic reference point. Designs below this are hard-rejected as inherently unstable. 0.0 = bare stability; 0.05 = 5% MAC buffer (recommended). This is the boundary the product feasibility gate enforces at every loading state; target_static_margin above is a separate, larger design preference used by the frozen reference path and report figures."
+        help = "Minimum static margin at the actual mass-model CG (fraction of MAC).",
+        long_help = "Minimum static margin measured using the actual mass-model (physical) CG, not the aerodynamic reference point. Designs below this are hard-rejected as inherently unstable. 0.0 = bare stability; 0.05 = 5% MAC buffer (recommended). This is the boundary the product feasibility gate enforces at every loading state; target_static_margin above is a separate, larger design preference used by the frozen reference path and report figures."
     )]
     pub min_physical_static_margin: f64,
 
@@ -241,7 +377,8 @@ pub struct DesignRequirements {
         decimals = 1,
         label = "Mass per passenger",
         unit = "kg",
-        help = "Combined average mass per occupant (body + baggage). The shipped 100 kg is a transparent project load-case default; FAA AC 120-27F is operator weight-and-balance guidance and does not establish a universal passenger mass. Record the operator, population, baggage method and date before using another value operationally. This remains the single load-case authority for report, GUI preview, pipeline, export and optimizer paths: cabin.passenger.checked_bag_mass_kg supplies the baggage share and the occupant slot the remainder."
+        help = "Combined average mass per occupant, body plus baggage [kg]. The shipped 100 kg is a project load-case default, not an FAA AC 120-27F figure.",
+        long_help = "Combined average mass per occupant (body + baggage). The shipped 100 kg is a transparent project load-case default; FAA AC 120-27F is operator weight-and-balance guidance and does not establish a universal passenger mass. Record the operator, population, baggage method and date before using another value operationally. This remains the single load-case authority for report, GUI preview, pipeline, export and optimizer paths: cabin.passenger.checked_bag_mass_kg supplies the baggage share and the occupant slot the remainder."
     )]
     pub passenger_mass_kg: f64,
 
@@ -260,17 +397,25 @@ impl Default for DesignRequirements {
         Self {
             cruise_mach: 0.84,
             cruise_altitude_m: 11887.2,
+            initial_cruise_altitude_m: None,
+            initial_cruise_mass_kg: None,
             mtow_kg: 358_670.0,
             aircraft_type: "passenger".to_owned(),
             cabin_preset: "Ryanair".to_owned(),
             optimize_passenger_capacity: true,
+            departure_track: None,
             num_passengers: 350,
             cargo_payload_kg: 102_100.0,
             cargo_objective_kg: 0.0,
             max_structural_payload_kg: 0.0,
+            mlw_kg: None,
+            mzfw_kg: None,
             min_passenger_capacity: 0,
             ultimate_load_factor: 3.75,
+            ultimate_load_factor_from_mtow: false,
             dive_speed_m_s: 220.0,
+            max_operating_mach: None,
+            high_speed_protection: false,
             limit_load_factor_neg: -1.0,
             max_wing_area_m2: 535.0,
             min_wing_loading_kg_m2: 485.0,
@@ -295,7 +440,77 @@ const fn default_optimize_passenger_capacity() -> bool {
     true
 }
 
+/// The CS 25.337(b) positive limit manoeuvring load factor at `mtow_kg`, times
+/// the 1.5 factor of safety of CS 25.303: `n = 2.1 + 24,000 / (W + 10,000)`
+/// with W in lb, not less than 2.5 and not more than 3.8. NaN for a mass that
+/// is not finite and positive.
+pub fn cs25_ultimate_load_factor(mtow_kg: f64) -> f64 {
+    const POUND_KG: f64 = 0.453_592_37;
+    if !mtow_kg.is_finite() || mtow_kg <= 0.0 {
+        return f64::NAN;
+    }
+    1.5 * (2.1 + 24_000.0 / (mtow_kg / POUND_KG + 10_000.0)).clamp(2.5, 3.8)
+}
+
 impl DesignRequirements {
+    /// MC, the design cruise Mach number of the gust and dive cases: the
+    /// declared [`Self::max_operating_mach`] (CS 25.1505), else the cruise Mach.
+    #[must_use]
+    pub fn design_cruise_mach_limit(&self) -> f64 {
+        self.max_operating_mach
+            .filter(|mach| mach.is_finite() && *mach > 0.0)
+            .unwrap_or(self.cruise_mach)
+    }
+
+    /// MD, the design dive Mach number: [`Self::design_cruise_mach_limit`]
+    /// plus the CS 25.335(b)(2) margin of 0.07.
+    #[must_use]
+    pub fn design_dive_mach(&self) -> f64 {
+        crate::design_speeds::dive_mach(self.design_cruise_mach_limit())
+    }
+
+    /// The CS 25.335(b) criterion of [`Self::high_speed_protection`].
+    #[must_use]
+    pub fn upset_criterion(&self) -> crate::design_speeds::UpsetCriterion {
+        crate::design_speeds::UpsetCriterion::from_protection(self.high_speed_protection)
+    }
+
+    /// VC, m/s EAS, of [`Self::dive_speed_m_s`] under [`Self::upset_criterion`].
+    #[must_use]
+    pub fn design_cruise_speed_eas_m_s(&self) -> f64 {
+        crate::design_speeds::design_cruise_speed_eas_m_s_for(
+            self.dive_speed_m_s,
+            self.upset_criterion(),
+        )
+    }
+
+    /// The ultimate load factor the design is sized to: the CS 25.337(b) value
+    /// at the running [`Self::mtow_kg`] when
+    /// [`Self::ultimate_load_factor_from_mtow`] is set, else the declared
+    /// [`Self::ultimate_load_factor`].
+    pub fn design_ultimate_load_factor(&self) -> f64 {
+        if self.ultimate_load_factor_from_mtow {
+            cs25_ultimate_load_factor(self.mtow_kg)
+        } else {
+            self.ultimate_load_factor
+        }
+    }
+
+    /// The declared initial cruise altitude requirement as `(altitude_m,
+    /// brake_release_mass_kg)`, the mass defaulting to `mtow_kg` (the
+    /// candidate's maximum take-off weight); `None` when no usable altitude
+    /// is declared. A declared mass that is not finite and positive is no
+    /// declaration, so the default applies.
+    pub fn initial_cruise_requirement(&self, mtow_kg: f64) -> Option<(f64, f64)> {
+        let usable = |value: f64| value.is_finite() && value > 0.0;
+        let altitude_m = self.initial_cruise_altitude_m.filter(|h| usable(*h))?;
+        let mass_kg = self
+            .initial_cruise_mass_kg
+            .filter(|m| usable(*m))
+            .unwrap_or(mtow_kg);
+        Some((altitude_m, mass_kg))
+    }
+
     /// Whether the payload target is recomputed from each candidate's cabin.
     ///
     /// This is unconditional in the product model. The legacy serialized
@@ -382,6 +597,49 @@ impl DesignRequirements {
 #[cfg(test)]
 mod tests {
     use super::*;
+
+    #[test]
+    fn the_load_factor_follows_the_mtow_only_when_asked() {
+        let mut req = DesignRequirements::default();
+        assert_eq!(req.design_ultimate_load_factor(), 3.75);
+        req.ultimate_load_factor_from_mtow = true;
+        // Above 50,000 lb the rule floors at 2.5.
+        assert!((req.design_ultimate_load_factor() - 3.75).abs() < 1e-12);
+        // The LJ60 at 23,500 lb: 2.816 limit.
+        req.mtow_kg = 10_659.0;
+        let at_mtow = req.design_ultimate_load_factor();
+        assert!((at_mtow - 4.224).abs() < 1e-3, "{at_mtow}");
+        req.mtow_kg = 9_000.0;
+        assert!(req.design_ultimate_load_factor() > at_mtow);
+        assert!(cs25_ultimate_load_factor(0.0).is_nan());
+    }
+
+    #[test]
+    fn an_initial_cruise_altitude_is_required_only_when_declared() {
+        let mut req = DesignRequirements::default();
+        assert_eq!(req.initial_cruise_requirement(70_000.0), None);
+        req.initial_cruise_mass_kg = Some(60_000.0);
+        assert_eq!(req.initial_cruise_requirement(70_000.0), None);
+        req.initial_cruise_altitude_m = Some(10_058.4);
+        assert_eq!(
+            req.initial_cruise_requirement(70_000.0),
+            Some((10_058.4, 60_000.0))
+        );
+        req.initial_cruise_mass_kg = None;
+        assert_eq!(
+            req.initial_cruise_requirement(70_000.0),
+            Some((10_058.4, 70_000.0))
+        );
+        for unusable in [0.0, -1.0, f64::NAN] {
+            req.initial_cruise_altitude_m = Some(unusable);
+            assert_eq!(req.initial_cruise_requirement(70_000.0), None);
+        }
+        // Unset fields stay out of a saved file, so files written before
+        // they existed load unchanged.
+        let saved = serde_json::to_value(DesignRequirements::default()).unwrap();
+        assert!(saved.get("initial_cruise_altitude_m").is_none());
+        assert!(saved.get("initial_cruise_mass_kg").is_none());
+    }
 
     #[test]
     fn the_shipped_defaults_need_no_normalizing() {

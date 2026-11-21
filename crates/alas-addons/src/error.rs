@@ -32,6 +32,9 @@ pub enum AddonError {
     /// The add-on returned something that is not a valid output set.
     #[error("invalid outputs: {0}")]
     Outputs(String),
+    /// The user stopped the run.
+    #[error("cancelled")]
+    Cancelled,
     /// A requested change was refused.
     #[error("{0}")]
     Apply(String),

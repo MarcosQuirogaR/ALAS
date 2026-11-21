@@ -10,7 +10,7 @@ use super::*;
 use alas_config::airports::Airport;
 use alas_perf::performance::{compute_v_speeds_at_masses, far25_oei_gradient};
 use alas_pipeline::field_reference::report_isa_sea_level_field_reference;
-use alas_pipeline::report_config::config_for_report;
+use alas_pipeline::report_config::config_for_report_at;
 use alas_pipeline::FullAnalysis;
 
 struct Case {
@@ -75,8 +75,16 @@ fn speeds_and_field_lengths_equal_the_report_config_path_to_the_bit() {
         let case = case(name);
         let area = case.report.airplane.s_ref;
         // The report's own speed basis, rebuilt independently of the block.
-        let resolved =
-            config_for_report(&case.config, &case.report, case.mtow_kg, case.mlw_kg, area);
+        // The ISA sea-level reference resolves the improved-climb V2 at ISA
+        // sea level, so the rebuild resolves it there too.
+        let resolved = config_for_report_at(
+            &case.config,
+            &case.report,
+            &isa,
+            case.mtow_kg,
+            case.mlw_kg,
+            area,
+        );
         let perf = &resolved.performance;
         let speeds = compute_v_speeds_at_masses(
             case.mtow_kg,

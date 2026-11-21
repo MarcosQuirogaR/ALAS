@@ -12,10 +12,10 @@
 //!
 //! The test runs the full chain (spec -> viscous VLM + drag build-up ->
 //! powertrain -> mission -> ACC score), prints one `BLIND|` line per
-//! comparison and asserts only that the numbers are finite and physical: the
-//! errors against the reports are REPORTED (agent report), not forced into a
-//! band by tuning.  Reported figures are the teams' own predictions except
-//! where marked measured (static thrust test stands).
+//! comparison.  Quantities marked measured (static thrust test stands) are
+//! asserted inside the documented band below; the teams' own predictions are
+//! REPORTED against the reports, not forced into a band by tuning.  The
+//! remaining assertions check that the numbers are finite and physical.
 //!
 //! Documented bands (fixed before the first run, see the report): static
 //! thrust +-20 % (repo regression allows 20 % CT/CP error; the v1 target is
@@ -31,11 +31,31 @@ use alas_uav::score::presets;
 
 use blind::{vehicle, Team};
 
+/// The documented band, percent, for a compared quantity.
+fn band_percent(what: &str) -> f64 {
+    if what.starts_with("static thrust") || what.starts_with("thrust") {
+        20.0
+    } else if what.starts_with("stall") {
+        8.0
+    } else if what.contains("speed") {
+        10.0
+    } else if what.contains("climb") {
+        35.0
+    } else {
+        25.0
+    }
+}
+
 fn line(team: &str, what: &str, predicted: f64, reported: f64, unit: &str, tag: &str) {
-    println!(
-        "BLIND|{team}|{what}|{predicted:.3}|{reported:.3}|{unit}|{:+.1}%|{tag}",
-        100.0 * (predicted - reported) / reported
-    );
+    let error = 100.0 * (predicted - reported) / reported;
+    println!("BLIND|{team}|{what}|{predicted:.3}|{reported:.3}|{unit}|{error:+.1}%|{tag}");
+    if tag == "measured" {
+        assert!(
+            error.abs() <= band_percent(what),
+            "{team}: {what} is {error:+.1} % from the measured value, outside the documented +-{} % band",
+            band_percent(what)
+        );
+    }
 }
 
 fn stand(t: &Team, reported_n: f64) -> f64 {
@@ -207,7 +227,7 @@ fn uvigo_blind() {
     run(&t, None);
 }
 
-/// Extra comparison requested by the coordinator: the airframe lane's
+/// Extra comparison: the airframe model's
 /// bottom-up STRUCTURE estimate (generic foam-composite preset, uncalibrated)
 /// against what the reports publish.  The flights above use the published
 /// masses; this only measures the mass model.

@@ -9,6 +9,7 @@
 //! a missing source from degrading silently into a free-text editor.
 
 use alas_config::{Entry, Field, Number, OptionSource, ZeroMeaning};
+use alas_perf::landing_gear::tires;
 use std::cell::RefCell;
 use std::rc::Rc;
 
@@ -37,24 +38,19 @@ pub(super) fn resolved_options(field: &Field, values: &Value) -> Option<Rc<[Stri
             "300M high-strength steel (titanium truck beam)".to_owned(),
             "7075-T6 aluminium".to_owned(),
         ],
-        Some(OptionSource::TireClass) => std::iter::once("auto".to_owned())
-            .chain(
-                alas_perf::landing_gear::TIRE_DATABASE
-                    .iter()
-                    .map(|tire| tire.code.to_owned()),
-            )
-            .collect(),
-        Some(OptionSource::MainDeckUld) => alas_payload::cargo::ULD_DATABASE
-            .iter()
-            .map(|uld| uld.key.to_owned())
-            .collect(),
-        Some(OptionSource::LowerDeckUld) => std::iter::once("AUTO".to_owned())
-            .chain(
-                alas_payload::cargo::ULD_DATABASE
-                    .iter()
-                    .map(|uld| uld.key.to_owned()),
-            )
-            .collect(),
+        Some(OptionSource::TireClass) => {
+            tires::option_codes(&alas_perf::landing_gear::TIRE_DATABASE)
+        }
+        Some(OptionSource::CertifiedTire) => tires::option_codes(&tires::CERTIFIED_TIRES),
+        Some(OptionSource::MainDeckUld | OptionSource::LowerDeckUld) => {
+            std::iter::once("AUTO".to_owned())
+                .chain(
+                    alas_payload::cargo::ULD_DATABASE
+                        .iter()
+                        .map(|uld| uld.key.to_owned()),
+                )
+                .collect()
+        }
         Some(OptionSource::CabinPreset) => Vec::new(),
         Some(source) => source
             .options()
@@ -109,7 +105,7 @@ fn airfoil_options() -> Rc<[String]> {
 /// then its ancestors, matching the nested form contract.
 pub(super) fn readonly_unless(
     values: &Value,
-    ancestors: &[Value],
+    ancestors: &[&Value],
     condition: alas_config::ReadonlyUnless,
 ) -> bool {
     value_at_path(values, condition.field)
@@ -193,6 +189,10 @@ pub(super) fn display_option(field: &Field, value: &str) -> String {
         return crate::views::tr(
             alas_pipeline::optimizer_summary::objective::objective_label(kind),
         );
+    }
+    // The automatic choice of a list reads "Auto" whatever case it is stored in.
+    if value.eq_ignore_ascii_case("auto") {
+        return alas_i18n::t(Some("Auto"), None).into_owned();
     }
     let humanized = humanize_identifier(value);
     let source = cruise_policy_display_name(field, value)
@@ -284,82 +284,6 @@ pub(super) fn value_as_str(v: &Value) -> Option<String> {
     }
 }
 
-/// Render a schema unit the way the desktop displays it.
-///
-/// The schema states a unit per field, and four different spellings of a
-/// dimensionless quantity had reached the screen at once: a literal hyphen
-/// (`10.000 -`), the word `fraction` (`0.027 fraction`), a phrase
-/// (`0.020 fraction of critical`) and nothing at all. This collapses them to
-/// one convention: a dimensionless quantity is a bare number, and a unit that
-/// names the reference a fraction is taken of keeps only that reference
-/// (`0.080 of semi-span`). Physical units are untouched apart from typography:
-/// `^2`/`^3` become real superscripts and the ASCII `.` that separates
-/// multiplied unit symbols becomes a middle dot, so `kg/(kgf.hr)` reads
-/// `kg/(kgf.h)` with the conventional separator instead of a full stop.
-///
-/// No value is converted here; this is presentation only.
-pub(crate) fn display_unit(unit: &str) -> String {
-    let unit = unit.trim();
-    let dimensionless = [
-        "-",
-        "--",
-        "1",
-        "0-1",
-        "fraction",
-        "dimensionless",
-        "ratio",
-        "x/c",
-        "chord fraction",
-        "root chord ratio",
-    ];
-    if unit.is_empty() || dimensionless.contains(&unit) {
-        return String::new();
-    }
-    // A fraction taken of a named reference keeps the reference only.
-    for prefix in ["fraction of ", "0-1 of "] {
-        if let Some(reference) = unit.strip_prefix(prefix) {
-            let reference = match reference {
-                "semispan" => "semi-span",
-                other => other,
-            };
-            // The phrase is translated whole: Spanish needs an article that
-            // depends on the reference (`de la MAC`, `de semienvergadura`).
-            return crate::views::tr(&format!("of {reference}"));
-        }
-    }
-    typeset_unit(unit)
-}
-
-/// Superscripts and the middle dot of a physical unit symbol.
-fn typeset_unit(unit: &str) -> String {
-    // The UAV pages spell squares and cubes without a caret. Map only these
-    // exact symbols; a general "digit after a letter" rule would also rewrite
-    // chemical and model names.
-    let unit = match unit {
-        "m2" => "m^2",
-        "m3" => "m^3",
-        "kg/m2" => "kg/m^2",
-        "kg/m3" => "kg/m^3",
-        "m/s2" => "m/s^2",
-        other => other,
-    };
-    let mut text = unit.replace("^2", "\u{b2}").replace("^3", "\u{b3}");
-    // `hr` is not the SI symbol for the hour and only ever appears as a
-    // denominator token here.
-    text = text.replace("kgf.hr", "kgf.h");
-    let bytes: Vec<char> = text.chars().collect();
-    let mut out = String::with_capacity(text.len());
-    for (index, character) in bytes.iter().enumerate() {
-        let multiplied = *character == '.'
-            && index > 0
-            && index + 1 < bytes.len()
-            && bytes[index - 1].is_alphanumeric()
-            && bytes[index + 1].is_alphabetic();
-        out.push(if multiplied { '\u{b7}' } else { *character });
-    }
-    out
-}
-
 /// The word a declared sentinel should read as, when the field currently
 /// holds it.
 ///
@@ -374,17 +298,26 @@ fn typeset_unit(unit: &str) -> String {
 /// values, not sentinels, and must keep rendering as numbers.
 pub(super) fn sentinel_word(field: &Field, value: f64) -> Option<&'static str> {
     if value == 0.0 {
-        if field.label.contains("(0 = auto)") || field.help.contains("0 = auto") {
+        let has = |text: &str| field.full_help().contains(text);
+        // The cargo-door positions: zero means the layout places the door.
+        if field.label.contains("(0 = auto)")
+            || has("0 = auto")
+            || has("; 0 fits as many")
+            || has("0 places it")
+        {
             return Some("Auto");
         }
-        if field.help.contains("Zero uses the great-circle distance") {
+        if field
+            .full_help()
+            .contains("Zero uses the great-circle distance")
+        {
             return Some("From route");
         }
-        if field.help.contains("Zero disables ") {
+        if field.full_help().contains("Zero disables ") {
             return Some("No limit");
         }
     }
-    if value == 1.0 && field.help.contains("1.0 = free") {
+    if value == 1.0 && field.full_help().contains("1.0 = free") {
         return Some("Free");
     }
     None
@@ -395,7 +328,7 @@ pub(super) fn sentinel_word(field: &Field, value: f64) -> Option<&'static str> {
 /// An optional editor rendered a blank box with no placeholder, no unit and no
 /// hint, so "derived", "random" and "never set" all looked the same.
 pub(super) fn optional_hint(field: &Field) -> &'static str {
-    let help = field.help;
+    let help = field.full_help();
     if help.contains("different search each run") {
         return "Random";
     }
@@ -433,30 +366,7 @@ pub(super) fn parse_number_or_sentinel(text: &str, field: &Field) -> Option<f64>
             }
         }
     }
-    trimmed.parse::<f64>().ok()
-}
-
-/// The shortest decimal rendering of `value` that still round-trips within
-/// `max_decimals` places.
-///
-/// `egui` derives a `DragValue`'s minimum decimals from its drag speed and the
-/// pointer aim radius, which is scaled by the display's points-per-pixel: on a
-/// 2x display that rendered whole-number counts as `16.0` and `0.0`, and the
-/// same quantity at two magnitudes with different decimals (`-4.00` beside
-/// `10.0`). Formatting explicitly makes the rendering a property of the value
-/// and the field, not of the monitor.
-pub(super) fn format_number(value: f64, max_decimals: usize) -> String {
-    if !value.is_finite() {
-        return format!("{value}");
-    }
-    for decimals in 0..max_decimals {
-        let text = format!("{value:.decimals$}");
-        let parsed: f64 = text.parse().unwrap_or(f64::NAN);
-        if (parsed - value).abs() <= value.abs() * 1e-9 + 1e-12 {
-            return text;
-        }
-    }
-    format!("{value:.max_decimals$}")
+    crate::user_number::parse_user_number(trimmed)
 }
 
 /// Decimals and drag step from a value's magnitude.

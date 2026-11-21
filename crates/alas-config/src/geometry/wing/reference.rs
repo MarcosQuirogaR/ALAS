@@ -374,8 +374,11 @@ mod tests {
             root: station(MainWingStationKind::Root, 0.0, 0.0, 15.0),
             side_of_body: None,
             kink: station(MainWingStationKind::Kink, 10.0, 5.0, 8.0),
+            custom_stations: Vec::new(),
             tip: station(MainWingStationKind::Tip, 30.0, 25.0, 2.0),
             tip_rake: None,
+            te_breaks: Vec::new(),
+            edge_stations: Vec::new(),
             inboard_le_sweep_deg: 26.0,
             outboard_le_sweep_deg: 45.0,
         }
@@ -420,6 +423,9 @@ mod tests {
             kink: station(MainWingStationKind::Kink, 5.0, 2.0, 5.0),
             tip: station(MainWingStationKind::Tip, 15.0, 6.0, 3.0),
             tip_rake: None,
+            te_breaks: Vec::new(),
+            edge_stations: Vec::new(),
+            custom_stations: Vec::new(),
             inboard_le_sweep_deg: 21.8,
             outboard_le_sweep_deg: 21.8,
         };

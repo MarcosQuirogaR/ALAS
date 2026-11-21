@@ -1,8 +1,10 @@
 // SPDX-License-Identifier: AGPL-3.0-or-later
 // Copyright (C) 2026 Marcos Quiroga Rodriguez
 
-//! The case snapshot the sandbox swaps with the guided workspace, and the
-//! persisted sandbox window layout.
+//! The case snapshot the sandbox swaps with the guided workspace, the
+//! persisted sandbox window layout, and the `AppState` steps that move between
+//! the two workspaces: asking how to leave, replacing the sandbox aircraft with
+//! the AVE reference, and holding or restoring the guided case.
 
 use std::collections::BTreeMap;
 
@@ -47,8 +49,6 @@ pub struct SandboxLayout {
     /// Whether the estimates strip is expanded. Closed on every sandbox
     /// entry; Quick Analysis opens it.
     pub estimates_open: bool,
-    /// Whether the Summary card of derived geometry metrics is shown.
-    pub summary_open: bool,
     /// Estimates strip width in points.
     pub estimates_width: f32,
     /// Whether the run log window is shown.
@@ -68,7 +68,6 @@ impl Default for SandboxLayout {
         Self {
             parameter_panel_width: 300.0,
             estimates_open: false,
-            summary_open: false,
             estimates_width: 300.0,
             log_window_open: false,
             log_window_minimized: false,
@@ -80,8 +79,37 @@ impl Default for SandboxLayout {
 }
 
 impl AppState {
+    /// Replace the active sandbox aircraft with a fresh AVE reference.
+    pub fn new_sandbox_from_reference(&mut self) -> bool {
+        if !self.sandbox.active() || self.is_running {
+            return false;
+        }
+        match Self::ave_sandbox_design() {
+            Some(design) => {
+                self.install_sandbox_design(
+                    design,
+                    crate::views::tr("New sandbox from the AVE reference."),
+                );
+                true
+            }
+            None => false,
+        }
+    }
+
+    /// Ask how to leave the sandbox.
+    pub fn request_leave_sandbox(&mut self) {
+        if self.sandbox.active() {
+            self.sandbox.exit_prompt = true;
+        }
+    }
+
     /// Move the active case out of the shared state.
     pub(super) fn take_case(&mut self) -> CaseSnapshot {
+        // A guided autosave still waiting for its pause is written before the
+        // case is held, so a crash in the Sandbox keeps the guided edits.
+        if self.files.autosave_since.take().is_some() {
+            self.library_autosave();
+        }
         CaseSnapshot {
             config_values: std::mem::take(&mut self.config_values),
             design_values: std::mem::take(&mut self.design_values),
@@ -113,6 +141,7 @@ impl AppState {
     /// Put a case back into the shared state.
     pub(super) fn restore_case(&mut self, case: CaseSnapshot) {
         self.config_values = case.config_values;
+        self.bump_config_revision();
         self.design_values = case.design_values;
         self.bounds = case.bounds;
         self.active_preset = case.active_preset;
@@ -135,7 +164,7 @@ impl AppState {
         // Run identities stay monotonic across cases so figure caches keyed
         // by run never collide between the two workspaces.
         self.run_identity = self.run_identity.max(case.run_identity);
-        self.result_figure_cache.clear();
+        self.clear_result_figures();
     }
 }
 

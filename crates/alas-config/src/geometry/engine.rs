@@ -30,11 +30,17 @@
 use serde::{Deserialize, Serialize};
 
 use super::nacelle_model::{is_legacy_nacelle_model, NacelleModel};
-use super::CentreEngineInstallation;
+use super::{AftFuselageEngineInstallation, CentreEngineInstallation};
 use crate::engines::{PropulsionTechnology, TurbofanEngineSpec, TurbopropEngineSpec};
 use crate::ConfigNode;
+pub use engine_scale::{
+    EngineScaleError, SizedEngine, ENGINE_DIAMETER_EXPONENT, ENGINE_LENGTH_EXPONENT,
+    ENGINE_SCALE_SEARCH_BRACKET, ENGINE_SCALE_VALIDITY_FRACTION, PROPELLER_DIAMETER_POWER_EXPONENT,
+};
 #[path = "engine_default.rs"]
 mod engine_default;
+#[path = "engine_scale.rs"]
+mod engine_scale;
 #[path = "engine_wire.rs"]
 mod engine_wire;
 
@@ -86,7 +92,7 @@ pub struct EngineConfig {
     #[config(
         options = Engine,
         label = "Engine model",
-        help = "Name from the built-in engine database (see the Engine selector on the Inputs tab): drives thrust, mass, and the default nacelle profile."
+        help = "Name from the built-in engine database (see the Engine selector on the Aircraft page): drives thrust, mass, and the default nacelle profile."
     )]
     pub engine_name: String,
 
@@ -112,7 +118,8 @@ pub struct EngineConfig {
         advanced,
         columns = ["x-station [m]", "radius fraction [0-1]"],
         label = "Nacelle profile points",
-        help = "List of (x-station [m], radius-fraction [0-1 of radius_scale_m below]) pairs tracing the nacelle's longitudinal silhouette from inlet (x=0) to exit, see the Engine Designer tab's live nacelle-silhouette preview for a picture of the shape these points draw. Auto-filled from the engine database when engine_name is recognised."
+        help = "Pairs of x-station [m] and radius fraction [0-1 of radius_scale_m] tracing the nacelle silhouette from inlet (x=0) to exit.",
+        long_help = "List of (x-station [m], radius-fraction [0-1 of radius_scale_m below]) pairs tracing the nacelle's longitudinal silhouette from inlet (x=0) to exit, see the Engine Designer tab's live nacelle-silhouette preview for a picture of the shape these points draw. Auto-filled from the engine database when engine_name is recognised."
     )]
     pub nacelle_profile: Vec<(f64, f64)>,
 
@@ -163,10 +170,26 @@ pub struct EngineConfig {
     )]
     pub inlet_x_offset_m: f64,
 
+    /// Per-engine stagger of the inlets, one entry per spanwise position, m; empty
+    /// keeps `inlet_x_offset_m` for every engine. The aircraft value stays live: its
+    /// difference from the mean of these entries shifts every engine together, so a
+    /// preset sets `inlet_x_offset_m` to that mean and an edit of it (the form field,
+    /// the drag handle) moves all nacelles. A reader that wants one value for the
+    /// aircraft (wing torque) reads `inlet_x_offset_m`.
+    #[serde(default, skip_serializing_if = "Vec::is_empty")]
+    #[config(skip)]
+    pub inlet_x_per_engine_m: Vec<f64>,
+
     /// Tail-engine pod of a trijet; `None`: catalogue nacelle on the tail cone.
     #[serde(default, skip_serializing_if = "Option::is_none")]
     #[config(skip)]
     pub centre_engine: Option<CentreEngineInstallation>,
+
+    /// Rear-fuselage mounting of the off-centreline engines; `None`: podded on
+    /// the wing, placed by `z_m` and `inlet_x_offset_m`.
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    #[config(skip)]
+    pub aft_fuselage: Option<AftFuselageEngineInstallation>,
 
     /// Deprecated turbofan compatibility mirror: bypass flow over core flow.
     #[config(
@@ -181,7 +204,8 @@ pub struct EngineConfig {
         advanced,
         label = "Overall (core) pressure ratio (OPR)",
         unit = "-",
-        help = "Total pressure ratio through the core compressors (LPC x HPC combined, NOT including the fan). Feeds mission compressor sizing (split into a fixed LPC ratio + a solved HPC ratio) and the Propulsion Analysis cycle's compressor_pressure_ratio."
+        help = "Total pressure ratio through the core compressors (LPC x HPC, not including the fan).",
+        long_help = "Total pressure ratio through the core compressors (LPC x HPC combined, NOT including the fan). Feeds mission compressor sizing (split into a fixed LPC ratio + a solved HPC ratio) and the Propulsion Analysis cycle's compressor_pressure_ratio."
     )]
     pub overall_pressure_ratio: f64,
 
@@ -207,7 +231,8 @@ pub struct EngineConfig {
     #[config(
         label = "Cruise TSFC (reference)",
         unit = "kg/(kgf.hr)",
-        help = "Reference cruise thrust-specific fuel consumption, used by the Breguet payload-range diagram. Not necessarily identical to the Propulsion Analysis tab's on-design-cycle-computed TSFC (a fast conceptual cycle model with generic component efficiencies vs. this field's real/published in-service figure), see that tab's caption."
+        help = "Reference cruise thrust-specific fuel consumption for the Breguet payload-range diagram. It is the in-service figure, not the Propulsion Analysis on-design-cycle TSFC.",
+        long_help = "Reference cruise thrust-specific fuel consumption, used by the Breguet payload-range diagram. Not necessarily identical to the Propulsion Analysis tab's on-design-cycle-computed TSFC (a fast conceptual cycle model with generic component efficiencies vs. this field's real/published in-service figure), see that tab's caption."
     )]
     pub cruise_tsfc_kg_kgf_hr: f64,
 
@@ -224,7 +249,8 @@ pub struct EngineConfig {
     #[config(
         advanced,
         label = "Part-power fuel-flow ratios",
-        help = "Fuel flow divided by take-off fuel flow at 7%, 30%, 85%, and 100% rated net thrust. Sea-level-static ICAO/EASA anchors; altitude use is an explicitly empirical Level-1 approximation."
+        help = "Fuel flow divided by take-off fuel flow at 7, 30, 85 and 100 % of rated net thrust.",
+        long_help = "Fuel flow divided by take-off fuel flow at 7%, 30%, 85%, and 100% rated net thrust. Sea-level-static ICAO/EASA anchors; altitude use is an explicitly empirical Level-1 approximation."
     )]
     #[serde(default, skip_serializing_if = "Vec::is_empty")]
     pub part_power_fuel_flow_ratios: Vec<f64>,
@@ -245,6 +271,30 @@ impl EngineConfig {
     #[must_use]
     pub fn z_for_engine_m(&self, index: usize) -> f64 {
         self.z_per_engine_m.get(index).copied().unwrap_or(self.z_m)
+    }
+
+    /// The rear-fuselage mount, when one is declared and valid.
+    ///
+    /// Every consumer reads this, so the built nacelle, the wing relief and the
+    /// mass inputs cannot disagree about where the engines hang. An invalid mount
+    /// is rejected by configuration validation and otherwise treated as no mount.
+    #[must_use]
+    pub fn rear_fuselage_mount(&self) -> Option<&AftFuselageEngineInstallation> {
+        self.aft_fuselage.as_ref().filter(|mount| mount.is_valid())
+    }
+
+    /// How far ahead of the local wing leading edge the inlet of engine `index`
+    /// (position in `spanwise_positions_m`) sits: the per-engine entry shifted by
+    /// the difference of [`Self::inlet_x_offset_m`] from the mean entry when given,
+    /// else `inlet_x_offset_m`.
+    #[must_use]
+    pub fn inlet_x_offset_for_engine_m(&self, index: usize) -> f64 {
+        let Some(&entry) = self.inlet_x_per_engine_m.get(index) else {
+            return self.inlet_x_offset_m;
+        };
+        let mean =
+            self.inlet_x_per_engine_m.iter().sum::<f64>() / self.inlet_x_per_engine_m.len() as f64;
+        entry + self.inlet_x_offset_m - mean
     }
 
     /// Authoritative per-engine sea-level static thrust, kN. Turboprops are

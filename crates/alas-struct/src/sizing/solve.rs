@@ -98,8 +98,11 @@ pub(super) fn size_wingbox_with_law(
         .map(|h| (0..n).map(|j| h[j] / h_sum[j]).collect())
         .collect();
 
-    // Skin fixed at the configured minimum (no torsional shear-flow upsizing,
-    // the same fidelity the analytical model uses).
+    // The configured minimum skin gauge. The frozen laws keep it everywhere
+    // (no torsional shear-flow upsizing, the same fidelity the analytical model
+    // uses); the product law starts from it and sizes the gauge station by
+    // station for the skin's combined stress (`product_strength`). The rib
+    // pitch below is set on this minimum gauge.
     let t_skin = cfg.t_skin_min_m;
 
     // Only the frozen law retains its historical root shear reserve. Product
@@ -155,7 +158,9 @@ pub(super) fn size_wingbox_with_law(
             .map(|j| {
                 let m_adm = a_cap[j] * cap_mat.f_allow_pa * h_eff[j];
                 let demand = (frac_m[j] * m_sizing[j]).abs();
-                if demand > 1.0 {
+                if demand.is_nan() {
+                    f64::NAN
+                } else if demand > 1.0 {
                     m_adm / demand - 1.0
                 } else {
                     f64::INFINITY
@@ -261,13 +266,15 @@ pub(super) fn size_wingbox_with_law(
             source: "Open source gap: aircraft-specific ply schedule and measured laminate design \
                      allowables are unavailable. Assigned as an effective isotropic proxy, not a \
                      verified aircraft material.",
-            applicability: "Effective isotropic proxy for a laminate wing box. f_allow is a single \
-                            axial design allowable, not a full laminate failure envelope; no ply schedule, \
-                            stacking sequence, compression-after-impact knockdown, inter-laminar check \
-                            or aeroelastic tailoring is modelled. Not a certified laminate analysis. \
-                            Gauge is a declared class assumption, not a measured gauge.",
+            applicability: "Effective isotropic proxy for a laminate wing box. Carbon covers are \
+                            held to a truncated maximum-strain envelope (Hart-Smith) at a single \
+                            0.40 % damage-tolerant design strain, and the product law sizes the cover \
+                            skin gauge station by station on it; no ply schedule, stacking sequence, \
+                            measured compression-after-impact allowable, inter-laminar check or \
+                            aeroelastic tailoring is modelled. Not a certified laminate analysis. \
+                            The minimum skin gauge is a declared class assumption, not a measured gauge.",
             // Represent uncalibrated relative uncertainty explicitly as unknown (None),
-            // never inventing a spurious number or 0.0 per strict audit instructions.
+            // never inventing a spurious number or 0.0.
             relative_uncertainty: None,
         })
     } else {
@@ -279,14 +286,41 @@ pub(super) fn size_wingbox_with_law(
     } else {
         Vec::new()
     };
+    let (cover_shape, cover_depth_m) = if matches!(law, SizingLaw::Product) {
+        (0..n)
+            .map(|j| {
+                let active: Vec<(f64, f64)> = spars
+                    .iter()
+                    .filter(|spar| spar.h[j] > 0.0)
+                    .map(|spar| (spar.chord_fraction, spar.h[j]))
+                    .collect();
+                (
+                    super::cover_shape::cover_shape_factor(wsg, eta[j], chord[j], &active),
+                    super::cover_shape::cover_depth_m(wsg, eta[j], &active),
+                )
+            })
+            .unzip()
+    } else {
+        (Vec::new(), Vec::new())
+    };
     let mut result = WingboxSizing {
         y_stations: y,
         axis_cos,
+        cover_shape,
+        cover_depth_m,
+        cover_shear_flow_n_per_m: Vec::new(),
         eta_stations: eta,
         chord,
         spar_fracs: wsg.spar_fracs.clone(),
         spars,
         t_skin,
+        // The product law sizes the gauge station by station
+        // (`product_strength`), from the minimum.
+        skin_gauge_m: if matches!(law, SizingLaw::Product) {
+            vec![t_skin; n]
+        } else {
+            Vec::new()
+        },
         num_ribs,
         rib_spacing_m: l_rib,
         mass_breakdown_kg: MassBreakdown {
@@ -301,6 +335,7 @@ pub(super) fn size_wingbox_with_law(
     };
     if matches!(law, SizingLaw::Product) {
         let demand = envelope::station_envelope(&loaded);
+        result.cover_shear_flow_n_per_m = demand.skin_shear_flow_n_per_m.clone();
         let fatigue = envelope::fatigue_limit_pa(cfg, cap_mat, set).map(|limit_pa| FatigueDemand {
             moment_1g_nm: &demand.level_moment_nm,
             limit_pa,

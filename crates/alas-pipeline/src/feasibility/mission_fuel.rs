@@ -114,6 +114,47 @@ pub(crate) fn assess_mission_fuel(
     }
 }
 
+/// A user-defined plan has no route dispatch: the native flight is the mission,
+/// flown at the fuel the plan closed on, and it alone says whether the plan was
+/// flown. Fuel is compared at the ramp, where the closure's shortfall is stated:
+/// a plan short of its contingency alone still flew (that is
+/// [`FindingCode::ReserveFuelShortfall`]), one short of what it burns did not.
+pub(crate) fn assess_plan_mission_fuel(
+    case: &crate::mission_stage::plan::PlanLoadCase,
+    flown: Option<&MissionResult>,
+) -> MissionFuelAssessment {
+    let native = native_telemetry(flown);
+    let used_kg = case.flight_burn_kg + case.taxi_fuel_kg + case.net_offload_kg;
+    let loadable_kg = case.ramp_fuel_kg - case.shortfall_kg;
+    let not_closed = case.closure == crate::mission_stage::plan::PlanClosure::NotClosed;
+    match native.status {
+        MissionFuelStatus::Completed if used_kg > loadable_kg => MissionFuelAssessment {
+            status: MissionFuelStatus::Exhausted,
+            burned_fuel_kg: Some(loadable_kg - case.taxi_fuel_kg - case.net_offload_kg),
+            required_trip_fuel_kg: None,
+            native,
+        },
+        MissionFuelStatus::Completed if not_closed => MissionFuelAssessment {
+            status: MissionFuelStatus::NotConverged,
+            burned_fuel_kg: Some(case.flight_burn_kg),
+            required_trip_fuel_kg: None,
+            native,
+        },
+        MissionFuelStatus::Completed => MissionFuelAssessment {
+            status: MissionFuelStatus::Completed,
+            burned_fuel_kg: Some(case.flight_burn_kg),
+            required_trip_fuel_kg: Some(case.flight_burn_kg),
+            native,
+        },
+        status => MissionFuelAssessment {
+            status,
+            burned_fuel_kg: native.burned_fuel_kg,
+            required_trip_fuel_kg: None,
+            native,
+        },
+    }
+}
+
 fn native_telemetry(native: Option<&MissionResult>) -> NativeMissionTelemetry {
     let Some(result) = native else {
         return NativeMissionTelemetry {
@@ -189,6 +230,8 @@ mod tests {
             reserve_margin_kg: Some(-shortfall_kg),
             design_mission: None,
             native_check: None,
+            zero_fuel_mass_kg: None,
+            offloaded_payload_kg: 0.0,
         }
     }
 

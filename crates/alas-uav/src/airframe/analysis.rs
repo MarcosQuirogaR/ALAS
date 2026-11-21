@@ -1,7 +1,7 @@
 // SPDX-License-Identifier: AGPL-3.0-or-later
 // Copyright (C) 2026 Marcos Quiroga Rodriguez
 
-//! One result struct for the optimiser and the GUI (UAV-PLAN M4, item 3):
+//! One result struct for the optimiser and the GUI:
 //! neutral point and static margin at the loaded CG, tail volume coefficients,
 //! cruise trim (elevator, tail lift, trim drag) and the spar (bending, shear,
 //! tip deflection, mass, margins).  Every field carries its unit in the name.
@@ -20,11 +20,11 @@ use super::trim::{trim_tailed, TrimCondition, TrimResult, TrimSetup};
 use super::AirframeError;
 
 /// Standard gravity, m/s^2.
-pub const G_M_S2: f64 = 9.806_65;
+pub const G_M_S2: f64 = alas_atmo::STANDARD_GRAVITY;
 
 /// Static-margin screening band, fraction of MAC: 5 to 15 %.  A judgement for
-/// screening, not a cited requirement.  Sources checked (bibliografia PDFs):
-/// Raymer 6th ed. p. 626 (PDF page): transport aircraft 5-10 % at the aft CG,
+/// screening, not a cited requirement.  Sources checked:
+/// Raymer, *Aircraft Design: A Conceptual Approach*, 6th ed.: transport aircraft 5-10 % at the aft CG,
 /// general aviation more stable (Cessna 172 about 19 %), fighters about 5 %.
 /// Sadraey Table 6.3 (printed p. 283, PDF p. 308) lists 0.1-0.3 for `h_np - h_cg`
 /// in a requirements table of unstated scope.  The two sources disagree above

@@ -5,14 +5,13 @@
 
 use alas_opt::OptimizationResult;
 
-use crate::state::AppState;
 use crate::views::results_view::SolverResultView;
 
-pub(super) fn selected_result_report<'a>(
-    state: &AppState,
-    result: &'a alas_pipeline::PipelineResult,
-) -> Option<&'a alas_pipeline::AnalysisReport> {
-    match state.selected_solver_view {
+pub(super) fn selected_result_report(
+    view: SolverResultView,
+    result: &alas_pipeline::PipelineResult,
+) -> Option<&alas_pipeline::AnalysisReport> {
+    match view {
         SolverResultView::Avl => result
             .solver_optimizations
             .as_ref()
@@ -26,11 +25,11 @@ pub(super) fn selected_result_report<'a>(
     }
 }
 
-pub(super) fn selected_optimization_result<'a>(
-    state: &AppState,
-    result: &'a alas_pipeline::PipelineResult,
-) -> Option<&'a OptimizationResult> {
-    match state.selected_solver_view {
+pub(super) fn selected_optimization_result(
+    view: SolverResultView,
+    result: &alas_pipeline::PipelineResult,
+) -> Option<&OptimizationResult> {
+    match view {
         SolverResultView::Avl => result
             .solver_optimizations
             .as_ref()
@@ -44,11 +43,11 @@ pub(super) fn selected_optimization_result<'a>(
     }
 }
 
-pub(super) fn selected_avl_result<'a>(
-    state: &AppState,
-    result: &'a alas_pipeline::PipelineResult,
-) -> Option<&'a alas_pipeline::AvlAnalysisResult> {
-    match state.selected_solver_view {
+pub(super) fn selected_avl_result(
+    view: SolverResultView,
+    result: &alas_pipeline::PipelineResult,
+) -> Option<&alas_pipeline::AvlAnalysisResult> {
+    match view {
         SolverResultView::Avl => result
             .solver_optimizations
             .as_ref()

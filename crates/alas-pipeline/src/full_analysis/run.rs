@@ -3,14 +3,16 @@
 
 //! Construction and the full run of a [`FullAnalysis`].
 
+use super::mass_pass::MassPass;
 use super::*;
+use alas_stab::neutral_point::TUNNEL_AC_SUMMARY_KEY;
 
 impl FullAnalysis {
     /// This analysis with its configuration resolved at the band takeoff mass
     /// `design` carries (`AlasConfig::at_band_mass`): the fixed-requirement
     /// problem at that mass. `None` when the mode is not the MTOW band, the
     /// configuration is a sized closure's, or it is resolved already.
-    fn at_band_design(&self, design: &DesignVector) -> Option<Self> {
+    pub(super) fn at_band_design(&self, design: &DesignVector) -> Option<Self> {
         if self.closure_bound
             || self.config.optimizer.objective.mtow_sizing != alas_config::MtowSizing::MtowBand
         {
@@ -20,17 +22,25 @@ impl FullAnalysis {
         (config != self.config).then_some(Self {
             config,
             reference_compatibility: self.reference_compatibility,
+            reference_masses: self.reference_masses,
             closure_bound: self.closure_bound,
+            load_plan: self.load_plan,
+            operator_cg_target_pct_mac: self.operator_cg_target_pct_mac,
+            sized_fuel: self.sized_fuel.clone(),
         })
     }
 
     /// Create a new analysis orchestrator for `config`.
     pub fn new(config: AlasConfig) -> Self {
-        let reference_compatibility = config.mass_model.uses_reference_mass_methods();
+        let reference_masses = config.mass_model.uses_reference_mass_methods();
         Self {
             config,
-            reference_compatibility,
+            reference_compatibility: false,
+            reference_masses,
             closure_bound: false,
+            load_plan: LoadPlanPolicy::default(),
+            operator_cg_target_pct_mac: None,
+            sized_fuel: None,
         }
     }
 
@@ -53,7 +63,11 @@ impl FullAnalysis {
         Self {
             config,
             reference_compatibility: true,
+            reference_masses: true,
             closure_bound: false,
+            load_plan: LoadPlanPolicy::Off,
+            operator_cg_target_pct_mac: None,
+            sized_fuel: None,
         }
     }
 
@@ -84,7 +98,7 @@ impl FullAnalysis {
         };
         builder
             .build(Some(design), include_engines)
-            .map_err(|e| format!("geometry build error: {e:?}"))
+            .map_err(|e| format!("geometry build error: {e}"))
     }
 
     /// Execute the same analysis workflow on an aircraft supplied by a CPACS
@@ -98,102 +112,40 @@ impl FullAnalysis {
         design: &DesignVector,
         airplane: Airplane,
     ) -> Result<AnalysisReport, String> {
-        if let Some(resolved) = self.at_band_design(design) {
-            return resolved.run_on_airplane(design, airplane);
-        }
-        // Premium economy is retained in saved cabins for compatibility, but
-        // the product cabin and FLOPS contract have three classes. Fold that
-        // slot before either pass builds a payload or prices the cabin;
-        // otherwise a declared Premium count can be added to FLOPS tourist
-        // while the row packer silently ignores it.
-        let product_cabin = self.config.cabin.passenger.canonicalized_for_product();
-        let mut product_cabin_config = self.config.cabin.clone();
-        product_cabin_config.passenger = product_cabin.clone();
-        // A cabin declared by count is the first pass's cabin too (`cabin_sync`).
-        let (declared_requirements, analysis_mass_model) = cabin_sync::declared_cabin(
-            &self.config.requirements,
-            &self
-                .config
-                .analysis_mass_model(self.config.requirements.mtow_kg),
-            &product_cabin,
-        );
-        let req = &declared_requirements;
-        let mut plane = airplane;
-
-        // The compatibility replay keeps the historical unfolded-area reference.
-        if self.reference_compatibility {
-            if let Some(main_wing) = plane.wings.first() {
-                plane.s_ref = main_wing.unfolded_area();
-            }
-        }
-
-        let coordinate_model = if self.reference_compatibility {
-            MassCoordinateModel::ReferenceCompatibility
-        } else {
-            MassCoordinateModel::StructuralWingbox(&self.config.structures)
-        };
-        let initial_mass_result = if self.reference_compatibility {
-            alas_mass::breakdown::run_mass_analysis_with_model_checked_with_gear(
-                &plane,
-                req,
-                &self.config.geometry,
-                &self.config.cabin,
-                &self.config.control_surfaces,
-                Some(&self.config.mass_model),
-                None,
-                coordinate_model,
-                &self.config.landing_gear,
-            )
-        } else {
-            alas_mass::breakdown::run_mass_analysis_with_model_checked_product_with_gear(
-                &plane,
-                req,
-                &self.config.geometry,
-                &product_cabin_config,
-                &self.config.control_surfaces,
-                Some(&analysis_mass_model),
-                None,
-                coordinate_model,
-                &self.config.landing_gear,
-            )
-        };
-        let (masses_init, coords_init, _cg_init) =
-            initial_mass_result.map_err(|error| format!("mass-coordinate error: {error}"))?;
-        let (coords_init, _) =
-            self.station_coordinates(design, &plane, &masses_init, coords_init)?;
-
-        // Second pass: build detailed interior layout and recompute mass breakdown and CG.
-        let (oew, x_oew) = oew_and_cg(&masses_init, &coords_init);
-        let first_pass = payload_pass::FirstPass {
-            requirements: req,
-            mass_model: &analysis_mass_model,
-            cabin: &product_cabin,
-            oew_kg: oew,
-            x_oew_m: x_oew,
-        };
-        let payload_pass::PayloadPass {
-            layout: payload_layout,
-            structural_payload_limit_kg: effective_structural_payload_limit_kg,
-            offloaded_payload_kg,
-            analysis: (mut masses, mut coords, _, flops_mass_buildup),
-        } = self.payload_pass(design, &plane, &first_pass, coordinate_model)?;
-        // An unsized analysis at the declared MTOW, in every sizing mode, and
-        // a Hard-MTOW closure both carry the maximum loadable fuel; another
-        // mode's closure carries its own mission fuel.
-        let loading = if self.reference_compatibility
-            || (self.closure_bound
-                && !self
-                    .config
-                    .optimizer
-                    .objective
-                    .mtow_sizing
-                    .sizes_at_declared_mass())
+        if self.load_plan == LoadPlanPolicy::Off
+            || self.reference_masses
+            || self.reference_compatibility
         {
-            None
-        } else {
-            takeoff_loading::apply(&self.config, design, &plane, &mut masses, &mut coords)?
-        };
-        let (coords, cg) = self.station_coordinates(design, &plane, &masses, coords)?;
+            return self.run_steered(design, airplane, None);
+        }
+        load_plan::run_planned(self, design, airplane)
+    }
+
+    /// [`Self::run_on_airplane`] with the payload centroid steered to
+    /// `steer_payload_cg_x_m` (`load_plan`).
+    pub(super) fn run_steered(
+        &self,
+        design: &DesignVector,
+        airplane: Airplane,
+        steer_payload_cg_x_m: Option<f64>,
+    ) -> Result<AnalysisReport, String> {
+        if let Some(resolved) = self.at_band_design(design) {
+            return resolved.run_steered(design, airplane, steer_payload_cg_x_m);
+        }
+        let MassPass {
+            mut plane,
+            declared_requirements,
+            tail_eta,
+            loading,
+            masses,
+            coords,
+            cg,
+            payload_layout,
+            effective_structural_payload_limit_kg,
+            offloaded_payload_kg,
+            flops_mass_buildup,
+        } = self.mass_pass(design, airplane, steer_payload_cg_x_m)?;
+        let req = &declared_requirements;
         // Anchor the aerodynamic moment reference to the actual physical CG.
         plane.xyz_ref[0] = cg[0];
 
@@ -207,7 +159,7 @@ impl FullAnalysis {
                 &plane,
                 design.sweep_deg,
                 Some(self.config.geometry.clone()),
-                Some(self.config.drag_model.clone()),
+                Some(self.config.resolved_drag_model()),
                 Some(fine_analysis.clone()),
             )
         } else {
@@ -215,19 +167,38 @@ impl FullAnalysis {
                 &plane,
                 AeroAnalysis::quarter_chord_sweep_deg(&plane, design.sweep_deg),
                 Some(self.config.geometry.clone()),
-                Some(self.config.drag_model.clone()),
+                Some(self.config.resolved_drag_model()),
                 Some(fine_analysis.clone()),
             )
         };
 
         let spanwise = fine_analysis.spanwise_resolution.max(1) as usize;
         let chordwise = fine_analysis.chordwise_resolution.max(1) as usize;
-        let fine_system = VlmSystem::assemble(&plane, spanwise, chordwise)
-            .map_err(|e| format!("vlm assembly error: {e:?}"))?;
+        for near in alas_aero::vlm::lattice_grouping_diagnostics(&plane.wings) {
+            tracing::warn!(
+                surface = %near.surface,
+                other = %near.other,
+                gap_m = near.gap_m,
+                end_chord_m = near.end_chord_m,
+                "a surface end misses another planform and stays in its own lattice component"
+            );
+        }
+        let fine_system = if self.reference_compatibility {
+            VlmSystem::assemble_reference_compatibility(&plane, spanwise, chordwise)
+        } else {
+            VlmSystem::assemble(&plane, spanwise, chordwise)
+        }
+        .map_err(|e| format!("vlm assembly error: {e}"))?;
 
-        let polar = aero
-            .run_sweep_with_system(&fine_system, req.cruise_mach, req.cruise_altitude_m)
-            .map_err(|e| format!("polar sweep error: {e:?}"))?;
+        let polar = super::run_polar(
+            &aero,
+            &plane,
+            &fine_analysis,
+            req.cruise_mach,
+            req.cruise_altitude_m,
+            !self.reference_compatibility && fine_analysis.compressible_trim,
+            Some(&fine_system),
+        )?;
 
         let component_masses = breakdown_to_map(&masses);
         let zero_fuel_mass_kg = crate::cruise_mass::zero_fuel_mass_kg(&component_masses);
@@ -237,7 +208,15 @@ impl FullAnalysis {
         let loaded_analysis = loading.map(|loading| {
             let mut config = self.config.clone();
             config.requirements.mtow_kg = loading.takeoff_mass_kg;
-            Self { config, ..*self }
+            Self {
+                config,
+                sized_fuel: self.sized_fuel.clone(),
+                reference_compatibility: self.reference_compatibility,
+                reference_masses: self.reference_masses,
+                closure_bound: self.closure_bound,
+                load_plan: self.load_plan,
+                operator_cg_target_pct_mac: self.operator_cg_target_pct_mac,
+            }
         });
         let operating = loaded_analysis.as_ref().unwrap_or(self);
         let takeoff_cl = operating.cruise_cl(&plane);
@@ -250,11 +229,16 @@ impl FullAnalysis {
         } else {
             neutral_point_with_system(&fine_system, &plane, &fine_analysis)
         }
-        .map_err(|e| format!("neutral point error: {e:?}"))?;
+        .map_err(|e| format!("neutral point error: {e}"))?;
 
-        let np_cond = self.np_conditions_for(&plane, &fine_analysis, req);
+        let inlet_polar = alas_opt::envelope::InletDragPolar {
+            cd0: polar_fit.cd0,
+            k: polar_fit.k,
+        };
+        let np_cond =
+            self.np_conditions_for(&plane, &fine_analysis, req, design, Some(inlet_polar));
 
-        let cg_envelope_ok = if self.reference_compatibility {
+        let cg_envelope_ok = if self.reference_masses {
             let env = check_cg_envelope(
                 &plane,
                 &masses,
@@ -297,6 +281,18 @@ impl FullAnalysis {
             });
 
         let mut geometry_summary = self.geometry_summary(&plane, design);
+        if let Some(d) = np_cond.as_ref().map(|c| &c.diagnostics) {
+            let shift = d.wing_lift_fraction.clamp(0.0, 1.0) * d.fuselage.tunnel_correction_shift_m;
+            geometry_summary.insert(
+                TUNNEL_AC_SUMMARY_KEY.to_owned(),
+                100.0 * shift / plane.c_ref,
+            );
+        }
+        if let Some(eta) = &tail_eta {
+            for (key, value) in eta.summary_entries() {
+                geometry_summary.insert(key.to_owned(), value);
+            }
+        }
         if let Some(loading) = loading {
             takeoff_loading::annotate(&mut geometry_summary, loading);
             geometry_summary.insert(
@@ -304,20 +300,26 @@ impl FullAnalysis {
                 self.config.requirements.mtow_kg,
             );
         }
-        // Report note: the reported cruise CL lies outside the analysed polar,
-        // so the reported cruise drag and L/D are the polar's end values rather
-        // than interpolations. The key is present only when that happens.
-        let polar_cl_range = polar
-            .cl
-            .iter()
-            .filter(|cl| cl.is_finite())
-            .fold((f64::INFINITY, f64::NEG_INFINITY), |(lo, hi), &cl| {
-                (lo.min(cl), hi.max(cl))
-            });
-        if !self.reference_compatibility
-            && (trimmed_clamped || cruise_cl < polar_cl_range.0 || cruise_cl > polar_cl_range.1)
-        {
-            geometry_summary.insert("reported_cruise_cl_outside_polar".to_owned(), 1.0);
+        // No mission is priced here: the point stands at the mean of the
+        // take-off and zero-fuel masses until the report is bound to its
+        // mission (`cruise_point`).
+        if !self.reference_compatibility {
+            let takeoff_mass_kg = operating.config.requirements.mtow_kg;
+            cruise_point::CruisePointBasis::all_fuel_burned(
+                takeoff_mass_kg,
+                zero_fuel_mass_kg,
+                loading.map_or(takeoff_mass_kg - zero_fuel_mass_kg, |loading| {
+                    loading.carried_usable_fuel_kg
+                }),
+            )
+            .write(&mut geometry_summary);
+            cruise_point::mark_polar_range(
+                &mut geometry_summary,
+                &polar,
+                design_point.cl,
+                cruise_cl,
+                trimmed_clamped,
+            );
         }
         if let Some(limit_kg) = effective_structural_payload_limit_kg {
             geometry_summary.insert("effective_structural_payload_limit_kg".to_owned(), limit_kg);
@@ -332,7 +334,7 @@ impl FullAnalysis {
             );
         }
 
-        Ok(AnalysisReport {
+        let mut report = AnalysisReport {
             design: *design,
             airplane: plane,
             polar,
@@ -349,8 +351,18 @@ impl FullAnalysis {
             trimmed_design_point,
             cg_envelope_ok,
             neutral_point_conditions: np_cond,
-            fuel: crate::fuel_model::ReportFuel::default(),
-        })
+            fuel: self
+                .sized_fuel
+                .clone()
+                .map_or_else(crate::fuel_model::ReportFuel::default, crate::fuel_model::ReportFuel::sized),
+        };
+        if let Some((aligned, aligned_cg)) =
+            crate::feasibility::ledger_aligned_coordinates(&self.config, &report)
+        {
+            report.mass_coordinates = coordinates_to_map(&aligned);
+            report.physical_cg = aligned_cg;
+        }
+        Ok(report)
     }
 
     /// Run the final report at the takeoff mass closed by the mission-sized
@@ -385,6 +397,7 @@ impl FullAnalysis {
             takeoff_mass_kg,
             landing_floor_kg,
             None,
+            None,
         )
     }
 
@@ -410,8 +423,17 @@ impl FullAnalysis {
             sized.takeoff_mass_kg,
             Some(sized.design_landing_mass_kg),
             Some(&sized.fuel_artifacts.tail_sizing),
+            Some(crate::fuel_model::SizedFuel::of(sized)),
         )?;
         report.fuel = crate::fuel_model::ReportFuel::sized(crate::fuel_model::SizedFuel::of(sized));
+        // The reported cruise point is the candidate's own mid-cruise mass,
+        // in the state its mission flies it in (`cruise_mass::mid_cruise_point`).
+        if let Err(reason) = self.bind_cruise_point(
+            &mut report,
+            cruise_point::CruisePointBasis::of_sized(&self.config, sized),
+        ) {
+            tracing::warn!(%reason, "the reported cruise point is not bound to the sized candidate");
+        }
         if let Some(loading) = sized.takeoff_loading {
             takeoff_loading::annotate(&mut report.geometry_summary, loading);
         }
@@ -425,6 +447,7 @@ impl FullAnalysis {
         takeoff_mass_kg: f64,
         landing_floor_kg: Option<f64>,
         tail_sizing: Option<&alas_config::TailSizing>,
+        sized_fuel: Option<crate::fuel_model::SizedFuel>,
     ) -> Result<AnalysisReport, String> {
         if !takeoff_mass_kg.is_finite() || takeoff_mass_kg <= 0.0 {
             return Err(format!(
@@ -447,18 +470,30 @@ impl FullAnalysis {
         let sized_analysis = Self {
             config: sized_config,
             reference_compatibility: self.reference_compatibility,
+            reference_masses: self.reference_masses,
             closure_bound: true,
+            load_plan: self.load_plan,
+            operator_cg_target_pct_mac: self.operator_cg_target_pct_mac,
+            sized_fuel,
         };
         let mut report = match tail_sizing {
             Some(sizing) => {
                 let mut config = sized_analysis.config.clone();
-                let mut design = *design;
-                let plane = alas_opt::mdo::rebuild_airplane(&mut config, &mut design, sizing)?;
-                Self {
+                let mut drawn = *design;
+                let plane = alas_opt::mdo::rebuild_airplane(&mut config, &mut drawn, sizing)?;
+                let mut report = Self {
                     config,
                     ..sized_analysis
                 }
-                .run_on_airplane(&design, plane)?
+                .run_on_airplane(&drawn, plane)?;
+                // The derived wing setting rotates the drawn wing and
+                // rides in `TailSizing::wing_incidence_deg`; it is never written
+                // into the published design vector. A search delivers this vector
+                // and feeds it back, and the delivered configuration keeps the
+                // unrotated root and break incidences, so a rotated tip here
+                // would change the washout of every rebuild from the pair.
+                report.design.tip_twist_deg = design.tip_twist_deg;
+                report
             }
             None => sized_analysis.run(design, include_engines)?,
         };

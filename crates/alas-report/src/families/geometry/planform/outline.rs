@@ -23,8 +23,8 @@ pub fn figure_geometry(plane: &Airplane, theme: Option<&str>) -> Scene {
     let top_rect = (50.0, 50.0, 660.0, 210.0);
     let (top_u, top_v) =
         equal_aspect_ranges(y_min, y_max, top_rect.2, -x_max, -x_min, top_rect.3, 0.15);
-    let top_axes = Axes2D::new(top_rect, top_u, top_v);
-    top_axes.draw_frame_with_labels(&mut scene, pal, "span Y [m]", "longitudinal X [m]");
+    let top_axes = Axes2D::new(top_rect, top_u, top_v).with_negated_y_tick_labels();
+    top_axes.draw_frame_with_labels(&mut scene, pal, "Span Y [m]", "Longitudinal X [m]");
 
     // Side: horizontal = X, vertical = Z, no inversion.
     let side_rect = (50.0, 310.0, 320.0, 200.0);
@@ -38,7 +38,7 @@ pub fn figure_geometry(plane: &Airplane, theme: Option<&str>) -> Scene {
     let (front_u, front_v) =
         equal_aspect_ranges(y_min, y_max, front_rect.2, z_min, z_max, front_rect.3, 0.2);
     let front_axes = Axes2D::new(front_rect, front_u, front_v);
-    front_axes.draw_frame_with_labels(&mut scene, pal, "span Y [m]", "Z [m]");
+    front_axes.draw_frame_with_labels(&mut scene, pal, "Span Y [m]", "Z [m]");
 
     let edge = Stroke::new(Color::rgb(0, 0, 0), 0.5);
     for (index, wing) in plane.wings.iter().enumerate() {
@@ -249,8 +249,8 @@ pub fn figure_planform_comparison(
     // The source figure is 11 by 8 inches at 100 dpi. Its tight-layout axes
     // box is part of the rendered scale contract.
     let rect = (137.5, 88.0, 852.5, 616.0);
-    let axes = Axes2D::new(rect, x_range, (-y_range.1, -y_range.0));
-    axes.draw_frame_with_labels(&mut scene, pal, "span Y [m]", "longitudinal X [m]");
+    let axes = Axes2D::new(rect, x_range, (-y_range.1, -y_range.0)).with_negated_y_tick_labels();
+    axes.draw_frame_with_labels(&mut scene, pal, "Span Y [m]", "Longitudinal X [m]");
 
     draw_planform(
         &mut scene,
@@ -275,10 +275,15 @@ pub fn figure_planform_comparison(
 
     draw_legend(
         &mut scene,
-        [rect.0 + rect.2 - 130.0, rect.1 + 8.0],
+        [rect.0 + rect.2 - 280.0, rect.1 + 8.0],
         &[
             (
-                labels.0.to_owned(),
+                if same_planform(baseline, optimized) {
+                    // Overlapping outlines read as one: no design change.
+                    format!("{} (identical to {})", labels.0, labels.1.to_lowercase())
+                } else {
+                    labels.0.to_owned()
+                },
                 LegendMarker::Line(Stroke::dashed(
                     Color::from_hex(BASELINE_COLOR),
                     2.0,
@@ -296,6 +301,19 @@ pub fn figure_planform_comparison(
     );
 
     scene
+}
+
+/// True when both airplanes have the same wing sections (position and chord).
+fn same_planform(a: &Airplane, b: &Airplane) -> bool {
+    a.wings.len() == b.wings.len()
+        && a.wings.iter().zip(&b.wings).all(|(wa, wb)| {
+            wa.xsecs.len() == wb.xsecs.len()
+                && wa
+                    .xsecs
+                    .iter()
+                    .zip(&wb.xsecs)
+                    .all(|(sa, sb)| sa.xyz_le == sb.xyz_le && sa.chord == sb.chord)
+        })
 }
 
 /// Limits of the top-view wing outlines `_draw_planform` emits.

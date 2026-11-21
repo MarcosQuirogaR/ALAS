@@ -122,13 +122,19 @@ impl From<alas_report::PdfError> for ExportError {
     }
 }
 
+/// `scene` for a standalone SVG: a Blue Marble globe gets its rasterized texture embedded, which
+/// the vector writer alone cannot draw (it paints only the dark disc the GUI draws the Earth on).
+pub fn embed_globe_textures(scene: &Scene) -> Scene {
+    alas_viz::with_embedded_globe_textures(scene, alas_viz::EXPORT_GLOBE_SCALE)
+}
+
 /// Export every available result figure as ordered SVG files in one ZIP archive.
 pub fn export_figure_archive(
     state: &AppState,
     output_dir: &Path,
 ) -> Result<ExportReceipt, ExportError> {
     let figures = collect_export_figures(state)?;
-    let path = output_dir.join(FIGURE_ARCHIVE_NAME);
+    let path = unused_output_path(output_dir, FIGURE_ARCHIVE_NAME);
     write_archive(&path, &figures)?;
     Ok(ExportReceipt {
         path,
@@ -143,12 +149,67 @@ pub fn export_pdf_report(
 ) -> Result<ExportReceipt, ExportError> {
     let figures = collect_export_figures(state)?;
     let document = alas_report::render_sectioned_pdf(&sections_from_figures(&figures))?;
-    let path = output_dir.join(PDF_REPORT_NAME);
+    let path = unused_output_path(output_dir, PDF_REPORT_NAME);
     write_output(&path, &document, "write PDF report")?;
     Ok(ExportReceipt {
         path,
         figure_count: figures.len(),
     })
+}
+
+/// `base_name` with a UTC time stamp before its extension ("alas-figures-20261117-093015.zip"),
+/// inside `output_dir` made absolute; a name already on disk gets a counter, so an earlier
+/// archive is never overwritten.
+fn unused_output_path(output_dir: &Path, base_name: &str) -> PathBuf {
+    let dir = std::path::absolute(output_dir).unwrap_or_else(|_| output_dir.to_path_buf());
+    let seconds = std::time::SystemTime::now()
+        .duration_since(std::time::UNIX_EPOCH)
+        .map_or(0, |elapsed| elapsed.as_secs());
+    let stamp = utc_stamp(seconds);
+    let (stem, extension) = base_name.rsplit_once('.').unwrap_or((base_name, ""));
+    let name = |counter: usize| {
+        let suffix = if counter == 0 {
+            String::new()
+        } else {
+            format!("-{counter}")
+        };
+        if extension.is_empty() {
+            format!("{stem}-{stamp}{suffix}")
+        } else {
+            format!("{stem}-{stamp}{suffix}.{extension}")
+        }
+    };
+    (0..10_000)
+        .map(|counter| dir.join(name(counter)))
+        .find(|candidate| !candidate.exists())
+        .unwrap_or_else(|| dir.join(name(0)))
+}
+
+/// `YYYYMMDD-HHMMSS` of a Unix time in UTC (proleptic Gregorian calendar).
+fn utc_stamp(unix_seconds: u64) -> String {
+    let days = (unix_seconds / 86_400) as i64;
+    let second_of_day = unix_seconds % 86_400;
+    // Civil-from-days (H. Hinnant): days since 1970-01-01 to year, month, day.
+    let z = days + 719_468;
+    let era = z.div_euclid(146_097);
+    let day_of_era = z.rem_euclid(146_097);
+    let year_of_era =
+        (day_of_era - day_of_era / 1_460 + day_of_era / 36_524 - day_of_era / 146_096) / 365;
+    let day_of_year = day_of_era - (365 * year_of_era + year_of_era / 4 - year_of_era / 100);
+    let month_index = (5 * day_of_year + 2) / 153;
+    let day = day_of_year - (153 * month_index + 2) / 5 + 1;
+    let month = if month_index < 10 {
+        month_index + 3
+    } else {
+        month_index - 9
+    };
+    let year = year_of_era + era * 400 + i64::from(month <= 2);
+    format!(
+        "{year:04}{month:02}{day:02}-{:02}{:02}{:02}",
+        second_of_day / 3_600,
+        second_of_day % 3_600 / 60,
+        second_of_day % 60
+    )
 }
 
 fn collect_export_figures(state: &AppState) -> Result<Vec<ExportedFigure>, ExportError> {
@@ -169,16 +230,23 @@ fn collect_export_figures(state: &AppState) -> Result<Vec<ExportedFigure>, Expor
         file_name: "00_design_summary.svg".to_owned(),
         category: "Design Summary".to_owned(),
         title: "Design Summary".to_owned(),
-        scene: summary_scene(format!(
-            "{}\n{}",
-            alas_report::format_summary(report, Some(&result.config)),
-            alas_pipeline::format_feasibility(&result.feasibility)
-        )),
+        scene: summary_scene(
+            without_repeated_findings(&format!(
+                "{}\n{}",
+                alas_report::format_summary(report, Some(&result.config)),
+                result.format_delivery()
+            )),
+            &theme,
+        ),
     }];
 
     for (index, descriptor) in alas_report::RESULT_FIGURES.iter().enumerate() {
-        if let Some(Some(scene)) = build_result_figure(state, descriptor.id, &result.config, &theme)
-        {
+        // A figure the Results gallery already holds is not solved again.
+        let built = match state.gallery_cached_figure(descriptor.id) {
+            Some(cached) => Some(cached.map(|scene| (*scene).clone())),
+            None => build_result_figure(state, descriptor.id, &result.config, &theme),
+        };
+        if let Some(Some(scene)) = built {
             figures.push(ExportedFigure {
                 file_name: figure_file_name(index + 1, descriptor.id),
                 category: descriptor.category.to_owned(),
@@ -191,6 +259,21 @@ fn collect_export_figures(state: &AppState) -> Result<Vec<ExportedFigure>, Expor
         return Err(ExportError::NoFigures);
     }
     Ok(figures)
+}
+
+/// Test probes: every exported figure rasterised as the GUI draws it, one PNG
+/// per SVG of the archive (same stem), for a visual review without a screen.
+#[cfg(test)]
+pub(crate) fn write_export_pngs(state: &AppState, dir: &Path) -> Result<usize, String> {
+    let figures = collect_export_figures(state).map_err(|e| e.to_string())?;
+    std::fs::create_dir_all(dir).map_err(|e| format!("{}: {e}", dir.display()))?;
+    for figure in &figures {
+        let scene = embed_globe_textures(&figure.scene);
+        let png = alas_viz::raster::render_scene_png(&scene)?;
+        let name = figure.file_name.replace(".svg", ".png");
+        std::fs::write(dir.join(&name), png).map_err(|e| format!("{name}: {e}"))?;
+    }
+    Ok(figures.len())
 }
 
 fn export_readiness(has_result: bool, complete: bool) -> Result<(), ExportError> {
@@ -210,20 +293,101 @@ fn figure_file_name(registry_position: usize, id: &str) -> String {
     )
 }
 
-fn summary_scene(summary: String) -> Scene {
-    let mut scene = Scene::new(640.0, 760.0, Some(Color::rgb(255, 255, 255)));
+const SUMMARY_WIDTH: f64 = 760.0;
+const SUMMARY_MARGIN: f64 = 36.0;
+const SUMMARY_FONT: f64 = 11.5;
+const SUMMARY_LINE_HEIGHT: f64 = 19.0;
+/// Characters per line at [`SUMMARY_FONT`] (points): the usable width over a conservative average
+/// glyph width of 0.58 em, with the font converted to pixels.
+const SUMMARY_WRAP_CHARS: usize = ((SUMMARY_WIDTH - 2.0 * SUMMARY_MARGIN)
+    / (0.58 * SUMMARY_FONT * alas_report::scene::CSS_PIXELS_PER_POINT))
+    as usize;
+
+/// `line` broken at spaces into pieces of at most `limit` characters; continuation pieces are
+/// indented two spaces. A single word longer than `limit` is kept whole.
+fn wrap_summary_line(line: &str, limit: usize) -> Vec<String> {
+    if line.chars().count() <= limit {
+        return vec![line.to_owned()];
+    }
+    let mut pieces: Vec<String> = Vec::new();
+    let mut current = String::new();
+    for word in line.split(' ') {
+        let needed = current.chars().count() + 1 + word.chars().count();
+        if !current.is_empty() && needed > limit {
+            pieces.push(std::mem::take(&mut current));
+            current.push_str("  ");
+        }
+        if !current.is_empty() && !current.ends_with(' ') {
+            current.push(' ');
+        }
+        current.push_str(word);
+    }
+    if !current.trim().is_empty() {
+        pieces.push(current);
+    }
+    pieces
+}
+
+/// The design-summary page in the figure theme `theme`, long lines wrapped to the page width.
+/// `summary` with each finding line ("- WARNING: ...", "- ERROR: ...") kept
+/// once: the design summary and the delivery verdict both list the run's
+/// findings, so the exported page repeated three of them word for word
+/// (A320-200, measured).
+fn without_repeated_findings(summary: &str) -> String {
+    let mut seen = std::collections::HashSet::new();
+    summary
+        .lines()
+        .filter(|line| {
+            let finding = line.trim_start();
+            !(finding.starts_with("- ") && !seen.insert(finding.to_owned()))
+        })
+        .collect::<Vec<_>>()
+        .join("\n")
+}
+
+fn summary_scene(summary: String, theme: &str) -> Scene {
+    let palette = alas_report::theme::get_palette(Some(theme));
+    let lines: Vec<(String, bool)> = summary
+        .lines()
+        .enumerate()
+        .flat_map(|(index, line)| {
+            // The first line is a title banner of "=" rules around the name: keep the name only.
+            let text = if index == 0 {
+                line.trim_matches(|c: char| c == '=' || c == ' ').to_owned()
+            } else {
+                line.to_owned()
+            };
+            wrap_summary_line(&text, SUMMARY_WRAP_CHARS)
+                .into_iter()
+                .map(move |piece| (piece, index == 0))
+        })
+        .collect();
+    let title_gap = SUMMARY_LINE_HEIGHT * 0.6;
+    let height = 2.0 * SUMMARY_MARGIN + title_gap + lines.len() as f64 * SUMMARY_LINE_HEIGHT;
+    let mut scene = Scene::new(SUMMARY_WIDTH, height, Some(Color::from_hex(palette.bg)));
     scene.title = Some("ALAS Design Summary".to_owned());
-    for (index, line) in summary.lines().enumerate() {
-        let y = 42.0 + index as f64 * 20.0;
+    scene.suppress_derived_title();
+    for (row, (text, is_title)) in lines.into_iter().enumerate() {
+        let y = SUMMARY_MARGIN
+            + row as f64 * SUMMARY_LINE_HEIGHT
+            + if row > 0 { title_gap } else { 0.0 };
+        // Middle of the line, not its top: the rasteriser placed the
+        // super- and subscripts of a top-aligned line (m², i_h, m/s²) a line
+        // low (measured on the A320-200 summary PNG); centred lines draw them
+        // in place, as the axis labels do.
         scene.add(SceneElement::Text {
-            text: line.to_owned(),
-            pos: [36.0, y],
-            font_size: if index == 0 { 17.0 } else { 11.5 },
-            color: Color::rgb(15, 23, 42),
+            text,
+            pos: [SUMMARY_MARGIN, y + 0.5 * SUMMARY_LINE_HEIGHT],
+            font_size: if is_title { 17.0 } else { SUMMARY_FONT },
+            color: Color::from_hex(if is_title {
+                palette.title
+            } else {
+                palette.tick
+            }),
             align: TextAlign::Left,
-            baseline: TextBaseline::Top,
+            baseline: TextBaseline::Middle,
             angle_deg: 0.0,
-            bold: index == 0,
+            bold: is_title,
         });
     }
     scene
@@ -261,7 +425,7 @@ fn write_archive(path: &Path, figures: &[ExportedFigure]) -> Result<(), ExportEr
     for figure in figures {
         entries.push((
             figure.file_name.clone(),
-            alas_report::render_svg(&figure.scene).into_bytes(),
+            alas_report::render_svg(&embed_globe_textures(&figure.scene)).into_bytes(),
         ));
     }
     write_stored_zip(path, &entries)
@@ -285,8 +449,9 @@ fn write_stored_zip(path: &Path, entries: &[(String, Vec<u8>)]) -> Result<(), Ex
     let parent = path.parent().unwrap_or_else(|| Path::new("."));
     std::fs::create_dir_all(parent)
         .map_err(|source| io_error("create export directory", parent, source))?;
-    let mut file =
-        File::create(path).map_err(|source| io_error("create figure archive", path, source))?;
+    let mut file = std::io::BufWriter::new(
+        File::create(path).map_err(|source| io_error("create figure archive", path, source))?,
+    );
     let mut central_entries = Vec::with_capacity(entries.len());
 
     for (name, contents) in entries {
@@ -360,7 +525,9 @@ fn write_stored_zip(path: &Path, entries: &[(String, Vec<u8>)]) -> Result<(), Ex
     write_u16(&mut file, count, path)?;
     write_u32(&mut file, central_size, path)?;
     write_u32(&mut file, central_offset, path)?;
-    write_u16(&mut file, 0, path)
+    write_u16(&mut file, 0, path)?;
+    file.flush()
+        .map_err(|source| io_error("write figure archive", path, source))
 }
 
 fn write_output(path: &Path, contents: &[u8], operation: &'static str) -> Result<(), ExportError> {
@@ -402,30 +569,55 @@ fn io_error(operation: &'static str, path: &Path, source: io::Error) -> ExportEr
     }
 }
 
-fn write_all(file: &mut File, contents: &[u8], path: &Path) -> Result<(), ExportError> {
+fn write_all(
+    file: &mut std::io::BufWriter<File>,
+    contents: &[u8],
+    path: &Path,
+) -> Result<(), ExportError> {
     file.write_all(contents)
         .map_err(|source| io_error("write figure archive", path, source))
 }
 
-fn write_u16(file: &mut File, value: u16, path: &Path) -> Result<(), ExportError> {
+fn write_u16(
+    file: &mut std::io::BufWriter<File>,
+    value: u16,
+    path: &Path,
+) -> Result<(), ExportError> {
     write_all(file, &value.to_le_bytes(), path)
 }
 
-fn write_u32(file: &mut File, value: u32, path: &Path) -> Result<(), ExportError> {
+fn write_u32(
+    file: &mut std::io::BufWriter<File>,
+    value: u32,
+    path: &Path,
+) -> Result<(), ExportError> {
     write_all(file, &value.to_le_bytes(), path)
 }
 
-fn crc32(bytes: &[u8]) -> u32 {
-    let mut crc = 0xffff_ffff_u32;
-    for byte in bytes {
-        crc ^= u32::from(*byte);
-        for _ in 0..8 {
+const CRC_TABLE: [u32; 256] = {
+    let mut table = [0_u32; 256];
+    let mut index = 0;
+    while index < 256 {
+        let mut crc = index as u32;
+        let mut bit = 0;
+        while bit < 8 {
             crc = if crc & 1 == 0 {
                 crc >> 1
             } else {
                 (crc >> 1) ^ 0xedb8_8320
             };
+            bit += 1;
         }
+        table[index] = crc;
+        index += 1;
+    }
+    table
+};
+
+fn crc32(bytes: &[u8]) -> u32 {
+    let mut crc = 0xffff_ffff_u32;
+    for byte in bytes {
+        crc = CRC_TABLE[usize::from((crc as u8) ^ *byte)] ^ (crc >> 8);
     }
     !crc
 }

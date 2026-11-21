@@ -24,15 +24,21 @@ mod cruise_flight;
 mod cruise_levels;
 mod drag;
 mod frozen_plan;
+mod initial_cruise;
 mod integrate;
 mod ladder_level;
+mod long_range_cruise;
+mod prescribed_level;
 mod profile;
 pub use cruise_levels::CruiseState;
 pub use drag::{CruiseDrag, ParabolicPolar};
 pub use frozen_plan::{
     FreezeError, FrozenMissionPlan, SizingBudget, MISSION_STEP_UNCONVERGED, SIZING_BUDGET_EXHAUSTED,
 };
-pub use integrate::{EnergyLedger, FlownLeg};
+pub(crate) use fuel_burn::gravity_at_altitude;
+pub(crate) use initial_cruise::InitialCruisePoint;
+pub use integrate::{CruiseLadder, CruiseRun, EnergyLedger, FlownLeg, FlownStep, StepPhase};
+pub use long_range_cruise::{LongRangeCruise, LONG_RANGE_CRUISE_SR_FRACTION};
 pub use profile::envelope_limit_m_s;
 
 use std::sync::Arc;
@@ -108,10 +114,10 @@ pub struct SegmentMissionModel {
     /// Last recovered flown altitude per leg, the warm start of the next
     /// recovery search.
     pub(crate) memory: adapt_memory::AdaptationMemory,
-    /// Scatter band of the maximum-cruise thrust (0 with an engine datum)
-    /// when the planner holds its levels under the max-cruise-thrust ceiling
-    /// (jets); `None` for no ceiling (turboprops, the lapse basis).
+    /// Max-cruise-thrust scatter band of the level ceiling; `None`: no ceiling.
     pub cruise_ceiling_band: Option<f64>,
+    /// Wing buffet-onset lift coefficient at the cruise Mach; `None`: unbounded.
+    pub buffet_onset_cl: Option<f64>,
 }
 
 /// Validity limits of the trimmed cruise polar per mission phase.
@@ -151,6 +157,8 @@ pub struct PhaseAeroLimits {
     /// (`alas_config::validation::cruise_point_inside_the_flight_envelope`);
     /// the flown legs never consulted it.
     pub dive_speed_eas_m_s: f64,
+    /// VC of that VD under the type's CS 25.335(b) criterion, m/s EAS.
+    pub cruise_speed_eas_m_s: f64,
 }
 
 impl PhaseAeroLimits {
@@ -164,6 +172,7 @@ impl PhaseAeroLimits {
             landing_delta_cd: config.performance.landing_flap_delta_cd
                 + config.performance.landing_gear_delta_cd,
             dive_speed_eas_m_s: config.requirements.dive_speed_m_s,
+            cruise_speed_eas_m_s: config.requirements.design_cruise_speed_eas_m_s(),
         }
     }
 
@@ -267,6 +276,7 @@ impl SegmentMissionModel {
             budget: None,
             memory: adapt_memory::AdaptationMemory::default(),
             cruise_ceiling_band: None,
+            buffet_onset_cl: None,
         };
         model.validate()?;
         Ok(model)
@@ -452,6 +462,56 @@ impl SegmentMissionModel {
         self
     }
 
+    /// The true airspeed, m/s, a declared cruise rung (a true airspeed declared for
+    /// the configured cruise level) is flown at when the cruise is at `level_m`: the
+    /// rule the priced route applies, so another model can fly the same speed.
+    ///
+    /// # Errors
+    ///
+    /// The atmosphere at either level is unusable, as text.
+    pub fn cruise_speed_at_level(&self, level_m: f64, declared_m_s: f64) -> Result<f64, String> {
+        self.geometry()
+            .cruise_tas_at(level_m, declared_m_s)
+            .map_err(|error| error.to_string())
+    }
+
+    /// The declared cruise rung, m/s (a true airspeed declared for the
+    /// configured cruise level), that flies `tas_m_s` when the cruise is at
+    /// `level_m`: the inverse of [`Self::cruise_speed_at_level`].
+    ///
+    /// Both of that rule's branches below its speed ceiling (the turboprop's
+    /// equivalent-airspeed hold and the jet's Mach hold) are proportional in
+    /// the declared speed, so the inverse is the one ratio. A speed found at
+    /// the flown level and written into the declared field unconverted is
+    /// flown at another dynamic pressure everywhere but the configured level:
+    /// the A400M's long-range cruise found at 8,926 m (187.5 m/s) was flown at
+    /// 160 m/s at 8,840 m because the field means 11,278 m.
+    ///
+    /// # Errors
+    ///
+    /// The atmosphere is unusable, or the speed ceiling of the rule (VMO or
+    /// VC) holds `tas_m_s` at `level_m`, so no declared speed flies it.
+    pub fn declared_cruise_speed_for(&self, level_m: f64, tas_m_s: f64) -> Result<f64, String> {
+        if !(tas_m_s.is_finite() && tas_m_s > 0.0) {
+            return Err(format!("true airspeed {tas_m_s} m/s is unusable"));
+        }
+        let ratio = self.cruise_speed_at_level(level_m, tas_m_s)? / tas_m_s;
+        if !(ratio.is_finite() && ratio > 0.0) {
+            return Err(format!(
+                "the cruise speed rule at {level_m:.0} m has no usable ratio ({ratio})"
+            ));
+        }
+        let declared_m_s = tas_m_s / ratio;
+        let flown_m_s = self.cruise_speed_at_level(level_m, declared_m_s)?;
+        if ((flown_m_s - tas_m_s) / tas_m_s).abs() > 1.0e-9 {
+            return Err(format!(
+                "{tas_m_s:.2} m/s at {level_m:.0} m lies above the cruise speed ceiling \
+                 ({flown_m_s:.2} m/s is flown)"
+            ));
+        }
+        Ok(declared_m_s)
+    }
+
     fn geometry(&self) -> ProfileGeometry<'_> {
         ProfileGeometry {
             profile: &self.profile,
@@ -464,6 +524,7 @@ impl SegmentMissionModel {
             cas_subdivisions: self.cas_subdivisions,
             isa_deviation_c: self.isa_deviation_c,
             dive_speed_eas_m_s: self.phase_limits.dive_speed_eas_m_s,
+            cruise_speed_eas_m_s: self.phase_limits.cruise_speed_eas_m_s,
             constant_mach_cruise: self.propulsion.kind() == super::propulsion::DeckKind::Turbofan,
         }
     }
@@ -542,6 +603,7 @@ fn deck_error(error: DeckError) -> FuelModelError {
 }
 
 mod fuel_burn;
+mod level_acceleration;
 #[cfg(test)]
 mod physics_tests;
 mod takeoff_acceleration;
@@ -611,6 +673,45 @@ mod tests {
 
     fn model() -> (SegmentMissionModel, f64) {
         model_for(&AlasConfig::default(), &DesignVector::default())
+    }
+
+    /// Long-range cruise is the fast side of the specific-range peak: at or
+    /// above the maximum-range speed, at 99 % of the maximum range (within the
+    /// bisection), and the speed it returns flies that range.
+    #[test]
+    fn long_range_cruise_is_ninety_nine_percent_of_the_peak_on_the_fast_side() {
+        let (model, mass) = model();
+        // The synthetic fixture cannot hold the declared cruise level at
+        // 85 % of its takeoff mass: take the first lighter, lower state it can.
+        let (fraction, altitude_m, found) = [(0.85, 1.0), (0.7, 0.85), (0.6, 0.7), (0.5, 0.6)]
+            .into_iter()
+            .find_map(|(fraction, level)| {
+                let altitude_m = level * model.cruise_altitude_m;
+                model
+                    .long_range_cruise(fraction * mass, altitude_m, model.cruise_tas_m_s)
+                    .ok()
+                    .map(|found| (fraction, altitude_m, found))
+            })
+            .expect("a state of the fixture qualifies as cruise");
+        assert!(found.tas_m_s > found.max_range_tas_m_s, "{found:?}");
+        let ratio = found.specific_range_m_kg / found.max_specific_range_m_kg;
+        assert!(
+            (ratio - LONG_RANGE_CRUISE_SR_FRACTION).abs() < 1.0e-6,
+            "ratio {ratio}"
+        );
+        let at = |tas: f64| {
+            model
+                .specific_air_range_m_kg(fraction * mass, altitude_m, tas)
+                .unwrap()
+        };
+        assert!((at(found.tas_m_s) - found.specific_range_m_kg).abs() < 1.0e-9);
+        // The peak is a peak: nothing near it beats it.
+        for factor in [0.97, 0.99, 1.01, 1.03] {
+            assert!(
+                at(factor * found.max_range_tas_m_s)
+                    <= found.max_specific_range_m_kg * (1.0 + 1.0e-9)
+            );
+        }
     }
 
     #[test]
@@ -783,8 +884,7 @@ mod tests {
             alas_atmo::Atmosphere::new(configured_cruise_m),
             alas_atmo::Atmosphere::new(jet.cruise_altitude_m),
         );
-        let vc_m_s =
-            model.phase_limits.dive_speed_eas_m_s / 1.25 / (flown.density() / 1.225).sqrt();
+        let vc_m_s = model.phase_limits.cruise_speed_eas_m_s / (flown.density() / 1.225).sqrt();
         for ((speed, _), declared) in jet.cruise_rungs.iter().zip([
             model.profile.cruise_1_air_speed_m_s,
             model.profile.cruise_2_air_speed_m_s,
@@ -947,6 +1047,7 @@ mod tests {
                 model.departure_elevation_m,
                 mass,
                 model.profile.takeoff_air_speed_m_s,
+                model.profile.takeoff_climb_rate_m_s,
             )
             .expect("the take-off acceleration of the calibrated widebody");
         assert!(acceleration.ledger.kinetic_energy_j > 0.0);
@@ -1212,6 +1313,51 @@ mod tests {
         let taxi = model.taxi_fuel_flow_kg_s().unwrap();
         assert!(cruise > 0.0 && holding > 0.0 && taxi > 0.0);
         assert!(taxi < cruise);
+    }
+
+    /// The declared speed that flies a true airspeed at another level is the
+    /// inverse of the rule that flies a declared speed there, and a speed the
+    /// rule's ceiling holds has no declared speed.
+    #[test]
+    fn a_true_airspeed_at_a_level_converts_to_the_declared_speed_that_flies_it() {
+        let (model, _) = model();
+        for level_m in [model.cruise_altitude_m, 9_000.0, 6_000.0] {
+            let tas_m_s = 0.9
+                * model
+                    .cruise_speed_at_level(level_m, model.cruise_tas_m_s)
+                    .unwrap();
+            let declared = model.declared_cruise_speed_for(level_m, tas_m_s).unwrap();
+            let flown = model.cruise_speed_at_level(level_m, declared).unwrap();
+            assert!(
+                (flown - tas_m_s).abs() <= 1.0e-9 * tas_m_s,
+                "{level_m}: {flown} against {tas_m_s}"
+            );
+        }
+        assert!(model.declared_cruise_speed_for(6_000.0, 400.0).is_err());
+    }
+
+    /// At MTOW the fixture cannot hold FL390 at its declared cruise speed on maximum-cruise
+    /// thrust: normal cruise is then the fastest speed that thrust holds, priced below the
+    /// refused speed, and a heavier aircraft burns more there.
+    #[test]
+    fn normal_cruise_beyond_the_cruise_rating_is_flown_at_maximum_cruise_thrust() {
+        let (model, mtow) = model();
+        let declared_m_s = model
+            .cruise_speed_at_level(model.cruise_altitude_m, model.cruise_tas_m_s)
+            .unwrap();
+        // The lightest mass, in 1 % steps of MTOW, at which the rating refuses the declared speed.
+        let refused = |mass: f64| {
+            model
+                .level_fuel_flow_kg_s(mass, model.cruise_altitude_m, declared_m_s)
+                .is_err()
+        };
+        let heavy_kg = (76..=100)
+            .map(|percent| f64::from(percent) / 100.0 * mtow)
+            .find(|mass| refused(*mass))
+            .expect("precondition: the declared speed is beyond the cruise rating below MTOW");
+        let heavy = model.cruise_fuel_flow_kg_s(heavy_kg).unwrap();
+        let light = model.cruise_fuel_flow_kg_s(0.75 * mtow).unwrap();
+        assert!(heavy.is_finite() && heavy > light, "{heavy} {light}");
     }
 
     /// Fuel, time and flown distance at `steps` per segment.

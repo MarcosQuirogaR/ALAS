@@ -5,9 +5,9 @@
 //!
 //! Torenbeek, Synthesis of Subsonic Airplane Design (1982), Secs. 5.4.5-5.4.6,
 //! pp. 167-170, and Appendix K underpin the propeller model. The BFL equation
-//! uses an energy-equivalent mean acceleration from the integrated 0-to-V2
-//! ground roll in place of the source's 0-to-V1 mean. Rotation and the critical
-//! V1 solution remain preliminary approximations. The mean OEI gradient over
+//! uses the source's mean acceleration from rest to the Eq. 5-88 critical
+//! engine-failure speed V1, integrated over the installed thrust at every roll
+//! speed. Rotation remains a preliminary approximation. The mean OEI gradient over
 //! take-off phases 1..2 follows Torenbeek Eq. 5-90 (0.06 + gamma_2 - gamma_2,min).
 //! These are conceptual
 //! estimates on a level dry hard runway, without wind, clearway or reverse thrust.
@@ -116,8 +116,8 @@ pub fn compute_field_performance_for_propulsion(
     field.v_speeds = reference_speeds(inputs)?;
     match propulsion {
         FieldPropulsion::Jet => {
-            // CS 25.125 landing distance as air, flare and braked-run segments
-            // (Torenbeek 2013, Eqs. 9.21-9.24); replaces the k_land correlation.
+            // CS 25.125 landing distance as air, transition and full-braking
+            // segments (FAA AC 25-7D 4.11); replaces the k_land correlation.
             field.ldr_m = LandingSegmentModel::jet(inputs.config.main_gear_truck_wheels)
                 .distance_m(field.v_speeds.v_app_ms);
             field.bfl_m = field.todr_m;
@@ -303,8 +303,7 @@ fn propeller_takeoff(
         positive("ground-roll acceleration / g", acceleration)?;
         Ok(acceleration)
     };
-    let roll_distance_m = ground_roll_distance_m(speeds.v2_ms, acceleration_g)?;
-    let equivalent_acceleration_g = speeds.v2_ms.powi(2) / (2.0 * G * roll_distance_m);
+    let roll_distance_m = ground_roll_distance_m(speeds.v2_ms, &acceleration_g)?;
     let climb_drag_ratio = (cd0 + polar.induced_drag_factor * cl_v2.powi(2)) / cl_v2;
     let thrust_v2 = thrust_n(speeds.v2_ms)?;
     let all_engine_gradient = thrust_v2 / weight_n - climb_drag_ratio;
@@ -331,8 +330,8 @@ fn propeller_takeoff(
     let stop_g = config.propeller_takeoff_stop_deceleration_g;
     let inertia_m = config.propeller_takeoff_inertia_distance_m / sigma.sqrt();
     // Torenbeek Eq. 5-89, p. 169, before the jet-specific Eq. 5-91
-    // simplification. Replacing the source's 0-to-V1 mean by the integrated
-    // 0-to-V2 energy mean retains thrust lapse but is a preliminary extension.
+    // simplification, with the source's 0-to-V1 mean acceleration (below),
+    // integrated over the installed thrust at every roll speed.
     // The phase 1-2 mean OEI gradient follows Eq. 5-90 (see below); no
     // phase-resolved OEI trajectory is solved.
     // Mean engine-out gradient over phases 1-2 of Eq. 5-86, Torenbeek Eq. 5-90,
@@ -344,9 +343,22 @@ fn propeller_takeoff(
         Some(minimum) => 0.06 + (engine_out_gradient - minimum),
         None => engine_out_gradient,
     };
+    // Eq. 5-89 reads the mean acceleration "(a/g)_0-1" from rest to the
+    // critical engine-failure speed V1 of Eq. 5-88 (same page), with the
+    // equivalent inertia time of the 200 m allowance, 4.5 s:
+    // V1/V2 = [(1 + 2 g h/V2^2) / (1 + gamma/(a/g)_stop)]^(1/2)
+    //         - gamma g (dt - 1) / V2,
+    // held below VR ("the condition that V1 < VR must be satisfied").
+    let energy_ratio = (1.0 + 2.0 * G * screen_height_m / speeds.v2_ms.powi(2))
+        / (1.0 + phase_mean_gradient / stop_g);
+    let v1_m_s = (energy_ratio.sqrt() * speeds.v2_ms
+        - phase_mean_gradient * G * (super::takeoff_field::STOP_INERTIA_TIME_S - 1.0))
+        .clamp(f64::EPSILON, speeds.v_r_ms.min(speeds.v2_ms));
+    let decision_roll_m = ground_roll_distance_m(v1_m_s, &acceleration_g)?;
+    let mean_acceleration_to_v1_g = v1_m_s.powi(2) / (2.0 * G * decision_roll_m);
     let balanced_distance_m = (speeds.v2_ms.powi(2) / (2.0 * G) + screen_height_m)
         / (1.0 + phase_mean_gradient / stop_g)
-        * (1.0 / equivalent_acceleration_g + 1.0 / stop_g)
+        * (1.0 / mean_acceleration_to_v1_g + 1.0 / stop_g)
         + inertia_m;
     // The energy balance with VLOF = V2 supplies the all-engine screen
     // distance, assuming instantaneous rotation. The BFL inertia allowance
@@ -360,7 +372,7 @@ fn propeller_takeoff(
 
 fn ground_roll_distance_m(
     terminal_speed_m_s: f64,
-    acceleration_g: impl Fn(f64) -> Result<f64, String>,
+    acceleration_g: &dyn Fn(f64) -> Result<f64, String>,
 ) -> Result<f64, String> {
     // Composite Simpson integration of Torenbeek Eqs. 5-73/5-74; the fixed
     // even grid is a numerical resolution, not a physical coefficient.
@@ -378,20 +390,18 @@ fn ground_roll_distance_m(
 fn propeller_landing(inputs: FieldInputs<'_>, speeds: VSpeeds) -> Result<f64, String> {
     let config = inputs.config;
     positive(
-        "landing mean excess drag/weight",
-        config.propeller_landing_mean_drag_to_weight,
-    )?;
-    positive(
         "landing mean deceleration",
         config.propeller_landing_deceleration_g,
     )?;
-    // The same segment equations as the jet model (Torenbeek 2013, Eqs.
-    // 9.21-9.24) with this method's own sourced glide parameter
-    // W/(D-T) = 1 / 0.10 (Torenbeek 1982, Eq. 5-93) and mean deceleration.
-    let model = LandingSegmentModel {
-        glide_ratio: 1.0 / config.propeller_landing_mean_drag_to_weight,
-        deceleration_g: config.propeller_landing_deceleration_g,
-    };
+    // The same certification segments as the jet model (FAA AC 25-7D 4.11: air
+    // distance, transition, full braking). Torenbeek (1982) Sec. 5.4.6 p. 170
+    // (Eq. 5-94) defines the mean deceleration "taking into account an equivalent
+    // inertia time", .35 to .45 g for turboprops without reverse: a mean from
+    // touchdown that includes the free roll, restated as a full-braking value plus
+    // the transition at the approach speed of the turboprop class. The mean
+    // (D - T)/W of Eq. 5-93 (`propeller_landing_mean_drag_to_weight`) is no longer
+    // read: the air distance is the AC 25-7D relation.
+    let model = LandingSegmentModel::turboprop(config.propeller_landing_deceleration_g);
     Ok(model.distance_m(speeds.v_app_ms))
 }
 
@@ -403,7 +413,7 @@ mod tests {
     fn integrated_roll_matches_constant_acceleration_energy_balance() -> Result<(), String> {
         let terminal_speed_m_s = 60.0_f64;
         let acceleration_g = 0.20;
-        let integrated = ground_roll_distance_m(terminal_speed_m_s, |_| Ok(acceleration_g))?;
+        let integrated = ground_roll_distance_m(terminal_speed_m_s, &|_| Ok(acceleration_g))?;
         let energy_distance = terminal_speed_m_s.powi(2) / (2.0 * G * acceleration_g);
         // Simpson integrates this linear integrand exactly except for rounding.
         assert!((integrated / energy_distance - 1.0).abs() < 1.0e-13);

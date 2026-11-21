@@ -1,5 +1,5 @@
 // SPDX-License-Identifier: AGPL-3.0-or-later
-// Copyright (C) 2026 Marcos Quiroga Rodriguez
+// Colet y_range = autoscale(series.iter().flat_map(|(pts, _, _)| pts.iter().map(|p| p.1)));yright (C) 2026 Marcos Quiroga Rodriguez
 
 // Ported from alas/reporting/visualization.py
 
@@ -35,12 +35,12 @@ mod velocities;
 
 pub use aero::{figure_mission_aero_coefficients, figure_mission_aero_forces};
 pub use drag::figure_mission_drag_components;
-pub use profile::figure_mission_profile;
+pub use profile::{figure_mission_profile, figure_mission_profile_vs_configured};
 pub use route::figure_mission_route_2d;
 pub use route_3d::{figure_mission_route_3d, route_focused_camera, route_globe_disk};
 pub use velocities::{figure_mission_flight_path, figure_mission_velocities};
 
-use crate::scene::{Axes2D, Color, Scene, SceneElement, Stroke, TextAlign, TextBaseline};
+use crate::scene::{Axes2D, Color, Fill, Scene, SceneElement, Stroke, TextAlign, TextBaseline};
 use crate::theme::Palette;
 use alas_mission::solve::MissionResult;
 use alas_mission::Conditions;
@@ -50,7 +50,7 @@ pub(super) const RHO_SL: f64 = 1.225;
 
 /// Standard gravity, m/s^2: the N -> kgf conversion `export_data.py`'s SFC
 /// column uses.
-pub(super) const G0: f64 = 9.80665;
+pub(super) const G0: f64 = alas_atmo::STANDARD_GRAVITY;
 
 /// Mission time in minutes at one control point, matching `_mission_time_min`
 /// (`np.asarray(mission.time_s) / 60.0`, where `mission.time_s` is the CSV's
@@ -90,23 +90,117 @@ pub(super) fn time_domain(mission: &MissionResult) -> (f64, f64) {
     (0.0, max_t.max(10.0))
 }
 
+/// Fewer finite samples than this keep the plain min/max autoscale.
+const PERCENTILE_MIN_SAMPLES: usize = 100;
+
+/// The full finite extent is kept unless it is wider than this multiple of the 1st-99th
+/// percentile span: such a series is dominated by a few outliers.
+const OUTLIER_SPAN_FACTOR: f64 = 3.0;
+
 /// Autoscale a Y range from data, matplotlib-style: a 5% margin on each side
 /// of the finite extent, falling back to `[0, 1]` when there is no finite
 /// data at all (an empty mission).
+///
+/// The range always contains every finite sample (so no part of a curve is cut
+/// off) unless the series has [`PERCENTILE_MIN_SAMPLES`] or more finite samples
+/// and its full extent exceeds [`OUTLIER_SPAN_FACTOR`] times its 1st-99th
+/// percentile span. Only then is the extent the 1st to 99th percentile, so a few
+/// spikes (near-idle SFC, a numerical outlier) cannot flatten the real trend;
+/// the clipped samples are then marked by [`draw_clipped_markers`].
 pub(super) fn autoscale(values: impl Iterator<Item = f64>) -> (f64, f64) {
-    let (mut lo, mut hi) = (f64::INFINITY, f64::NEG_INFINITY);
-    for v in values {
-        if v.is_finite() {
-            lo = lo.min(v);
-            hi = hi.max(v);
-        }
-    }
-    if !lo.is_finite() || !hi.is_finite() {
+    let mut finite: Vec<f64> = values.filter(|v| v.is_finite()).collect();
+    if finite.is_empty() {
         return (0.0, 1.0);
     }
+    finite.sort_by(f64::total_cmp);
+    let full = (finite[0], finite[finite.len() - 1]);
+    let (lo, hi) = if finite.len() >= PERCENTILE_MIN_SAMPLES {
+        let last = finite.len() - 1;
+        let at = |q: f64| finite[((last as f64) * q).round() as usize];
+        let core = (at(0.01), at(0.99));
+        if full.1 - full.0 > OUTLIER_SPAN_FACTOR * (core.1 - core.0) {
+            core
+        } else {
+            full
+        }
+    } else {
+        full
+    };
     let span = (hi - lo).max(1e-9);
     let pad = span * 0.05;
     (lo - pad, hi + pad)
+}
+
+/// Mark every run of samples that lies beyond the axes' Y range with a small triangle on the
+/// frame edge it left through, so a curve cut by an outlier-robust range is visibly cut rather
+/// than silently truncated.
+fn draw_clipped_markers(axes: &Axes2D, scene: &mut Scene, pts: &[(f64, f64)], color: Color) {
+    let (y_lo, y_hi) = (axes.y_min.min(axes.y_max), axes.y_min.max(axes.y_max));
+    let mut was_out = 0_i8;
+    for &(x, y) in pts {
+        let side = if !y.is_finite() || x < axes.x_min || x > axes.x_max {
+            0
+        } else if y > y_hi {
+            1
+        } else if y < y_lo {
+            -1
+        } else {
+            0
+        };
+        if side != 0 && side != was_out {
+            let [px, _] = axes.map_point(x, y_lo);
+            let (edge, dir) = if side > 0 {
+                (axes.top, 1.0)
+            } else {
+                (axes.top + axes.height, -1.0)
+            };
+            scene.add(SceneElement::Polygon {
+                points: vec![
+                    [px - 3.5, edge + dir * 6.0],
+                    [px + 3.5, edge + dir * 6.0],
+                    [px, edge],
+                ],
+                fill: Some(Fill::new(color)),
+                stroke: None,
+            });
+        }
+        was_out = side;
+    }
+}
+
+/// Draw a label over imagery with a contrasting halo: four offset copies in the
+/// halo colour under the label itself, so it reads on dark ocean and light land.
+pub(super) fn add_halo_text(
+    scene: &mut Scene,
+    text: &str,
+    pos: [f64; 2],
+    font_size: f64,
+    align: TextAlign,
+    baseline: TextBaseline,
+) {
+    let halo = Color::from_hex("#05080f");
+    for (dx, dy) in [(-1.0, 0.0), (1.0, 0.0), (0.0, -1.0), (0.0, 1.0)] {
+        scene.add(SceneElement::Text {
+            text: text.to_owned(),
+            pos: [pos[0] + dx, pos[1] + dy],
+            font_size,
+            color: halo,
+            align,
+            baseline,
+            angle_deg: 0.0,
+            bold: false,
+        });
+    }
+    scene.add(SceneElement::Text {
+        text: text.to_owned(),
+        pos,
+        font_size,
+        color: Color::from_hex("#f4f6fa"),
+        align,
+        baseline,
+        angle_deg: 0.0,
+        bold: false,
+    });
 }
 
 /// Draw a line series, breaking it into separate polylines at any non-finite
@@ -114,20 +208,35 @@ pub(super) fn autoscale(values: impl Iterator<Item = f64>) -> (f64, f64) {
 /// `SFC_kg_kgf_hr` are both undefined where their denominator is zero
 /// (`export_data.py` reports `nan` there too), and a scene's `Polyline` has
 /// no gap primitive of its own to lean on.
-fn add_series_with_gaps(axes: &Axes2D, scene: &mut Scene, pts: &[(f64, f64)], stroke: Stroke) {
+fn add_series_with_gaps(
+    axes: &Axes2D,
+    scene: &mut Scene,
+    pts: &[(f64, f64)],
+    stroke: Stroke,
+    name: Option<&str>,
+) {
+    let draw = |scene: &mut Scene, run: &[(f64, f64)]| {
+        if let Some(name) = name {
+            scene.data_trace.name_next_line(name.to_owned());
+        }
+        axes.add_line_series(scene, run, stroke.clone());
+    };
     let mut run: Vec<(f64, f64)> = Vec::new();
     for &(x, y) in pts {
         if y.is_finite() {
             run.push((x, y));
         } else if !run.is_empty() {
-            axes.add_line_series(scene, &run, stroke.clone());
+            draw(scene, &run);
             run.clear();
         }
     }
     if !run.is_empty() {
-        axes.add_line_series(scene, &run, stroke);
+        draw(scene, &run);
     }
 }
+
+/// One plotted series: its `(x, y)` points, its stroke and an optional recorded name.
+type NamedSeries<'a> = (&'a [(f64, f64)], Stroke, Option<&'a str>);
 
 /// Draw one panel's frame, one or more overlaid series, and a bold
 /// left-aligned title above the axes. This follows the panel-identity convention
@@ -144,11 +253,41 @@ pub(super) fn draw_time_panel_multi(
     title: &str,
     title_font: f64,
 ) -> Axes2D {
-    let y_range = autoscale(series.iter().flat_map(|(pts, _)| pts.iter().map(|p| p.1)));
+    let named: Vec<NamedSeries<'_>> = series
+        .iter()
+        .map(|(pts, stroke)| (*pts, stroke.clone(), None))
+        .collect();
+    draw_time_panel_named(scene, pal, rect, x_range, &named, title, title_font)
+}
+
+/// [`draw_time_panel_multi`] where a series may carry a name its plot data
+/// records for each of its runs.
+pub(super) fn draw_time_panel_named(
+    scene: &mut Scene,
+    pal: &Palette,
+    rect: (f64, f64, f64, f64),
+    x_range: (f64, f64),
+    series: &[NamedSeries<'_>],
+    title: &str,
+    title_font: f64,
+) -> Axes2D {
+    let y_range = autoscale(
+        series
+            .iter()
+            .flat_map(|(pts, _, _)| pts.iter().map(|p| p.1)),
+    );
     let axes = Axes2D::new(rect, x_range, y_range);
     axes.draw_frame(scene, pal);
-    for (pts, stroke) in series {
-        add_series_with_gaps(&axes, scene, pts, stroke.clone());
+    // The stack shares one time axis, drawn once under the bottom panel, and
+    // each panel's title carries its quantity and unit. Record both against
+    // this panel, or plot-data export takes the next panel's title for its
+    // x label (and its unit for the time unit).
+    scene
+        .data_trace
+        .note_labels(&axes, Some("Time (min)"), Some(title));
+    for (pts, stroke, name) in series {
+        add_series_with_gaps(&axes, scene, pts, stroke.clone(), *name);
+        draw_clipped_markers(&axes, scene, pts, stroke.color);
     }
     scene.add(SceneElement::Text {
         text: title.to_owned(),
@@ -305,6 +444,13 @@ mod test_support {
                 true_course_rad: 0.0,
                 temperature_deviation_k: 0.0,
                 number_control_points: n,
+                takeoff_rated: false,
+                rating_limited: false,
+                configuration_delta_cd: 0.0,
+                load_factor: 1.0,
+                entry_speed_m_s: 0.0,
+                exit_speed_m_s: 0.0,
+                speed_profile: Vec::new(),
             },
             numerics: Numerics::default(),
             conditions: cond,
@@ -312,6 +458,8 @@ mod test_support {
             throttle: vec![0.0; n],
             body_angle_rad: vec![0.0; n],
             residuals: vec![[0.0; 2]; n],
+            // Empty on any leg that is not a rating-limited climb.
+            rate_profile_m_s: Vec::new(),
         }
     }
 
@@ -398,6 +546,62 @@ mod tests {
         assert!((hi - 3.1).abs() < 1e-9);
         assert_eq!(autoscale(std::iter::empty()), (0.0, 1.0));
         assert_eq!(autoscale([f64::NAN, f64::NAN].into_iter()), (0.0, 1.0));
+    }
+
+    #[test]
+    fn autoscale_ignores_one_percent_outliers_on_long_series() {
+        let mut values: Vec<f64> = (0..300)
+            .map(|i| 0.55 + 0.0001 * f64::from(i % 10))
+            .collect();
+        values[10] = 400.0;
+        values[200] = -50.0;
+        let (lo, hi) = autoscale(values.into_iter());
+        assert!(lo > 0.4 && hi < 0.7, "{lo} {hi}");
+    }
+
+    #[test]
+    fn autoscale_keeps_a_moderate_spike_inside_the_axes() {
+        // A start-up spike of a few percent of the samples is part of the curve, not an
+        // outlier: the full extent is kept so no part of the line leaves the box.
+        let mut values: Vec<f64> = (0..300)
+            .map(|i| 0.55 + 0.0001 * f64::from(i % 10))
+            .collect();
+        for value in values.iter_mut().take(6) {
+            *value = 0.9;
+        }
+        let (lo, hi) = autoscale(values.into_iter());
+        assert!(lo < 0.55 && hi > 0.9, "{lo} {hi}");
+    }
+
+    #[test]
+    fn clipped_outliers_are_marked_on_the_frame() {
+        let mut values: Vec<f64> = (0..300)
+            .map(|i| 0.55 + 0.0001 * f64::from(i % 10))
+            .collect();
+        values[10] = 400.0;
+        let pts: Vec<(f64, f64)> = values
+            .iter()
+            .enumerate()
+            .map(|(i, &v)| (i as f64 / 30.0, v))
+            .collect();
+        let mut scene = Scene::new(400.0, 300.0, None);
+        let pal = crate::theme::get_palette(Some("dark"));
+        draw_time_panel(
+            &mut scene,
+            pal,
+            (50.0, 40.0, 300.0, 200.0),
+            (0.0, 10.0),
+            &pts,
+            Stroke::new(Color::from_hex("tab:blue"), 1.0),
+            "x",
+            9.0,
+        );
+        let triangles = scene
+            .elements
+            .iter()
+            .filter(|element| matches!(element, SceneElement::Polygon { .. }))
+            .count();
+        assert_eq!(triangles, 1);
     }
 
     #[test]

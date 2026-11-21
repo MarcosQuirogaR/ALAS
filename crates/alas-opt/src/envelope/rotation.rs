@@ -35,6 +35,12 @@ use alas_config::AlasConfig;
 use alas_geom::aircraft::airplane::Airplane;
 use alas_mass::inertia::RadiiOfGyration;
 
+use super::tail_stall::{
+    plain_flap_delta_cl_max, strip_area_fraction, symmetric_thickness,
+    tail_section_chart_excursion, tail_section_cl_max, SEA_LEVEL_KINEMATIC_VISCOSITY_M2_S,
+    SEA_LEVEL_SPEED_OF_SOUND_M_S,
+};
+
 /// Required pitch acceleration at rotation, deg/s^2, for a transport: the
 /// midpoint of Sadraey's transport range. Sadraey, *Aircraft Design: A
 /// Systems Engineering Approach*, Wiley, 2012, ch. 12, sec. 12.3 (elevator
@@ -137,106 +143,21 @@ pub(super) fn elevator_effectiveness(chord_fraction: f64) -> f64 {
     1.0 - (theta - theta.sin()) / std::f64::consts::PI
 }
 
-/// Empirical large-deflection correction to the plain-flap (elevator) lift
-/// effectiveness: the ratio of the real to the linear (thin-airfoil)
-/// angle-of-attack effectiveness at trailing-edge deflection `|delta|` in
-/// degrees, for a flap (elevator) of chord fraction `c_f / c`.
-///
-/// Source: USAF Stability and Control DATCOM (Finck, AFWAL-TR-83-3048,
-/// 1978 revision), sec. 6.1.1.1, Fig. 6.1.1.1-40, "Empirical correction for
-/// lift effectiveness of plain trailing-edge flaps at high flap deflections"
-/// (K'). Digitised by eye from the DTIC ADB072483 scan (leaf n1909), about
-/// +/-0.03 (+/-0.05 between 15 and 25 deg), at c_f/c = 0.25, 0.30, 0.40:
-///
-/// | delta deg | 0.25 | 0.30 | 0.40 |
-/// |---|---|---|---|
-/// | 0-10 | 1.00 | 1.00 | 1.00 |
-/// | 15 | 0.97 | 0.96 | 0.94 |
-/// | 20 | 0.85 | 0.82 | 0.77 |
-/// | 25 | 0.74 | 0.72 | 0.68 |
-/// | 30 | 0.66 | 0.65 | 0.62 |
-/// | 40 | 0.57 | 0.56 | 0.53 |
-///
-/// Linear in both deflection and chord fraction, clamped to the tabulated
-/// chord range and constant beyond 40 deg.
+/// Empirical large-deflection correction `K'` to the plain-flap (elevator)
+/// lift effectiveness at trailing-edge deflection `|delta|` in degrees, for a
+/// flap (elevator) of chord fraction `c_f / c`: USAF DATCOM Fig.
+/// 6.1.1.1-40, as digitised in
+/// [`alas_perf::performance::yaw_balance::large_deflection_effectiveness_factor`],
+/// which the rudder of the yaw balance shares.
 #[must_use]
 pub(super) fn large_deflection_effectiveness_factor(
     deflection_deg: f64,
     chord_fraction: f64,
 ) -> f64 {
-    const DEFLECTIONS: [f64; 7] = [0.0, 10.0, 15.0, 20.0, 25.0, 30.0, 40.0];
-    const CHORDS: [f64; 3] = [0.25, 0.30, 0.40];
-    const FACTORS: [[f64; 7]; 3] = [
-        [1.00, 1.00, 0.97, 0.85, 0.74, 0.66, 0.57],
-        [1.00, 1.00, 0.96, 0.82, 0.72, 0.65, 0.56],
-        [1.00, 1.00, 0.94, 0.77, 0.68, 0.62, 0.53],
-    ];
-    fn interpolate(xs: &[f64], ys: &[f64], x: f64) -> f64 {
-        let x = x.clamp(xs[0], xs[xs.len() - 1]);
-        for i in 1..xs.len() {
-            if x <= xs[i] {
-                return ys[i - 1] + (ys[i] - ys[i - 1]) * (x - xs[i - 1]) / (xs[i] - xs[i - 1]);
-            }
-        }
-        ys[ys.len() - 1]
-    }
-    let delta = if deflection_deg.is_finite() {
-        deflection_deg.abs()
-    } else {
-        DEFLECTIONS[DEFLECTIONS.len() - 1]
-    };
-    let by_chord: Vec<f64> = FACTORS
-        .iter()
-        .map(|row| interpolate(&DEFLECTIONS, row, delta))
-        .collect();
-    let chord = if chord_fraction.is_finite() {
-        chord_fraction
-    } else {
-        CHORDS[CHORDS.len() - 1]
-    };
-    interpolate(&CHORDS, &by_chord, chord)
-}
-
-/// Maximum section lift coefficient of the tail airfoil, `c_l,max`, at the
-/// takeoff-roll Reynolds number (a few million), for the symmetric NACA
-/// four-digit sections a tail uses (Abbott and von Doenhoff, *Theory of
-/// Wing Sections*, 1949, standard-roughness data): 0006 0.9, 0009 1.3,
-/// 0012 1.5, 0015 1.55, 0018 1.5, interpolated linearly in thickness and
-/// clamped at the ends. The values take the lower end of the published
-/// scatter [E]; the figures were not re-read when this was written, so
-/// verify them before treating them as sourced. Any other section (unknown
-/// name, not a symmetric `naca00NN`) takes 1.3, the thin symmetric value.
-#[must_use]
-pub(super) fn tail_section_cl_max(airfoil: &str) -> f64 {
-    const THIN_SYMMETRIC: f64 = 1.3;
-    const TABLE: [(f64, f64); 5] = [
-        (0.06, 0.9),
-        (0.09, 1.3),
-        (0.12, 1.5),
-        (0.15, 1.55),
-        (0.18, 1.5),
-    ];
-    let lower = airfoil.trim().to_ascii_lowercase();
-    let Some(digits) = lower.strip_prefix("naca00") else {
-        return THIN_SYMMETRIC;
-    };
-    let Ok(percent) = digits.parse::<u32>() else {
-        return THIN_SYMMETRIC;
-    };
-    if digits.len() != 2 {
-        return THIN_SYMMETRIC;
-    }
-    let thickness = f64::from(percent) / 100.0;
-    if thickness <= TABLE[0].0 {
-        return TABLE[0].1;
-    }
-    for pair in TABLE.windows(2) {
-        let ((t0, c0), (t1, c1)) = (pair[0], pair[1]);
-        if thickness <= t1 {
-            return c0 + (c1 - c0) * (thickness - t0) / (t1 - t0);
-        }
-    }
-    TABLE[TABLE.len() - 1].1
+    alas_perf::performance::yaw_balance::large_deflection_effectiveness_factor(
+        deflection_deg,
+        chord_fraction,
+    )
 }
 
 /// The horizontal-tail lift at rotation and the terms it is built from.
@@ -254,15 +175,21 @@ pub(super) struct RotationTailLift {
     pub(super) downwash_rad: f64,
     /// Elevator effectiveness times its span fraction.
     pub(super) elevator_effectiveness: f64,
+    /// Elevator term of the tail angle of attack at full up-elevator,
+    /// `tau_e delta_e`, rad (negative).
+    pub(super) elevator_term_rad: f64,
     /// Total tail lift coefficient at rotation, on the tail's own area;
     /// negative (download), limited in magnitude to
     /// [`Self::section_cap`].
     pub(super) lift_coefficient: f64,
     /// The linear (uncapped) tail lift coefficient, negative.
     pub(super) linear_lift_coefficient: f64,
-    /// Largest download coefficient the tail section supports,
-    /// `0.9 c_l,max cos(Lambda_c/4)`, positive.
+    /// Largest download coefficient the tail supports, `0.9 [c_l,max
+    /// cos(Lambda_c/4) + Delta c_l,max (S_e / S_h) cos(Lambda_HL)]`, positive.
     pub(super) section_cap: f64,
+    /// The clean-section part of [`Self::section_cap`] (before the elevator
+    /// increment), positive.
+    pub(super) clean_section_cap: f64,
 }
 
 /// The horizontal tail's lift coefficient at rotation with full up-elevator,
@@ -292,19 +219,21 @@ pub(super) struct RotationTailLift {
 /// - `delta_e,max`: [`MAX_ELEVATOR_UP_DEFLECTION_DEG`], a documented
 ///   class-generic assumption.
 ///
-/// The linear result is then limited to the tail section's stall: the
-/// download cannot exceed `CL_h,max = 0.9 c_l,max cos(Lambda_c/4)` (Raymer,
-/// *Aircraft Design: A Conceptual Approach*, the finite-wing maximum lift
-/// from the section maximum), with `c_l,max` from
-/// [`tail_section_cl_max`]. The cap is the clean-section value: the
-/// elevator's own increment to `c_l,max` is not credited [E], which is
-/// conservative. `None` with no second (tail) wing.
+/// The linear result is then limited to the tail's stall: the download
+/// cannot exceed `CL_h,max = 0.9 [c_l,max cos(Lambda_c/4) + Delta c_l,max
+/// (S_e / S_h) cos(Lambda_HL)]` (Raymer, *Aircraft Design: A Conceptual
+/// Approach*, eq. 12.21, the finite-wing maximum lift from the section
+/// maximum and the flap increment). `c_l,max` and `Delta c_l,max` (the
+/// elevator's own plain-flap increment) are sourced in [`super::tail_stall`]
+/// at the rotation Mach and tail Reynolds numbers of `rotation_speed_m_s`
+/// (ISA sea level). `None` with no second (tail) wing.
 #[must_use]
 pub(super) fn rotation_tail_lift(
     plane: &Airplane,
     config: &AlasConfig,
     ground_z_m: f64,
     cl_ground_attitude: f64,
+    rotation_speed_m_s: f64,
 ) -> Option<RotationTailLift> {
     let wing = plane.wings.first()?;
     let tail = plane.wings.get(1)?;
@@ -318,15 +247,19 @@ pub(super) fn rotation_tail_lift(
         .map(|section| section.chord * section.twist)
         .sum::<f64>()
         / chord_sum;
+    // The handbook slope and the Reynolds length are stated on the theoretical planform.
+    let reference = tail.reference_planform();
     let lift_curve_slope_per_rad = alas_stab::static_stability::datcom(
-        tail.aspect_ratio(),
+        reference.aspect_ratio(),
         tail.mean_sweep_angle(0.25).to_radians(),
         tail.taper_ratio(),
         0.0,
     );
     let wing_aspect_ratio = plane.b_ref * plane.b_ref / plane.s_ref;
-    let ground_effect =
-        wieselsberger_factor(wing.aerodynamic_center(0.25)[2] - ground_z_m, plane.b_ref);
+    let ground_effect = wieselsberger_factor(
+        wing.carried_box().aerodynamic_center(0.25)[2] - ground_z_m,
+        plane.b_ref,
+    );
     let downwash_rad =
         ground_effect * 2.0 * cl_ground_attitude / (std::f64::consts::PI * wing_aspect_ratio);
     let controls = &config.control_surfaces;
@@ -348,9 +281,7 @@ pub(super) fn rotation_tail_lift(
         effectiveness,
         elevator_deg.to_radians(),
     );
-    let section_cap = 0.9
-        * tail_section_cl_max(&config.geometry.empennage.tail_airfoil)
-        * tail.mean_sweep_angle(0.25).to_radians().cos().abs();
+    let (clean_section_cap, section_cap) = tail_download_cap(tail, config, rotation_speed_m_s);
     let lift_coefficient = linear_lift_coefficient.max(-section_cap);
     Some(RotationTailLift {
         lift_curve_slope_per_rad,
@@ -358,10 +289,65 @@ pub(super) fn rotation_tail_lift(
         built_incidence_rad,
         downwash_rad,
         elevator_effectiveness: effectiveness,
+        elevator_term_rad: effectiveness * elevator_deg.to_radians(),
         lift_coefficient,
         linear_lift_coefficient,
         section_cap,
+        clean_section_cap,
     })
+}
+
+/// The horizontal tail's maximum download coefficient (a magnitude) with
+/// full up-elevator at the sea-level speed `speed_m_s`, and the same without
+/// the elevator's increment: `CL_h,max = 0.9 [c_l,max cos(Lambda_c/4) +
+/// Delta c_l,max (S_e / S_h) cos(Lambda_HL)]` (Raymer, *Aircraft Design: A
+/// Conceptual Approach*, eq. 12.21), the section maximum and the elevator's
+/// plain-flap increment of [`super::tail_stall`] at the Mach and tail
+/// Reynolds numbers of that speed (ISA sea level), the elevator at
+/// [`elevator_up_deflection_deg`]. The rotation's transient maximum-elevator
+/// limit only. It is optimistic: a smooth, sealed-gap, ice-free tail at
+/// full deflection, with no margin for recovery. The landing-trim balance
+/// takes Torenbeek's design value [`super::support::SCISSOR_CL_H_MAX`]
+/// instead, which keeps that margin.
+#[must_use]
+pub(super) fn tail_download_cap(
+    tail: &alas_geom::aircraft::wing::Wing,
+    config: &AlasConfig,
+    speed_m_s: f64,
+) -> (f64, f64) {
+    let controls = &config.control_surfaces;
+    let elevator_deg = elevator_up_deflection_deg(config);
+    let mach = speed_m_s / SEA_LEVEL_SPEED_OF_SOUND_M_S;
+    let reynolds = speed_m_s * tail.reference_planform().mean_aerodynamic_chord()
+        / SEA_LEVEL_KINEMATIC_VISCOSITY_M2_S;
+    let airfoil = &config.geometry.empennage.tail_airfoil;
+    let quarter_chord_cos = tail.mean_sweep_angle(0.25).to_radians().cos().abs();
+    if let Some((mach_end, reynolds_end)) = tail_section_chart_excursion(mach, reynolds) {
+        tracing::debug!(
+            mach,
+            reynolds,
+            ?mach_end,
+            ?reynolds_end,
+            "tail section c_l,max is held at the end of its chart, not read from it"
+        );
+    }
+    let clean_section_cap = 0.9 * tail_section_cl_max(airfoil, mach, reynolds) * quarter_chord_cos;
+    let hinge_cos = tail
+        .mean_sweep_angle(1.0 - controls.elevator_chord_fraction)
+        .to_radians()
+        .cos()
+        .abs();
+    let elevator_area_fraction = strip_area_fraction(
+        tail.taper_ratio(),
+        controls.elevator_span_start_frac,
+        controls.elevator_span_end_frac,
+    );
+    let elevator_increment = symmetric_thickness(airfoil).map_or(0.0, |thickness| {
+        plain_flap_delta_cl_max(thickness, controls.elevator_chord_fraction, elevator_deg)
+    });
+    let section_cap =
+        clean_section_cap + 0.9 * elevator_increment * elevator_area_fraction * hinge_cos;
+    (clean_section_cap, section_cap)
 }
 
 /// The tail incidence at rotation, rad (negative is leading edge down, more
@@ -651,7 +637,8 @@ mod tests {
             let ground = super::super::support::ground_z_m(&plane.fuselages[0], &config);
             let cl_ground = config.performance.cl_max_to
                 * config.landing_gear.cl_ground_attitude_frac_of_cl_max_to;
-            let tail = rotation_tail_lift(&plane, &config, ground, cl_ground).expect("a tail");
+            let tail =
+                rotation_tail_lift(&plane, &config, ground, cl_ground, 75.0).expect("a tail");
             match config.landing_gear.takeoff_stabilizer_nose_up_deg {
                 Some(setting) => {
                     assert!(tail.incidence_rad < tail.built_incidence_rad, "{name}");
@@ -663,15 +650,6 @@ mod tests {
         let atr = AlasConfig::from_value(&serde_json::json!({ "preset": "ATR72-600" }))
             .expect("the ATR configures");
         assert_eq!(atr.landing_gear.takeoff_stabilizer_nose_up_deg, None);
-    }
-
-    #[test]
-    fn the_tail_section_cap_follows_the_symmetric_naca_thickness() {
-        assert_eq!(tail_section_cl_max("naca0012"), 1.5);
-        assert_eq!(tail_section_cl_max("NACA0009"), 1.3);
-        assert!((tail_section_cl_max("naca0010") - (1.3 + 0.2 / 3.0)).abs() < 1.0e-12);
-        assert_eq!(tail_section_cl_max("naca2412"), 1.3);
-        assert_eq!(tail_section_cl_max("something"), 1.3);
     }
 
     /// The registered presets' derived tail lift at rotation: the linear
@@ -692,7 +670,8 @@ mod tests {
             let ground = super::super::support::ground_z_m(fuselage, &config);
             let cl_ground = config.performance.cl_max_to
                 * config.landing_gear.cl_ground_attitude_frac_of_cl_max_to;
-            let tail = rotation_tail_lift(&plane, &config, ground, cl_ground).expect("a tail");
+            let tail =
+                rotation_tail_lift(&plane, &config, ground, cl_ground, 75.0).expect("a tail");
             let controls = &config.control_surfaces;
             let span_fraction = (controls.elevator_span_end_frac
                 - controls.elevator_span_start_frac)
@@ -729,6 +708,36 @@ mod tests {
                 "{name}"
             );
             assert!(tail.lift_coefficient < 0.0, "{name}: {tail:?}");
+        }
+    }
+
+    /// Probe: prints the rotation tail-lift terms of every registered preset.
+    #[test]
+    #[ignore = "diagnostic table of all registered presets; prints"]
+    // A probe prints its numbers; it asserts nothing.
+    #[allow(clippy::print_stdout)]
+    fn registered_preset_tail_stall_table() {
+        use alas_geom::builder::AircraftBuilder;
+        for name in alas_config::presets::available() {
+            let config = AlasConfig::from_value(&serde_json::json!({ "preset": name }))
+                .expect("a registered preset configures");
+            let registered = alas_config::presets::get(name).expect("a registered preset");
+            let plane = AircraftBuilder::new(Some(config.geometry.clone()))
+                .build(Some(&registered.design_vector), true)
+                .expect("a registered preset builds");
+            let ground = super::super::support::ground_z_m(&plane.fuselages[0], &config);
+            let cl_ground = config.performance.cl_max_to
+                * config.landing_gear.cl_ground_attitude_frac_of_cl_max_to;
+            if let Some(tail) = rotation_tail_lift(&plane, &config, ground, cl_ground, 78.0) {
+                println!(
+                    "{name}: linear {:.3} cap {:.3} (clean {:.3}) applied {:.3} incidence {:.2} deg",
+                    tail.linear_lift_coefficient,
+                    -tail.section_cap,
+                    -tail.clean_section_cap,
+                    tail.lift_coefficient,
+                    tail.incidence_rad.to_degrees()
+                );
+            }
         }
     }
 }

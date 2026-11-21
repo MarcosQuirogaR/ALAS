@@ -57,6 +57,35 @@ struct PreparedDynamicState {
     alpha_deg: f64,
 }
 
+/// Which gate of [`prepare_trimmed_dynamic_state`] rejected the report, in
+/// the order the gates are tested.
+fn trim_gate_failure(report: &AnalysisReport, config: &AlasConfig) -> String {
+    let Some(trimmed) = report.trimmed_design_point else {
+        return "the trim solve produced no trimmed design point".to_owned();
+    };
+    if !trimmed.geometric_body_alpha_deg.is_finite() || !trimmed.trim_ih_deg.is_finite() {
+        return "trim angle or stabilizer incidence is not finite".to_owned();
+    }
+    if !trimmed.cm_residual.is_finite() {
+        return "the trim pitching-moment residual is not finite".to_owned();
+    }
+    if trimmed.cm_residual.abs() > 1.0e-3 {
+        return format!(
+            "trim pitching-moment residual |Cm| = {:.4} exceeds the 0.001 gate",
+            trimmed.cm_residual.abs()
+        );
+    }
+    if report.physical_cg.iter().any(|value| !value.is_finite()) {
+        return "the physical CG is not finite".to_owned();
+    }
+    let req = &config.requirements;
+    let speed = req.cruise_mach * Atmosphere::new(req.cruise_altitude_m).speed_of_sound();
+    if !speed.is_finite() || speed <= 0.0 {
+        return "the cruise speed is not positive".to_owned();
+    }
+    "component masses are missing or not finite, or the geometry has no wing or fuselage".to_owned()
+}
+
 fn prepare_trimmed_dynamic_state(
     report: &AnalysisReport,
     config: &AlasConfig,
@@ -94,6 +123,7 @@ fn prepare_trimmed_dynamic_state(
         .iter_mut()
         .filter(|wing| wing.name == "Horizontal Stabilizer")
     {
+        wing.twist_about_pitch_axis = true;
         for section in &mut wing.xsecs {
             section.twist = trimmed.trim_ih_deg;
         }
@@ -162,7 +192,10 @@ pub fn figure_dynamic_modes(
     let Some(state) = prepare_trimmed_dynamic_state(report, config) else {
         return super::status_scene(
             "Dynamic Stability Modes",
-            "A valid trimmed cruise state is unavailable; dynamic modes were not evaluated.",
+            &format!(
+                "No valid trimmed cruise state ({}); dynamic modes were not evaluated.",
+                trim_gate_failure(report, config)
+            ),
             pal,
         );
     };
@@ -254,6 +287,7 @@ fn render(modes: &DynamicModes, alpha: f64, pal: &'static crate::theme::Palette)
     );
 
     let mut legend_entries = Vec::new();
+    let mut pending_labels: Vec<(&str, [f64; 2], Color)> = Vec::new();
     for &(key, display, color_hex) in &MODE_STYLE {
         let m = mode_by_key(modes, key);
         let color = Color::from_hex(color_hex);
@@ -281,9 +315,36 @@ fn render(modes: &DynamicModes, alpha: f64, pal: &'static crate::theme::Palette)
             (p[0] + 8.0).clamp(axes.left + 4.0, axes.left + axes.width - 4.0),
             (p[1] - 7.0).clamp(axes.top + 11.0, axes.top + axes.height - 4.0),
         ];
+        pending_labels.push((display, label_pos, color));
+        legend_entries.push((display.to_owned(), LegendMarker::Circle(color)));
+    }
+    // De-collide the pole labels: a label that overlaps an earlier one steps
+    // up (then down) in label-height increments until it is clear.
+    let mut placed: Vec<[f64; 2]> = Vec::new();
+    for (display, mut pos, color) in pending_labels {
+        let text_w = display.chars().count() as f64 * 5.2;
+        let clear = |candidate: [f64; 2], placed: &[[f64; 2]]| {
+            placed.iter().all(|q| {
+                (candidate[0] - q[0]).abs() >= text_w.max(60.0)
+                    || (candidate[1] - q[1]).abs() >= 11.0
+            })
+        };
+        for step in 0..12 {
+            let k = (step / 2 + step % 2) as f64;
+            let sign = if step % 2 == 0 { -1.0 } else { 1.0 };
+            let candidate = [
+                pos[0],
+                (pos[1] + sign * 11.0 * k).clamp(axes.top + 11.0, axes.top + axes.height - 4.0),
+            ];
+            if clear(candidate, &placed) {
+                pos = candidate;
+                break;
+            }
+        }
+        placed.push(pos);
         scene.add(SceneElement::Text {
             text: display.to_owned(),
-            pos: label_pos,
+            pos,
             font_size: 8.0,
             color,
             align: TextAlign::Left,
@@ -291,9 +352,21 @@ fn render(modes: &DynamicModes, alpha: f64, pal: &'static crate::theme::Palette)
             angle_deg: 0.0,
             bold: true,
         });
-        legend_entries.push((display.to_owned(), LegendMarker::Circle(color)));
     }
 
+    // Both axes are symmetric-log: linear inside the threshold, logarithmic
+    // outside it. Without the statement a reader takes the tick spacing for a
+    // linear scale and misreads how far apart the poles are.
+    scene.add(SceneElement::Text {
+        text: format!("Symmetric-log axes, linear within \u{b1}{linthresh:.3} 1/s"),
+        pos: [axes.left + axes.width, axes.top - 6.0],
+        font_size: 8.5,
+        color: Color::from_hex(pal.tick),
+        align: TextAlign::Right,
+        baseline: TextBaseline::Bottom,
+        angle_deg: 0.0,
+        bold: false,
+    });
     scene.add(SceneElement::Text {
         text: "Real part (1/s) \u{2014} damping".to_owned(),
         pos: [axes.left + axes.width / 2.0, axes.top + axes.height + 22.0],
@@ -323,13 +396,14 @@ fn render(modes: &DynamicModes, alpha: f64, pal: &'static crate::theme::Palette)
         9.0,
     );
 
-    render_table(&mut scene, modes, pal, 360.0, 520.0);
+    render_table(&mut scene, modes, pal, 360.0, 528.0);
 
     scene
 }
 
-/// The right panel: a compact monospace mode-summary table, built from
-/// stacked `Text` elements (the primitive set has no multi-line text block).
+/// The right panel: the mode-summary table, one text per cell so every cell is translated on its
+/// own and the columns line up. Columns: mode, period of the oscillation (or time constant is not
+/// given: a real root has no period), damping ratio of the complex pair, stability.
 fn render_table(
     scene: &mut Scene,
     modes: &DynamicModes,
@@ -337,33 +411,46 @@ fn render_table(
     x: f64,
     y: f64,
 ) {
-    let mut lines = Vec::new();
-    for &(key, display, _) in &MODE_STYLE {
-        let m = mode_by_key(modes, key);
-        let period_str = if m.period_s > 0.0 {
-            format!("{:.1}s", m.period_s)
-        } else {
-            "n/a".to_owned()
-        };
-        let status = if m.stable { "Stable" } else { "Unstable" };
-        lines.push(format!(
-            "{display} | {period_str} | {:.3} | {status}",
-            m.damping_ratio
-        ));
-    }
-
-    let line_h = 16.0;
-    for (i, line) in lines.iter().enumerate() {
+    // Column gaps fit the widest cell ("Damping ratio ζ") at 11 pt.
+    let column_x = [x, x + 150.0, x + 235.0, x + 375.0];
+    let line_h = 17.0;
+    let mut cell = |col: usize, row: usize, text: String, bold: bool| {
         scene.add(SceneElement::Text {
-            text: line.clone(),
-            pos: [x, y + (i as f64) * line_h],
+            text,
+            pos: [column_x[col], y + (row as f64) * line_h],
             font_size: 11.0,
             color: Color::from_hex(pal.title),
             align: TextAlign::Left,
             baseline: TextBaseline::Top,
             angle_deg: 0.0,
-            bold: false,
+            bold,
         });
+    };
+    for (col, header) in ["Mode", "Period", "Damping ratio \u{3b6}", "Status"]
+        .into_iter()
+        .enumerate()
+    {
+        cell(col, 0, header.to_owned(), true);
+    }
+    for (i, &(key, display, _)) in MODE_STYLE.iter().enumerate() {
+        let m = mode_by_key(modes, key);
+        let period_str = if m.period_s > 0.0 {
+            format!("{:.1} s", m.period_s)
+        } else {
+            "n/a".to_owned()
+        };
+        let status = if m.stable { "Stable" } else { "Unstable" };
+        // A real root is not an oscillation: its damping ratio is undefined.
+        let zeta = if m.eigenvalue_imag.abs() > 1e-9 {
+            format!("{:.3}", m.damping_ratio)
+        } else {
+            "n/a".to_owned()
+        };
+        let row = i + 1;
+        cell(0, row, display.to_owned(), false);
+        cell(1, row, period_str, false);
+        cell(2, row, zeta, false);
+        cell(3, row, status.to_owned(), false);
     }
 }
 

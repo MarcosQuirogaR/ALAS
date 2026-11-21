@@ -146,3 +146,106 @@ fn degenerate_loadings_do_not_invent_a_flight() {
     assert!(mid_cruise_mass_of_loading_kg(f64::INFINITY, 10_000.0, &plan).is_nan());
     assert!(mid_cruise_mass_of_loading_kg(200_000.0, f64::NAN, &plan).is_nan());
 }
+
+/// The analysed loading flies all of its fuel but the reserves, whatever the
+/// range the reserve plan was priced over: a loading heavier in fuel than
+/// that plan burns the surplus too, a lighter one burns less, and the fuel
+/// left on landing is the reserves of the trip flown.
+#[test]
+fn a_loading_flies_its_own_fuel_down_to_the_reserves() {
+    let plan = route_plan(40_000.0);
+    let takeoff_kg = 230_000.0;
+    for surplus_kg in [6_000.0, 0.0, -8_000.0] {
+        let loaded_kg = plan.takeoff_fuel_kg() + surplus_kg;
+        let Some(mass) = cruise_mass_of_loading_with_plan(takeoff_kg, loaded_kg, 9.0e6, &plan)
+        else {
+            panic!("a finite loading has a mid-cruise mass");
+        };
+        assert_eq!(
+            mass.mid_cruise_mass_kg,
+            mid_cruise_mass_of_loading_kg(takeoff_kg, loaded_kg, &plan)
+        );
+        let trip_kg = trip_fuel_of_loading_kg(loaded_kg, &plan);
+        assert!((mass.trip_fuel_kg - trip_kg).abs() < 1.0e-6, "{surplus_kg}");
+        assert_eq!(surplus_kg > 0.0, mass.trip_fuel_kg > plan.trip.kg + 1.0);
+        let left_kg = landing_fuel_after_trip_kg(&plan, mass.trip_fuel_kg);
+        assert!(
+            (mass.landing_fuel_kg - left_kg).abs() < 1.0e-6,
+            "{surplus_kg}"
+        );
+        assert_eq!(mass.reserve_plan_range_m, 9.0e6);
+    }
+    assert!(cruise_mass_of_loading_with_plan(f64::NAN, 50_000.0, 9.0e6, &plan).is_none());
+    assert!(cruise_mass_of_loading_with_plan(takeoff_kg, f64::NAN, 9.0e6, &plan).is_none());
+    assert!(cruise_mass_of_loading_with_plan(-1.0, 50_000.0, 9.0e6, &plan).is_none());
+}
+
+/// The mid-cruise mass is flown in the cruise segment begun at or above it:
+/// a mass between two step starts is at the earlier step's level, a mass at
+/// a step start is already at that step's level, a mass heavier than the
+/// first segment's start is at the initial level, and a plan with no cruise
+/// segment has no level.
+#[test]
+fn the_mid_cruise_mass_is_flown_at_the_level_of_its_segment() {
+    use crate::mdo::mission_model::CruiseState;
+    let state = |altitude_m: f64, tas_m_s: f64, mass_kg: f64| CruiseState {
+        altitude_m,
+        tas_m_s,
+        mass_kg,
+    };
+    let states = [
+        state(9_144.0, 236.0, 250_000.0),
+        state(9_753.6, 233.0, 230_000.0),
+        state(10_363.2, 230.0, 210_000.0),
+    ];
+    assert_eq!(level_flown_at_mass_m(&states, 240_000.0), Some(9_144.0));
+    assert_eq!(level_flown_at_mass_m(&states, 230_000.0), Some(9_753.6));
+    assert_eq!(level_flown_at_mass_m(&states, 220_000.0), Some(9_753.6));
+    assert_eq!(level_flown_at_mass_m(&states, 200_000.0), Some(10_363.2));
+    assert_eq!(level_flown_at_mass_m(&states, 260_000.0), Some(9_144.0));
+    assert_eq!(level_flown_at_mass_m(&[], 230_000.0), None);
+    // The flown state is the whole segment's: its own speed, not one read
+    // at the level.
+    assert_eq!(state_flown_at_mass(&states, 220_000.0), Some(states[1]));
+    assert_eq!(state_flown_at_mass(&states, 260_000.0), Some(states[0]));
+    assert_eq!(state_flown_at_mass(&[], 230_000.0), None);
+}
+
+/// The C295's design mission is payload-defined (its range is the closure's
+/// output at the certified MTOW), so a loading no closure flew has no design
+/// range to price its reserves over; its own mission is a range search on
+/// the design mission's model and reserve rule, which need no range. The
+/// baseline's cruise point therefore stands at a level its mission flies
+/// (runs-r4: it stood at the 6,100 m design altitude, no legal level, with
+/// the reason in tracing only), at the speed its schedule flies there.
+#[test]
+fn a_payload_defined_design_mission_still_places_a_loading_at_a_flown_level() {
+    let name = "C295";
+    let config =
+        alas_config::AlasConfig::from_value(&serde_json::json!({ "preset": name })).unwrap();
+    let design = alas_config::presets::get(name).unwrap().design_vector;
+    let assessment = crate::mdo::assess_product_candidate(&config, &design).unwrap();
+    let sized = &assessment.sized;
+    assert!(
+        sized.takeoff_loading.is_some(),
+        "the baseline is analysed at a declared loading"
+    );
+    let artifacts = &sized.fuel_artifacts;
+    let range = super::super::sizing::candidate_model::design_mission_model(&config, artifacts);
+    assert!(range.is_err(), "the design range stays the closure's output");
+    let (_, range_m, _) =
+        super::super::sizing::candidate_model::design_mission_flight(&config, artifacts).unwrap();
+    assert!(range_m.is_err());
+    let point = mid_cruise_point(&config, sized).unwrap();
+    let req = &config.requirements;
+    // A legal flight level (whole hundreds of feet) at or below the design
+    // altitude, not the 6,100 m design altitude itself.
+    let feet = point.altitude_m / 0.3048;
+    assert!((feet - (feet / 100.0).round() * 100.0).abs() < 1.0e-3, "{feet} ft");
+    assert!(point.altitude_m <= req.cruise_altitude_m + 1.0);
+    assert!(point.tas_m_s > 0.0 && point.mach > 0.0);
+    // The Mach is on the mission's day (the departure's ISA deviation), within
+    // a few per cent of the standard day's.
+    let sound = alas_atmo::us1976_compute_values(point.altitude_m, 0.0).speed_of_sound_m_s;
+    assert!((point.mach - point.tas_m_s / sound).abs() < 0.05 * point.mach);
+}

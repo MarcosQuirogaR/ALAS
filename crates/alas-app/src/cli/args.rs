@@ -4,7 +4,7 @@
 //! Argument parsing, help text and configuration loading.
 
 use std::fs;
-use std::path::PathBuf;
+use std::path::{Path, PathBuf};
 
 use alas_config::AlasConfig;
 use alas_exec::ToolPreferences;
@@ -49,6 +49,33 @@ pub struct CliArgs {
     pub save_config: Option<PathBuf>,
     /// Download any missing/truncated navigation-data files and exit.
     pub download_navdata: bool,
+    /// Show the external-tool install plan; install it when `--yes` is also given.
+    pub install_tools: bool,
+    /// Consent to the plan shown by `--install-tools` without a prompt.
+    pub assume_yes: bool,
+    /// Remove one installer-managed external tool by id and exit.
+    pub uninstall_tool: Option<String>,
+    /// Serve the Model Context Protocol (JSON-RPC 2.0) over stdin and stdout.
+    pub mcp: bool,
+    /// Folder the stdio server reads and writes in; default
+    /// `<user data>/automation`.
+    pub workspace: Option<PathBuf>,
+    /// Honour program and tool folders named by `--config` (default: ignore
+    /// them and use the tool preferences).
+    pub trust_config_tool_paths: bool,
+    /// Let this run request its route from the SimBrief service for
+    /// `mission.simbrief_username` (default: no network request).
+    pub live_dispatch: bool,
+    /// Analyse a named aircraft preset instead of the default configuration.
+    pub preset: Option<String>,
+    /// Run only these physics stages (and the stages they need), comma
+    /// separated: geometry, mass, aero, stability, field, mission,
+    /// structures, feasibility (alias gate). See `alas_pipeline::partial`.
+    pub only: Option<String>,
+    /// Folder of the partial-run result cache (default: `<output>/.alas-cache`).
+    pub cache_dir: Option<PathBuf>,
+    /// Recompute every stage of a partial run and overwrite its cache entries.
+    pub refresh_cache: bool,
 }
 
 impl Default for CliArgs {
@@ -71,6 +98,17 @@ impl Default for CliArgs {
             quiet: false,
             save_config: None,
             download_navdata: false,
+            install_tools: false,
+            assume_yes: false,
+            uninstall_tool: None,
+            mcp: false,
+            workspace: None,
+            trust_config_tool_paths: false,
+            live_dispatch: false,
+            preset: None,
+            only: None,
+            cache_dir: None,
+            refresh_cache: false,
         }
     }
 }
@@ -144,6 +182,32 @@ pub fn parse_args(args: &[String]) -> Result<Option<CliArgs>, String> {
                 cli.save_config = Some(PathBuf::from(val));
             }
             "--download-navdata" => cli.download_navdata = true,
+            "--install-tools" => cli.install_tools = true,
+            "--yes" => cli.assume_yes = true,
+            "--uninstall-tool" => {
+                let val = flag_value(&mut iter, "--uninstall-tool")?;
+                cli.uninstall_tool = Some(val.to_owned());
+            }
+            "--mcp" => cli.mcp = true,
+            "--trust-config-tool-paths" => cli.trust_config_tool_paths = true,
+            "--live-dispatch" => cli.live_dispatch = true,
+            "--preset" => {
+                let val = flag_value(&mut iter, "--preset")?;
+                cli.preset = Some(val.to_owned());
+            }
+            "--only" => {
+                let val = flag_value(&mut iter, "--only")?;
+                cli.only = Some(val.to_owned());
+            }
+            "--cache-dir" => {
+                let val = flag_value(&mut iter, "--cache-dir")?;
+                cli.cache_dir = Some(PathBuf::from(val));
+            }
+            "--refresh-cache" => cli.refresh_cache = true,
+            "--workspace" => {
+                let val = flag_value(&mut iter, "--workspace")?;
+                cli.workspace = Some(PathBuf::from(val));
+            }
             unknown if unknown.starts_with('-') => {
                 return Err(format!("unknown option: {unknown}"));
             }
@@ -152,6 +216,18 @@ pub fn parse_args(args: &[String]) -> Result<Option<CliArgs>, String> {
         }
     }
 
+    if cli.preset.is_some() && cli.config.is_some() {
+        return Err(
+            "--preset and --config are exclusive: name the preset inside the config file"
+                .to_owned(),
+        );
+    }
+    if (cli.cache_dir.is_some() || cli.refresh_cache) && cli.only.is_none() {
+        return Err("--cache-dir and --refresh-cache only apply with --only".to_owned());
+    }
+    if cli.workspace.is_some() && !cli.mcp {
+        return Err("--workspace only applies with --mcp".to_owned());
+    }
     Ok(Some(cli))
 }
 
@@ -186,24 +262,54 @@ pub(super) fn help_text() -> String {
     line("      --quiet               Reduce console logging");
     line("      --save-config <PATH>  Write effective configuration to YAML and exit");
     line("      --download-navdata    Download missing navigation-data files and exit");
+    line("      --install-tools       Show the external-tool install plan; with --yes, download and install");
+    line("      --yes                 Consent to the plan shown by --install-tools");
+    line("      --uninstall-tool <ID> Remove one installer-managed external tool and exit");
+    line("      --trust-config-tool-paths  Run the programs a --config file names (MSES, NASTRAN, Patran folders); without it they come from the tool preferences");
+    line("      --live-dispatch       Fetch the route from SimBrief (www.simbrief.com) for the account in mission.simbrief_username; without it no request is made and --save-config leaves the account out");
+    line("      --mcp                 Serve the Model Context Protocol (JSON-RPC 2.0) on stdin/stdout");
+    line("      --workspace <DIR>     Folder --mcp reads and writes in (default: <user data>/automation)");
+    line("      --preset <NAME>       Analyse a registered aircraft preset (e.g. A320-200, C295)");
+    line("      --only <STAGES>       Run only these physics stages and what they need, comma separated:");
+    line("                            geometry, mass, aero, stability, field, mission, structures, feasibility (gate);");
+    line("                            prints a JSON summary and writes <output>/partial_run.json");
+    line("      --cache-dir <DIR>     Partial-run cache folder (default: <output>/.alas-cache)");
+    line("      --refresh-cache       Recompute every stage of a partial run and overwrite the cache");
     line("  -h, --help                Display this help message");
+    line("");
+    line("Exit codes: 0 accepted design delivered; 1 crash, usage or configuration error;");
+    line(
+        "            2 unknown --only stage; 3 run completed but no accepted design was delivered",
+    );
+    line("            (verdict NOT ACCEPTED or physical status INFEASIBLE; output files are written).");
     text
+}
+
+/// Read a configuration document as written: JSON for a `.json` file, YAML
+/// (a superset) for anything else.
+pub(crate) fn read_config_document(path: &Path) -> Result<serde_json::Value, String> {
+    let content = fs::read_to_string(path)
+        .map_err(|e| format!("failed to read config file {}: {e}", path.display()))?;
+    if path.extension().and_then(|s| s.to_str()) == Some("json") {
+        serde_json::from_str(&content).map_err(|e| format!("failed to parse config JSON: {e}"))
+    } else {
+        serde_yaml::from_str(&content).map_err(|e| format!("failed to parse config YAML: {e}"))
+    }
 }
 
 /// Load configuration from file (YAML/JSON) or defaults, applying CLI overrides.
 pub fn load_config(args: &CliArgs) -> Result<AlasConfig, String> {
     let mut config = if let Some(ref path) = args.config {
-        let content = fs::read_to_string(path)
-            .map_err(|e| format!("failed to read config file {}: {e}", path.display()))?;
-        let value: serde_json::Value = if path.extension().and_then(|s| s.to_str()) == Some("json")
-        {
-            serde_json::from_str(&content)
-                .map_err(|e| format!("failed to parse config JSON: {e}"))?
-        } else {
-            serde_yaml::from_str(&content)
-                .map_err(|e| format!("failed to parse config YAML: {e}"))?
-        };
-        crate::config_load::load_config_value(&value)?
+        crate::config_load::load_config_value(&read_config_document(path)?)?
+    } else if let Some(name) = args.preset.as_deref() {
+        // An unknown name would otherwise fall back to the default aircraft.
+        alas_config::presets::get(name).map_err(|_| {
+            format!(
+                "unknown preset `{name}`; available: {}",
+                alas_config::presets::available().join(", ")
+            )
+        })?;
+        crate::config_load::load_config_value(&serde_json::json!({ "preset": name }))?
     } else {
         AlasConfig::default()
     };
@@ -225,7 +331,7 @@ pub fn load_config(args: &CliArgs) -> Result<AlasConfig, String> {
 /// Apply persisted machine-tool locations when no explicit config file owns
 /// those settings. A project config must remain authoritative over machine
 /// preferences, just as it is in the GUI's configuration flow.
-pub(super) fn apply_cli_tool_preferences(
+pub(crate) fn apply_cli_tool_preferences(
     config: &mut AlasConfig,
     preferences: &ToolPreferences,
     use_persisted_preferences: bool,
@@ -252,4 +358,40 @@ pub(super) fn apply_cli_tool_preferences(
     if let Some(path) = &preferences.routes_dir {
         config.mission.routes_dir.clone_from(path);
     }
+}
+
+/// Reset every program and solver-folder location of a configuration file to
+/// its default, so the tool preferences decide which programs run. Returns the
+/// names of the fields that differed from the default.
+pub(crate) fn discard_config_tool_paths(config: &mut AlasConfig) -> Vec<&'static str> {
+    let defaults = AlasConfig::default();
+    let mut discarded = Vec::new();
+    macro_rules! reset {
+        ($name:literal, $($field:tt)+) => {
+            if config.$($field)+ != defaults.$($field)+ {
+                config.$($field)+ = defaults.$($field)+.clone();
+                discarded.push($name);
+            }
+        };
+    }
+    reset!("mses.mses_dir", mses.mses_dir);
+    reset!("structures.nastran_exe_path", structures.nastran_exe_path);
+    reset!(
+        "structures.nastran_solver_path",
+        structures.nastran_solver_path
+    );
+    reset!(
+        "structures.nastran95_dir_path",
+        structures.nastran95_dir_path
+    );
+    reset!(
+        "structures.nastran95_runtime_path",
+        structures.nastran95_runtime_path
+    );
+    reset!(
+        "structures.nastran95_rf_stage_path",
+        structures.nastran95_rf_stage_path
+    );
+    reset!("structures.patran_exe_path", structures.patran_exe_path);
+    discarded
 }

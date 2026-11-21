@@ -123,7 +123,9 @@ back to `cargo test` and cannot separate the heavy tests.
 cargo xtask gate --quick           # every change: checks, fmt, lints and fast tests of affected packages
 cargo xtask gate                   # phase integration and CI: everything
 cargo xtask gate --integration     # only the heavy tier (alias: --slow)
-cargo nextest run                  # the fast dev-loop tier alone
+cargo nextest run                  # the fast dev-loop tier alone (profile `fast` is the same filter)
+cargo xtask test-affected [--base <ref>]   # fast tests of the changed packages and their reverse dependencies only
+cargo nextest run --profile merge # fast + medium: what a merge runs (everything but integration and nightly)
 cargo nextest run -p alas-pipeline # the fast tier of one crate
 cargo nextest run --profile integration   # the heavy tier: all-preset replays, acceptance, staged searches
 cargo nextest run --profile full   # every test
@@ -182,14 +184,14 @@ changes results.
   The shipped `release` profile is unchanged.
 * **`cargo xtask dev-env`** prints the settings above for the shell to
   evaluate, so a fresh shell or worktree needs one line:
-  `cargo xtask dev-env --target-dir <target-root>/<lane> | Invoke-Expression`
+  `cargo xtask dev-env --target-dir <target-dir> | Invoke-Expression`
   (PowerShell; `--shell sh` prints `export` lines instead). It sets
   `CARGO_TARGET_X86_64_PC_WINDOWS_MSVC_LINKER=rust-lld` on Windows, optionally
-  `CARGO_TARGET_DIR` (use one target directory per lane, reused across that
-  lane's commits) and, with `--sccache`, `RUSTC_WRAPPER=sccache` plus
+  `CARGO_TARGET_DIR` (use one target directory per checkout, reused across that
+  checkout's commits) and, with `--sccache`, `RUSTC_WRAPPER=sccache` plus
   `CARGO_INCREMENTAL=0`. `cargo xtask dev-env --run -- cargo build --profile
   harness -p alas-acceptance --bins` applies it to one command only. Pass
-  `-j N` so the total thread count of all concurrent lanes stays within the
+  `-j N` so the total thread count of all concurrent builds stays within the
   host's budget.
 
 ### Native preset matrix
@@ -252,14 +254,6 @@ a project-completion tracker any more, since orchestration layers such as
 `alas-pipeline` and `alas-gui` were written natively rather than translated.
 
 ---
-
-### Optional Earth texture
-
-Globe and map figures use the plain vector globe and flat map by default. ALAS
-does not ship an Earth raster. To add a texture, set `ALAS_EARTH_TEXTURE` to the
-path of a local equirectangular PNG (2:1, for example a copy of the NASA Blue
-Marble, which is public domain). It is read once per process; if it is unset or
-unreadable, figures render without the texture and a warning is printed.
 
 ## Running the application
 
@@ -371,9 +365,11 @@ focused when the list opens.
 
 ## Backing up
 
-The repository has no remote, by design. To write a full copy into OneDrive:
+The repository has no remote, by design. To write a full copy into a synced folder, set
+`ALAS_BACKUP_DIR` to that folder and run:
 
 ```powershell
+$env:ALAS_BACKUP_DIR = 'C:/path/to/synced/folder'
 cargo xtask backup
 ```
 

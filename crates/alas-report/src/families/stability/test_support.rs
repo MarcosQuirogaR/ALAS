@@ -102,6 +102,7 @@ pub fn probe_report(airplane: Airplane) -> AnalysisReport {
         polar: PolarSweep {
             alpha_deg: vec![-2.0, 0.0, 2.0, 4.0, 6.0],
             geometric_alpha_deg: vec![-2.0, 0.0, 2.0, 4.0, 6.0],
+            compressible_mach: None,
             cl: vec![-0.1, 0.15, 0.4, 0.65, 0.9],
             cd: vec![0.02, 0.02, 0.025, 0.03, 0.04],
             cd_induced: vec![0.001, 0.002, 0.006, 0.012, 0.02],

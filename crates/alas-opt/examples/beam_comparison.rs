@@ -104,6 +104,7 @@ fn main() -> Result<(), Box<dyn Error>> {
         let rib = materials::get(&cfg.rib_material)?;
         let stations = sizing_stations(&geometry, cfg);
         let (front, rear) = box_chord_band(&geometry);
+        let fuel_density_kg_m3 = alas_mass::tanks::inventory_density_kg_m3(&config);
         let declared = alas_mass::wing_reconciliation::declared_wing_fuel_case(
             &config, &design, &req, &geometry, &stations, front, rear,
         );
@@ -112,7 +113,11 @@ fn main() -> Result<(), Box<dyn Error>> {
             .map(|case| case.running_mass_kg_m.clone())
             .unwrap_or_else(|| {
                 alas_struct::tanks::integral_fuel_running_mass_kg_m(
-                    &geometry, &stations, front, rear,
+                    &geometry,
+                    &stations,
+                    front,
+                    rear,
+                    fuel_density_kg_m3,
                 )
             });
         let fuel_scope = declared
@@ -141,6 +146,7 @@ fn main() -> Result<(), Box<dyn Error>> {
             cap,
             rib,
             &fuel_scope,
+            fuel_density_kg_m3,
             &mounted,
         );
         let raw = scoped.sizing;

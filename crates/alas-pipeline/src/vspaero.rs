@@ -230,7 +230,8 @@ pub fn run_vspaero_analysis(
     // OpenMP threads: ALAS_VSPAERO_THREADS, else logical cores divided by
     // ALAS_CONCURRENT_JOBS (the former fixed 4 left a 16-thread host idle).
     let threads = RuntimeSettings::current().vspaero_thread_count();
-    let process = run_vspaero(executable, &result.case_path, threads, timeout_seconds);
+    let deadline_s = sweep_deadline_seconds(timeout_seconds, request.alpha_deg.len());
+    let process = run_vspaero(executable, &result.case_path, threads, deadline_s);
     match process.status {
         VspaeroProcessStatus::InputMissing => {
             result.status = VspaeroAnalysisStatus::GeometryUnavailable;
@@ -410,6 +411,32 @@ pub fn classify_vspaero_comparison(
     }
 }
 
+/// Hang-guard seconds allowed per requested angle of attack.
+///
+/// Each angle is an independent cold-started free-wake solve. With the
+/// span-proportional main-wing lattice (`openvsp::emit`, 6 800 loops for the
+/// A320) one angle took 71 s on 3 threads; the default lattice took
+/// 190 to 210 s on 16 threads under load. The guard is about four times the
+/// 3-thread solve; a real hang is caught earlier by the executor's no-output
+/// limit.
+pub const VSPAERO_GUARD_SECONDS_PER_ALPHA: f64 = 300.0;
+
+/// The overall VSPAERO deadline: the caller's floor, raised to the per-angle
+/// guard times the number of angles in the sweep. A fixed deadline cut a
+/// slow but progressing sweep off (nine angles at 200 s each already fill
+/// the former 1 800 s), so the guard must grow with the work requested.
+pub fn sweep_deadline_seconds(floor_seconds: f64, alpha_count: usize) -> f64 {
+    // Alpha counts are tens at most; the conversion is exact.
+    #[allow(clippy::cast_precision_loss)]
+    let per_sweep = VSPAERO_GUARD_SECONDS_PER_ALPHA * alpha_count as f64;
+    if floor_seconds.is_finite() && floor_seconds > 0.0 {
+        floor_seconds.max(per_sweep)
+    } else {
+        // An invalid caller value is reported by the executor unchanged.
+        floor_seconds
+    }
+}
+
 /// Number of VSPAERO alpha points in the reduced matrix profile.
 pub const MATRIX_VSPAERO_ALPHA_POINTS: usize = 5;
 
@@ -443,6 +470,13 @@ mod tests {
             vec![-4.0, 0.0, 3.0, 7.0, 10.0]
         );
         assert_eq!(external_alpha_schedule(&full, FidelityProfile::Full), full);
+        // The hang guard grows with the sweep and never drops below the floor.
+        assert_eq!(sweep_deadline_seconds(1800.0, 1), 1800.0);
+        assert_eq!(
+            sweep_deadline_seconds(1800.0, 9),
+            9.0 * VSPAERO_GUARD_SECONDS_PER_ALPHA
+        );
+        assert!(sweep_deadline_seconds(f64::NAN, 9).is_nan());
         let short = [0.0, 1.0, 2.0];
         assert_eq!(
             external_alpha_schedule(&short, FidelityProfile::Matrix),

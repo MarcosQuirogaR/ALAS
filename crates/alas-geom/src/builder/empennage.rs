@@ -8,6 +8,10 @@
 use alas_config::DesignVector;
 
 use super::fin_root::{FinSeat, FinTrapezoid};
+use super::tail_edges::{
+    reference_fin_end, with_drawn_edges, with_reference_fin_to, with_section_thickness,
+    StraightTail,
+};
 use super::tail_planform::hstab_planform;
 use super::{mesh, tail_attachment, AircraftBuilder, BuildError, GeometryContract};
 use crate::aircraft::airfoil::Airfoil;
@@ -51,11 +55,29 @@ impl AircraftBuilder {
         if !meshed {
             return Ok(wing);
         }
-        Ok(mesh::for_contract(
-            self.geometry_contract,
-            &wing,
-            g.n_subdivisions,
-        )?)
+        let wing = mesh::for_contract(self.geometry_contract, &wing, g.n_subdivisions)?;
+        if self.geometry_contract != GeometryContract::Product {
+            return Ok(wing);
+        }
+        let root_le_m = [
+            x_hstab + planform.root_shift_m[0],
+            0.0,
+            z_hstab + planform.root_shift_m[2],
+        ];
+        let line = StraightTail {
+            root_le_m,
+            root_chord_m: planform.root_chord_m,
+            root_twist_deg: planform.root_twist_deg,
+            tip_le_m: [
+                root_le_m[0] + planform.tip_le_m[0],
+                planform.tip_le_m[1],
+                root_le_m[2] + planform.tip_le_m[2],
+            ],
+            tip_chord_m: g.hstab_tip_chord_m * ts,
+            tip_twist_deg: g.hstab_tip_twist_deg,
+            span_axis: 1,
+        };
+        with_drawn_edges(wing, &g.hstab_edge_stations, &line, ts)
     }
 
     /// The vertical stabilizer: root/tip cross-sections at the design
@@ -68,7 +90,7 @@ impl AircraftBuilder {
     pub(super) fn build_vstab(
         &self,
         dv: &DesignVector,
-        tail_airfoil: &Airfoil,
+        fin_airfoil: &Airfoil,
         meshed: bool,
         seat: &FinSeat,
     ) -> Result<Wing, BuildError> {
@@ -100,7 +122,7 @@ impl AircraftBuilder {
         let wing = Wing::new(
             "Vertical Stabilizer",
             vec![
-                WingXSec::new([0.0, 0.0, 0.0], fin.root_chord_m, 0.0, tail_airfoil.clone()),
+                WingXSec::new([0.0, 0.0, 0.0], fin.root_chord_m, 0.0, fin_airfoil.clone()),
                 WingXSec::new(
                     [
                         tip_x * ts - shift[0],
@@ -109,20 +131,56 @@ impl AircraftBuilder {
                     ],
                     fin.tip_chord_m,
                     0.0,
-                    tail_airfoil.clone(),
+                    fin_airfoil.clone(),
                 ),
             ],
             false,
         );
-        let wing = wing.translate([x_vstab + shift[0], shift[1], g.vstab_z_m + shift[2]]);
+        let mut wing = wing.translate([x_vstab + shift[0], shift[1], g.vstab_z_m + shift[2]]);
+        // A fin standing on a centreline pod is built from the pod up, but its
+        // reference planform, the published fin area, stays carried down to the fuselage.
+        // The leading edge meets the fuselage above the built root of any fin resting on
+        // it, however it rests, so only a fin the pod holds above that point is carried.
+        if self.geometry_contract == GeometryContract::Product {
+            let on_fuselage = seat
+                .fuselage_alone()
+                .map(|body| configured.carried_to_leading_edge_on(&body));
+            if let (Some(root), Some(tip)) = (
+                on_fuselage.filter(|root| root.root_le_m[2] < fin.root_le_m[2]),
+                wing.xsecs.last().cloned(),
+            ) {
+                let root =
+                    WingXSec::new(root.root_le_m, root.root_chord_m, 0.0, fin_airfoil.clone());
+                wing.reference_xsecs = Some(vec![root, tip]);
+            }
+        }
+        let line = StraightTail {
+            root_le_m: configured.root_le_m,
+            root_chord_m: configured.root_chord_m,
+            root_twist_deg: 0.0,
+            tip_le_m: configured.tip_le_m,
+            tip_chord_m: configured.tip_chord_m,
+            tip_twist_deg: 0.0,
+            span_axis: 2,
+        };
+        let seat = tail_attachment::tailplane_seat(g, dv, self.geometry_contract);
+        let configured_end = g
+            .vstab_reference_end_fraction
+            .filter(|_| self.geometry_contract == GeometryContract::Product);
+        let to_reference_end = |fin: Wing| match reference_fin_end(configured_end, &line, seat) {
+            Some(fraction) => with_reference_fin_to(fin, &line, fraction),
+            None => fin,
+        };
         if !meshed {
+            return Ok(to_reference_end(wing));
+        }
+        let wing = mesh::for_contract(self.geometry_contract, &wing, g.n_subdivisions)?;
+        if self.geometry_contract != GeometryContract::Product {
             return Ok(wing);
         }
-        Ok(mesh::for_contract(
-            self.geometry_contract,
-            &wing,
-            g.n_subdivisions,
-        )?)
+        with_drawn_edges(wing, &g.vstab_edge_stations, &line, ts)
+            .map(to_reference_end)
+            .and_then(|fin| with_section_thickness(fin, &g.vstab_thickness_stations, &line))
     }
 
     /// The two tail surfaces alone, `(horizontal, vertical)`, as unmeshed
@@ -160,7 +218,18 @@ impl AircraftBuilder {
         let tail_airfoil = Self::resolve(&self.geometry.empennage.tail_airfoil)?;
         let fuselage = self.build_fuselage_reported(dv, &mut super::BuildReport::default())?;
         let seat = self.fin_seat(dv, &fuselage)?;
-        Ok(EmpennageContext { tail_airfoil, seat })
+        let fin_airfoil = self.own_fin_airfoil()?;
+        Ok(EmpennageContext {
+            tail_airfoil,
+            fin_airfoil,
+            seat,
+        })
+    }
+
+    /// The fin's own section when the configuration states one.
+    pub(super) fn own_fin_airfoil(&self) -> Result<Option<Airfoil>, BuildError> {
+        let name = self.geometry.empennage.vstab_airfoil.as_deref();
+        name.map(Self::resolve).transpose()
     }
 
     /// [`Self::build_empennage`] with the scale-independent parts supplied by
@@ -176,7 +245,15 @@ impl AircraftBuilder {
     ) -> Result<(Wing, Wing), BuildError> {
         Ok((
             self.build_hstab(dv, &context.tail_airfoil, false)?,
-            self.build_vstab(dv, &context.tail_airfoil, false, &context.seat)?,
+            self.build_vstab(
+                dv,
+                context
+                    .fin_airfoil
+                    .as_ref()
+                    .unwrap_or(&context.tail_airfoil),
+                false,
+                &context.seat,
+            )?,
         ))
     }
 }
@@ -186,5 +263,6 @@ impl AircraftBuilder {
 #[derive(Debug, Clone)]
 pub struct EmpennageContext {
     tail_airfoil: Airfoil,
+    fin_airfoil: Option<Airfoil>,
     seat: FinSeat,
 }

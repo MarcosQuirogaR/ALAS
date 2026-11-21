@@ -103,6 +103,9 @@ pub fn wing_structural_centroid(
     if wing.xsecs.len() < 2 {
         return Err(WingCentroidError::InsufficientSections);
     }
+    // The structure integrated here is the box, carried across the body.
+    let wing = wing.carried_box();
+    let wing: &Wing = &wing;
     let cumulative_span = cumulative_semispan(wing);
     let semi_span = *cumulative_span
         .last()
@@ -132,7 +135,7 @@ pub fn wing_structural_centroid(
 
     let supported_force_n = requirements.mtow_kg
         * requirements.gravity_m_s2
-        * requirements.ultimate_load_factor
+        * requirements.design_ultimate_load_factor()
         * structures.additional_safety_factor
         / if wing.symmetric { 2.0 } else { 1.0 };
     let web_thicknesses =

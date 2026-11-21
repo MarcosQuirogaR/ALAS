@@ -10,7 +10,7 @@ mod results;
 mod tests;
 
 use alas_screen::types::ScreeningObjective;
-use egui::{DragValue, RichText, ScrollArea, Ui};
+use egui::{vec2, DragValue, RichText, ScrollArea, Ui};
 use std::path::{Path, PathBuf};
 
 use crate::state::AppState;
@@ -37,15 +37,74 @@ fn show_screening_content(state: &mut AppState, ui: &mut Ui) {
     ));
     ui.add_space(6.0);
 
+    let width = ui.available_width();
+    if screening_page_column_count(width) == 2 {
+        // Setup | results side by side; each column is clipped to its own width
+        // so no card spills into its neighbour.
+        let left = (width * 0.4).clamp(SETUP_COLUMN_MIN_WIDTH, 460.0);
+        let right = (width - left - COLUMN_GAP - 2.0 * ui.spacing().item_spacing.x)
+            .max(RESULTS_COLUMN_MIN_WIDTH);
+        ui.horizontal_top(|ui| {
+            for (index, column_width) in [left, right].into_iter().enumerate() {
+                if index == 1 {
+                    ui.add_space(COLUMN_GAP);
+                }
+                ui.allocate_ui_with_layout(
+                    vec2(column_width, 10_000.0),
+                    egui::Layout::top_down(egui::Align::Min),
+                    |ui| {
+                        ui.set_width(column_width);
+                        ui.set_max_width(column_width);
+                        if index == 0 {
+                            show_setup_column(state, ui);
+                        } else {
+                            show_results_column(state, ui);
+                        }
+                    },
+                );
+            }
+        });
+    } else {
+        show_setup_column(state, ui);
+        ui.add_space(12.0);
+        show_results_column(state, ui);
+    }
+}
+
+/// Narrowest width that still fits the setup cards without clipping.
+const SETUP_COLUMN_MIN_WIDTH: f32 = 340.0;
+/// Narrowest width that still fits one result figure card (280 px canvas plus
+/// the card frame).
+const RESULTS_COLUMN_MIN_WIDTH: f32 = 340.0;
+/// Space between the two columns.
+const COLUMN_GAP: f32 = 16.0;
+
+/// Two columns (setup | results) when both fit side by side, else one that
+/// wraps the results under the setup.
+fn screening_page_column_count(available_width: f32) -> usize {
+    if available_width >= SETUP_COLUMN_MIN_WIDTH + COLUMN_GAP + RESULTS_COLUMN_MIN_WIDTH + 140.0 {
+        2
+    } else {
+        1
+    }
+}
+
+/// The airfoil preview, the options and the run controls.
+fn show_setup_column(state: &mut AppState, ui: &mut Ui) {
     show_screening_preview(&mut state.screening, ui);
     ui.add_space(12.0);
     show_options(state, ui);
     ui.add_space(8.0);
     show_screening_actions(state, ui);
-    ui.add_space(12.0);
+}
+
+/// The ranked table and the figures of the last result.
+fn show_results_column(state: &mut AppState, ui: &mut Ui) {
     if let Some(result) = state.screening.result.take() {
         show_result(state, ui, &result);
         state.screening.result = Some(result);
+    } else {
+        ui.label(RichText::new(tr("Run the screening to see ranked candidates here.")).weak());
     }
 }
 
@@ -86,7 +145,7 @@ fn show_mses_readiness(state: &mut AppState, ui: &mut Ui) {
     } else if readiness.pending() {
         tr("Checking...")
     } else {
-        tr("MSES executables not configured (Advanced Settings > External Tools)")
+        tr("MSES executables not configured (External Tools page)")
     };
     let color = if resolved.is_some() {
         crate::theme::success_color(ui.visuals())
@@ -138,10 +197,7 @@ fn show_ranking_options(ui: &mut Ui, o: &mut alas_screen::types::AirfoilScreenin
     if !use_custom_cl {
         target_label.on_hover_text(tr("Use level-flight CL"));
     }
-    if ui
-        .checkbox(&mut use_custom_cl, tr("Set explicitly"))
-        .changed()
-    {
+    if crate::checkbox::checkbox(ui, &mut use_custom_cl, tr("Set explicitly")).changed() {
         o.target_cl = use_custom_cl.then_some(o.target_cl.unwrap_or(0.5));
     }
     if let Some(target_cl) = &mut o.target_cl {
@@ -189,8 +245,9 @@ fn show_envelope_options(ui: &mut Ui, o: &mut alas_screen::types::AirfoilScreeni
         .on_hover_text(tr("Derived from cruise Mach and sweep"));
     ui.label(RichText::new(tr("Automatic")).weak())
         .on_hover_text(tr("Derived from cruise Mach and sweep"));
-    screening_field_label(ui, "Model size");
+    screening_field_label(ui, "Accuracy (NeuralFoil model)").on_hover_text(tr(MODEL_SIZE_HINT));
     egui::ComboBox::from_id_salt("screening_model_size")
+        .icon(crate::combo_icon::down_arrow)
         .width(ui.available_width())
         .selected_text(tr(&o.model_size))
         .show_ui(ui, |ui| {
@@ -202,7 +259,9 @@ fn show_envelope_options(ui: &mut Ui, o: &mut alas_screen::types::AirfoilScreeni
                     o.model_size = size.to_owned();
                 }
             }
-        });
+        })
+        .response
+        .on_hover_text(tr(MODEL_SIZE_HINT));
     screening_field_label(ui, "Alpha min [deg]");
     ui.add_sized(
         [ui.available_width(), ui.spacing().interact_size.y],
@@ -239,7 +298,8 @@ fn show_fidelity_options(
     show_three_dimensional: bool,
 ) {
     if show_three_dimensional {
-        ui.checkbox(
+        crate::checkbox::checkbox(
+            ui,
             &mut o.refine_3d,
             tr("Refine top candidates in 3-D (Stage 2)"),
         );
@@ -251,7 +311,8 @@ fn show_fidelity_options(
             );
         }
     } else {
-        ui.checkbox(
+        crate::checkbox::checkbox(
+            ui,
             &mut o.verify_mses,
             tr("Verify survivors with MSES (Stage 3)"),
         );
@@ -265,9 +326,16 @@ fn show_fidelity_options(
     }
 }
 
+/// What the NeuralFoil model-size selector does.
+const MODEL_SIZE_HINT: &str =
+    "Size of the NeuralFoil surrogate network: larger is more accurate but slower.";
+
 fn screening_field_label(ui: &mut Ui, label: &str) -> egui::Response {
     ui.add_space(4.0);
-    ui.label(RichText::new(tr(label)).weak().small())
+    ui.label(crate::notation::styled(
+        ui,
+        RichText::new(tr(label)).weak().small(),
+    ))
 }
 
 fn screening_option_column_count(available_width: f32) -> usize {

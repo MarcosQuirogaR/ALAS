@@ -48,8 +48,10 @@ fn all_presets_resolve_scaled_inventory_and_reject_overfill() {
 
 #[test]
 fn custom_auxiliary_disable_does_not_restore_the_reference_total() {
-    let preset = presets::get("DC-10").unwrap();
-    let mut config = AlasConfig::from_value(&serde_json::json!({"preset":"DC-10"})).unwrap();
+    // The LJ60 fuselage tank (EASA TCDS IM.A.212 III.7) is the registered
+    // auxiliary cell; the DC-10's unsourced one was removed (ACAP sec 5.4.4).
+    let preset = presets::get("LJ60").unwrap();
+    let mut config = AlasConfig::from_value(&serde_json::json!({"preset":"LJ60"})).unwrap();
     let plane = AircraftBuilder::new(Some(config.geometry.clone()))
         .build(Some(&preset.design_vector), false)
         .unwrap();

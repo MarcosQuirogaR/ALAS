@@ -104,7 +104,8 @@ pub struct VnDiagramData {
     pub v_s_kt: f64,
     /// Maneuvering speed [kt].
     pub v_a_kt: f64,
-    /// Design cruise speed [kt] (derived `VD/1.25`).
+    /// Design cruise speed [kt] (the CS 25.335(b) VC of VD,
+    /// `alas_config::design_speeds::design_cruise_speed_eas_m_s`).
     pub v_c_kt: f64,
     /// Design dive speed [kt].
     pub v_d_kt: f64,
@@ -147,7 +148,8 @@ impl VnDiagramData {
 /// is read, so this crate takes it directly instead of depending on the
 /// geometry crate for one field.
 /// `n_lim_pos = ultimate_load_factor / 1.5` (CS-25.303 factor of safety),
-/// `VC = VD / 1.25` (CS-25.335(b) minimum margin); the stall boundaries use
+/// VC the CS 25.335(b) design cruising speed of VD (the inverse of the upset-criterion margin,
+/// at least `0.8 VD`, `alas_config::design_speeds`); the stall boundaries use
 /// the clean-configuration lift limits, distinct from the flaps-down maxima.
 /// The result carries an explicit 25.337(b) status instead of silently
 /// clamping a configured limit factor. Deriving VC from a configured VD is a
@@ -163,7 +165,7 @@ pub fn build_vn_diagram(
     let w = req.mtow_kg * G;
     let s = s_ref.max(1e-6);
 
-    let n_ult_pos = req.ultimate_load_factor;
+    let n_ult_pos = req.design_ultimate_load_factor();
     let n_lim_pos = n_ult_pos / 1.5;
     let far25_positive_limit_load_factor_min = far25_positive_limit_load_factor_min(req.mtow_kg);
     let far25_positive_load_factor_status =
@@ -172,7 +174,7 @@ pub fn build_vn_diagram(
     let n_ult_neg = n_lim_neg * 1.5;
 
     let v_d = req.dive_speed_m_s;
-    let v_c = v_d / 1.25;
+    let v_c = req.design_cruise_speed_eas_m_s();
     let v_s = (2.0 * w / (RHO_SL * s * perf_cfg.cl_max_clean)).sqrt();
     let v_a = (2.0 * n_lim_pos * w / (RHO_SL * s * perf_cfg.cl_max_clean)).sqrt();
 
@@ -257,6 +259,28 @@ mod tests {
         assert_eq!(
             assess_far25_positive_limit_load_factor(f64::NAN, req.mtow_kg),
             Far25PositiveLoadFactorStatus::Uncheckable
+        );
+    }
+
+    #[test]
+    fn a_load_factor_tied_to_the_mtow_meets_the_minimum_at_a_lighter_design() {
+        // The LJ60 factor at its 10,659 kg MTOW is below the 25.337(b) minimum
+        // of a 9,000 kg design; tied to the MTOW it follows the design down.
+        let mut req = DesignRequirements {
+            mtow_kg: 9_000.0,
+            ultimate_load_factor: alas_config::requirements::cs25_ultimate_load_factor(10_659.0),
+            ..DesignRequirements::default()
+        };
+        let fixed = build_vn_diagram(25.0, &req, &PerformanceConfig::default(), 12_500.0);
+        assert_eq!(
+            fixed.far25_positive_load_factor_status,
+            Far25PositiveLoadFactorStatus::BelowMinimum
+        );
+        req.ultimate_load_factor_from_mtow = true;
+        let tied = build_vn_diagram(25.0, &req, &PerformanceConfig::default(), 12_500.0);
+        assert_eq!(
+            tied.far25_positive_load_factor_status,
+            Far25PositiveLoadFactorStatus::MeetsMinimum
         );
     }
 

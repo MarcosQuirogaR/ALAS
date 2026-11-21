@@ -106,6 +106,7 @@ pub(crate) fn paint_line_plot_with(
             points: points.to_vec(),
             color: ui.visuals().hyperlink_color,
             dashed: false,
+            open_markers: false,
         }],
         invert_y,
     );
@@ -122,6 +123,9 @@ pub(crate) struct PlotSeries {
     /// residual) from the first (the initial residual) without spending a
     /// second colour that would be harder to tell apart.
     pub dashed: bool,
+    /// Draw each sample as an open circle and join none of them: the style of
+    /// samples that carry weaker evidence than the connected curve.
+    pub open_markers: bool,
 }
 
 /// Distinct, theme-aware colours for grouped series.
@@ -150,6 +154,15 @@ pub(crate) fn plot_legend(ui: &mut Ui, series: &[PlotSeries]) {
     ui.horizontal_wrapped(|ui| {
         for entry in series.iter().filter(|entry| !entry.points.is_empty()) {
             let (rect, _) = ui.allocate_exact_size(vec2(18.0, 10.0), egui::Sense::hover());
+            if entry.open_markers {
+                ui.painter().circle_stroke(
+                    rect.center(),
+                    4.0,
+                    egui::Stroke::new(1.6_f32, entry.color),
+                );
+                ui.label(egui::RichText::new(tr(&entry.name)).small());
+                continue;
+            }
             let stroke = egui::Stroke::new(2.0_f32, entry.color);
             let line = [
                 egui::pos2(rect.left(), rect.center().y),
@@ -286,6 +299,12 @@ pub(crate) fn paint_multi_line_plot_with(
                 )
             })
             .collect::<Vec<_>>();
+        if entry.open_markers {
+            for center in projected {
+                painter.circle_stroke(center, 4.0, egui::Stroke::new(1.6_f32, entry.color));
+            }
+            continue;
+        }
         let stroke = egui::Stroke::new(if entry.dashed { 1.4_f32 } else { 2.0_f32 }, entry.color);
         if entry.dashed {
             painter.extend(egui::Shape::dashed_line(&projected, stroke, 4.0, 3.0));

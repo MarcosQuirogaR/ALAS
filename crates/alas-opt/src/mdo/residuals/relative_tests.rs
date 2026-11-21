@@ -63,10 +63,20 @@ fn hard_mtow_nominals_keep_relative_guards_with_volume_limited_loading() {
             "{name}: no nominal loading"
         );
         assert!(!rows.iter().any(|row| row.id == "cg_model_error"), "{name}");
-        if matches!(name, "A320-200" | "DC-10") {
+        if name == "A320-200" {
             assert_eq!(
                 outcome.sized.takeoff_loading.unwrap().status,
                 alas_mass::loading::MtowFuelLoadingStatus::VolumeLimited,
+                "{name}"
+            );
+        }
+        // DC-10: it seats its registered 255 passengers and its zero-fuel
+        // mass exceeds MTOW less the usable capacity by 770.8 kg, so it is mass-limited (see
+        // `balance_ledger::tests::hard_mtow_preset_ledgers_conserve_mass_and_report_volume_limits`).
+        if name == "DC-10" {
+            assert_eq!(
+                outcome.sized.takeoff_loading.unwrap().status,
+                alas_mass::loading::MtowFuelLoadingStatus::MassLimited,
                 "{name}"
             );
         }
@@ -112,8 +122,8 @@ fn every_preset_nominal_passes_both_relative_constraints() {
 fn a_candidate_below_both_nominal_and_requirement_fails() {
     // The fixture needs a registered aircraft short of both requirements;
     // the A320's usable takeoff range now exceeds 30 %MAC (the derived
-    // rotation authority), and the A380-800's tail-scrape clearance (11.23 deg after the
-    // geometry phase 1 aft loft) now exceeds the required 10 deg. The AVE is short of both:
+    // rotation authority), and the A380-800's tail-scrape clearance (11.23 deg with the
+    // aft loft) now exceeds the required 10 deg. The AVE is short of both:
     // 6.94 deg of scrape clearance and a usable range under 30 %MAC.
     let config = reference_config("AVE");
     let outcome = nominal_outcome(&config);
@@ -129,7 +139,28 @@ fn a_candidate_below_both_nominal_and_requirement_fails() {
     let better = NominalBalance {
         usable_cg_range_pct_mac: headroom("minimum_usable_cg_range", own.usable_cg_range_pct_mac),
         tail_scrape_deg: headroom("tail_scrape", own.tail_scrape_deg),
+        mac_m: own.mac_m,
     };
+    // The travel is held in metres: a registered aircraft with a chord a
+    // tenth longer asks a tenth more of this chord, and the tail scrape, an
+    // angle, is unchanged.
+    let longer = NominalBalance {
+        mac_m: 1.1 * own.mac_m,
+        ..own
+    };
+    let scaled = relative_residuals(&assessment, longer, ResidualRole::Constraint);
+    let unscaled = relative_residuals(&assessment, own, ResidualRole::Constraint);
+    assert!(
+        (find(&scaled, "usable_cg_range_vs_nominal").limit
+            / find(&unscaled, "usable_cg_range_vs_nominal").limit
+            - 1.1)
+            .abs()
+            < 1e-12
+    );
+    assert_eq!(
+        find(&scaled, "tail_scrape_vs_nominal").limit,
+        find(&unscaled, "tail_scrape_vs_nominal").limit
+    );
     let failing = relative_residuals(&assessment, better, ResidualRole::Constraint);
     for id in ["usable_cg_range_vs_nominal", "tail_scrape_vs_nominal"] {
         let r = find(&failing, id);
@@ -139,6 +170,7 @@ fn a_candidate_below_both_nominal_and_requirement_fails() {
     let above = NominalBalance {
         usable_cg_range_pct_mac: 1.0e3,
         tail_scrape_deg: 1.0e3,
+        mac_m: own.mac_m,
     };
     let capped = relative_residuals(&assessment, above, ResidualRole::Constraint);
     assert_eq!(
@@ -151,19 +183,30 @@ fn a_candidate_below_both_nominal_and_requirement_fails() {
     );
 }
 
+/// A clean sheet from a registered preset is
+/// held to the registered aircraft on the rows the search cannot move, on its
+/// own mission and on a new one: relative guards hard, absolute tail scrape
+/// and usable CG range diagnostic.
 #[test]
-fn clean_sheet_has_no_nominal_and_no_relative_residuals() {
-    let config = AlasConfig::from_value(&serde_json::json!({"preset": "A320-200", "optimizer": {"design_space": {"mode": "clean_sheet"}}}))
+fn a_clean_sheet_is_held_to_the_registered_aircraft_on_any_mission() {
+    let own = AlasConfig::from_value(&serde_json::json!({"preset": "A320-200", "optimizer": {"design_space": {"mode": "clean_sheet"}}}))
         .unwrap_or_else(|error| panic!("{error}"));
-    assert_ne!(
-        config.optimizer.design_space.mode,
-        alas_config::DesignMode::ReferenceAdaptation
-    );
-    assert!(nominal_balance(&config).is_none());
-    let outcome = nominal_outcome(&config);
-    let residuals = balance_residuals(&outcome, &config, ResidualRole::Constraint);
-    assert!(residuals.iter().all(|r| !r.id.ends_with("_vs_nominal")));
-    assert!(residuals.iter().any(|r| r.id == "minimum_usable_cg_range"));
+    let mut new_mission = own.clone();
+    new_mission.optimizer.objective.design_range_nmi = 3000.0;
+    assert!(own.flies_registered_mission() && !new_mission.flies_registered_mission());
+    let outcome = nominal_outcome(&own);
+    for config in [&own, &new_mission] {
+        assert!(nominal_balance(config).is_some());
+        let rows = balance_residuals(&outcome, config, ResidualRole::Constraint);
+        for id in ["usable_cg_range_vs_nominal", "tail_scrape_vs_nominal"] {
+            let row = rows.iter().find(|r| r.id == id).unwrap_or_else(|| panic!("{id}"));
+            assert_eq!(row.role, ResidualRole::Constraint, "{id}");
+        }
+        for id in ["minimum_usable_cg_range", "tail_scrape"] {
+            let row = rows.iter().find(|r| r.id == id).unwrap_or_else(|| panic!("{id}"));
+            assert_eq!(row.role, ResidualRole::Diagnostic, "{id}");
+        }
+    }
 }
 
 #[test]
@@ -205,10 +248,10 @@ fn the_nominal_is_sized_once_across_many_candidate_evaluations() {
 }
 
 /// Two configurations that differ only in the geometry scaffold (the tip
-/// section, so the reference wing's thickness and tank volume) get their own
-/// buffet and tank references, each resolved once however often it is read.
+/// section, so the tank volume) get their own tank reference, each resolved
+/// once however often it is read.
 #[test]
-fn buffet_and_tank_references_follow_the_complete_configuration() {
+fn tank_references_follow_the_complete_configuration() {
     let base = reference_config("A320-200");
     let mut thicker = base.clone();
     thicker.geometry.wing.tip_airfoil = "sc20610".to_owned();
@@ -218,18 +261,10 @@ fn buffet_and_tank_references_follow_the_complete_configuration() {
     );
     let mut no_center = base.clone();
     no_center.fuel_tanks.center.enabled = false;
-    let wing = super::super::residuals_buffet::reference_wing_basis;
     let tank = super::nominal_tank_capacity_kg;
     for config in [&base, &thicker, &no_center, &base, &thicker, &no_center] {
-        assert!(wing(config).is_some() && tank(config).is_some());
+        assert!(tank(config).is_some());
     }
-    let (thin_wing, thick_wing) = (wing(&base), wing(&thicker));
-    assert!(
-        thick_wing
-            .zip(thin_wing)
-            .is_some_and(|(thick, thin)| thick.1 > thin.1),
-        "{thin_wing:?} vs {thick_wing:?}"
-    );
     let (full, reduced) = (tank(&base), tank(&no_center));
     assert!(
         full.zip(reduced)
@@ -237,10 +272,6 @@ fn buffet_and_tank_references_follow_the_complete_configuration() {
         "{full:?} vs {reduced:?}"
     );
     for config in [&base, &thicker, &no_center] {
-        assert_eq!(
-            super::super::residuals_buffet::REFERENCE_WING_BASIS.resolutions(config),
-            1
-        );
         assert_eq!(super::NOMINAL_TANK_CAPACITY_KG.resolutions(config), 1);
     }
 }
@@ -329,4 +360,131 @@ fn a_registered_aircraft_whose_mission_overflows_its_tanks_still_has_a_nominal()
         let error = assess(&outcome, &config).expect_err("mission fuel exceeds the tanks");
         assert!(error.contains("exceeds usable capacity"), "{error}");
     }
+}
+
+/// The A320 search under `payload_adjusted` once rejected 30 of its 32
+/// candidates as `relative_balance_nominal_unavailable`: the registered
+/// aircraft's nominal must resolve under the configuration a search runs in
+/// every MTOW mode, and the reason must be stated when it does not.
+#[test]
+fn the_nominal_resolves_under_a_search_configuration_in_every_mtow_mode() {
+    for mode in ["fixed_requirement", "mtow_band", "payload_adjusted"] {
+        let config = AlasConfig::from_value(&serde_json::json!({
+            "preset": "A320-200",
+            "mses": {"enabled": false},
+            "structures": {"run_nastran": false, "run_patran_export": false},
+            "optimizer": {
+                "solver": {
+                    "workers": 1,
+                    "screening": {"max_evaluations": 24},
+                    "refinement": {"max_evaluations": 36}
+                },
+                "objective": {"mtow_sizing": mode}
+            }
+        }))
+        .unwrap_or_else(|error| panic!("{mode}: {error}"));
+        assert_eq!(
+            config.optimizer.design_space.mode,
+            alas_config::DesignMode::ReferenceAdaptation,
+            "{mode}"
+        );
+        if let Err(reason) = super::relative_balance::resolve(&config) {
+            panic!("A320-200 {mode}: nominal unavailable: {reason}");
+        }
+    }
+    let config = reference_config("A320-200");
+    let outcome = nominal_outcome(&config);
+    let assessment = assess(&outcome, &config).unwrap_or_else(|error| panic!("{error}"));
+    let rows = super::relative_balance::residuals_against(
+        &assessment,
+        Err("sizing did not close"),
+        ResidualRole::Constraint,
+    );
+    let row = find(&rows, "relative_balance_nominal_unavailable");
+    assert!(row.violated());
+    assert!(
+        row.detail
+            .as_deref()
+            .is_some_and(|d| d.ends_with("sizing did not close")),
+        "{:?}",
+        row.detail
+    );
+}
+
+/// A closure that stops unsettled holds its last pass's state, not the
+/// dispatch mass it reports; the balance ledger re-evaluates the state's
+/// grouped decomposition at the state's own mass. Read at a heavier dispatch,
+/// the systems items outgrew their slot and the ledger refused the statement
+/// (the A320 payload-adjusted nominal: -0.35 kg).
+#[test]
+fn the_ledger_reads_the_mass_its_state_was_evaluated_at() {
+    let config = AlasConfig::from_value(&serde_json::json!({
+        "preset": "A320-200",
+        "optimizer": {"objective": {"mtow_sizing": "payload_adjusted"}}
+    }))
+    .unwrap_or_else(|error| panic!("{error}"));
+    let mut outcome = nominal_outcome(&config);
+    let at = outcome
+        .evaluated_at
+        .unwrap_or_else(|| panic!("a mission-sized closure records its state's mass"));
+    // As a closure stopped 400 kg short of its dispatch reports it.
+    outcome.sized.takeoff_mass_kg = at.takeoff_mass_kg + 400.0;
+    super::balance_ledger::loading_bases_for(
+        &outcome,
+        &config,
+        super::balance_ledger::FuelLoad::TankLimited,
+    )
+    .unwrap_or_else(|error| panic!("{error}"));
+}
+
+/// The balance rows judge the loading the report's load plan places, not the
+/// nominal placement: the registered C295, whose report passes every hard CG
+/// constraint after a forward plan, is not rejected on tip-back by the search.
+#[test]
+fn the_search_judges_the_planned_loading_of_the_registered_c295() {
+    let config = AlasConfig::from_value(&serde_json::json!({
+        "preset": "C295",
+        "optimizer": {"design_space": {"mode": "baseline_sandbox"}}
+    }))
+    .unwrap_or_else(|error| panic!("{error}"));
+    let outcome = nominal_outcome(&config);
+    let (ledger, flown) = super::balance_ledger::loading_bases(&outcome, &config)
+        .unwrap_or_else(|error| panic!("{error}"));
+    assert!(flown.is_some(), "the C295 route is dispatched");
+    // The nominal placement alone leaves the design take-off aft of the
+    // tip-back limit; the rows must not report that loading.
+    let _ = ledger;
+    let rows = balance_residuals(&outcome, &config, ResidualRole::Constraint);
+    let tip_back = find(&rows, "tip_back");
+    assert!(
+        !tip_back.violated(),
+        "tip-back {} deg against {} deg",
+        tip_back.actual,
+        tip_back.limit
+    );
+    assert!(rows
+        .iter()
+        .all(|row| row.role != ResidualRole::Constraint || !row.violated()));
+}
+
+/// The plan reads both loadings the rows gate. The LJ60 route's states sit
+/// inside their windows at the nominal placement while its maximum-fuel
+/// design take-off is aft of the tip-back limit; the report plans that
+/// loading and passes, and so does the search.
+#[test]
+fn the_plan_serves_the_design_loading_of_the_registered_lj60() {
+    let config = AlasConfig::from_value(&serde_json::json!({
+        "preset": "LJ60",
+        "optimizer": {"design_space": {"mode": "baseline_sandbox"}}
+    }))
+    .unwrap_or_else(|error| panic!("{error}"));
+    let outcome = nominal_outcome(&config);
+    let rows = balance_residuals(&outcome, &config, ResidualRole::Constraint);
+    let tip_back = find(&rows, "tip_back");
+    assert!(
+        !tip_back.violated(),
+        "tip-back {} deg against {} deg",
+        tip_back.actual,
+        tip_back.limit
+    );
 }

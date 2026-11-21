@@ -91,6 +91,10 @@ pub struct SandboxSession {
     /// Monotonic identity of the sandbox aircraft; bumps on every
     /// model-affecting edit, including detached settings.
     pub revision: u64,
+    /// The revision installed, saved or loaded last (see `dirty`).
+    pub saved_revision: u64,
+    /// Entering resumes `last_design` exactly (a loaded document), not the guided case.
+    pub resume_exact: bool,
     /// Session-only undo history.
     pub undo: UndoStack,
     /// Quick Analysis results and worker.
@@ -122,12 +126,29 @@ pub struct SandboxSession {
     pub model: Option<SandboxSceneModel>,
     /// The framing kept across camera motion and edits; `None` until refit.
     pub framing: Option<FramingReference>,
+    /// The model point the camera orbits about; `None` until a fit, when it
+    /// is the centre of the shown components' bounding box.
+    pub pivot: Option<[f64; 3]>,
+    /// Where the pivot sits on screen, in canvas units from the canvas centre.
+    pub pan: (f64, f64),
+    /// Whether the user panned, zoomed or picked a pivot since the last fit;
+    /// an untouched view is refitted on a resize, a touched one is kept.
+    pub view_touched: bool,
+    /// The time (egui seconds) the pivot was last picked, for its marker.
+    pub pivot_marker_at: Option<f64>,
     /// The viewport size the scene canvas is drawn for, in points.
     pub viewport_size: Option<(f32, f32)>,
+    /// What the floating controls cover of the viewport, in points: left,
+    /// top, right, bottom. `None` until measured; a fit leaves it free.
+    pub fit_inset: Option<(f32, f32, f32, f32)>,
     /// The message of the last rejected edit, shown until the next valid one.
     pub rejected_edit: Option<String>,
-    /// Search text of the Parameter Panel.
-    pub search: String,
+    /// A Discipline Window (by discipline id) to bring to the front on the
+    /// next frame: set by every action that opens or re-triggers one.
+    pub raise_discipline: Option<String>,
+    /// The hump enabling that waits for the user to accept switching a lofted
+    /// fuselage to the parametric one.
+    pub hump_confirm: bool,
     /// Direct-manipulation drag in progress.
     pub drag: Option<super::drag::ActiveDrag>,
     /// Undo stack capacity.
@@ -173,7 +194,7 @@ impl AppState {
     }
 
     /// The sandbox aircraft as a fresh AVE case.
-    fn ave_sandbox_design() -> Option<SandboxDesign> {
+    pub(super) fn ave_sandbox_design() -> Option<SandboxDesign> {
         let preset = presets::get(REFERENCE_PRESET).ok()?;
         let operational = preset.operational_mission_defaults();
         let mut config = AlasConfig::default();
@@ -206,8 +227,9 @@ impl AppState {
     }
 
     /// Install `design` as the active sandbox case.
-    fn install_sandbox_design(&mut self, design: SandboxDesign, opening_line: String) {
+    pub(super) fn install_sandbox_design(&mut self, design: SandboxDesign, opening_line: String) {
         self.config_values = design.config_values;
+        self.bump_config_revision();
         self.design_values = design.design_values;
         // Every design variable is pinned: the drawn aircraft is analysed as
         // drawn, never redesigned by a run.
@@ -225,7 +247,7 @@ impl AppState {
         self.run_events.clear();
         self.logs = Vec::new();
         self.result_scene = None;
-        self.result_figure_cache.clear();
+        self.clear_result_figures();
         self.selected_result_id = "polar_comparison".to_owned();
         self.results_tab = "summary".to_owned();
         self.selected_solver_view = SolverResultView::Vlm;
@@ -250,11 +272,33 @@ impl AppState {
         }
         // A replaced aircraft is framed afresh; edits keep the framing.
         self.sandbox.framing = None;
+        self.sandbox.pivot = None;
+        self.sandbox.pan = (0.0, 0.0);
         self.refresh_sandbox_scene();
+        self.sandbox.mark_saved();
+    }
+
+    /// The aircraft of the loaded preset case as a sandbox design: the case as
+    /// the guided pages hold it, with its registered identity cleared because a
+    /// sandbox aircraft is edited freely, and pinned by
+    /// [`Self::install_sandbox_design`].
+    fn preset_case_sandbox_design(&self) -> Option<SandboxDesign> {
+        if self.active_preset.is_empty() {
+            return None;
+        }
+        let mut config_values = self.config_values.clone();
+        config_values
+            .as_object_mut()?
+            .insert("preset".to_owned(), Value::String(String::new()));
+        Some(SandboxDesign {
+            config_values,
+            design_values: self.design_values.clone(),
+        })
     }
 
     /// Enter the sandbox. `fresh` starts from AVE; otherwise the last
-    /// sandbox or custom design is resumed when one exists.
+    /// sandbox or custom design is resumed when one exists, and the loaded
+    /// preset's aircraft opens when none does.
     ///
     /// Returns `false` when the sandbox could not open (a run is in flight
     /// or the reference preset is unavailable).
@@ -272,7 +316,10 @@ impl AppState {
         }
         let resumed = if fresh {
             None
-        } else if self.active_preset.is_empty() && self.sandbox.last_design.is_some() {
+        } else if self.active_preset.is_empty()
+            && self.sandbox.last_design.is_some()
+            && !self.sandbox.resume_exact
+        {
             // The guided case is itself the promoted custom design; carry
             // its latest edits rather than an older copy.
             Some(SandboxDesign {
@@ -282,7 +329,29 @@ impl AppState {
         } else {
             self.sandbox.last_design.clone()
         };
+        let from_preset = resumed
+            .is_none()
+            .then(|| (!fresh).then(|| self.preset_case_sandbox_design()))
+            .flatten()
+            .flatten();
+        let preset_name = self.active_preset.clone();
         let (design, line) = match resumed {
+            None if from_preset.is_some() => {
+                let Some(mut design) = from_preset else {
+                    return false;
+                };
+                if let Some(mode) = design
+                    .config_values
+                    .pointer_mut("/optimizer/design_space/mode")
+                {
+                    *mode = Value::String(DesignMode::BaselineSandbox.as_str().to_owned());
+                }
+                let line = crate::views::tr_fields(
+                    "Sandbox opened from {name}.",
+                    &[("name", preset_name)],
+                );
+                (design, line)
+            }
             Some(mut design) => {
                 if let Some(mode) = design
                     .config_values
@@ -309,27 +378,6 @@ impl AppState {
         true
     }
 
-    /// Replace the active sandbox aircraft with a fresh AVE reference.
-    pub fn new_sandbox_from_reference(&mut self) -> bool {
-        if !self.sandbox.active() || self.is_running {
-            return false;
-        }
-        match Self::ave_sandbox_design() {
-            Some(design) => {
-                self.install_sandbox_design(design, tr("New sandbox from the AVE reference."));
-                true
-            }
-            None => false,
-        }
-    }
-
-    /// Ask how to leave the sandbox.
-    pub fn request_leave_sandbox(&mut self) {
-        if self.sandbox.active() {
-            self.sandbox.exit_prompt = true;
-        }
-    }
-
     /// Resolve the leave-sandbox prompt.
     ///
     /// Returns `false` when the choice could not be applied (a sandbox Full
@@ -339,18 +387,25 @@ impl AppState {
         if !self.sandbox.active() {
             return false;
         }
+        if self.is_running && choice != ExitChoice::Cancel {
+            // The prompt stays open and the run is asked to stop, so the click
+            // is not swallowed; a later click completes the exit.
+            self.request_pipeline_cancel();
+            self.sandbox.exit_prompt = true;
+            self.status_message = tr("Cancel the running sandbox analysis before leaving.");
+            return false;
+        }
         match choice {
             ExitChoice::Cancel => true,
             ExitChoice::Discard => {
-                if self.is_running {
-                    self.status_message = tr("Cancel the running sandbox analysis before leaving.");
-                    return false;
-                }
                 self.sandbox.estimates.abandon();
                 self.sandbox.undo.clear();
                 self.sandbox.drag = None;
                 self.sandbox.last_design = None;
                 self.sandbox.mode = WorkspaceMode::Guided;
+                // The next sandbox opens on the whole aircraft, not on the
+                // component this one was focused on.
+                self.reset_sandbox_view();
                 if let Some(prior) = self.sandbox.prior_case.take() {
                     self.restore_case(prior);
                 }
@@ -358,14 +413,10 @@ impl AppState {
                     tr("Sandbox discarded; the previous case is active again."),
                     LogKind::Info,
                 );
-                self.on_config_modified();
+                self.settle_after_sandbox(false);
                 true
             }
             ExitChoice::Promote => {
-                if self.is_running {
-                    self.status_message = tr("Cancel the running sandbox analysis before leaving.");
-                    return false;
-                }
                 let Some(mut config) = self.typed_config() else {
                     self.status_message = tr(
                         "The sandbox configuration is not valid; fix the highlighted fields first.",
@@ -376,9 +427,10 @@ impl AppState {
                 config.preset.clear();
                 config.optimizer.design_space.mode = DesignMode::CleanSheet;
                 // The promoted geometry is the baseline as drawn; sizing the
-                // fuselage from the cabin would silently redraw it.
-                config.optimizer.design_space.fuselage_sized_by_cabin = false;
+                // fuselage or the engine would silently redraw it.
+                config.optimizer.design_space.hold_as_drawn();
                 self.config_values = full_config_values(&config);
+                self.bump_config_revision();
                 self.sandbox.last_design = Some(SandboxDesign {
                     config_values: self.config_values.clone(),
                     design_values: self.design_values.clone(),
@@ -395,7 +447,7 @@ impl AppState {
                     self.run_events.clear();
                     self.result_scene = None;
                 }
-                self.result_figure_cache.clear();
+                self.clear_result_figures();
                 self.sandbox.estimates.abandon();
                 self.sandbox.undo.clear();
                 self.sandbox.drag = None;
@@ -408,7 +460,7 @@ impl AppState {
                     tr("Sandbox promoted: the custom aircraft is now the guided baseline."),
                     LogKind::Info,
                 );
-                self.on_config_modified();
+                self.settle_after_sandbox(true);
                 true
             }
         }
@@ -425,6 +477,7 @@ impl AppState {
     /// Apply a snapshot from the undo history.
     fn apply_edit_snapshot(&mut self, snapshot: EditSnapshot) {
         self.config_values = snapshot.config_values;
+        self.bump_config_revision();
         self.design_values = snapshot.design_values;
         self.on_sandbox_model_changed();
     }
@@ -467,6 +520,7 @@ impl AppState {
             return;
         }
         self.sandbox.revision = self.sandbox.revision.wrapping_add(1);
+        self.note_autosave_due();
         self.sandbox.estimates.invalidate();
         if let Some(config) = self.typed_config() {
             self.validation_findings = validate(&config);
@@ -477,19 +531,27 @@ impl AppState {
     /// Rebuild the sandbox aircraft from the committed model and redraw it,
     /// keeping the last valid aircraft when the geometry does not build.
     pub fn refresh_sandbox_scene(&mut self) {
-        match super::scene::build_sandbox_airplane(self) {
-            Some((plane, _)) => {
+        match super::scene::try_build_sandbox_airplane(self) {
+            Ok((plane, _)) => {
                 self.sandbox.model = Some(super::scene::build_sandbox_model(&plane));
                 self.sandbox.airplane = Some(plane);
                 self.sandbox.rejected_edit = None;
                 self.reproject_sandbox_scene();
             }
-            None => {
-                if self.sandbox.rejected_edit.is_none() {
-                    self.sandbox.rejected_edit = Some(tr(
-                        "The geometry does not build; the last valid shape is shown.",
-                    ));
-                }
+            Err(reason) => {
+                // The builder's own reason (first line, bounded) replaces any
+                // older message: it is what the user has to fix now.
+                let reason: String = reason
+                    .lines()
+                    .next()
+                    .unwrap_or_default()
+                    .chars()
+                    .take(140)
+                    .collect();
+                self.sandbox.rejected_edit = Some(crate::views::tr_fields(
+                    "The geometry does not build ({reason}); the last valid shape is shown.",
+                    &[("reason", reason)],
+                ));
             }
         }
     }
@@ -499,43 +561,15 @@ impl AppState {
     /// kept; a cleared framing is fitted to the shown components and kept
     /// from then on.
     pub fn reproject_sandbox_scene(&mut self) {
+        if self.sandbox.framing.is_none() {
+            self.fit_sandbox_view();
+        }
         if let Some(model) = &self.sandbox.model {
             let built = super::scene::project_sandbox_model(self, model);
             self.sandbox.framing = Some(built.1.reference());
             self.sandbox.scene = Some(built);
             self.sandbox.scene_revision = self.sandbox.scene_revision.wrapping_add(1);
         }
-    }
-
-    /// Fit the framing to the components now shown and redraw: the explicit
-    /// Fit action, and the deliberate reframe on a focus change or a new
-    /// design. Camera presets, orbit, zoom, resizing and geometry edits
-    /// never call this, so the pixels per metre they show stay comparable.
-    pub fn refit_sandbox_framing(&mut self) {
-        self.sandbox.framing = None;
-        self.reproject_sandbox_scene();
-    }
-
-    /// Focus one discipline (isolating it in the preview) or return to the
-    /// overview, refitting the framing to what is now shown.
-    pub fn set_sandbox_focus(&mut self, discipline: Option<Discipline>) {
-        self.sandbox.set_focus(discipline);
-        self.refit_sandbox_framing();
-    }
-
-    /// Record the viewport size the scene is drawn for. A changed size
-    /// redraws the kept framing on the new canvas, so the model scales
-    /// with the viewport's smaller side and nothing is refitted.
-    pub fn set_sandbox_viewport_size(&mut self, size: (f32, f32)) -> bool {
-        let changed = self
-            .sandbox
-            .viewport_size
-            .is_none_or(|(w, h)| (w - size.0).abs() > 0.5 || (h - size.1).abs() > 0.5);
-        if changed {
-            self.sandbox.viewport_size = Some(size);
-            self.reproject_sandbox_scene();
-        }
-        changed
     }
 }
 
@@ -545,3 +579,10 @@ impl AppState {
 #[cfg(test)]
 #[path = "session_tests.rs"]
 mod tests;
+
+// Tests assert on values they construct here, so a failed expect is the
+// assertion failing, not a library invariant being broken.
+#[allow(clippy::unwrap_used, clippy::expect_used)]
+#[cfg(test)]
+#[path = "preset_scene_tests.rs"]
+mod preset_scene_tests;

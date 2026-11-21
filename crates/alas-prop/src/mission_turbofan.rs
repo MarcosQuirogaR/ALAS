@@ -72,7 +72,7 @@ const GAS_CONSTANT_AIR: f64 = 287.052_874_2;
 const JET_A_SPECIFIC_ENERGY_J_KG: f64 = 43.02e6;
 
 /// Standard sea-level gravity, m/s^2. `Attributes.Planets.Earth.sea_level_gravity`.
-const SEA_LEVEL_GRAVITY: f64 = 9.806_65;
+const SEA_LEVEL_GRAVITY: f64 = alas_atmo::STANDARD_GRAVITY;
 
 /// Earth's mean radius, m. `Attributes.Planets.Earth.mean_radius`.
 const EARTH_MEAN_RADIUS_M: f64 = 6.371e6;

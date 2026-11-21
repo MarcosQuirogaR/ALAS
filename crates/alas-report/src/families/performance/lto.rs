@@ -11,14 +11,15 @@ use alas_config::AlasConfig;
 use alas_perf::performance::FieldPerformance;
 use alas_pipeline::full_analysis::AnalysisReport;
 
-use crate::chart_kit::draw_title;
+use crate::chart_kit::{draw_title, major_ticks};
 use crate::families::performance::support::{
-    draw_arrow, format_thousands, resolve_airport, status_message_scene,
+    draw_arrow, format_thousands, resolve_arrival, resolve_departure, status_message_scene,
 };
-use crate::scene::{Color, Fill, Scene, SceneElement, Stroke, TextAlign, TextBaseline};
+use crate::scene::{Color, Fill, Scale, Scene, SceneElement, Stroke, TextAlign, TextBaseline};
 use crate::theme::get_palette;
 
 mod inputs;
+mod note;
 mod plot_data;
 
 const MS_TO_KT: f64 = 1.94384;
@@ -32,7 +33,7 @@ pub fn figure_lto_departure(
     config: &AlasConfig,
     theme: Option<&str>,
 ) -> Scene {
-    let airport = match resolve_airport(&config.departure_airport) {
+    let airport = match resolve_departure(config) {
         Ok(airport) => airport,
         Err(_) => return missing_airport_scene(&config.departure_airport, theme),
     };
@@ -45,7 +46,7 @@ pub fn figure_lto_arrival(
     config: &AlasConfig,
     theme: Option<&str>,
 ) -> Scene {
-    let airport = match resolve_airport(&config.arrival_airport) {
+    let airport = match resolve_arrival(config) {
         Ok(airport) => airport,
         Err(_) => return missing_airport_scene(&config.arrival_airport, theme),
     };
@@ -146,6 +147,9 @@ fn draw_lto(
     };
     draw_runway(&mut scene, performance, pal, &labels);
     draw_bars(&mut scene, performance, pal, &labels);
+    if !legacy {
+        note::draw_governing_note(&mut scene, performance, pal);
+    }
     scene
 }
 
@@ -267,6 +271,10 @@ fn draw_runway(
     });
     let runway_center_y = runway_y + rw_h * 0.5;
     let marker_half_length = rw_h * 1.15;
+    // Markers sorted by position; a name that would sit within a label width
+    // of the previous one steps up a row, so close V speeds stay readable.
+    let mut previous_x = f64::NEG_INFINITY;
+    let mut row = 0_usize;
     for (name, speed, colour) in speeds {
         let position = if v2 > 0.0 {
             x(performance.todr_m * (speed / v2).powi(2).min(1.0) * 0.75)
@@ -278,9 +286,35 @@ fn draw_runway(
             p2: [position, runway_center_y + marker_half_length],
             stroke: Stroke::dashed(Color::from_hex(colour), 1.2, 4.0, 3.0),
         });
-        let _ = name;
-        let _ = speed;
+        row = if position - previous_x < 22.0 {
+            row + 1
+        } else {
+            0
+        };
+        previous_x = position;
+        scene.add(SceneElement::Text {
+            text: name.to_owned(),
+            pos: [
+                position,
+                runway_center_y - marker_half_length - 2.0 - row as f64 * 10.0,
+            ],
+            font_size: 9.0,
+            color: Color::from_hex(colour),
+            align: TextAlign::Center,
+            baseline: TextBaseline::Bottom,
+            angle_deg: 0.0,
+            bold: true,
+        });
     }
+    plot_data::record_v_speeds(
+        scene,
+        [
+            ("V1", performance.v_speeds.v1_ms),
+            ("VR", performance.v_speeds.v_r_ms),
+            ("V2", performance.v_speeds.v2_ms),
+        ],
+        MS_TO_KT,
+    );
     for (index, (name, speed, colour)) in [
         ("V1", performance.v_speeds.v1_ms, "#f1c40f"),
         ("VR", performance.v_speeds.v_r_ms, "#e67e22"),
@@ -303,6 +337,22 @@ fn draw_runway(
             bold: true,
         });
     }
+    scene.add(SceneElement::Text {
+        text: format!(
+            "TODR margin to TODA: {:+.0} m ({:+.1} %)",
+            toda - performance.todr_m,
+            100.0 * (toda - performance.todr_m) / toda.max(1e-6),
+        ),
+        // Bottom-left of the panel, below the lowest arrow: at the top it ran through the
+        // TODR arrow and its label.
+        pos: [left + 14.0, top + height - 14.0],
+        font_size: 9.0,
+        color: Color::from_hex(pal.title),
+        align: TextAlign::Left,
+        baseline: TextBaseline::Bottom,
+        angle_deg: 0.0,
+        bold: true,
+    });
     scene.add(SceneElement::Text {
         text: format!(
             "{}  |  elev {:.0} m  ISA+{:.0}C\nTODA = {} m   LDA = {} m",
@@ -421,7 +471,8 @@ fn draw_bars(
                 text: "EXCEEDS\nRUNWAY".to_owned(),
                 pos: [center, top + height - available_height * 0.5],
                 font_size: 7.5,
-                color: Color::from_hex("#ff4444"),
+                // White: red on the red/orange/blue bars it sits on was unreadable.
+                color: Color::from_hex("#ffffff"),
                 align: TextAlign::Center,
                 baseline: TextBaseline::Middle,
                 angle_deg: 0.0,
@@ -463,9 +514,8 @@ fn draw_bars(
     // carries a numeric distance scale.  Draw it explicitly because this
     // panel is not a continuous Axes2D series.
     let max_value = max_value * 1.2;
-    let step = (max_value / 5.0).max(1.0);
-    let mut tick = 0.0;
-    while tick <= max_value + step * 1e-9 {
+    // Round values (0, 1 000, 2 000, ...) rather than fifths of the axis end.
+    for tick in major_ticks(0.0, max_value, Scale::Linear, 5) {
         let y = top + height - tick / max_value * height;
         scene.add(SceneElement::Line {
             p1: [left - 4.0, y],
@@ -482,7 +532,6 @@ fn draw_bars(
             angle_deg: 0.0,
             bold: false,
         });
-        tick += step;
     }
 }
 
@@ -538,6 +587,30 @@ mod tests {
         assert!(distance_label_x.is_some_and(|x| x <= 40.0));
     }
 
+    /// The V1/VR/V2 values are in the plot data in knots with a unit, so no
+    /// consumer has to read them from the SVG text.
+    #[test]
+    fn plot_data_carries_the_take_off_speeds_in_knots() {
+        let performance = sample_performance();
+        let data = crate::plot_data::with_capture(|| {
+            let scene = draw_lto(&performance, "Departure", None, false);
+            crate::plot_data::PlotData::from_scene(&scene, "lto_departure", None).unwrap()
+        });
+        let panel = data
+            .panels
+            .iter()
+            .find(|p| p.series.iter().any(|s| s.name == "take-off speeds"))
+            .unwrap();
+        let series = &panel.series[0];
+        assert_eq!(series.labels, vec!["V1", "VR", "V2"]);
+        assert_eq!(panel.y_unit.as_deref(), Some("kt"));
+        for (y, ms) in series.y.iter().zip([70.0, 74.0, 82.0]) {
+            assert!((y - ms * MS_TO_KT).abs() < 1e-9);
+        }
+        let si = panel.y_si.as_ref().unwrap();
+        assert!((series.y[0] * si.factor - 70.0).abs() < 1e-3);
+    }
+
     /// The V1/VR/V2 dashed markers must sit within the drawn TODR distance,
     /// scaled the same way as the LTO golden sidecar (by
     /// `todr_m`, not by the full declared TODA). Scaling by TODA
@@ -588,5 +661,87 @@ mod tests {
                 "fixture does not distinguish todr- from toda-based scaling for {name}"
             );
         }
+    }
+}
+
+// Fixtures are built here, so a failed unwrap is the assertion failing.
+#[allow(clippy::unwrap_used, clippy::expect_used)]
+#[cfg(test)]
+mod stated_takeoff_tests {
+    use super::*;
+    use crate::families::performance::figure_matching_chart;
+
+    /// The departure figures read the effective take-off distance: the
+    /// shorter of the route's and the stated one, never a longer one.
+    #[test]
+    fn the_lto_and_matching_figures_read_the_effective_take_off_distance() {
+        let mut config =
+            AlasConfig::from_value(&serde_json::json!({ "preset": "A320-200" })).unwrap();
+        let preset = alas_config::presets::get("A320-200").unwrap();
+        let report = alas_pipeline::FullAnalysis::new(config.clone())
+            .run(&preset.design_vector, true)
+            .unwrap();
+        let route = alas_config::airports::get(&config.departure_airport)
+            .unwrap()
+            .toda_m;
+        let render = |config: &AlasConfig| {
+            (
+                format!("{:?}", figure_lto_departure(&report, config, None)),
+                format!("{:?}", figure_matching_chart(&report, config, None)),
+            )
+        };
+        let (lto_route, chart_route) = render(&config);
+        assert!(lto_route.contains(&format!("TODA = {} m", format_thousands(route))));
+
+        config.toda_override_m = Some(2_600.0);
+        let (lto_short, chart_short) = render(&config);
+        assert!(lto_short.contains("TODA = 2 600 m"), "{lto_short}");
+        assert_ne!(chart_short, chart_route, "the take-off curve moves");
+
+        config.toda_override_m = Some(route + 800.0);
+        let (lto_long, chart_long) = render(&config);
+        assert_eq!(lto_long, lto_route);
+        assert_eq!(chart_long, chart_route);
+    }
+
+    /// The landing end follows the same rule, and the chart and the
+    /// landing-and-take-off figures draw the aerodromes they are given.
+    #[test]
+    fn the_landing_figures_read_the_effective_landing_distance_and_the_chart_takes_explicit_airports(
+    ) {
+        use crate::families::performance::figure_matching_chart_for_airports;
+        let mut config =
+            AlasConfig::from_value(&serde_json::json!({ "preset": "A320-200" })).unwrap();
+        let preset = alas_config::presets::get("A320-200").unwrap();
+        let report = alas_pipeline::FullAnalysis::new(config.clone())
+            .run(&preset.design_vector, true)
+            .unwrap();
+        let departure = alas_config::airports::get(&config.departure_airport).unwrap();
+        let arrival = alas_config::airports::get(&config.arrival_airport).unwrap();
+        let arrival_figure =
+            |config: &AlasConfig| format!("{:?}", figure_lto_arrival(&report, config, None));
+        let route = arrival_figure(&config);
+        assert!(route.contains(&format!("LDA = {} m", format_thousands(arrival.lda_m))));
+
+        config.lda_override_m = Some(2_100.0);
+        assert!(arrival_figure(&config).contains("LDA = 2 100 m"));
+        config.lda_override_m = Some(arrival.lda_m + 800.0);
+        assert_eq!(arrival_figure(&config), route, "a longer value is ignored");
+
+        // The chart for the configured pair equals the explicit-airport chart
+        // for that pair, and differs for the swapped pair a dispatched plan
+        // could fly.
+        config.lda_override_m = None;
+        let configured = format!("{:?}", figure_matching_chart(&report, &config, None));
+        let same = format!(
+            "{:?}",
+            figure_matching_chart_for_airports(&report, &config, departure, arrival, None)
+        );
+        let swapped = format!(
+            "{:?}",
+            figure_matching_chart_for_airports(&report, &config, arrival, departure, None)
+        );
+        assert_eq!(configured, same);
+        assert_ne!(configured, swapped);
     }
 }

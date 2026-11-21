@@ -1,7 +1,7 @@
 // SPDX-License-Identifier: AGPL-3.0-or-later
 // Copyright (C) 2026 Marcos Quiroga Rodriguez
 
-//! Propeller slipstream on the wing: actuator-disk model (UAV-PLAN 3.1 item 6).
+//! Propeller slipstream on the wing: actuator-disk model.
 //!
 //! Frame: geometry axes of `alas-geom`, x aft, y right, z up, metres.  A
 //! tractor propeller sits ahead of the wing (smaller x) with its thrust along
@@ -111,7 +111,7 @@ impl PropDisc {
 
     /// One propeller of a solved powertrain: thrust per propeller is the
     /// operating point's total thrust over `n_motors`, the radius is half the
-    /// propeller diameter (lane B public API: `Powertrain::prop.diameter_m()`,
+    /// propeller diameter (public API: `Powertrain::prop.diameter_m()`,
     /// `OperatingPoint::thrust_n`).
     ///
     /// # Errors

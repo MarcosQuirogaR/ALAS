@@ -18,7 +18,9 @@
 //!
 //! Each surface is given as a chord fraction of the local chord and a span
 //! run between two fractions of the semi-span. The defaults are typical
-//! transport proportions.
+//! transport proportions; a registered aircraft declares its own runs in
+//! `preset_control_surfaces`. A zero chord fraction states the aircraft does
+//! not have that surface.
 
 use serde::{Deserialize, Serialize};
 
@@ -97,6 +99,32 @@ pub struct ControlSurfacesConfig {
     )]
     pub aileron_span_end_frac: f64,
 
+    /// Inboard aileron chord as a fraction of local wing chord.
+    #[serde(default)]
+    #[config(
+        label = "Inboard aileron chord fraction",
+        help = "Chord of the inboard (high-speed) aileron or flaperon as a fraction of local wing chord. Zero means the aircraft has none."
+    )]
+    pub inboard_aileron_chord_fraction: f64,
+
+    /// Inboard end of the inboard aileron run.
+    #[serde(default)]
+    #[config(
+        label = "Inboard aileron span start",
+        unit = "fraction of semi-span",
+        help = "Inboard end of the inboard aileron run, as a fraction of wing semi-span."
+    )]
+    pub inboard_aileron_span_start_frac: f64,
+
+    /// Outboard end of the inboard aileron run.
+    #[serde(default)]
+    #[config(
+        label = "Inboard aileron span end",
+        unit = "fraction of semi-span",
+        help = "Outboard end of the inboard aileron run, as a fraction of wing semi-span."
+    )]
+    pub inboard_aileron_span_end_frac: f64,
+
     /// Spoiler chord as a fraction of local wing chord.
     #[config(
         label = "Spoiler chord fraction",
@@ -171,7 +199,8 @@ pub struct ControlSurfacesConfig {
     #[config(
         label = "Rudder maximum deflection",
         unit = "deg",
-        help = "Largest rudder deflection each way. With the rudder chord and span it sets the rudder authority of the one-engine-inoperative yaw balance (minimum control speed, trim drag, crosswind). Transports use 25 to 30 degrees for a single-hinge rudder and up to 35 degrees for a double-hinge one (Torenbeek, Synthesis of Subsonic Airplane Design, Sec. 9.6.1; Roskam, Airplane Design Part VII, Sec. 2.3)."
+        help = "Largest rudder deflection each way [deg]. With rudder chord and span it sets the authority for the one-engine-inoperative yaw balance.",
+        long_help = "Largest rudder deflection each way. With the rudder chord and span it sets the rudder authority of the one-engine-inoperative yaw balance (minimum control speed, trim drag, crosswind). Transports use 25 to 30 degrees for a single-hinge rudder and up to 35 degrees for a double-hinge one (Torenbeek, Synthesis of Subsonic Airplane Design, Sec. 9.6.1; Roskam, Airplane Design Part VII, Sec. 2.3)."
     )]
     pub rudder_max_deflection_deg: f64,
 }
@@ -194,6 +223,9 @@ impl Default for ControlSurfacesConfig {
             aileron_chord_fraction: 0.20,
             aileron_span_start_frac: 0.66,
             aileron_span_end_frac: 0.95,
+            inboard_aileron_chord_fraction: 0.0,
+            inboard_aileron_span_start_frac: 0.0,
+            inboard_aileron_span_end_frac: 0.0,
             spoiler_chord_fraction: 0.10,
             spoiler_span_start_frac: 0.10,
             spoiler_span_end_frac: 0.64,
@@ -208,12 +240,67 @@ impl Default for ControlSurfacesConfig {
     }
 }
 
+impl ControlSurfacesConfig {
+    /// Whether the wing has spoilers or speedbrakes: a positive chord over a
+    /// span run of positive length. A zero chord states the aircraft has none.
+    pub fn has_spoilers(&self) -> bool {
+        self.spoiler_chord_fraction > 0.0
+            && self.spoiler_span_end_frac > self.spoiler_span_start_frac
+    }
+
+    /// The span band, fractions of the semi-span, that the inboard aileron cuts
+    /// out of the flap run where it sits between an inboard and an outboard
+    /// flap (747, 787, DC-10). `None` without an inboard aileron inside the run.
+    pub fn flap_gap(&self) -> Option<(f64, f64)> {
+        let (start, end) = (self.flap_span_start_frac, self.flap_span_end_frac);
+        let (gap_start, gap_end) = (
+            self.inboard_aileron_span_start_frac.max(start),
+            self.inboard_aileron_span_end_frac.min(end),
+        );
+        (self.inboard_aileron_chord_fraction > 0.0 && gap_end > gap_start)
+            .then_some((gap_start, gap_end))
+    }
+
+    /// The trailing-edge flap bands, fractions of the semi-span: the flap run
+    /// less [`Self::flap_gap`], so no span carries both a flap and the inboard
+    /// aileron. Empty when the wing has no flap.
+    pub fn flap_bands(&self) -> Vec<(f64, f64)> {
+        let (start, end) = (self.flap_span_start_frac, self.flap_span_end_frac);
+        if !(self.flap_chord_fraction > 0.0 && end > start) {
+            return Vec::new();
+        }
+        match self.flap_gap() {
+            None => vec![(start, end)],
+            Some((gap_start, gap_end)) => [(start, gap_start), (gap_end, end)]
+                .into_iter()
+                .filter(|(a, b)| b > a)
+                .collect(),
+        }
+    }
+}
+
 // A test asserts on values it constructed here directly, so a failed unwrap
 // or expect is the assertion failing, not a library invariant being broken.
 #[allow(clippy::unwrap_used, clippy::expect_used)]
 #[cfg(test)]
 mod tests {
     use super::*;
+
+    #[test]
+    fn an_inboard_aileron_between_two_flaps_is_cut_out_of_the_flap_run() {
+        let mut config = ControlSurfacesConfig::default();
+        assert_eq!(
+            config.flap_bands(),
+            vec![(config.flap_span_start_frac, config.flap_span_end_frac)]
+        );
+        config.inboard_aileron_chord_fraction = 0.2;
+        config.inboard_aileron_span_start_frac = 0.35;
+        config.inboard_aileron_span_end_frac = 0.40;
+        assert_eq!(config.flap_gap(), Some((0.35, 0.40)));
+        assert_eq!(config.flap_bands(), vec![(0.10, 0.35), (0.40, 0.62)]);
+        config.flap_chord_fraction = 0.0;
+        assert!(config.flap_bands().is_empty());
+    }
 
     #[test]
     fn every_span_run_starts_inboard_of_where_it_ends() {

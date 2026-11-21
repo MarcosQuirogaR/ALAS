@@ -7,6 +7,8 @@ use std::path::{Path, PathBuf};
 use std::process::{Command, Stdio};
 use std::time::{Duration, Instant};
 
+use alas_exec::process::NoConsoleWindow;
+
 use crate::state::AppState;
 use crate::views::tr;
 
@@ -160,6 +162,7 @@ pub(super) fn show_launch_button(state: &mut AppState, ui: &mut egui::Ui) -> egu
             {
                 // This is an explicit user action: show the native interactive GUI.
                 match Command::new(executable)
+                    .no_window()
                     .arg(&model)
                     .current_dir(model.parent().unwrap_or(Path::new(".")))
                     .stdin(Stdio::null())

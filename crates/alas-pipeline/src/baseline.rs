@@ -172,6 +172,8 @@ pub fn analyze_baseline(config: &AlasConfig, design: &DesignVector) -> BaselineR
         total_mass: payload_layout.total_mass,
         cg_x: payload_layout.cg_x,
         cg_y: payload_layout.cg_y,
+        equipment_mass: payload_layout.equipment_mass(),
+        equipment_cg: payload_layout.equipment_cg(),
     });
 
     let (masses, coords, _) =

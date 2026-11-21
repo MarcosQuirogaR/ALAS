@@ -3,7 +3,7 @@
 
 //! Breguet-factor decomposition probe (model side only).
 //!
-//! For each preset of a targets file (the kappa-lane `tow_kg` / `fuel_tank_kg`
+//! For each preset of a targets file (the kappa-work `tow_kg` / `fuel_tank_kg`
 //! / `delta_payload_kg` format) this builds the baseline full analysis, flies
 //! the corner-C trip at the chart takeoff mass, and reports every factor of
 //! the Breguet range equation at the flown mid-cruise point:
@@ -119,7 +119,7 @@ fn one(name: &str, tow: f64, tank: f64, delta: f64, options: &Options) -> Result
         config.drag_model.lift_dependent_viscous_fraction = kappa;
     }
     if let Some(margin) = options.margin {
-        config.drag_model.viscous_margin = margin;
+        config.drag_model.viscous_margin = Some(margin);
     }
     if options.faa_for.iter().any(|item| item == name) {
         config.fuel_policy.scheme = alas_config::FuelScheme::FaaFlagSupplemental;
@@ -249,7 +249,7 @@ fn one(name: &str, tow: f64, tank: f64, delta: f64, options: &Options) -> Result
         &report.airplane,
         AeroAnalysis::quarter_chord_sweep_deg(&report.airplane, report.design.sweep_deg),
         Some(config.geometry.clone()),
-        Some(config.drag_model.clone()),
+        Some(config.resolved_drag_model()),
         Some(config.analysis.clone()),
     );
     let breakdown = aero.parasite_breakdown(mach, altitude, None, None);

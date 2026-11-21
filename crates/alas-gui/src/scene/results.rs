@@ -6,11 +6,13 @@
 use alas_config::AlasConfig;
 use alas_geom::builder::AircraftBuilder;
 use alas_report::families::aerodynamics::{
-    figure_aero_panel, figure_airfoil_reynolds, figure_drag_breakdown, figure_model_comparison,
-    figure_mses_convergence, figure_mses_cp_contours, figure_mses_mach_contours,
-    figure_mses_pressure_distribution, figure_optimized_aircraft_comparison,
-    figure_polar_comparison, figure_span_loading, figure_status_message, figure_vlm_flow,
-    figure_vspaero_load_distribution, figure_vspaero_polar, figure_vspaero_wake_convergence,
+    figure_aero_panel_with_cl_max, figure_airfoil_reynolds, figure_drag_breakdown,
+    figure_model_comparison_with_cl_max, figure_mses_convergence, figure_mses_cp_contours,
+    figure_mses_mach_contours, figure_mses_pressure_distribution,
+    figure_optimized_aircraft_comparison, figure_polar_comparison,
+    figure_polar_comparison_with_cl_max, figure_span_loading, figure_status_message,
+    figure_vlm_flow, figure_vspaero_load_distribution, figure_vspaero_polar,
+    figure_vspaero_wake_convergence,
 };
 use alas_report::families::geometry::{
     figure_airfoil_evolution, figure_design_evolution, figure_openvsp_cad_preview,
@@ -26,14 +28,14 @@ use alas_report::families::mass_balance_layout::{
 };
 use alas_report::families::mission::{
     figure_mission_aero_coefficients, figure_mission_aero_forces, figure_mission_drag_components,
-    figure_mission_flight_path, figure_mission_profile, figure_mission_route_2d,
+    figure_mission_flight_path, figure_mission_profile_vs_configured, figure_mission_route_2d,
     figure_mission_route_3d, figure_mission_velocities,
 };
 use alas_report::families::optimization::figure_airfoil_comparison;
 use alas_report::families::optimization::figure_optimization_run;
 use alas_report::families::performance::{
-    figure_lto_for_airport_at_masses, figure_matching_chart, figure_payload_range,
-    figure_vn_diagram,
+    figure_lto_for_airport_at_masses, figure_matching_chart, figure_matching_chart_for_airports,
+    figure_payload_range, figure_vn_diagram,
 };
 use alas_report::families::propulsion::{
     figure_propulsion_altitude_sweep, figure_propulsion_bpr_sensitivity,
@@ -53,26 +55,49 @@ use alas_report::families::structures_dynamics::{
 use alas_report::scene::{Camera3D, Scene};
 
 use super::localize_scene_for_display;
+use super::lto_airport::route_airports;
 use super::solver::{
     selected_avl_result, selected_optimization_result, selected_result_report, solutions_avl_result,
 };
 use crate::state::AppState;
+use crate::views::results_view::SolverResultView;
+
+/// The baseline-versus-optimized figures: they need an optimization run.
+fn is_comparison_figure(id: &str) -> bool {
+    matches!(
+        id,
+        "airfoil_comparison" | "polar_comparison" | "planform_comparison"
+    )
+}
+
+/// Why the selected figure has no data in this run.
+fn unavailable_reason(state: &AppState, result: &alas_pipeline::PipelineResult) -> &'static str {
+    if is_comparison_figure(&state.selected_result_id)
+        && selected_optimization_result(state.selected_solver_view, result).is_none()
+    {
+        "Unavailable for this run: no optimization ran, so there is no optimized design to compare with the baseline."
+    } else {
+        "Unavailable for this run: the required analysis stage did not produce data."
+    }
+}
 
 /// The results-gallery scene for the current result selection.
 pub fn build_result_scene(state: &AppState) -> Option<Scene> {
     let result = state.pipeline_result.as_ref()?;
-    let report = selected_result_report(state, result)?;
+    let report = selected_result_report(state.selected_solver_view, result)?;
     let theme = state.theme.figure_theme_name().to_owned();
     match build_result_figure(state, &state.selected_result_id, &result.config, &theme) {
         Some(Some(scene)) => Some(scene),
         Some(None) | None => {
             if let Some(descriptor) = alas_report::find_figure(&state.selected_result_id) {
-                Some(localize_scene_for_display(alas_report::families::aerodynamics::figure_status_message(
-                    descriptor.title,
-                    "Unavailable for this run: the required analysis stage did not produce data.",
-                    false,
-                    Some(&theme),
-                )))
+                Some(localize_scene_for_display(
+                    alas_report::families::aerodynamics::figure_status_message(
+                        descriptor.title,
+                        unavailable_reason(state, result),
+                        false,
+                        Some(&theme),
+                    ),
+                ))
             } else {
                 // Unknown ids fall back to a useful chart, while registered ids stay
                 // honest.
@@ -109,17 +134,44 @@ pub fn build_result_figure_with_camera(
     theme: &str,
     camera: Option<Camera3D>,
 ) -> Option<Option<Scene>> {
-    alas_report::capture_plot_data(|| build_result_figure_inner(state, id, config, theme, camera))
+    let result = state.pipeline_result.as_ref()?;
+    build_result_figure_detached(
+        result,
+        state.selected_solver_view,
+        id,
+        config,
+        theme,
+        camera,
+    )
 }
 
-fn build_result_figure_inner(
-    state: &AppState,
+/// [`build_result_figure_with_camera`] from the result and the solver view
+/// alone, so a worker thread can build a figure from a snapshot of the result
+/// without the application state. The caller sets the display language of the
+/// building thread (`alas_i18n::set_language`; it is thread-local).
+pub fn build_result_figure_detached(
+    result: &alas_pipeline::PipelineResult,
+    view: SolverResultView,
     id: &str,
     config: &AlasConfig,
     theme: &str,
     camera: Option<Camera3D>,
 ) -> Option<Option<Scene>> {
-    let result = state.pipeline_result.as_ref()?;
+    // Footnotes the figures wrap themselves are translated before the wrap.
+    alas_report::set_text_localizer(super::localization::localize_scene_text);
+    alas_report::capture_plot_data(|| {
+        build_result_figure_inner(result, view, id, config, theme, camera)
+    })
+}
+
+fn build_result_figure_inner(
+    result: &alas_pipeline::PipelineResult,
+    view: SolverResultView,
+    id: &str,
+    config: &AlasConfig,
+    theme: &str,
+    camera: Option<Camera3D>,
+) -> Option<Option<Scene>> {
     // These figures depend only on configuration and remain useful before a
     // full aerodynamic report exists.
     let config_scene = match id {
@@ -165,12 +217,25 @@ fn build_result_figure_inner(
             },
         )));
     }
-    let report = selected_result_report(state, result)?;
+    let report = selected_result_report(view, result)?;
     let baseline = result.baseline_analysis.as_ref();
     let scene = match id {
-        "matching_chart" => figure_matching_chart(report, config, Some(theme)),
+        "matching_chart" => {
+            // An airport that does not resolve keeps the report's own status
+            // scene (and its guard order) instead of an empty slot.
+            match run_airports(config, result) {
+                Some((origin, destination)) => figure_matching_chart_for_airports(
+                    report,
+                    config,
+                    &origin,
+                    &destination,
+                    Some(theme),
+                ),
+                None => figure_matching_chart(report, config, Some(theme)),
+            }
+        }
         "optimization_history" => {
-            let optimization = selected_optimization_result(state, result)?;
+            let optimization = selected_optimization_result(view, result)?;
             let summary = alas_pipeline::optimizer_summary::OptimizerRunSummary::from_result(
                 optimization,
                 &result.config,
@@ -179,7 +244,7 @@ fn build_result_figure_inner(
             figure_optimization_run(optimization, Some(&summary), Some(theme))
         }
         "design_evolution" => {
-            let history = &selected_optimization_result(state, result)?.history;
+            let history = &selected_optimization_result(view, result)?.history;
             let builder = AircraftBuilder::new(Some(config.geometry.clone()));
             figure_design_evolution(history, &builder, 12, Some(theme)).unwrap_or_else(|| {
                 figure_status_message(
@@ -189,6 +254,13 @@ fn build_result_figure_inner(
                     Some(theme),
                 )
             })
+        }
+        // A baseline-only run carries a baseline analysis that is the analysed
+        // design itself: a "baseline vs optimized" figure would compare the
+        // design with itself, so it is left out like any figure without data
+        // (`unavailable_reason` says why when it is selected).
+        id if is_comparison_figure(id) && selected_optimization_result(view, result).is_none() => {
+            return None;
         }
         "airfoil_comparison" => {
             let baseline = baseline?;
@@ -215,11 +287,12 @@ fn build_result_figure_inner(
         "airfoil_evolution" => figure_airfoil_evolution(&report.airplane, Some(theme)),
         "polar_comparison" => {
             let baseline = baseline?;
-            figure_polar_comparison(
+            figure_polar_comparison_with_cl_max(
                 baseline,
                 report,
                 ("Baseline", "Optimized"),
                 None,
+                Some(config.performance.cl_max_clean),
                 Some(theme),
             )
         }
@@ -236,8 +309,12 @@ fn build_result_figure_inner(
         "wireframe_fuselage" => figure_wireframe_fuselage(&report.airplane, Some(theme)),
         "wireframe_empennage" => figure_wireframe_empennage(&report.airplane, Some(theme)),
         "threeview" | "asb_threeview" => figure_threeview(&report.airplane, Some(theme)),
-        "aero_panel" => figure_aero_panel(report, Some(theme)),
-        "span_loading" => figure_span_loading(report, Some(theme)),
+        "aero_panel" => figure_aero_panel_with_cl_max(
+            report,
+            Some(config.performance.cl_max_clean),
+            Some(theme),
+        ),
+        "span_loading" => figure_span_loading(report, config, Some(theme)),
         "vlm_flow" => figure_vlm_flow(report, Some(theme)),
         "drag_breakdown" => figure_drag_breakdown(report, Some(theme)),
         "airfoil_reynolds" => {
@@ -324,24 +401,8 @@ fn build_result_figure_inner(
         "payload_range" => figure_payload_range(report, config, Some(theme)),
         "lto_departure" | "lto_arrival" => {
             let departure = id == "lto_departure";
-            let airport = result
-                .route
-                .as_ref()
-                .and_then(|route| {
-                    if departure {
-                        route.origin_airport.as_ref()
-                    } else {
-                        route.dest_airport.as_ref()
-                    }
-                })
-                .or_else(|| {
-                    alas_config::airports::get(if departure {
-                        &config.departure_airport
-                    } else {
-                        &config.arrival_airport
-                    })
-                    .ok()
-                })?;
+            let (origin, destination) = run_airports(config, result)?;
+            let airport = if departure { &origin } else { &destination };
             let fuel = &result.feasibility.fuel_loading;
             let takeoff_mass_kg = fuel.analyzed_takeoff_mass_kg;
             let mlw_limit_kg = config.landing_mass_limit_kg(
@@ -360,11 +421,12 @@ fn build_result_figure_inner(
                 Some(theme),
             )
         }
-        "mission_profile" => figure_mission_profile(
+        "mission_profile" => figure_mission_profile_vs_configured(
             result
                 .mission_result
                 .as_ref()
                 .filter(|mission| mission.figure_data_ready())?,
+            Some(config.requirements.cruise_altitude_m),
             Some(theme),
         ),
         "mission_velocities" => figure_mission_velocities(
@@ -440,14 +502,15 @@ fn build_result_figure_inner(
                     Some(theme),
                 )
             } else {
-                figure_model_comparison(
+                figure_model_comparison_with_cl_max(
                     report,
+                    Some(config.performance.cl_max_clean),
                     result
                         .mission_result
                         .as_ref()
                         .filter(|mission| mission.figure_data_ready()),
                     result.vspaero_result.as_ref(),
-                    selected_avl_result(state, result),
+                    selected_avl_result(view, result),
                     Some(theme),
                 )
             }
@@ -475,4 +538,20 @@ fn build_screening_figure_inner(state: &AppState, id: &str, theme: &str) -> Opti
         _ => None,
     }
     .map(localize_scene_for_display)
+}
+
+/// The aerodromes the run's field-performance figures are drawn for.
+fn run_airports(
+    config: &AlasConfig,
+    result: &alas_pipeline::PipelineResult,
+) -> Option<(
+    alas_config::airports::Airport,
+    alas_config::airports::Airport,
+)> {
+    let route = result.route.as_ref();
+    route_airports(
+        config,
+        route.and_then(|route| route.origin_airport.as_ref()),
+        route.and_then(|route| route.dest_airport.as_ref()),
+    )
 }

@@ -168,9 +168,30 @@ impl AlasConfig {
     /// A window that starts above the limit (a nominal that already violates
     /// it) is pulled down to the limit as well, so the search is never
     /// handed a span range the hard requirement rejects outright.
+    ///
+    /// The wing position of a redesigned registered aircraft is not searched
+    /// ([`Self::derives_wing_position`]) and the sweep of one that cruises
+    /// below the compressibility-drag onset is held
+    /// ([`Self::holds_reference_sweep`]).
     pub fn design_envelope(&self, nominal: &DesignVector) -> Vec<VariableEnvelope> {
-        let mut envelope = self.optimizer.design_space.envelope(nominal);
+        let mut envelope = self
+            .optimizer
+            .design_space
+            .envelope_for(nominal, self.aircraft_class());
         self.apply_clean_sheet_bounds(&mut envelope);
+        let hold = |envelope: &mut Vec<VariableEnvelope>, name: &str| {
+            for variable in envelope.iter_mut().filter(|v| v.name == name) {
+                variable.lower = variable.nominal;
+                variable.upper = variable.nominal;
+                variable.fixed = true;
+            }
+        };
+        if self.derives_wing_position() {
+            hold(&mut envelope, WING_POSITION_VARIABLE);
+        }
+        if self.holds_reference_sweep() {
+            hold(&mut envelope, "sweep_deg");
+        }
         if let Some(limit) = self.max_design_span_m() {
             for variable in envelope.iter_mut().filter(|v| v.name == "span_m") {
                 variable.upper = variable.upper.min(limit);
@@ -182,12 +203,127 @@ impl AlasConfig {
     }
 }
 
+/// The design variable that places the wing along the fuselage.
+pub const WING_POSITION_VARIABLE: &str = "wing_x_shift_m";
+
+impl AlasConfig {
+    /// Whether the wing position of a candidate is derived from its balance
+    /// instead of searched: every redesign of a registered aircraft (a
+    /// reference adaptation or a clean sheet started from a preset), not a
+    /// fixed-aircraft sandbox and not a brief without a registered aircraft.
+    ///
+    /// A designer places the wing where the loaded aircraft balances
+    /// (Torenbeek, *Synthesis of Subsonic Airplane Design*, 1982, ch. 8,
+    /// the wing location along the fuselage from the loading diagram;
+    /// Raymer, *Aircraft Design: A Conceptual Approach*, ch. 15 and 16). The
+    /// evaluator therefore moves the wing until the take-off centre of gravity
+    /// sits at the registered aircraft's fraction of the mean aerodynamic
+    /// chord, and reports the position it found in the design vector. Left
+    /// free, the search moved the wing up to 1.7 m under a fixed fuselage,
+    /// cabin and gear, and the centre-of-gravity rows followed the chord
+    /// instead of the loading.
+    #[must_use]
+    pub fn derives_wing_position(&self) -> bool {
+        self.optimizer.design_space.mode != crate::DesignMode::BaselineSandbox
+            && crate::presets::get(&self.preset).is_ok()
+    }
+
+    /// Whether a reference adaptation holds the sweep at the registered
+    /// value: the design cruise Mach is below `drag_model.wave_drag_onset_mach`
+    /// (0.6 by default), the Mach below which no transport section has a
+    /// drag rise. The product drag law (Shevell-Kroo, `Auto`) is not gated
+    /// by that Mach and has a crest-critical creep at every Mach, but at these
+    /// speeds it is negligible: at cruise the ATR 72-600 (Mach 0.44) carries
+    /// 0.17 counts and the C295 (Mach 0.42) 0.09 counts of it, with a model
+    /// crest-critical Mach of about 0.61 for their conventional sections, and
+    /// a degree of sweep changes it by about 0.002 counts. Sweep therefore
+    /// cannot pay for its wing mass and low-speed lift through drag, and a
+    /// change of it is a change of the mean-chord station alone. Both are
+    /// held; every jet and the A400M (Mach 0.72, 17.5 counts at cruise) keep
+    /// the sweep window.
+    #[must_use]
+    pub fn holds_reference_sweep(&self) -> bool {
+        self.optimizer.design_space.mode == crate::DesignMode::ReferenceAdaptation
+            && self.requirements.cruise_mach < self.resolved_drag_model().wave_drag_onset_mach
+    }
+}
+
 // A test asserts on values it built here, so a failed unwrap is the assertion
 // failing rather than a library invariant being broken.
 #[allow(clippy::unwrap_used, clippy::expect_used)]
 #[cfg(test)]
 mod tests {
     use super::*;
+
+    #[test]
+    fn a_redesigned_registered_aircraft_does_not_search_its_wing_position() {
+        let variable = |config: &AlasConfig, name: &str| {
+            let nominal = config.configured_nominal_design();
+            config
+                .design_envelope(&nominal)
+                .into_iter()
+                .find(|variable| variable.name == name)
+                .unwrap()
+        };
+        for mode in ["reference_adaptation", "clean_sheet"] {
+            let config = AlasConfig::from_value(&serde_json::json!({
+                "preset": "A320-200",
+                "optimizer": { "design_space": { "mode": mode } },
+            }))
+            .unwrap();
+            assert!(config.derives_wing_position(), "{mode}");
+            let position = variable(&config, WING_POSITION_VARIABLE);
+            assert!(position.fixed && position.lower == position.upper, "{mode}");
+            assert_eq!(position.lower, position.nominal, "{mode}");
+            // The jet keeps its sweep window.
+            assert!(!config.holds_reference_sweep(), "{mode}");
+            assert!(!variable(&config, "sweep_deg").fixed, "{mode}");
+        }
+        // A fixed-aircraft sandbox and a brief without a registered aircraft
+        // derive nothing.
+        let sandbox = AlasConfig::from_value(&serde_json::json!({
+            "preset": "A320-200",
+            "optimizer": { "design_space": { "mode": "baseline_sandbox" } },
+        }))
+        .unwrap();
+        assert!(!sandbox.derives_wing_position());
+        assert!(!AlasConfig::default().derives_wing_position());
+    }
+
+    #[test]
+    fn a_reference_adaptation_below_the_wave_drag_onset_holds_its_sweep() {
+        for (preset, held) in [
+            ("ATR72-600", true),
+            ("C295", true),
+            ("A400M", false),
+            ("LJ60", false),
+            ("A320-200", false),
+        ] {
+            let config = AlasConfig::from_value(&serde_json::json!({
+                "preset": preset,
+                "optimizer": { "design_space": { "mode": "reference_adaptation" } },
+            }))
+            .unwrap();
+            assert_eq!(config.holds_reference_sweep(), held, "{preset}");
+            let nominal = config.configured_nominal_design();
+            let sweep = config
+                .design_envelope(&nominal)
+                .into_iter()
+                .find(|variable| variable.name == "sweep_deg")
+                .unwrap();
+            assert_eq!(sweep.fixed, held, "{preset}");
+            if held {
+                assert_eq!((sweep.lower, sweep.upper), (sweep.nominal, sweep.nominal));
+            }
+        }
+        // A clean sheet searches the sweep whatever the Mach.
+        let clean = AlasConfig::from_value(&serde_json::json!({
+            "preset": "ATR72-600",
+            "optimizer": { "design_space": { "mode": "clean_sheet" } },
+        }))
+        .unwrap();
+        assert!(!clean.holds_reference_sweep());
+    }
 
     #[test]
     fn a_span_on_a_band_edge_belongs_to_the_next_letter() {

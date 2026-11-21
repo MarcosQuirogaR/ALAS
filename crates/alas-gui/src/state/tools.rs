@@ -238,3 +238,36 @@ fn report_marker_failure(marker_path: &Path, error: &std::io::Error) {
         marker_path.display()
     );
 }
+
+impl AppState {
+    /// Drain the "Install all" worker and, when it finishes, point unset
+    /// CFD tool paths at tools it installed (OpenVSP needs no setting: the
+    /// locator already searches the user data folder).
+    pub fn poll_tool_installer(&mut self) {
+        let Some(reports) = self.tool_installer.poll() else {
+            return;
+        };
+        for report in &reports {
+            match &report.result {
+                alas_exec::installer::ToolResult::Installed { executable, .. } => {
+                    self.log(format!("Installed {}.", report.id), LogKind::Info);
+                    let path = executable.to_string_lossy().into_owned();
+                    match report.id.as_str() {
+                        "gmsh" if self.cfd.gmsh_executable.is_none() => {
+                            self.cfd.gmsh_executable = Some(path.clone());
+                            self.cfd.openfoam_preferences.gmsh_executable = Some(path);
+                        }
+                        "paraview" if self.cfd.paraview_executable.is_none() => {
+                            self.cfd.paraview_executable = Some(path);
+                        }
+                        _ => {}
+                    }
+                }
+                alas_exec::installer::ToolResult::Failed(message) => {
+                    self.log(format!("{}: {message}", report.id), LogKind::Warn);
+                }
+                _ => {}
+            }
+        }
+    }
+}

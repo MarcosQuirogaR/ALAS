@@ -21,11 +21,16 @@ pub mod objective;
 pub use geometry::{
     GeometryComparison, AEROELASTIC_CAVEAT_TEXT, ASPECT_RATIO_FLAG_FRACTION,
     ASPECT_RATIO_FLAG_LABEL, BUFFET_BASIS_TEXT, SWEEP_FLAG_DEG, SWEEP_FLAG_LABEL,
+    WING_POSITION_LABEL,
 };
 
 /// What the search is: a bounded local refinement of the preset, not a
 /// global search for the best aircraft of its class.
 pub const SCOPE_LABEL: &str = "Local refinement around the preset";
+
+/// [`SCOPE_LABEL`] of a clean sheet, which searches from its class-sized or
+/// cabin-sized start rather than the registered preset.
+pub const CLEAN_SHEET_SCOPE_LABEL: &str = "Clean-sheet search from the sized start";
 
 /// The stopping rule of a run in which a stage may stop on its time limit.
 pub const TIME_LIMITED_TEXT: &str = "Time-limited: the stopping point depends on machine speed and worker count; replay with the recorded evaluation counts for a bit-identical result at any worker count";
@@ -130,8 +135,17 @@ pub struct OptimizerRunSummary {
     /// explicit bounds rather than the unchanged preset
     /// ([`baseline_is_constrained_start`]).
     pub baseline_constrained: bool,
+    /// Whether the run is a clean sheet, whose baseline is its sized start
+    /// rather than the registered preset.
+    pub clean_sheet: bool,
     /// The delivered wing against the baseline's, when both reports exist.
     pub geometry: Option<GeometryComparison>,
+    /// How far the best design was still moving when the search's
+    /// candidate plan ended.
+    pub convergence: Option<alas_opt::ConvergenceIndicator>,
+    /// Why the search found no feasible design (rejection counts and the worst
+    /// violated constraint with value and limit); `None` when it found one.
+    pub infeasibility: Option<String>,
 }
 
 /// Whether the baseline of `diagnostics` is a constrained start, not the
@@ -207,6 +221,10 @@ pub const TERMINATION_TEXT: &[(&str, &str)] = &[
     ("pregate_exhausted", "Pre-gate rejection cap reached"),
     ("stagnated", "Stopped improving"),
     ("cancelled", "Cancelled"),
+    (
+        "no_feasible_design",
+        "No feasible design found; least-violating design reported",
+    ),
     ("fixed_bounds", "No free design variable"),
     (
         "reporting_fidelity_rejected",
@@ -215,6 +233,14 @@ pub const TERMINATION_TEXT: &[(&str, &str)] = &[
     (
         "reporting_fidelity_fallback",
         "Verified fallback candidate at reporting fidelity",
+    ),
+    (
+        "registered_design_retained",
+        "No candidate beat the registered aircraft; it is delivered",
+    ),
+    (
+        "start_design_retained",
+        "No candidate beat the clean-sheet start; it is delivered",
     ),
 ];
 
@@ -337,7 +363,10 @@ impl OptimizerRunSummary {
             }),
             reporting_baseline: acceptance.and_then(|acceptance| acceptance.baseline.clone()),
             baseline_constrained: diagnostics.is_some_and(baseline_is_constrained_start),
+            clean_sheet: config.optimizer.design_space.mode == alas_config::DesignMode::CleanSheet,
             geometry: None,
+            convergence: diagnostics.and_then(|d| d.convergence.clone()),
+            infeasibility: result.infeasibility_summary(),
         }
     }
 

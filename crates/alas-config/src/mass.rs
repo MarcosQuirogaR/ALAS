@@ -5,18 +5,17 @@
 
 //! Mass architecture and parameters of the production and comparison builds.
 //!
-//! The product default is the single, checked NASA FLOPS transport
-//! architecture. The historical Torenbeek/fraction values remain serialized
-//! for an explicit reference-compatible comparison and migration, but they
-//! do not participate in production evaluation or silently fill missing FLOPS
-//! inputs.
+//! The product default is the single, checked NASA FLOPS transport architecture.
+//! The historical Torenbeek/fraction values stay serialized for an explicit
+//! comparison and migration; they never enter production evaluation or fill
+//! missing FLOPS inputs.
 
 use serde::{Deserialize, Serialize};
 
 use crate::{
-    legacy_mass_model_schema_version, ConfigNode, FlopsStructureConfig, FlopsTransportConfig,
-    FlopsTurbopropConfig, MassArchitecture, MassArchitectureMigration, PropulsionMassMethod,
-    StructuralMassMethod, SystemsMassMethod, MASS_MODEL_SCHEMA_VERSION,
+    ConfigNode, FlopsStructureConfig, FlopsTransportConfig, FlopsTurbopropConfig, MassArchitecture,
+    MassArchitectureMigration, PropulsionMassMethod, StructuralMassMethod, SystemsMassMethod,
+    MASS_MODEL_SCHEMA_VERSION,
 };
 
 /// Tunable mass fractions and structural parameters.
@@ -25,9 +24,8 @@ use crate::{
 pub struct MassModelConfig {
     /// Version of this node's own schema; see [`MASS_MODEL_SCHEMA_VERSION`].
     ///
-    /// A saved file that predates the single mass architecture states no
-    /// version, so it reads back as 1 and
-    /// [`MassModelConfig::normalize_architecture`] migrates it.
+    /// A file that predates the single mass architecture states none, reads back
+    /// as 1 and is migrated by [`MassModelConfig::normalize_architecture`].
     #[serde(default = "legacy_mass_model_schema_version")]
     #[config(skip)]
     pub schema_version: u32,
@@ -38,15 +36,15 @@ pub struct MassModelConfig {
         advanced,
         options = MassArchitecture,
         label = "Mass architecture",
-        help = "The one method that owns every mass group. 'Pure FLOPS transport v1' is the product model: the NASA FLOPS conventional-transport equations own the wing, tails, fuselage, gear, nacelles, propulsion, systems, furnishings and operating items, and a missing input is reported rather than replaced. 'Legacy reference-compatible comparison' is the frozen Torenbeek/fraction buildup, kept only as a comparison and regression control, nothing falls back to it."
+        help = "The method that owns every mass group.",
+        long_help = "The one method that owns every mass group. 'Pure FLOPS transport v1' is the product model: the NASA FLOPS conventional-transport equations own the wing, tails, fuselage, gear, nacelles, propulsion, systems, furnishings and operating items, and a missing input is reported rather than replaced. 'Legacy reference-compatible comparison' is the frozen Torenbeek/fraction buildup, kept only as a comparison and regression control, nothing falls back to it."
     )]
     pub mass_architecture: MassArchitecture,
 
     /// Method used for systems, equipment, and operating-item mass.
     ///
-    /// Derived from [`Self::mass_architecture`]; not independently selectable
-    /// and no longer written to saved files. Retained as a field because the
-    /// mass buildup and the ledger labels read it per group.
+    /// Derived from [`Self::mass_architecture`], not selectable and not written to
+    /// files; kept as a field because the buildup and ledger labels read it.
     #[serde(default, skip_serializing)]
     #[config(skip)]
     pub systems_mass_method: SystemsMassMethod,
@@ -81,7 +79,8 @@ pub struct MassModelConfig {
     #[config(
         nested,
         advanced,
-        help = "FLOPS technology factors (composites, aeroelastic tailoring, strut bracing, variable sweep), landing-gear and landing-mass overrides, baseline engine scaling, and the empty-mass margin used by the FLOPS structural and propulsion methods."
+        help = "FLOPS technology factors (composites, aeroelastic tailoring, strut bracing, variable sweep), gear and landing-mass overrides, engine scaling, empty-mass margin.",
+        long_help = "FLOPS technology factors (composites, aeroelastic tailoring, strut bracing, variable sweep), landing-gear and landing-mass overrides, baseline engine scaling, and the empty-mass margin used by the FLOPS structural and propulsion methods."
     )]
     pub flops_structure: FlopsStructureConfig,
 
@@ -95,7 +94,8 @@ pub struct MassModelConfig {
     #[config(
         nested,
         advanced,
-        help = "Declared engine dry mass, propeller geometry and construction, nacelle area density, pylon coefficient and engine-installation mass used by the shaft-power propulsion group. NASA FLOPS parameterises every propulsion mass on rated thrust and has no turboprop branch, so these inputs replace that group for a propeller-driven aircraft."
+        help = "Declared engine dry mass, propeller geometry and construction, nacelle area density, pylon coefficient and installation mass for the shaft-power group.",
+        long_help = "Declared engine dry mass, propeller geometry and construction, nacelle area density, pylon coefficient and engine-installation mass used by the shaft-power propulsion group. NASA FLOPS parameterises every propulsion mass on rated thrust and has no turboprop branch, so these inputs replace that group for a propeller-driven aircraft."
     )]
     pub flops_turboprop: FlopsTurbopropConfig,
 
@@ -105,19 +105,23 @@ pub struct MassModelConfig {
     #[config(
         advanced,
         label = "Geometry-derived component stations",
-        help = "Place mass groups at the built geometry stations: tails at 42 percent of their mean chord, gear at its nose and main stations, engines at their nacelles and fuel in its tanks. Disable to keep the other groups at the reference points. The complete wing always uses the sized box plus secondary first moment, shared with the item ledger."
+        help = "Place mass groups at built geometry stations (tails at 42 % mean chord, gear, engines at nacelles, fuel in tanks).",
+        long_help = "Place mass groups at the built geometry stations: tails at 42 percent of their mean chord, gear at its nose and main stations, engines at their nacelles and fuel in its tanks. Disable to keep the other groups at the reference points. The complete wing always uses the sized box plus secondary first moment, shared with the item ledger."
     )]
     pub geometric_component_stations: bool,
 
     /// Legacy Torenbeek share of maximum takeoff weight the wing structure must carry.
     #[config(
+        advanced,
         label = "Wing suspended-mass fraction",
-        help = "Legacy comparison only: fraction of MTOW treated as 'suspended' mass in the Torenbeek wing structural formula (everything the wing structure must carry other than itself). Typical commercial transport: 0.70-0.78."
+        help = "Legacy comparison only: fraction of MTOW treated as suspended mass in the Torenbeek wing structural formula [0-1]. Typical commercial transport 0.70-0.78.",
+        long_help = "Legacy comparison only: fraction of MTOW treated as 'suspended' mass in the Torenbeek wing structural formula (everything the wing structure must carry other than itself). Typical commercial transport: 0.70-0.78."
     )]
     pub suspended_mass_fraction: f64,
 
     /// Legacy Torenbeek design airspeed with the flaps out.
     #[config(
+        advanced,
         label = "Max airspeed with flaps extended",
         unit = "m/s",
         help = "Legacy comparison only: design airspeed with flaps extended, fed into the Torenbeek wing-mass formula."
@@ -126,6 +130,7 @@ pub struct MassModelConfig {
 
     /// Legacy Torenbeek maximum flap deflection.
     #[config(
+        advanced,
         label = "Max take-off flap deflection",
         unit = "deg",
         help = "Legacy comparison only: maximum flap deflection angle, fed into the Torenbeek wing-mass formula."
@@ -179,7 +184,8 @@ pub struct MassModelConfig {
     #[config(
         label = "Payload linear density",
         unit = "kg/m",
-        help = "How much payload mass occupies one metre of cabin length. Used only to derive the payload/systems CG position (the occupied cabin length), not the payload mass itself, so stretching the fuselage beyond what the payload needs doesn't shift the CG aft 'for free'."
+        help = "Payload mass per metre of occupied cabin length [kg/m]. Used only to place the payload/systems CG, not the payload mass.",
+        long_help = "How much payload mass occupies one metre of cabin length. Used only to derive the payload/systems CG position (the occupied cabin length), not the payload mass itself, so stretching the fuselage beyond what the payload needs doesn't shift the CG aft 'for free'."
     )]
     pub cabin_payload_density_kg_m: f64,
 
@@ -213,17 +219,19 @@ pub struct MassModelConfig {
     )]
     pub pct_load_mlg_max: f64,
 
-    /// Least weight the nose gear needs for steering authority.
+    /// Least weight the nose gear carries at the most-aft CG.
     #[config(
         label = "Min nose-gear load fraction",
-        help = "Minimum fraction of weight that must be on the nose gear for adequate steering authority: sets the 'Min Nose Load' CG-envelope boundary (the aft-most safe CG at each weight). Raymer ch.11 / Torenbeek recommend roughly 6-8% minimum for steering/braking authority (8-15% preferred, <=20% max, see pct_load_nlg_max_handling); the shipped default was previously 2%, which left the boundary well inside the aerodynamic aft limit for most configured presets and so rarely governed anything."
+        help = "Minimum fraction of weight on the nose gear at the most-aft CG (Min Nose Load CG boundary). Class value 0.0352 from 13 airliner families.",
+        long_help = "Minimum fraction of weight that must be on the nose gear: sets the 'Min Nose Load' CG-envelope boundary (the aft-most CG at each weight, the main-gear station less this share of the wheelbase), the same for every aircraft. The class value, 3.52 %, is the lowest static nose-gear share at a certified most-aft CG in a sample of 13 airliner families read from the manufacturers' airport-planning documents (Boeing 717, 737NG, 737 MAX, 757, 767, 777, MD-80, MD-90, MD-11; Airbus A300-600, A310, A330; Embraer E190): the MD-90-30 at 157,000 lb. The nine wing-engine twins alone give 3.77 % (737-800 at 156,000 lb) and the median of the family minima is 4.99 %. No business jet is in the sample: none publishes the table. Raymer (6th ed., Sec. 11.2, p. 343) gives 5 % as the least nose-wheel load with enough traction to steer, a design guideline for placing the main gear and not a certification limit; see pct_load_nlg_max_handling for the pair's other end."
     )]
     pub pct_load_nlg_min: f64,
 
     /// Most weight the nose gear should carry for handling.
     #[config(
         label = "Max nose-gear handling-load fraction",
-        help = "Maximum fraction of current weight that should sit on the nose gear at the forward CG limit, for handling/steering reasons (excess nose-wheel steering and braking load, reduced main-wheel braking authority), independent of the nose tires' rated capacity. Raymer ch.11 / Torenbeek: ~20% is a common practical ceiling."
+        help = "Maximum fraction of weight on the nose gear at the forward CG limit. Raymer 6th ed. Sec. 11.2: above 0.20 the main gear is too far aft.",
+        long_help = "Maximum fraction of current weight that may sit on the nose gear at the forward CG limit, independent of the nose tires' rated capacity. Raymer (6th ed., Sec. 11.2) gives both nose-load bounds as one pair: over 20% of the weight on the nosewheel means the main gear is probably too far aft relative to the c.g., under 5% leaves too little traction to steer, and 8-15% is optimum (p. 343); M_f/B below 0.20 at the forward c.g. and M_a/B above 0.05 at the aft c.g., 0.15 and 0.08 preferred (Sec. 11.3, p. 345). pct_load_nlg_min, the aft end of the same pair, is a separate class value taken from certified practice (see its help)."
     )]
     pub pct_load_nlg_max_handling: f64,
 
@@ -245,145 +253,25 @@ pub struct MassModelConfig {
     /// Share of the wing's geometric volume that is usable tankage.
     #[config(
         label = "Usable fuel-tank volume fraction",
-        help = "Fraction of the wing's geometric (Torenbeek) fuel volume that's actually usable tank capacity, after structure, ribs, systems and unusable-fuel allowance. Typical preliminary-design value: 0.85-0.95."
+        help = "Fraction of the wing's geometric (Torenbeek) fuel volume that is usable tank capacity, after structure, ribs, systems and unusable fuel [0-1].",
+        long_help = "Fraction of the wing's geometric (Torenbeek) fuel volume that's actually usable tank capacity, after structure, ribs, systems and unusable-fuel allowance. Typical preliminary-design value: 0.85-0.95."
     )]
     pub fuel_tank_usable_fraction: f64,
 }
 
-/// Deserialization representation for [`MassModelConfig`].
-///
-/// The three pre-version-2 selectors are deliberately kept in this wire
-/// object even though current files omit them.  A current file carries
-/// `mass_architecture`, so the derived selectors can be repaired immediately
-/// after decoding; a legacy file omits that field and the selectors remain
-/// available to [`MassModelConfig::normalize_architecture`] during the
-/// configuration migration path.
-#[derive(Debug, Deserialize)]
-#[serde(deny_unknown_fields, default)]
-struct MassModelConfigWire {
-    #[serde(default = "legacy_mass_model_schema_version")]
-    schema_version: u32,
-    mass_architecture: Option<MassArchitecture>,
-    systems_mass_method: SystemsMassMethod,
-    #[serde(default = "FlopsTransportConfig::working_default")]
-    flops_transport: FlopsTransportConfig,
-    structural_mass_method: StructuralMassMethod,
-    propulsion_mass_method: PropulsionMassMethod,
-    flops_structure: FlopsStructureConfig,
-    flops_turboprop: FlopsTurbopropConfig,
-    geometric_component_stations: bool,
-    suspended_mass_fraction: f64,
-    max_airspeed_for_flaps_ms: f64,
-    flap_deflection_angle_deg: f64,
-    landing_gear_mass_fraction: f64,
-    propulsion_twr_factor: f64,
-    propulsion_installation_factor: f64,
-    propulsion_mass_fallback_fraction: f64,
-    systems_mass_fraction: f64,
-    furnishings_mass_fraction: f64,
-    cabin_payload_density_kg_m: f64,
-    nlg_x_fraction: f64,
-    mlg_x_fraction_mac: f64,
-    pct_load_nlg_max: f64,
-    pct_load_mlg_max: f64,
-    pct_load_nlg_min: f64,
-    #[serde(default = "default_pct_load_nlg_max_handling")]
-    pct_load_nlg_max_handling: f64,
-    mlw_fraction_mtow: f64,
-    fuel_density_kg_m3: f64,
-    fuel_tank_usable_fraction: f64,
-}
-
-impl Default for MassModelConfigWire {
-    fn default() -> Self {
-        let defaults = MassModelConfig::default();
-        Self {
-            schema_version: defaults.schema_version,
-            // None lets the conversion distinguish a current architecture
-            // field from a legacy file that only has the three old selectors.
-            mass_architecture: None,
-            systems_mass_method: defaults.systems_mass_method,
-            flops_transport: defaults.flops_transport,
-            structural_mass_method: defaults.structural_mass_method,
-            propulsion_mass_method: defaults.propulsion_mass_method,
-            flops_structure: defaults.flops_structure,
-            flops_turboprop: defaults.flops_turboprop,
-            geometric_component_stations: default_true(),
-            suspended_mass_fraction: defaults.suspended_mass_fraction,
-            max_airspeed_for_flaps_ms: defaults.max_airspeed_for_flaps_ms,
-            flap_deflection_angle_deg: defaults.flap_deflection_angle_deg,
-            landing_gear_mass_fraction: defaults.landing_gear_mass_fraction,
-            propulsion_twr_factor: defaults.propulsion_twr_factor,
-            propulsion_installation_factor: defaults.propulsion_installation_factor,
-            propulsion_mass_fallback_fraction: defaults.propulsion_mass_fallback_fraction,
-            systems_mass_fraction: defaults.systems_mass_fraction,
-            furnishings_mass_fraction: defaults.furnishings_mass_fraction,
-            cabin_payload_density_kg_m: defaults.cabin_payload_density_kg_m,
-            nlg_x_fraction: defaults.nlg_x_fraction,
-            mlg_x_fraction_mac: defaults.mlg_x_fraction_mac,
-            pct_load_nlg_max: defaults.pct_load_nlg_max,
-            pct_load_mlg_max: defaults.pct_load_mlg_max,
-            pct_load_nlg_min: defaults.pct_load_nlg_min,
-            pct_load_nlg_max_handling: defaults.pct_load_nlg_max_handling,
-            mlw_fraction_mtow: defaults.mlw_fraction_mtow,
-            fuel_density_kg_m3: defaults.fuel_density_kg_m3,
-            fuel_tank_usable_fraction: defaults.fuel_tank_usable_fraction,
-        }
-    }
-}
-
-impl From<MassModelConfigWire> for MassModelConfig {
-    fn from(wire: MassModelConfigWire) -> Self {
-        let architecture = wire.mass_architecture.unwrap_or_default();
-        let has_current_architecture = wire.mass_architecture.is_some();
-        let mut model = Self {
-            schema_version: wire.schema_version,
-            mass_architecture: architecture,
-            systems_mass_method: wire.systems_mass_method,
-            flops_transport: wire.flops_transport,
-            structural_mass_method: wire.structural_mass_method,
-            propulsion_mass_method: wire.propulsion_mass_method,
-            flops_structure: wire.flops_structure,
-            flops_turboprop: wire.flops_turboprop,
-            geometric_component_stations: wire.geometric_component_stations,
-            suspended_mass_fraction: wire.suspended_mass_fraction,
-            max_airspeed_for_flaps_ms: wire.max_airspeed_for_flaps_ms,
-            flap_deflection_angle_deg: wire.flap_deflection_angle_deg,
-            landing_gear_mass_fraction: wire.landing_gear_mass_fraction,
-            propulsion_twr_factor: wire.propulsion_twr_factor,
-            propulsion_installation_factor: wire.propulsion_installation_factor,
-            propulsion_mass_fallback_fraction: wire.propulsion_mass_fallback_fraction,
-            systems_mass_fraction: wire.systems_mass_fraction,
-            furnishings_mass_fraction: wire.furnishings_mass_fraction,
-            cabin_payload_density_kg_m: wire.cabin_payload_density_kg_m,
-            nlg_x_fraction: wire.nlg_x_fraction,
-            mlg_x_fraction_mac: wire.mlg_x_fraction_mac,
-            pct_load_nlg_max: wire.pct_load_nlg_max,
-            pct_load_mlg_max: wire.pct_load_mlg_max,
-            pct_load_nlg_min: wire.pct_load_nlg_min,
-            pct_load_nlg_max_handling: wire.pct_load_nlg_max_handling,
-            mlw_fraction_mtow: wire.mlw_fraction_mtow,
-            fuel_density_kg_m3: wire.fuel_density_kg_m3,
-            fuel_tank_usable_fraction: wire.fuel_tank_usable_fraction,
-        };
-        // Current files carry one authoritative architecture.  Re-derive the
-        // compatibility fields so direct serde round-trips cannot create a
-        // hybrid in memory.  Legacy files intentionally retain their old
-        // selectors until `from_value_with_migration` can report the change.
-        if has_current_architecture || model.schema_version >= MASS_MODEL_SCHEMA_VERSION {
-            model.apply_architecture();
-        }
-        model
-    }
-}
+mod wire;
+use wire::MassModelConfigWire;
 
 const fn default_true() -> bool {
     true
 }
 
-/// Raymer/Torenbeek practical ceiling on nose-gear handling load.
+/// Design ceiling of the static nose-gear share at the most-forward CG: 15 % (Jenkinson, Simpkin and Rhodes, Civil Jet
+/// Aircraft Design, 1999, ch. 3, p. 47: "not more than 15% W static load on the nose-wheel"; Raymer 6th ed., Sec. 11.3,
+/// p. 345: `M_f/B` below 0.20, 0.15 preferred). 0.20, Raymer's outer bound, stood here; the four published forward
+/// plateaus of the registered types sit at 10.7 to 13.2 %, none near 20 %.
 const fn default_pct_load_nlg_max_handling() -> f64 {
-    0.20
+    0.15
 }
 
 impl MassModelConfig {
@@ -496,7 +384,13 @@ impl Default for MassModelConfig {
             mlg_x_fraction_mac: 0.50,
             pct_load_nlg_max: 0.10,
             pct_load_mlg_max: 0.93,
-            pct_load_nlg_min: 0.06, // Raymer/Torenbeek ~6-8% min.
+            // The limit is a gate every certified design has to pass, so it is the lowest share certified practice
+            // shows, not a central value: 3.52 % (field help). The design floors of the handbooks are higher (5 %:
+            // Raymer 6th ed., p. 343; Sadraey 2013, pp. 503-507; 8 %: Jenkinson 1999, p. 47) and certified aircraft go
+            // below them at their most-aft CG: 747-400 3.6 %, 787-9 4.3 %, 737-800 3.77 %, 777-300 3.79 %, A330 4.11 %.
+            // By configuration in the 13-family sample: nine wing-engine twins 3.77 to 7.35 % (median 5.06 %), three
+            // rear-engined types 3.52 to 4.39 %, the MD-11 5.67 %; no quad, no turboprop.
+            pct_load_nlg_min: 0.0352,
             pct_load_nlg_max_handling: default_pct_load_nlg_max_handling(),
             mlw_fraction_mtow: crate::landing_mass_ratio::working_default_mlw_fraction_mtow(),
             fuel_density_kg_m3: 804.0,
@@ -529,8 +423,8 @@ mod tests {
         // separate handling/steering ceiling this ordering exists to check.
         let config = MassModelConfig::default();
         assert!(config.pct_load_nlg_min < config.pct_load_nlg_max_handling);
-        assert!((config.pct_load_nlg_max_handling - 0.20).abs() < 1e-12);
-        assert!((config.pct_load_nlg_min - 0.06).abs() < 1e-12);
+        assert!((config.pct_load_nlg_max_handling - 0.15).abs() < 1e-12);
+        assert!((config.pct_load_nlg_min - 0.0352).abs() < 1e-12);
     }
 
     #[test]

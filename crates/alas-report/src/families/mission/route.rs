@@ -10,6 +10,7 @@ const MIN_WAYPOINT_LABEL_SEPARATION_PX: f64 = 64.0;
 
 use alas_route::route::Route;
 
+use super::add_halo_text;
 use crate::chart_kit::draw_colorbar;
 use crate::colormap::Colormap;
 use crate::scene::{Axes2D, Color, Fill, Scene, SceneElement, Stroke, TextAlign, TextBaseline};
@@ -98,20 +99,29 @@ pub fn figure_mission_route_2d(
             Stroke::new(Color::from_hex("#00d8ff"), 2.0),
         );
     }
+    let mass_lo = mass_coloring.map_or(0.0, |m| m.iter().copied().fold(f64::INFINITY, f64::min));
+    let mass_span_all = mass_coloring.map_or(1.0, |m| {
+        (m.iter().copied().fold(f64::NEG_INFINITY, f64::max) - mass_lo).max(f64::EPSILON)
+    });
     let mut last_label_position: Option<[f64; 2]> = None;
     for (index, waypoint) in route.waypoints.iter().enumerate() {
         let center = detail.map_point(points[index].0, waypoint.lat);
+        let is_end = index == 0 || index + 1 == route.waypoints.len();
+        let fill = if index == 0 {
+            Color::from_hex("#2ecc71")
+        } else if is_end {
+            Color::from_hex("#e74c3c")
+        } else if let Some(mass) = mass_coloring {
+            // Intermediate markers carry the same mass ramp as the route line.
+            Colormap::Jet.sample((mass[index] - mass_lo) / mass_span_all)
+        } else {
+            Color::from_hex("#aaaaaa")
+        };
         scene.add(SceneElement::Circle {
             center,
-            radius: 3.0,
-            fill: Some(Fill::new(Color::from_hex(if index == 0 {
-                "#2ecc71"
-            } else if index + 1 == route.waypoints.len() {
-                "#e74c3c"
-            } else {
-                "#aaaaaa"
-            }))),
-            stroke: Some(Stroke::new(Color::from_hex(pal.spine), 0.7)),
+            radius: if is_end { 4.2 } else { 3.2 },
+            fill: Some(Fill::new(fill)),
+            stroke: Some(Stroke::new(Color::from_hex("#f4f6fa"), 0.9)),
         });
         let endpoint = index == 0 || index + 1 == route.waypoints.len();
         let separated = last_label_position.is_none_or(|previous| {
@@ -120,37 +130,38 @@ pub fn figure_mission_route_2d(
             dx * dx + dy * dy >= MIN_WAYPOINT_LABEL_SEPARATION_PX.powi(2)
         });
         if !waypoint.ident.is_empty() && (endpoint || separated) {
-            scene.add(SceneElement::Text {
-                text: waypoint.ident.clone(),
-                pos: [center[0] + 5.0, center[1] - 5.0],
-                font_size: 9.0,
-                color: Color::from_hex(pal.tick),
-                align: TextAlign::Left,
-                baseline: TextBaseline::Bottom,
-                angle_deg: 0.0,
-                bold: false,
-            });
+            add_halo_text(
+                &mut scene,
+                &waypoint.ident,
+                [center[0] + 5.0, center[1] - 5.0],
+                9.0,
+                TextAlign::Left,
+                TextBaseline::Bottom,
+            );
             last_label_position = Some(center);
         }
     }
     draw_endpoint_legend(&mut scene, [650.0, 448.0], pal);
     let total_km = route.total_distance_m() / 1000.0;
-    let profile_note = match (mass_profile, altitude_profile) {
-        (Some(mass), Some(alt)) => format!(
-            "{} waypoints | {:.0} km | flown profile: {:.0} kg to {:.0} kg, {:.0} to {:.0} m",
+    let profile_note =
+        match (mass_profile, altitude_profile) {
+            // `alt` is the flown altitude of the mission trajectory at each
+            // waypoint (`route_geometry::sync_mass_to_route`); its first and last
+            // values are the airport elevations, so the caption reports its peak.
+            (Some(mass), Some(alt)) => format!(
+            "{} waypoints | {:.0} km | flown profile: {:.0} kg to {:.0} kg, peak altitude {:.0} m",
             route.waypoints.len(),
             total_km,
             mass.first().copied().unwrap_or(0.0),
             mass.last().copied().unwrap_or(0.0),
-            alt.first().copied().unwrap_or(0.0),
-            alt.last().copied().unwrap_or(0.0),
+            alt.iter().copied().filter(|a| a.is_finite()).fold(0.0, f64::max),
         ),
-        _ => format!(
-            "{} waypoints | {:.0} km | lateral route only (mission telemetry unavailable)",
-            route.waypoints.len(),
-            total_km
-        ),
-    };
+            _ => format!(
+                "{} waypoints | {:.0} km | lateral route only (mission telemetry unavailable)",
+                route.waypoints.len(),
+                total_km
+            ),
+        };
     scene.add(SceneElement::Text {
         text: profile_note,
         pos: [450.0, 550.0],
@@ -380,11 +391,6 @@ mod tests {
 
     #[test]
     fn route_detail_uses_a_clipped_equirectangular_texture() {
-        // The Earth texture is optional (ALAS_EARTH_TEXTURE); without it the
-        // figure draws the plain map and there is no texture to assert on.
-        if alas_pipeline::earth_texture::earth_texture_png().is_none() {
-            return;
-        }
         let route = Route::new(
             vec![
                 Waypoint::named(51.47, -0.45, "EGLL"),
@@ -440,9 +446,9 @@ mod tests {
                 SceneElement::Text { text, .. } if text.starts_with('P') => Some(text.as_str()),
                 _ => None,
             })
-            .collect::<Vec<_>>();
-        assert!(waypoint_labels.contains(&"P0"));
-        assert!(waypoint_labels.contains(&"P11"));
+            .collect::<std::collections::BTreeSet<_>>(); // halo copies collapse
+        assert!(waypoint_labels.contains("P0"));
+        assert!(waypoint_labels.contains("P11"));
         assert!(waypoint_labels.len() < route.waypoints.len());
     }
 

@@ -8,7 +8,9 @@
 //! shared with the native pseudospectral schedule. This module applies it to
 //! the MDO model's sub-rungs and bounds the literal-speed legs.
 
-use alas_config::mission::{SpeedCaps, SpeedReference};
+use alas_config::mission::{
+    SpeedCaps, SpeedReference, SPEED_RESTRICTION_ALTITUDE_M, SPEED_RESTRICTION_CAS_M_S,
+};
 use alas_mass::fuel_plan::FuelModelError;
 
 use super::{ProfileGeometry, Segment, SegmentKind};
@@ -38,6 +40,44 @@ impl ProfileGeometry<'_> {
         if (end_m - start_m).abs() <= super::MINIMUM_SEGMENT_ALTITUDE_M {
             return Ok(Vec::new());
         }
+        // The 250 kt indicated limit below 10,000 ft binds at that altitude
+        // whatever the rung's own band (14 CFR 91.117(a)). A band that
+        // straddles it is flown as two bands meeting there, each with its
+        // share of the sub-rungs (at least one), so no part below 10,000 ft
+        // is flown faster and no sub-rung is cut short.
+        let (low_m, high_m) = (start_m.min(end_m), start_m.max(end_m));
+        if cas_m_s > SPEED_RESTRICTION_CAS_M_S
+            && low_m < SPEED_RESTRICTION_ALTITUDE_M
+            && SPEED_RESTRICTION_ALTITUDE_M < high_m
+        {
+            let below_share = (SPEED_RESTRICTION_ALTITUDE_M - low_m) / (high_m - low_m);
+            let below_count = ((subdivisions as f64 * below_share).round() as usize)
+                .clamp(1, subdivisions.saturating_sub(1).max(1));
+            let above_count = subdivisions.saturating_sub(below_count).max(1);
+            let (first, second) = if start_m < end_m {
+                (
+                    (start_m, SPEED_RESTRICTION_ALTITUDE_M, below_count),
+                    (SPEED_RESTRICTION_ALTITUDE_M, end_m, above_count),
+                )
+            } else {
+                (
+                    (start_m, SPEED_RESTRICTION_ALTITUDE_M, above_count),
+                    (SPEED_RESTRICTION_ALTITUDE_M, end_m, below_count),
+                )
+            };
+            let mut segments = Vec::new();
+            for (from_m, to_m, count) in [first, second] {
+                segments.extend(
+                    self.cas_vertical_segments(kind, from_m, to_m, cas_m_s, rate_m_s, count)?,
+                );
+            }
+            return Ok(segments);
+        }
+        let cas_m_s = if high_m <= SPEED_RESTRICTION_ALTITUDE_M {
+            cas_m_s.min(SPEED_RESTRICTION_CAS_M_S)
+        } else {
+            cas_m_s
+        };
         let caps = self.caps_for(kind);
         let subdivisions = subdivisions.max(1);
         let mut segments = Vec::with_capacity(subdivisions);
@@ -82,8 +122,9 @@ impl ProfileGeometry<'_> {
     /// ([`Self::cas_vertical_segments`]) and are skipped here. A literal
     /// true airspeed is a larger Mach number the higher it is flown (the
     /// speed of sound falls with altitude to the tropopause), so each rung is
-    /// held to `MMO a` at the colder end of its band. `1.0` when MMO is not
-    /// declared.
+    /// held to the smaller `MMO a` of the two ends of its band (and of any
+    /// MMO schedule row inside it, the MMO taken at each one's pressure
+    /// altitude). `1.0` when MMO is not declared.
     pub(super) fn mach_scale(
         &self,
         climb: &[Segment],
@@ -91,16 +132,28 @@ impl ProfileGeometry<'_> {
         cruise_rungs: &[(f64, f64)],
         cruise_m: f64,
     ) -> Result<f64, FuelModelError> {
-        let mmo = self.profile.max_operating_mach;
-        if !(mmo.is_finite() && mmo > 0.0) {
+        let caps = self.profile.certified_caps();
+        let single = self.profile.max_operating_mach;
+        if self.profile.mmo_schedule.is_empty() && !(single.is_finite() && single > 0.0) {
             return Ok(1.0);
         }
         let ceiling = |low_m: f64, high_m: f64| -> Result<f64, FuelModelError> {
-            let cold = self
-                .ambient(low_m, "MMO")?
-                .speed_of_sound_m_s
-                .min(self.ambient(high_m, "MMO")?.speed_of_sound_m_s);
-            Ok(mmo * cold)
+            let (bottom_m, top_m) = (low_m.min(high_m), low_m.max(high_m));
+            let rows = self
+                .profile
+                .mmo_schedule
+                .iter()
+                .map(|(altitude_m, _)| *altitude_m)
+                .filter(|altitude_m| *altitude_m > bottom_m && *altitude_m < top_m);
+            let mut limit = f64::INFINITY;
+            for altitude_m in [low_m, high_m].into_iter().chain(rows) {
+                let ambient = self.ambient(altitude_m, "MMO")?;
+                let mmo = caps.max_mach_at(ambient.pressure_pa);
+                if mmo.is_finite() && mmo > 0.0 {
+                    limit = limit.min(mmo * ambient.speed_of_sound_m_s);
+                }
+            }
+            Ok(limit)
         };
         let mut scale: f64 = 1.0;
         if self.profile.climb_descent_speed_reference == SpeedReference::TrueAirspeed {
@@ -159,6 +212,7 @@ mod tests {
             cas_subdivisions: 64,
             isa_deviation_c,
             dive_speed_eas_m_s: 0.0,
+            cruise_speed_eas_m_s: 0.0,
             constant_mach_cruise: true,
         }
     }

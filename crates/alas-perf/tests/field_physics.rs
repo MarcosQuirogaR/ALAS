@@ -153,7 +153,7 @@ fn jets_use_top_once_and_the_legacy_path_remains_selectable() -> Result<(), Stri
     assert_eq!(corrected.todr_m, translated.todr_m);
     assert_eq!(corrected.bfl_m, corrected.todr_m);
     assert_eq!(translated.bfl_m, corrected.bfl_m * config.bfl_factor);
-    // The production landing distance is the Torenbeek air/flare/braked-run
+    // The production landing distance is the air/transition/braked-run
     // segment model at Vref; only the legacy replay keeps the k_land correlation.
     let segments = alas_perf::performance::LandingSegmentModel::jet(config.main_gear_truck_wheels)
         .distance_m(corrected.v_speeds.v_app_ms);

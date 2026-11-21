@@ -22,6 +22,7 @@ pub(super) fn show_screening_preview(
     crate::theme::card_frame(ui).show(ui, |ui| {
         ui.label(RichText::new(tr("Airfoil outline")).strong());
         egui::ComboBox::from_id_salt("screening_preview_airfoil")
+            .icon(crate::combo_icon::down_arrow)
             .width(ui.available_width().min(320.0))
             .selected_text(screening.preview.selected().unwrap_or("-"))
             .show_ui(ui, |ui| {

@@ -312,8 +312,8 @@ fn the_static_margin_and_neutral_point_match_python() {
 
     let mut comparison = Comparison::new("trim (static margin, neutral point)", Tier::Linalg);
 
-    let sm =
-        trim::static_margin(&plane, &analysis).expect("the nominal aircraft meshes and solves");
+    let sm = trim::static_margin_reference_compatibility(&plane, &analysis)
+        .expect("the nominal aircraft meshes and solves");
     comparison.scalar("static_margin", sm, fixture.static_margin.static_margin);
 
     let (x_np, np_sm, cl_alpha) = trim::neutral_point_reference_compatibility(&plane, &analysis)
@@ -344,9 +344,12 @@ fn autobalance_matches_python() {
         // Each case balances a fresh aircraft, as the generator's per-case
         // `copy.deepcopy` does: autobalance mutates `xyz_ref[0]` in place.
         let mut candidate = build();
-        let sm_before =
-            trim::autobalance(&mut candidate, case.inputs.target_static_margin, &analysis)
-                .expect("the nominal aircraft meshes and solves");
+        let sm_before = trim::autobalance_reference_compatibility(
+            &mut candidate,
+            case.inputs.target_static_margin,
+            &analysis,
+        )
+        .expect("the nominal aircraft meshes and solves");
         comparison.scalar(
             &format!("autobalance.{name}.sm_before"),
             sm_before,

@@ -4,12 +4,12 @@
 //! The item-level mass ledger's loading points and the public ledger entry
 //! points of the CG envelope assessment. Both entry points build the named
 //! `(state, cg_x, cg_z, mass_kg)` tuples and hand them to
-//! `ledger_basis::assess_model_cg_envelope_from_states`.
+//! `ground_ends::assess_model_cg_envelope_from_states`.
 
 use alas_config::AlasConfig;
 use alas_geom::aircraft::airplane::Airplane;
 
-use super::ledger_basis::assess_model_cg_envelope_from_states;
+use super::ground_ends::assess_model_cg_envelope_from_states;
 use super::{ModelCgEnvelopeAssessment, ModelCgEnvelopeError, ModelCgLoadingState};
 
 /// The OEW/analyzed-ZFW/analyzed-TOW points the item-level mass ledger
@@ -42,6 +42,12 @@ pub struct LedgerLoadingBasis {
     /// gravity, `I_yy`, kg m^2; `NaN` when not available, which selects
     /// Raymer's radius of gyration in the rotation criterion.
     pub takeoff_pitch_inertia_kg_m2: f64,
+    /// Ledger `I_yy` about the operating-empty centre of gravity, kg m^2;
+    /// `NaN` when not available.
+    pub oew_pitch_inertia_kg_m2: f64,
+    /// Ledger `I_yy` about the zero-fuel centre of gravity, kg m^2; `NaN`
+    /// when not available.
+    pub zero_fuel_pitch_inertia_kg_m2: f64,
 }
 
 impl LedgerLoadingBasis {
@@ -94,6 +100,117 @@ impl LedgerLoadingBasis {
             fuel_cg_x,
             fuel_cg_z,
         )
+    }
+}
+
+impl LedgerLoadingBasis {
+    /// Pitch moment of inertia `I_yy`, kg m^2, about the centre of gravity
+    /// of a loading state of this basis (`mass_kg` at `cg_x_m`, `cg_z_m`):
+    /// the operating-empty tensor plus the payload, plus, above the
+    /// zero-fuel mass, the fraction of the take-off fuel the state carries,
+    /// each moved to the state's centre of gravity by the parallel-axis
+    /// theorem (`I = I_own + m d^2`, `d` in the x-z plane). The payload's
+    /// and the fuel's own inertias are the differences of the ledger's
+    /// three tensors; a partial fuel load carries the same fraction of the
+    /// fuel's own inertia, at the centroid the state's centre of gravity
+    /// implies (the states fill the fuel at one centroid,
+    /// `super::operational_loading_states_with_z`). Exact at the three
+    /// ledger points.
+    ///
+    /// Without the operating-empty and zero-fuel tensors, the take-off
+    /// tensor scaled to the state's mass at the take-off radius of
+    /// gyration; `NaN` without a finite take-off tensor.
+    #[must_use]
+    pub fn pitch_inertia_about_kg_m2(&self, mass_kg: f64, cg_x_m: f64, cg_z_m: f64) -> f64 {
+        let moved = |own: f64, mass: f64, x: f64, z: f64| {
+            own + mass * ((x - cg_x_m).powi(2) + (z - cg_z_m).powi(2))
+        };
+        let tensors = [
+            self.oew_pitch_inertia_kg_m2,
+            self.zero_fuel_pitch_inertia_kg_m2,
+            self.takeoff_pitch_inertia_kg_m2,
+        ];
+        if !tensors
+            .iter()
+            .all(|value| value.is_finite() && *value > 0.0)
+        {
+            return if self.takeoff_pitch_inertia_kg_m2.is_finite()
+                && self.takeoff_pitch_inertia_kg_m2 > 0.0
+                && self.takeoff_mass_kg > 0.0
+            {
+                self.takeoff_pitch_inertia_kg_m2 / self.takeoff_mass_kg * mass_kg
+            } else {
+                f64::NAN
+            };
+        }
+        let (payload, payload_x, payload_z, fuel, fuel_x, fuel_z) = self.payload_and_fuel();
+        // Own inertias about each part's centroid, from the ledger tensors
+        // about the zero-fuel and take-off centres of gravity.
+        let distance2 = |x0: f64, z0: f64, x1: f64, z1: f64| (x0 - x1).powi(2) + (z0 - z1).powi(2);
+        let payload_own = (self.zero_fuel_pitch_inertia_kg_m2
+            - self.oew_pitch_inertia_kg_m2
+            - self.oew_mass_kg
+                * distance2(
+                    self.oew_cg_x_m,
+                    self.oew_cg_z_m,
+                    self.zero_fuel_cg_x_m,
+                    self.zero_fuel_cg_z_m,
+                )
+            - payload
+                * distance2(
+                    payload_x,
+                    payload_z,
+                    self.zero_fuel_cg_x_m,
+                    self.zero_fuel_cg_z_m,
+                ))
+        .max(0.0);
+        let fuel_own = (self.takeoff_pitch_inertia_kg_m2
+            - self.zero_fuel_pitch_inertia_kg_m2
+            - self.zero_fuel_mass_kg
+                * distance2(
+                    self.zero_fuel_cg_x_m,
+                    self.zero_fuel_cg_z_m,
+                    self.takeoff_cg_x_m,
+                    self.takeoff_cg_z_m,
+                )
+            - fuel * distance2(fuel_x, fuel_z, self.takeoff_cg_x_m, self.takeoff_cg_z_m))
+        .max(0.0);
+        let oew = moved(
+            self.oew_pitch_inertia_kg_m2,
+            self.oew_mass_kg,
+            self.oew_cg_x_m,
+            self.oew_cg_z_m,
+        );
+        // The load above the base point, at the centroid the state's centre
+        // of gravity implies.
+        let load = |base_mass: f64, base_x: f64, base_z: f64, own_full: f64, full: f64| {
+            let load_mass = (mass_kg - base_mass).max(0.0);
+            if load_mass <= 0.0 || full <= 0.0 {
+                return 0.0;
+            }
+            let x = (mass_kg * cg_x_m - base_mass * base_x) / load_mass;
+            let z = (mass_kg * cg_z_m - base_mass * base_z) / load_mass;
+            moved(own_full * (load_mass / full).min(1.0), load_mass, x, z)
+        };
+        if mass_kg <= self.zero_fuel_mass_kg {
+            oew + load(
+                self.oew_mass_kg,
+                self.oew_cg_x_m,
+                self.oew_cg_z_m,
+                payload_own,
+                payload,
+            )
+        } else {
+            let zero_fuel = oew + moved(payload_own, payload, payload_x, payload_z);
+            zero_fuel
+                + load(
+                    self.zero_fuel_mass_kg,
+                    self.zero_fuel_cg_x_m,
+                    self.zero_fuel_cg_z_m,
+                    fuel_own,
+                    fuel,
+                )
+        }
     }
 }
 
@@ -176,7 +293,7 @@ pub fn assess_model_cg_envelope_with_ledger_and_landing(
     assess_model_cg_envelope_from_states(
         plane,
         states,
-        ledger.takeoff_pitch_inertia_kg_m2,
+        Some(&ledger),
         ledger.takeoff_cg_x_m,
         x_np,
         critical_x_np,

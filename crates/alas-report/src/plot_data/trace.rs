@@ -207,11 +207,13 @@ pub(crate) fn observe(trace: &mut DataTrace, element: &SceneElement) {
             fill,
             stroke,
         } => {
+            let name = trace.next_polygon_name.take();
             if let Some((axes, data)) = resolve(points) {
                 let color = fill
                     .map(|f| f.color.to_hex_rgb())
                     .or_else(|| stroke.as_ref().map(stroke_hex));
-                let series = TraceSeries::from_pairs(SeriesKind::Polygon, color, &data);
+                let mut series = TraceSeries::from_pairs(SeriesKind::Polygon, color, &data);
+                series.name = name;
                 trace.panel_mut(&axes).series.push(series);
             }
         }

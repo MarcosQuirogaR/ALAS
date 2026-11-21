@@ -29,8 +29,10 @@
 pub mod build;
 pub mod cabin;
 pub mod cargo;
+pub mod declared_items;
 pub mod geometry;
 pub mod layout;
+pub mod load_plan;
 pub mod loading_sequence;
 pub mod oew;
 
@@ -50,7 +52,7 @@ pub use cargo::{
     UldType,
 };
 pub use geometry::{CabinGeometry, CabinGeometryError, DeckSpec};
-pub use layout::{DeckItem, ItemKind, ItemMeta, LayoutSummary, Mode, PayloadLayout};
+pub use layout::{DeckItem, DeclaredMeta, ItemKind, ItemMeta, LayoutSummary, Mode, PayloadLayout};
 pub use loading_sequence::{
     cargo_loading_sequences, concat_sequences, passenger_loading_sequences, potato_boundary,
     LoadingPoint, LoadingSequence, PotatoPoint,

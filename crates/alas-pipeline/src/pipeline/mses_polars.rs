@@ -56,8 +56,14 @@ pub(super) fn run_polars<T: Send>(
     if workers == 1 {
         worker();
     } else {
+        // The workers launch MSES under the caller's stage, not their own.
+        let stage = alas_exec::supervise::launch_stage();
+        let staged_worker = || match stage.as_deref() {
+            Some(stage) => alas_exec::supervise::with_launch_stage(stage, worker),
+            None => worker(),
+        };
         std::thread::scope(|scope| {
-            let handles: Vec<_> = (0..workers).map(|_| scope.spawn(worker)).collect();
+            let handles: Vec<_> = (0..workers).map(|_| scope.spawn(staged_worker)).collect();
             for handle in handles {
                 handle
                     .join()

@@ -127,7 +127,10 @@ fn the_fuselage_export_pins_the_documented_linear_loft_and_point_caps(
     );
 
     for (fuselage_index, fuselage) in airplane.fuselages.iter().enumerate() {
-        for section_index in 0..fuselage.xsecs.len() {
+        // The export lofts the closed stations (an open end gains a point
+        // cap), not the raw section list.
+        let stations = fuselage.closed_stations();
+        for section_index in 0..stations.len() {
             let xsec_id = format!("body_xsec_{fuselage_index}_{section_index}");
             assert!(script.contains(&format!("SetXSecContinuity( {xsec_id}, 0 );")));
             assert!(script.contains(&format!(
@@ -138,9 +141,9 @@ fn the_fuselage_export_pins_the_documented_linear_loft_and_point_caps(
             )));
         }
 
-        let first = &fuselage.xsecs[0];
-        let last_index = fuselage.xsecs.len() - 1;
-        let last = &fuselage.xsecs[last_index];
+        let first = &stations[0];
+        let last_index = stations.len() - 1;
+        let last = &stations[last_index];
         let first_cap = format!("body_xsec_{fuselage_index}_0");
         let last_cap = format!("body_xsec_{fuselage_index}_{last_index}");
         let first_angle = format!("SetXSecTanAngles( {first_cap}, XSEC_BOTH_SIDES, 90 );");
@@ -477,4 +480,46 @@ fn an_aircraft_with_a_main_gear_station_exports_exactly_the_station_it_had() {
     assert_eq!(gear.x_nlg, unchecked.x_nlg_m);
     assert_eq!(gear.x_mlg, unchecked.x_mlg_m);
     assert!(!gear.wheels.is_empty());
+}
+
+#[test]
+fn a_many_section_wing_gets_the_span_proportional_lattice_and_small_surfaces_keep_the_default(
+) -> Result<(), Box<dyn std::error::Error>> {
+    let config = AlasConfig::from_value(&serde_json::json!({ "preset": "A320-200" }))?;
+    let design = alas_config::presets::get("A320-200")
+        .map_err(|error| error.to_string())?
+        .design_vector;
+    let airplane =
+        AircraftBuilder::new(Some(config.geometry.clone())).build(Some(&design), true)?;
+    let script = render_script(&airplane, None, "a.vsp3", "a.cad_preview.vsp3", "a.png");
+    let mut refined = 0;
+    for (index, wing) in airplane.wings.iter().enumerate() {
+        let points: Vec<usize> = (1..wing.xsecs.len())
+            .filter_map(|section| {
+                let key = format!("SetParmVal( wing_{index}, \"SectTess_U\", \"XSec_{section}\", ");
+                let start = script.find(&key)? + key.len();
+                let value: f64 = script[start..].split(' ').next()?.parse().ok()?;
+                Some(value as usize)
+            })
+            .collect();
+        let sections = wing.xsecs.len() - 1;
+        if sections * 5 <= 60 {
+            assert!(points.is_empty(), "wing {index} keeps the OpenVSP default");
+            continue;
+        }
+        refined += 1;
+        assert_eq!(points.len(), sections, "wing {index}: every section set");
+        assert!(points.iter().all(|&p| p >= 2));
+        let intervals: usize = points.iter().map(|p| p - 1).sum();
+        // The target, plus at most one rounding interval per section.
+        assert!(
+            (60..=60 + 2 * sections).contains(&intervals),
+            "wing {index}: {intervals} spanwise intervals over {sections} sections"
+        );
+    }
+    assert!(
+        refined >= 1,
+        "the A320 main wing is lofted through many sections"
+    );
+    Ok(())
 }

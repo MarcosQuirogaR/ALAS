@@ -467,4 +467,11 @@ pub struct Axes2D {
     pub x_tick_decimals: Option<usize>,
     /// Optional fixed number of decimals for Y-axis tick labels.
     pub y_tick_decimals: Option<usize>,
+    /// Whether the Y data axis holds the negated quantity (a planform that
+    /// puts the nose at the top plots `-X`), so the tick labels print the
+    /// quantity itself instead of its negative.
+    pub y_tick_negated: bool,
+    /// Font size of the numeric tick labels, scene units; the axis titles are
+    /// 1.5 larger. Figures drawn near display size raise it for legibility.
+    pub tick_font_size: f64,
 }

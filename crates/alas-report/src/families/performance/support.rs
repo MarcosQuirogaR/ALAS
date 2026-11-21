@@ -15,10 +15,10 @@ use alas_config::AlasConfig;
 
 use crate::scene::{Color, Fill, Point2D, Scene, SceneElement, Stroke};
 
-/// Standard gravity as `performance.py` writes it locally (`_G`), reproduced
-/// here rather than imported since `alas_perf::performance`'s own copy is
-/// crate-private -- the two are the same literal, `9.81`.
-pub(super) const G: f64 = 9.81;
+/// Standard gravity, m/s^2 (9.80665): the constant `alas_perf::performance`
+/// forms its wing loadings and thrust-to-weight ratios with, so the chart
+/// axes in kg/m^2 and the plotted design point are on the same weight.
+pub(super) const G: f64 = alas_atmo::STANDARD_GRAVITY;
 
 /// Resolve a configured airport string to a database entry -- `_resolve_airport`.
 ///
@@ -45,6 +45,22 @@ pub(super) fn resolve_airport(s: &str) -> Result<&'static Airport, UnknownAirpor
         }
     }
     Err(UnknownAirport(s.to_owned()))
+}
+
+/// The departure aerodrome with the effective (shorter-only) stated take-off
+/// distance applied, the one every field requirement reads.
+pub(super) fn resolve_departure(
+    config: &alas_config::AlasConfig,
+) -> Result<&'static Airport, UnknownAirport> {
+    resolve_airport(&config.departure_airport).map(|airport| config.with_stated_takeoff(airport))
+}
+
+/// The arrival aerodrome with the effective (shorter-only) stated landing
+/// distance applied, the one every landing requirement reads.
+pub(super) fn resolve_arrival(
+    config: &alas_config::AlasConfig,
+) -> Result<&'static Airport, UnknownAirport> {
+    resolve_airport(&config.arrival_airport).map(|airport| config.with_stated_landing(airport))
 }
 
 /// Sea-level static thrust-to-weight at the analyzed takeoff mass `mass_kg`
@@ -80,16 +96,7 @@ pub(super) fn status_message_scene(title: &str, message: &str, theme: Option<&st
 /// Python's `f"{x:,.0f}"` -- the one formatting flag either figure uses that
 /// Rust's own formatter has no direct equivalent for.
 pub(super) fn format_thousands(value: f64) -> String {
-    let rounded = value.round().max(0.0) as i64;
-    let digits = rounded.to_string();
-    let mut out = String::with_capacity(digits.len() + digits.len() / 3);
-    for (i, ch) in digits.chars().enumerate() {
-        if i > 0 && (digits.len() - i) % 3 == 0 {
-            out.push(',');
-        }
-        out.push(ch);
-    }
-    out
+    crate::numfmt::grouped(value.max(0.0), 0)
 }
 
 /// Draw a straight arrow from `p0` to `p1` in canvas pixel coordinates: a
@@ -185,7 +192,7 @@ mod tests {
 
     #[test]
     fn thousands_formatting_places_a_comma_every_three_digits() {
-        assert_eq!(format_thousands(1_234_567.4), "1,234,567");
+        assert_eq!(format_thousands(1_234_567.4), "1 234 567");
         assert_eq!(format_thousands(42.0), "42");
         assert_eq!(format_thousands(0.0), "0");
     }
@@ -198,5 +205,26 @@ mod tests {
             let r = ((p[0] - 1.0).powi(2) + (p[1] - 2.0).powi(2)).sqrt();
             assert!((r - 5.0).abs() < 1e-9);
         }
+    }
+
+    #[test]
+    fn a_stated_field_length_longer_than_the_route_never_reaches_a_figure() {
+        let mut config = alas_config::AlasConfig::default();
+        let departure = alas_config::airports::get(&config.departure_airport).unwrap();
+        let arrival = alas_config::airports::get(&config.arrival_airport).unwrap();
+        config.toda_override_m = Some(departure.toda_m + 800.0);
+        config.lda_override_m = Some(arrival.lda_m + 800.0);
+        assert_eq!(resolve_departure(&config).unwrap().toda_m, departure.toda_m);
+        assert_eq!(resolve_arrival(&config).unwrap().lda_m, arrival.lda_m);
+        config.toda_override_m = Some(departure.toda_m - 500.0);
+        config.lda_override_m = Some(arrival.lda_m - 500.0);
+        assert_eq!(
+            resolve_departure(&config).unwrap().toda_m,
+            departure.toda_m - 500.0
+        );
+        assert_eq!(
+            resolve_arrival(&config).unwrap().lda_m,
+            arrival.lda_m - 500.0
+        );
     }
 }

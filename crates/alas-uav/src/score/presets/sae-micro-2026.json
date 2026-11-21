@@ -4,7 +4,7 @@
   "family": "sae_aero_design",
   "name": "SAE Aero Design 2026, Micro class (liquid payload)",
   "status": "official",
-  "citation": "SAE Aero Design 2026 Rules 2026.0 (2025-09-05), s9 Micro class (requirements printed p.40-41, take-off s9.5 p.41, scoring s9.6 p.42); local copy refs/competitions/SAE2026_AeroDesign_rules.pdf; the empty-weight term is (W_empty - 1)^4 + 8.9 on the rendered page (competitions.md printed it as /4, which is wrong)",
+  "citation": "SAE Aero Design 2026 Rules 2026.0 (2025-09-05), s9 Micro class (requirements printed p.40-41, take-off s9.5 p.41, scoring s9.6 p.42); the empty-weight term is (W_empty - 1)^4 + 8.9 on the rendered page (competitions.md printed it as /4, which is wrong)",
   "gates": [
     {
       "id": "cells",

@@ -58,7 +58,11 @@ pub(super) fn propulsion_metric_card(ui: &mut Ui, label: &str, value: &str) {
         ui.set_min_width(ui.available_width());
         if !label.is_empty() {
             ui.add(
-                egui::Label::new(RichText::new(localized_propulsion_label(label)).small()).wrap(),
+                egui::Label::new(crate::notation::styled(
+                    ui,
+                    RichText::new(localized_propulsion_label(label)).small(),
+                ))
+                .wrap(),
             );
         }
         ui.add(egui::Label::new(RichText::new(value).strong().size(14.0)).wrap());
@@ -73,6 +77,8 @@ pub(super) fn localized_propulsion_label(label: &str) -> String {
         "Specific thrust SFn" => format!("{}  SFn", tr("Specific thrust")),
         "Fuel-air ratio f" => format!("{}  f", tr("Fuel-air ratio")),
         "TSFC (computed)" => tr("TSFC (computed)"),
+        "TSFC (mission deck)" => tr("TSFC (mission deck)"),
+        "TIT (take-off)" => tr("TIT (take-off)"),
         "TSFC (reference)" => tr("TSFC (reference)"),
         "Thermal efficiency (eta_t)" => format!("{} (eta_t)", tr("Thermal efficiency")),
         "Propulsive efficiency (eta_p)" => format!("{} (eta_p)", tr("Propulsive efficiency")),

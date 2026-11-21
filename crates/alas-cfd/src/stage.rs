@@ -222,6 +222,9 @@ where
     if stage == CfdStage::QualityGate {
         *ctx.mesh_output = combined.clone();
     }
+    let blocked = result.exit_code.and_then(|code| {
+        alas_exec::process::explain_windows_exit(&command.program.to_string_lossy(), code)
+    });
     let severity = match result.status {
         OpenFoamProcessStatus::Completed => CfdEventSeverity::Info,
         OpenFoamProcessStatus::Cancelled => CfdEventSeverity::Warning,
@@ -232,12 +235,17 @@ where
         ctx.started,
         stage,
         severity,
-        process_summary(tool, &result),
+        blocked.as_ref().map_or_else(
+            || process_summary(tool, &result),
+            |text| format!("{tool}: {text}"),
+        ),
     );
     if result.status != OpenFoamProcessStatus::Completed {
         ctx.command_logs.insert(
             "__failure".to_owned(),
-            format!("{tool}: {}", process_failure_detail(&result, &combined)),
+            blocked.unwrap_or_else(|| {
+                format!("{tool}: {}", process_failure_detail(&result, &combined))
+            }),
         );
     }
     Ok(result.status)

@@ -13,19 +13,12 @@ use alas_config::airport_io::CustomAirport;
 use crate::state::{AppState, LogKind};
 use crate::views::tr_fields;
 
-/// The user-level file the custom-airport registry is kept in.
-///
-/// The registry itself is in-memory, and a saved workspace carries a copy, but
-/// entering an airport in the application is expected to survive a restart on
-/// its own, without the user having to remember to save a case file. This
-/// sits beside the tool preferences the same installation already writes, so
-/// one user-data location holds both.
-const CUSTOM_AIRPORT_STORE: &str = "custom-airports.json";
-
 /// Serialize the registry to `path` without exposing a partly written file to
 /// the next launch, the same temporary-then-rename discipline the tool
-/// preferences use.
-fn write_custom_airports(path: &Path, airports: &[CustomAirport]) -> Result<(), String> {
+/// preferences use. The store is
+/// [`alas_exec::ToolLocator::custom_airports_path`]; the headless server
+/// writes it through this function too.
+pub fn write_custom_airports(path: &Path, airports: &[CustomAirport]) -> Result<(), String> {
     let text = alas_config::airport_io::export_json(airports).map_err(|error| error.to_string())?;
     if let Some(parent) = path.parent() {
         fs::create_dir_all(parent)
@@ -35,14 +28,14 @@ fn write_custom_airports(path: &Path, airports: &[CustomAirport]) -> Result<(), 
         .map_err(|error| format!("cannot write {}: {error}", path.display()))
 }
 
-/// Read a persisted registry.
+/// Read a persisted registry from one store file (a JSON array of airports).
 ///
 /// `Ok(None)` means there is nothing stored yet, which is the ordinary state
 /// of a fresh installation. An unreadable or invalid file is an error rather
 /// than an empty registry, so a damaged store is reported instead of silently
 /// discarding the user's airports. Provenance is read back as it was written:
 /// this is the same registry, not a fresh JSON import.
-fn read_custom_airports(path: &Path) -> Result<Option<Vec<CustomAirport>>, String> {
+pub fn read_store_file(path: &Path) -> Result<Option<Vec<CustomAirport>>, String> {
     if !path.exists() {
         return Ok(None);
     }
@@ -54,12 +47,33 @@ fn read_custom_airports(path: &Path) -> Result<Option<Vec<CustomAirport>>, Strin
         .map_err(|error| error.to_string())
 }
 
+/// Read the airports of an installation whose legacy store file is `path`:
+/// the per-airport files of `library/my-airports` beside it plus the legacy
+/// file itself, which wins for an ICAO code present in both (it is only left
+/// behind when something wrote it after the last migration). `Ok(None)` means
+/// nothing is stored. The headless runner reads through this function.
+pub fn read_custom_airports(path: &Path) -> Result<Option<Vec<CustomAirport>>, String> {
+    let legacy = read_store_file(path)?;
+    let dir = path
+        .parent()
+        .map(|parent| parent.join("library").join("my-airports"));
+    let mut airports = dir
+        .map(|dir| crate::airport_store::read_airport_dir(&dir).0)
+        .unwrap_or_default();
+    if legacy.is_none() && airports.is_empty() {
+        return Ok(None);
+    }
+    for airport in legacy.unwrap_or_default() {
+        airports.retain(|stored| !stored.icao.eq_ignore_ascii_case(&airport.icao));
+        airports.push(airport);
+    }
+    Ok(Some(airports))
+}
+
 impl AppState {
-    /// Where this installation keeps its custom airports.
+    /// Where earlier versions kept all custom airports in one file.
     fn custom_airport_store(&self) -> PathBuf {
-        self.tool_locator
-            .preferences_path()
-            .with_file_name(CUSTOM_AIRPORT_STORE)
+        self.tool_locator.custom_airports_path()
     }
 
     /// Restore the persisted custom airports at start-up.
@@ -68,35 +82,42 @@ impl AppState {
     /// so the user can recover it; the session simply starts with the curated
     /// database only.
     pub fn load_persisted_custom_airports(&mut self) {
-        let path = self.custom_airport_store();
-        match read_custom_airports(&path) {
-            Ok(None) => {}
-            Ok(Some(airports)) => {
-                let count = airports.len();
-                match alas_config::airport_io::replace_custom_airports(airports) {
-                    Ok(()) => {
-                        self.refresh_airport_names();
-                        if count > 0 {
-                            self.log(
-                                format!(
-                                    "Restored {count} custom airport(s) from {}.",
-                                    path.display()
-                                ),
-                                LogKind::Info,
-                            );
-                        }
-                    }
-                    Err(error) => self.log(
-                        format!("Custom airport store rejected: {error}"),
-                        LogKind::Warn,
+        let path = self.tool_locator.my_airports_dir();
+        match crate::airport_store::migrate_legacy(&self.custom_airport_store(), &path) {
+            Ok(0) => {}
+            Ok(count) => self.log(
+                format!("Moved {count} custom airport(s) to {}.", path.display()),
+                LogKind::Info,
+            ),
+            Err(error) => self.log(
+                format!("Custom airport store could not be migrated: {error}"),
+                LogKind::Warn,
+            ),
+        }
+        let (airports, problems) = crate::airport_store::read_airport_dir(&path);
+        for problem in problems {
+            self.log(
+                format!("Custom airport file unreadable: {problem}"),
+                LogKind::Warn,
+            );
+        }
+        if airports.is_empty() {
+            return;
+        }
+        let count = airports.len();
+        match alas_config::airport_io::replace_custom_airports(airports) {
+            Ok(()) => {
+                self.refresh_airport_names();
+                self.log(
+                    format!(
+                        "Restored {count} custom airport(s) from {}.",
+                        path.display()
                     ),
-                }
+                    LogKind::Info,
+                );
             }
             Err(error) => self.log(
-                format!(
-                    "Custom airport store at {} is unreadable: {error}",
-                    path.display()
-                ),
+                format!("Custom airport store rejected: {error}"),
                 LogKind::Warn,
             ),
         }
@@ -107,14 +128,66 @@ impl AppState {
     /// A failure here never rejects the change the user already made in this
     /// session; it is reported so they know the entry is not yet durable.
     fn persist_custom_airports(&mut self) {
-        let path = self.custom_airport_store();
-        let airports = alas_config::airport_io::registered_custom_airports();
-        if let Err(error) = write_custom_airports(&path, &airports) {
-            let status =
-                format!("Custom airports could not be saved for the next session: {error}");
-            self.custom_airport_status = Some(status.clone());
-            self.log(status, LogKind::Warn);
+        let dir = self.tool_locator.my_airports_dir();
+        for airport in alas_config::airport_io::registered_custom_airports() {
+            if let Err(error) = crate::airport_store::write_airport(&dir, &airport) {
+                let status =
+                    format!("Custom airports could not be saved for the next session: {error}");
+                self.custom_airport_status = Some(status.clone());
+                self.log(status, LogKind::Warn);
+                return;
+            }
         }
+    }
+
+    /// Remove one custom airport from the registry and from disk.
+    pub fn delete_custom_airport(&mut self, icao: &str) {
+        let mut airports = alas_config::airport_io::registered_custom_airports();
+        airports.retain(|airport| !airport.icao.eq_ignore_ascii_case(icao));
+        match alas_config::airport_io::replace_custom_airports(airports) {
+            Ok(()) => {
+                let dir = self.tool_locator.my_airports_dir();
+                if let Err(error) = crate::airport_store::delete_airport(&dir, icao) {
+                    self.log(error, LogKind::Warn);
+                }
+                self.refresh_airport_names();
+                self.files.status = Some(format!("Deleted custom airport {icao}."));
+            }
+            Err(error) => self.files.status = Some(error.to_string()),
+        }
+    }
+
+    /// Give a custom airport another display name. Routes that used the old
+    /// name follow it. The ICAO code (the file name) stays.
+    pub fn rename_custom_airport(&mut self, icao: &str, new_name: &str) -> Result<(), String> {
+        let new_name = new_name.trim();
+        if new_name.is_empty() {
+            return Err("Enter a name for the airport.".to_owned());
+        }
+        let mut airports = alas_config::airport_io::registered_custom_airports();
+        let Some(target) = airports
+            .iter_mut()
+            .find(|airport| airport.icao.eq_ignore_ascii_case(icao))
+        else {
+            return Err(format!("No custom airport {icao}."));
+        };
+        let old_name = std::mem::replace(&mut target.name, new_name.to_owned());
+        let renamed = target.clone();
+        alas_config::airport_io::replace_custom_airports(airports)
+            .map_err(|error| error.to_string())?;
+        crate::airport_store::write_airport(&self.tool_locator.my_airports_dir(), &renamed)?;
+        let mut changed = false;
+        for key in ["departure_airport", "arrival_airport", "alternate_airport"] {
+            if self.config_values.get(key).and_then(Value::as_str) == Some(old_name.as_str()) {
+                self.config_values[key] = Value::String(new_name.to_owned());
+                changed = true;
+            }
+        }
+        self.refresh_airport_names();
+        if changed {
+            self.on_config_modified();
+        }
+        Ok(())
     }
 
     /// Refresh airport selector choices after a custom entry or import.
@@ -363,7 +436,7 @@ impl AppState {
 
     /// Save the current configuration with custom records in its workspace
     /// envelope. The generic configuration remains backward-compatible.
-    pub fn save_config(&mut self) {
+    pub fn save_config(&mut self) -> bool {
         let text = match serde_json::to_string_pretty(&self.workspace_document_with_custom_data()) {
             Ok(t) => t,
             Err(e) => {
@@ -371,7 +444,7 @@ impl AppState {
                     tr_fields("Save failed: {error}", &[("error", e.to_string())]),
                     LogKind::Error,
                 );
-                return;
+                return false;
             }
         };
         let path = self.config_path.clone();
@@ -380,15 +453,32 @@ impl AppState {
             let _ = fs::create_dir_all(parent);
         }
         match crate::fs_atomic::write_atomic(&target, text) {
-            Ok(()) => self.log(
-                tr_fields("Saved configuration to {path}.", &[("path", path)]),
-                LogKind::Info,
-            ),
-            Err(e) => self.log(
-                tr_fields("Save failed: {error}", &[("error", e.to_string())]),
-                LogKind::Error,
-            ),
+            Ok(()) => {
+                self.log(
+                    tr_fields("Saved configuration to {path}.", &[("path", path)]),
+                    LogKind::Info,
+                );
+                true
+            }
+            Err(e) => {
+                self.log(
+                    tr_fields("Save failed: {error}", &[("error", e.to_string())]),
+                    LogKind::Error,
+                );
+                false
+            }
         }
+    }
+
+    /// [`Self::save_config`], settling the unsaved edits of the aircraft it
+    /// saved (the sandbox aircraft in the Sandbox, the guided case otherwise)
+    /// only when the file was written.
+    pub fn save_config_settling(&mut self) -> bool {
+        let saved = self.save_config();
+        if saved {
+            self.settle_case();
+        }
+        saved
     }
 }
 
@@ -418,6 +508,7 @@ mod custom_airport_store_tests {
             runway_lengths_m: vec![3200.0],
             declared_toda_m: None,
             declared_lda_m: None,
+            departure_surveys: Vec::new(),
             provenance: AirportProvenance {
                 kind: AirportProvenanceKind::UserEntered,
                 source: Some("ALAS custom-airport editor".to_owned()),
@@ -440,8 +531,15 @@ mod custom_airport_store_tests {
         // A custom airport entered earlier must survive importing another.
         alas_config::airport_io::replace_custom_airports(vec![entered_airport()])
             .expect("the earlier airport registers");
+        // A temp user-data directory: importing persists the airport store, and
+        // the real one (next to the tool preferences) must not be overwritten.
+        let user_data = path.parent().expect("the store has a directory");
         let mut state = AppState {
             custom_airport_file_path: path.display().to_string(),
+            tool_locator: alas_exec::ToolLocator::new(
+                user_data.join("app"),
+                user_data.join("user-data"),
+            ),
             ..AppState::default()
         };
         state.import_custom_airports();

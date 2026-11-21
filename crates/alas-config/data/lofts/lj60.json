@@ -1,0 +1,387 @@
+{
+  "schema": 1,
+  "preset": "LJ60",
+  "body": "fuselage",
+  "reference_length_m": 17.12,
+  "degree": 5,
+  "frame": "x aft of nose tip, y right, z up, metres; z datum identical to the preset fuselage frame (cabin_z_m etc.)",
+  "curves": {
+    "A": {
+      "knots": [
+        0.0,
+        0.0,
+        0.0,
+        0.0,
+        0.0,
+        0.0,
+        0.04088785046728972,
+        0.08177570093457943,
+        0.13434579439252334,
+        0.17523364485981308,
+        0.20443925233644858,
+        0.227803738317757,
+        0.227803738317757,
+        0.227803738317757,
+        0.4702102803738318,
+        0.4702102803738318,
+        0.4702102803738318,
+        0.5549065420560747,
+        0.6717289719626168,
+        0.8177570093457943,
+        0.9053738317757009,
+        0.9579439252336447,
+        1.0,
+        1.0,
+        1.0,
+        1.0,
+        1.0,
+        1.0
+      ],
+      "coeffs": [
+        0.0,
+        0.027337949759951047,
+        0.14302133449927182,
+        0.18284941103578603,
+        0.3757160738165771,
+        0.5578028593013054,
+        0.781405930826829,
+        0.8754501196504627,
+        0.9436796457254505,
+        0.9319561918436481,
+        1.0486949501282596,
+        0.8466788578920401,
+        1.1037188575538361,
+        0.7145207152172308,
+        0.5258341248634169,
+        0.2618653120512349,
+        0.37008956448112273,
+        0.07377761831102721,
+        0.0605224664477985,
+        0.01253138408518106,
+        0.014555135031000952,
+        0.006656173520111997
+      ]
+    },
+    "E": {
+      "knots": [
+        0.0,
+        0.0,
+        0.0,
+        0.0,
+        0.0,
+        0.0,
+        0.052570093457943924,
+        0.10514018691588785,
+        0.12850467289719628,
+        0.14018691588785046,
+        0.15186915887850466,
+        0.16939252336448596,
+        0.19275700934579437,
+        0.227803738317757,
+        0.227803738317757,
+        0.227803738317757,
+        0.3796728971962617,
+        0.3796728971962617,
+        0.3796728971962617,
+        0.4964953271028037,
+        0.6133177570093458,
+        0.7009345794392523,
+        0.7885514018691588,
+        0.8761682242990654,
+        1.0,
+        1.0,
+        1.0,
+        1.0,
+        1.0,
+        1.0
+      ],
+      "coeffs": [
+        0.0,
+        0.03550851455761878,
+        0.05445380921194536,
+        0.12592430011338981,
+        0.20249590319502273,
+        0.30412787752678294,
+        0.4062269274034941,
+        0.6241560101050568,
+        0.8031218964230674,
+        0.8893732594327896,
+        0.8777189748636762,
+        0.9463441096944395,
+        0.8832318319195002,
+        0.9272685100357031,
+        0.9041943548130412,
+        0.8974037781321647,
+        0.8360668548200961,
+        0.869197707146704,
+        0.7436768107754447,
+        0.3095512064210024,
+        0.216260800419071,
+        0.06734544075655456,
+        0.05187659221214172,
+        0.022431718193668015
+      ]
+    },
+    "zc": {
+      "knots": [
+        0.0,
+        0.0,
+        0.0,
+        0.0,
+        0.0,
+        0.0,
+        0.052570093457943924,
+        0.10514018691588785,
+        0.12850467289719628,
+        0.14018691588785046,
+        0.15186915887850466,
+        0.16939252336448596,
+        0.19275700934579437,
+        0.227803738317757,
+        0.227803738317757,
+        0.227803738317757,
+        0.3796728971962617,
+        0.3796728971962617,
+        0.3796728971962617,
+        0.4964953271028037,
+        0.6133177570093458,
+        0.7009345794392523,
+        0.7885514018691588,
+        0.8761682242990654,
+        1.0,
+        1.0,
+        1.0,
+        1.0,
+        1.0,
+        1.0
+      ],
+      "coeffs": [
+        -0.6227213985606643,
+        -0.6285484560067174,
+        -0.5601164512908745,
+        -0.4986844385446459,
+        -0.4146978074301541,
+        -0.3548497405977541,
+        -0.2834298501163747,
+        -0.14135277527233214,
+        -0.04770781184268963,
+        -0.008794814114106063,
+        -0.011776477589854298,
+        0.007930156403573665,
+        -0.0008561481128085047,
+        -0.004185229652206091,
+        0.0034601987833978837,
+        0.00929595232330365,
+        0.02709471830682074,
+        0.005363659728652587,
+        0.03356256078715543,
+        0.284461366894678,
+        0.3783525522913758,
+        0.5153486538350981,
+        0.5699126890835521,
+        0.6238517517009174
+      ]
+    },
+    "n": {
+      "knots": [
+        0.0,
+        0.0,
+        0.0,
+        0.0,
+        0.0,
+        0.0,
+        1.0,
+        1.0,
+        1.0,
+        1.0,
+        1.0,
+        1.0
+      ],
+      "coeffs": [
+        2.0,
+        2.0,
+        2.0,
+        2.0,
+        2.0,
+        2.0
+      ]
+    },
+    "k": {
+      "knots": [
+        0.0,
+        0.0,
+        0.0,
+        0.0,
+        0.0,
+        0.0,
+        1.0,
+        1.0,
+        1.0,
+        1.0,
+        1.0,
+        1.0
+      ],
+      "coeffs": [
+        0.0,
+        0.0,
+        0.0,
+        0.0,
+        0.0,
+        0.0
+      ]
+    }
+  },
+  "front": {
+    "kind": "point",
+    "tip_radius_m": 0.0981351487635101
+  },
+  "rear": {
+    "kind": "base"
+  },
+  "cabin": {
+    "x_start_m": 3.9,
+    "x_end_m": 9.28
+  },
+  "fairness": {
+    "inflections": {
+      "crown": 4,
+      "keel": 2,
+      "plan": 3
+    },
+    "tv_ratio_max": 1.5
+  },
+  "fit": {
+    "rms_m": 0.0093,
+    "max_m": 0.0408,
+    "lambda": 0.0,
+    "tool_version": "lj60 lsq quintic fit 1, knots by hand; rms_m and max_m are over the drawn samples (hand priors excluded) + plan tail end inside the fin bullet (2026-11-06)"
+  },
+  "provenance": [
+    {
+      "group": "A",
+      "kind": "measured",
+      "drawing": {
+        "id": "flightsafety_learjet60ptm",
+        "title": "FlightSafety International, Learjet 60 Pilot Training Manual, fig 1-2 General Dimensions (vector line drawing; training-manual drawing, not a manufacturer engineering drawing)",
+        "page": "1-3",
+        "sha256": "5edddc3965462b83a2c2a235657575d0b15421a0012184eb8f8ef0fe1c025cc9",
+        "path": "flightsafety_learjet60ptm.pdf"
+      },
+      "view": "top",
+      "px_per_m": 122.0,
+      "n_samples": 161,
+      "rms_m": 0.0,
+      "max_m": 0.0,
+      "confidence": "A",
+      "note": "plan half-width from the calibrated top silhouette, both halves averaged, to x 8.05 m; aft of the wing the drawn side lines by hand: the fuselage side is hidden under the wing root, the pylon box x 10.85-13.7 m and the HTP from x 15.8 m. Plateau = preset D/2. FAIRNESS BUDGET RAISED: the drawn waist behind the wing root adds one inflection to the plan line, so the plan budget is 3 instead of 2. Tail end (2026-11-06): under the tailplane the plan line is hidden; it runs straight from the last seen half-width at x 15.85 m to 0.09 m at the end, inside the drawn fin bullet. Plan refit (2026-11-19): forward of the x 8.05 m knot the curve is refitted to the drawn plan outline (stroke centre, scale 21.96 pt/m from the 17.12 m side dimension), whose plateau reads 1.967 m; the plan width is calibrated to the printed 1.96 m diameter (factor 0.996). Forward residual against the calibrated outline rms 0.19 cm, max 0.96 cm (old fit 0.71 / 1.99 cm, widest section 1.990 m, now 1.965 m); aft of 8.05 m the hand lines are held within 0.5 cm."
+    },
+    {
+      "group": "E",
+      "kind": "measured",
+      "drawing": {
+        "id": "flightsafety_learjet60ptm",
+        "title": "FlightSafety International, Learjet 60 Pilot Training Manual, fig 1-2 General Dimensions (vector line drawing; training-manual drawing, not a manufacturer engineering drawing)",
+        "page": "1-3",
+        "sha256": "5edddc3965462b83a2c2a235657575d0b15421a0012184eb8f8ef0fe1c025cc9",
+        "path": "flightsafety_learjet60ptm.pdf"
+      },
+      "view": "side",
+      "px_per_m": 122.0,
+      "n_samples": 467,
+      "rms_m": 0.0,
+      "max_m": 0.0,
+      "confidence": "A",
+      "note": "half-height from crown and keel of the side silhouette; crown hidden by the nacelle x 10.45-14.3 m (drawn line behind it used), keel hidden by the nose-gear door and main wheel, and from x 15.2 m by the ventral fins (straight drawn line extended at its 0.24 slope to the drawn tail end). FAIRNESS BUDGET RAISED: the drawn radome and windshield corner at x 2.25 m, crown 4 with its tangent into the barrel"
+    },
+    {
+      "group": "zc",
+      "kind": "measured",
+      "drawing": {
+        "id": "flightsafety_learjet60ptm",
+        "title": "FlightSafety International, Learjet 60 Pilot Training Manual, fig 1-2 General Dimensions (vector line drawing; training-manual drawing, not a manufacturer engineering drawing)",
+        "page": "1-3",
+        "sha256": "5edddc3965462b83a2c2a235657575d0b15421a0012184eb8f8ef0fe1c025cc9",
+        "path": "flightsafety_learjet60ptm.pdf"
+      },
+      "view": "side",
+      "px_per_m": 122.0,
+      "n_samples": 467,
+      "rms_m": 0.0,
+      "max_m": 0.0,
+      "confidence": "A",
+      "note": "centreline height; z datum: drawn barrel centre 1.565 m above the printed ground line, nose tip 0.94 m above it"
+    },
+    {
+      "group": "n",
+      "kind": "template",
+      "drawing": {
+        "id": "flightsafety_learjet60ptm",
+        "title": "FlightSafety International, Learjet 60 Pilot Training Manual, fig 1-2 General Dimensions (vector line drawing; training-manual drawing, not a manufacturer engineering drawing)",
+        "page": "1-3",
+        "sha256": "5edddc3965462b83a2c2a235657575d0b15421a0012184eb8f8ef0fe1c025cc9",
+        "path": "flightsafety_learjet60ptm.pdf"
+      },
+      "view": "front",
+      "px_per_m": 122.0,
+      "n_samples": 0,
+      "rms_m": 0.0,
+      "max_m": 0.0,
+      "confidence": "A",
+      "note": "n = 2 (ellipse): the front view is a circle, its height 2.1 m disagrees with the side view 1.93 m"
+    },
+    {
+      "group": "k",
+      "kind": "template",
+      "drawing": {
+        "id": "flightsafety_learjet60ptm",
+        "title": "FlightSafety International, Learjet 60 Pilot Training Manual, fig 1-2 General Dimensions (vector line drawing; training-manual drawing, not a manufacturer engineering drawing)",
+        "page": "1-3",
+        "sha256": "5edddc3965462b83a2c2a235657575d0b15421a0012184eb8f8ef0fe1c025cc9",
+        "path": "flightsafety_learjet60ptm.pdf"
+      },
+      "view": "side",
+      "px_per_m": 122.0,
+      "n_samples": 0,
+      "rms_m": 0.0,
+      "max_m": 0.0,
+      "confidence": "A",
+      "note": "k = 0: unmeasured"
+    },
+    {
+      "group": "closure",
+      "kind": "measured",
+      "drawing": {
+        "id": "flightsafety_learjet60ptm",
+        "title": "FlightSafety International, Learjet 60 Pilot Training Manual, fig 1-2 General Dimensions (vector line drawing; training-manual drawing, not a manufacturer engineering drawing)",
+        "page": "1-3",
+        "sha256": "5edddc3965462b83a2c2a235657575d0b15421a0012184eb8f8ef0fe1c025cc9",
+        "path": "flightsafety_learjet60ptm.pdf"
+      },
+      "view": "side",
+      "px_per_m": 122.0,
+      "n_samples": 0,
+      "rms_m": 0.0,
+      "max_m": 0.0,
+      "confidence": "A",
+      "note": "front: point nose; rear: the drawn finite tail end about 0.30 x 0.32 m"
+    },
+    {
+      "group": "cabin",
+      "kind": "dimension",
+      "drawing": {
+        "id": "flightsafety_learjet60ptm",
+        "title": "FlightSafety International, Learjet 60 Pilot Training Manual, fig 1-2 General Dimensions (vector line drawing; training-manual drawing, not a manufacturer engineering drawing)",
+        "page": "1-3",
+        "sha256": "5edddc3965462b83a2c2a235657575d0b15421a0012184eb8f8ef0fe1c025cc9",
+        "path": "flightsafety_learjet60ptm.pdf"
+      },
+      "view": "side",
+      "px_per_m": 122.0,
+      "n_samples": 0,
+      "rms_m": 0.0,
+      "max_m": 0.0,
+      "confidence": "A",
+      "note": "PTM fig 19-2: cabin_start_x_m at the Jane's All the World's Aircraft 2008-09 cabin length 5.38 m ahead of the aft pressure bulkhead, F.S. 378.05 in, x 9.28 m"
+    }
+  ]
+}

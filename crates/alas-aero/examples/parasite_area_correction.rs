@@ -15,11 +15,12 @@ fn main() -> Result<(), Box<dyn std::error::Error>> {
         let config = AlasConfig::from_value(&serde_json::json!({"preset": name}))?;
         let dv = presets::get(name)?.design_vector;
         let plane = AircraftBuilder::new(Some(config.geometry.clone())).build(Some(&dv), true)?;
+        let drag_model = config.resolved_drag_model();
         let mut analysis = AeroAnalysis::new(
             &plane,
             dv.sweep_deg,
             Some(config.geometry),
-            Some(config.drag_model),
+            Some(drag_model),
             Some(config.analysis),
         );
         let mach = config.requirements.cruise_mach;

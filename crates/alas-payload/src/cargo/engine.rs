@@ -28,7 +28,7 @@ use crate::layout::{
 /// Where the load is trimmed to when the configuration asks for no particular
 /// point: a conservative quarter chord, which is inside every envelope this
 /// program can produce.
-const DEFAULT_TARGET_PCT_MAC: f64 = 25.0;
+pub(crate) const DEFAULT_TARGET_PCT_MAC: f64 = 25.0;
 
 /// Where the main-deck door goes when it is not stated, as a fraction of the
 /// cabin length.
@@ -71,6 +71,19 @@ pub fn build_cargo_layout_reference_compatibility(
     )
 }
 
+/// The layout of the requested net cargo, held to the structural payload
+/// limit.
+///
+/// `requirements.max_structural_payload_kg` is a gross mass: the maximum
+/// zero-fuel weight less the operating empty weight, so the unit load devices
+/// count against it with the freight they hold. The request
+/// (`cargo_payload_kg`) is net, and the loader adds the tare of the
+/// containers it selects. A request whose freight and tare together exceed
+/// the limit is therefore loaded at the net mass that brings the gross load
+/// to the limit, the summary keeps the request, and the report states the
+/// difference; the deck used to carry the tare on top of the limit (the
+/// 747-400F flew 6.9 t above its declared structural payload). The frozen
+/// reference replay keeps its own gross-target rule.
 fn build_cargo_layout_with_mass_semantics(
     g: &CabinGeometry,
     cargo: &CargoDeckConfig,
@@ -79,9 +92,48 @@ fn build_cargo_layout_with_mass_semantics(
     x_oew: f64,
     mass_semantics: CargoMassSemantics,
 ) -> PayloadLayout {
-    let mut manager = CargoLoadManager::new(g, cargo.clone());
-    let payload_target = req.cargo_payload_kg;
+    let requested_kg = req.cargo_payload_kg;
+    let mut layout = build_cargo_layout_at(g, cargo, oew, x_oew, mass_semantics, requested_kg);
+    let limit_kg = req.max_structural_payload_kg;
+    if mass_semantics != CargoMassSemantics::Net || !(limit_kg.is_finite() && limit_kg > 0.0) {
+        return layout;
+    }
+    // The tare is a step function of the containers used, so the net target
+    // is lowered by the remaining excess until the gross load fits.
+    let tolerance_kg = 1.0e-9 * limit_kg;
+    let mut target_kg = requested_kg;
+    let held = layout.total_mass - limit_kg > tolerance_kg;
+    for _ in 0..8 {
+        let excess_kg = layout.total_mass - limit_kg;
+        if excess_kg.is_nan() || excess_kg <= tolerance_kg || target_kg <= 0.0 {
+            break;
+        }
+        target_kg = (target_kg - excess_kg).max(0.0);
+        layout = build_cargo_layout_at(g, cargo, oew, x_oew, mass_semantics, target_kg);
+    }
+    if let LayoutSummary::Cargo(summary) = &mut layout.summary {
+        summary.requested_net_payload_t = requested_kg / 1000.0;
+        summary.held_to_structural_limit_kg = held.then_some(limit_kg);
+    }
+    layout
+}
 
+/// The layout of `payload_target` kg of net cargo (see
+/// [`build_cargo_layout_with_mass_semantics`]).
+fn build_cargo_layout_at(
+    g: &CabinGeometry,
+    cargo: &CargoDeckConfig,
+    oew: f64,
+    x_oew: f64,
+    mass_semantics: CargoMassSemantics,
+    payload_target: f64,
+) -> PayloadLayout {
+    // The frozen reference replay keeps the reference loader's mass-only limits.
+    let mut manager = if mass_semantics == CargoMassSemantics::ReferenceGross {
+        CargoLoadManager::new_mass_limited(g, cargo.clone())
+    } else {
+        CargoLoadManager::new(g, cargo.clone())
+    };
     let target_pct = if cargo.target_cg_pct_mac > 0.0 {
         cargo.target_cg_pct_mac
     } else {
@@ -142,6 +194,10 @@ fn build_cargo_layout_with_mass_semantics(
         }
     }
 
+    if let Some(plan_x) = cargo.plan_payload_cg_x_m {
+        manager.relocate_same_set(plan_x);
+    }
+
     let mut items = Vec::new();
     let mut n_main = 0i64;
     let mut n_lower = 0i64;
@@ -178,7 +234,7 @@ fn build_cargo_layout_with_mass_semantics(
             y: slot.y,
             z: z_item,
             length: slot.uld.length,
-            width: slot.uld.width,
+            width: slot.realized_width_m,
             mass: total_weight,
             height: h_item,
             label: format!("{} {}kg", slot.uld.code, total_weight as i64),
@@ -240,6 +296,7 @@ fn build_cargo_layout_with_mass_semantics(
             .iter()
             .map(|slot| slot.usable_volume_m3())
             .sum(),
+        installed: manager.capacity_summary(),
         lower_uld: manager.lower_uld.code,
         target_cg_pct_mac: target_pct,
         achieved_cg_pct_mac: if total_mass > 0.0 {
@@ -248,6 +305,7 @@ fn build_cargo_layout_with_mass_semantics(
             0.0
         },
         strategy,
+        held_to_structural_limit_kg: None,
     };
 
     PayloadLayout {
@@ -256,6 +314,8 @@ fn build_cargo_layout_with_mass_semantics(
         total_mass,
         cg_x,
         cg_y,
+        balance: None,
+        all_coach_capacity: None,
         summary: LayoutSummary::Cargo(Box::new(summary)),
     }
 }

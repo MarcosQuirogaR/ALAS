@@ -6,7 +6,7 @@
 //! or the declared decisions rather than from the flight simulation, the
 //! measured signals, and per-competition counts. All values are SI.
 //!
-//! The frozen list is not edited (schema freeze, decision D1); these names
+//! The frozen list is not edited (schema freeze); these names
 //! belong to the score engine and are documented here.
 
 /// A declared input of the score language.

@@ -63,7 +63,7 @@ pub(super) fn utilization(
     let strength = sigma.hypot(3.0_f64.sqrt() * tau) / bending_allowable_pa(material);
     let critical = buckling_scale(height, sizing.installed_rib_spacing_m(), material)
         * (spar.t_web[station] / height).powi(2);
-    strength.max(tau / critical)
+    super::section::max_or_nan(strength, tau / critical)
 }
 
 /// Enlarge the web gauge of every station whose clear panels need it.

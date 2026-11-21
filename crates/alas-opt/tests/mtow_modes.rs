@@ -299,15 +299,161 @@ fn the_payload_adjusted_mode_closes_on_the_charted_range_by_default() {
     assert!(sized.takeoff_mass_kg <= config.requirements.mtow_kg);
     assert!(sized.takeoff_mass_kg > 0.85 * config.requirements.mtow_kg);
     // No hard finding. The A220's cruise_thrust, 0.3350 installed against 0.3367 required in
-    // lane a220-atr (the PW1500G has no cruise-thrust datum, so the generic chart deck is used
+    // a220-atr work (the PW1500G has no cruise-thrust datum, so the generic chart deck is used
     // unscaled), now passes by 0.7 %: 0.3371 installed against 0.3346 required, with the merges
-    // since that lane (the cruise-drag change among them is kappa-cal: clean-polar kappa 0.43 and
+    // since then (the cruise-drag change among them is kappa-cal: clean-polar kappa 0.43 and
     // viscous margin 0.97). The toc_rate_of_climb miss was a residual speed inconsistency, fixed
     // in a220-atr. A 0.5 % margin either way is inside the model's thrust uncertainty.
-    assert_eq!(
-        assessment.violated_hard_ids(),
-        Vec::<&str>::new(),
+    // The departure is judged determined (it clears), so the `takeoff_obstacle_clearance_undetermined` warning row is
+    // no longer produced; the determined `takeoff_obstacle_clearance` row stands in its place.
+    assert!(
+        assessment.violated_hard_ids().is_empty(),
         "{:?}",
         assessment.residuals
     );
+    assert!(!assessment
+        .residuals
+        .iter()
+        .any(|row| row.id == "takeoff_obstacle_clearance_undetermined"));
+    assert!(assessment
+        .residuals
+        .iter()
+        .any(|row| row.id == "takeoff_obstacle_clearance" && !row.violated()));
+}
+
+/// A redesigned A220-300 whose main gear the placement rule puts on the
+/// minimum nose-load boundary is judged with its gear there. Its re-sized
+/// closure left the design takeoff state 3.0e-8 below the nose-share limit
+/// (0.0592143 against 0.0592143, 1.5e-6 of the limit, above the placement
+/// slack); the residual move was inside the chart-read precision, so it was
+/// not made and the candidate was rejected, as were 14 of the 15 of a
+/// payload-adjusted search. The residual move is now applied to the closure
+/// as a rigid translation of the main group.
+#[test]
+fn a_placed_main_gear_is_judged_where_the_rule_put_it() {
+    let config = AlasConfig::from_value(&serde_json::json!({
+        "preset": "A220-300",
+        "mses": {"enabled": false},
+        "downstream": {"openvsp": false, "vspaero": false, "avl": false, "flowunsteady": false},
+        "structures": {"run_nastran": false, "run_patran_export": false},
+        "optimizer": {"objective": {"mtow_sizing": "payload_adjusted"}}
+    }))
+    .unwrap();
+    let design: DesignVector = serde_json::from_value(serde_json::json!({
+        "span_m": 35.00082761183533, "root_chord_m": 6.921386870232416,
+        "break_chord_m": 3.5703984623689147, "tip_chord_m": 1.2534096513095048,
+        "sweep_deg": 30.228820068241447, "tip_twist_deg": -0.7604234468059277,
+        "wing_x_shift_m": -0.15879836328833374, "tail_scale": 0.9961879138267175,
+        "fuselage_length_m": 38.7, "tail_x_shift_m": 0.0,
+        "airfoil_thickness_scale": 1.0374373185456731,
+        "airfoil_camber_scale": 1.023756919262098,
+        "bump_upper_front": -0.00017763538734254887,
+        "bump_upper_rear": 9.827752567233381e-05,
+        "bump_lower_mid": 0.0002233435020549011, "bump_lower_rear": 0.0
+    }))
+    .unwrap();
+    let assessment = assess(&config, &design);
+    for id in ["min_nose_gear_load", "max_nose_gear_load"] {
+        let row = residual(&assessment, id).unwrap_or_else(|| panic!("no {id} row"));
+        assert!(
+            !row.violated(),
+            "{id}: actual {:e} limit {:e} ({:?})",
+            row.actual,
+            row.limit,
+            row.detail
+        );
+    }
+}
+
+/// A charted point quoted under a stated reserve rule is closed under that rule, and the route
+/// is flown off-design under the configured policy: the E195-E2's 3,000 nm is quoted with a
+/// 100 nm alternate (Embraer specification sheet), the configured policy carries 200 nmi.
+#[test]
+fn the_design_mission_is_closed_under_the_reserve_its_range_is_quoted_under() {
+    use alas_mass::fuel_plan::FuelRule;
+    let name = "E195-E2";
+    let mut config = AlasConfig::from_value(&serde_json::json!({ "preset": name })).unwrap();
+    config.optimizer.objective.mtow_sizing = MtowSizing::PayloadAdjusted;
+    let design = alas_config::presets::get(name).unwrap().design_vector;
+    let assessment = assess(&config, &design);
+    let sized = &assessment.sized;
+    let alternate_nmi = |rule: FuelRule| match rule {
+        FuelRule::Diversion { distance_m } => distance_m / 1_852.0,
+        other => panic!("{other:?}"),
+    };
+    assert!((alternate_nmi(sized.dispatch.plan.alternate.rule) - 100.0).abs() < 1e-9);
+    let route = sized
+        .mtow
+        .offdesign
+        .as_ref()
+        .expect("the route is flown off-design");
+    assert!(
+        (alternate_nmi(route.dispatch.plan.alternate.rule)
+            - config.fuel_policy.alternate_distance_nmi)
+            .abs()
+            < 1e-9
+    );
+}
+
+/// The C295 design mission is payload-defined: 2,940 kg (Jane's All the
+/// World's Aircraft 2008-09, C-295M, printed p.546, the normal-weights range
+/// point) flown at the TCDS-certified MTOW (EASA.A.186 Issue 08, Section 5
+/// item 13, printed p.79) with the reserve Jane's states (45 min hold). In
+/// the payload-adjusted mode the closure carries the laid-out payload, the
+/// 6,000 kg cargo requirement.
+/// No range is declared: the closure solves the largest range whose full
+/// reserve fuel plan fits the fuel the certified mass leaves, so the closed
+/// takeoff mass is the certified one and the reserves are carried.
+#[test]
+fn the_c295_design_range_is_the_models_output_at_the_certified_mtow() {
+    let mut config = AlasConfig::from_value(&serde_json::json!({ "preset": "C295" })).unwrap();
+    config.optimizer.design_space.mode = DesignMode::ReferenceAdaptation;
+    config.optimizer.objective.mtow_sizing = MtowSizing::PayloadAdjusted;
+    let design = alas_config::presets::get("C295").unwrap().design_vector;
+    assert_eq!(config.design_mission().range.declared_nmi(), None);
+    let assessment = assess(&config, &design);
+    let sized = &assessment.sized;
+    let plan = &sized.dispatch.plan;
+    let summary = format!(
+        "C295 payload-defined design mission: range {:.1} nmi, OEW {:.1} kg, payload {:.1} kg, takeoff fuel {:.1} kg, trip {:.1} kg, reserve (contingency {:.1} + alternate {:.1} + final {:.1} + additional {:.1}) kg, taxi {:.1} kg, takeoff mass {:.2} kg, usable capacity {:.1} kg, status {:?}, closed {}",
+        sized.design_range_m / 1_852.0,
+        sized.operating_empty_mass_kg,
+        sized.payload_kg,
+        plan.takeoff_fuel_kg(),
+        plan.trip.kg,
+        plan.contingency.kg,
+        plan.alternate.kg,
+        plan.final_reserve.kg,
+        plan.additional.kg,
+        plan.taxi.kg,
+        sized.dispatch.takeoff_mass_kg,
+        sized.usable_capacity_kg,
+        sized.dispatch.status,
+        sized.sizing_closed,
+    );
+    assert!(sized.sizing_closed, "{summary}");
+    assert!(
+        sized.design_range_m > 0.0 && sized.mission_distance_known,
+        "{summary}"
+    );
+    // The payload-adjusted closure flies the laid-out payload (the 6,000 kg cargo
+    // requirement); the charted 2,940 kg point is priced in the design database
+    // (characteristics.design_point_range), not by the closure.
+    assert_eq!(sized.payload_kg, config.requirements.cargo_payload_kg);
+    assert_eq!(sized.payload_kg, 6_000.0);
+    // The certified mass is the takeoff mass: the range is the largest the
+    // fuel it leaves flies with reserves (or the tanks bind below it).
+    let tolerance_kg = config.optimizer.objective.sizing_tolerance_kg;
+    let tank_limited = sized.usable_capacity_kg.is_finite()
+        && sized.zero_fuel_mass_kg + sized.usable_capacity_kg - plan.taxi.kg
+            < config.requirements.mtow_kg;
+    if !tank_limited {
+        assert!(
+            (sized.dispatch.takeoff_mass_kg - config.requirements.mtow_kg).abs() < tolerance_kg,
+            "takeoff mass {} kg against the certified {} kg",
+            sized.dispatch.takeoff_mass_kg,
+            config.requirements.mtow_kg
+        );
+    }
+    assert!(plan.contingency.kg + plan.alternate.kg + plan.final_reserve.kg > 0.0);
 }

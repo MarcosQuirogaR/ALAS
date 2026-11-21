@@ -400,11 +400,11 @@ fn embedded_blue_marble_stays_on_the_scene_display_path() {
 }
 
 mod maximized_overlay {
-    //! The maximized Results figure is an overlay inside the main window.
-    //! Native viewports are reserved for menus and tool windows; a figure
-    //! double-clicked in the gallery must never spawn a detached OS window.
+    //! The maximized Results figure is a detached window: a native viewport,
+    //! with the helper's in-window fallback where a headless context cannot
+    //! open one (which is what these tests drive).
 
-    use super::super::fullscreen_result::{fullscreen_area_id, show_fullscreen_result};
+    use super::super::fullscreen_result::show_fullscreen_result;
     use super::super::images::external_image;
     use super::super::{
         fullscreen_open, fullscreen_view_key, open_fullscreen_result, FullscreenFigure,
@@ -453,7 +453,10 @@ mod maximized_overlay {
 
     impl Harness {
         fn maximized() -> Self {
-            let ctx = Context::default();
+            Self::maximized_in(Context::default())
+        }
+
+        fn maximized_in(ctx: Context) -> Self {
             let mut state = AppState::default();
             open_fullscreen_result(&mut state, &ctx, VIEW_KEY, CAMERA_KEY, false);
             Self {
@@ -496,21 +499,49 @@ mod maximized_overlay {
     }
 
     #[test]
-    fn maximized_result_figure_is_an_overlay_inside_the_main_window() {
-        let mut harness = Harness::maximized();
+    fn maximized_result_figure_requests_its_own_native_window() {
+        let (ctx, requested) = crate::native_viewport::capture::native_context();
+        let mut harness = Harness::maximized_in(ctx);
         let output = harness.frame(raw_input(0.0, Vec::new()));
-
-        // Only the root viewport rendered: no detached OS window was
-        // requested for the figure.
-        assert_eq!(output.viewport_output.len(), 1);
-        assert!(output.viewport_output.contains_key(&ViewportId::ROOT));
-        let area = harness
-            .ctx
-            .memory(|memory| memory.area_rect(fullscreen_area_id(VIEW_KEY)))
-            .expect("the maximized figure registers its overlay area");
-        assert_eq!(area.min, egui::Pos2::ZERO);
-        assert!(area.width() >= WINDOW.x && area.height() >= WINDOW.y);
+        let requested = requested.borrow();
+        assert_eq!(requested.len(), 1, "one OS window, no in-window surface");
+        assert_eq!(
+            requested[0].id,
+            crate::native_viewport::viewport_id(
+                super::super::fullscreen_result::fullscreen_area_id(VIEW_KEY)
+            )
+        );
+        assert_eq!(requested[0].title.as_deref(), Some("Mass breakdown"));
         assert!(harness.is_open());
+        // The root window itself paints only the (here empty) page.
+        assert!(output.viewport_output.contains_key(&ViewportId::ROOT));
+    }
+
+    #[test]
+    fn the_figure_window_opens_maximized_and_a_second_open_raises_it() {
+        let (ctx, requested) = crate::native_viewport::capture::native_context();
+        let mut harness = Harness::maximized_in(ctx.clone());
+        harness.frame(raw_input(0.0, Vec::new()));
+        assert_eq!(requested.borrow()[0].maximized, Some(true));
+        assert_eq!(requested.borrow()[0].focus_commands, 0);
+        open_fullscreen_result(&mut harness.state, &ctx, VIEW_KEY, CAMERA_KEY, false);
+        let output = harness.frame(raw_input(0.1, Vec::new()));
+        let figure_window = crate::native_viewport::viewport_id(
+            super::super::fullscreen_result::fullscreen_area_id(VIEW_KEY),
+        );
+        let from_root = output.viewport_output.get(&figure_window).map_or(0, |out| {
+            out.commands
+                .iter()
+                .filter(|command| matches!(command, egui::ViewportCommand::Focus))
+                .count()
+        });
+        let raised = from_root
+            + requested
+                .borrow()
+                .iter()
+                .map(|seen| seen.focus_commands)
+                .sum::<usize>();
+        assert_eq!(raised, 1, "the open window is brought to the front");
     }
 
     #[test]
@@ -611,7 +642,9 @@ fn a_result_figure_card_shows_its_explanation_only_as_hover_text() {
         })
         .collect();
     assert!(
-        painted.iter().any(|text| text == descriptor.title),
+        painted
+            .iter()
+            .any(|text| *text == crate::views::tr(descriptor.title)),
         "the card paints the figure title: {painted:?}"
     );
     assert!(
@@ -625,6 +658,7 @@ fn a_static_card_canvas_takes_its_drawing_aspect_within_bounds() {
     use super::gallery::{fitted_canvas_height, TileScene, FITTED_CANVAS_MAX, FITTED_CANVAS_MIN};
     let tile = |width: f64, height: f64, orbitable: bool| TileScene {
         scene: Some(std::sync::Arc::new(Scene::new(width, height, None))),
+        pending: false,
         view_key: String::new(),
         camera_key: String::new(),
         orbitable,
@@ -648,6 +682,7 @@ fn a_static_card_canvas_takes_its_drawing_aspect_within_bounds() {
     );
     let empty = TileScene {
         scene: None,
+        pending: false,
         view_key: String::new(),
         camera_key: String::new(),
         orbitable: false,

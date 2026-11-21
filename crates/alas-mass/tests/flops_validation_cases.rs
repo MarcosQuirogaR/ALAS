@@ -29,8 +29,9 @@
 //! aircraft.
 
 // A test asserts on values it constructed or loaded from a fixture it
-// controls, so a failed unwrap there is the assertion failing.
-#![allow(clippy::unwrap_used, clippy::expect_used)]
+// controls, so a failed unwrap there is the assertion failing. The printed
+// lines are the per-component comparison, read with --nocapture.
+#![allow(clippy::unwrap_used, clippy::expect_used, clippy::print_stdout)]
 
 use alas_mass::flops_transport::propulsion::{estimate_flops_propulsion, FlopsPropulsionInputs};
 use alas_mass::flops_transport::structure::{
@@ -69,6 +70,8 @@ fn in_lb(kilograms: f64) -> f64 {
 fn check(label: &str, actual_kg: f64, expected_lb: f64, relative: f64) {
     let actual_lb = in_lb(actual_kg);
     let error = (actual_lb - expected_lb).abs() / expected_lb.abs().max(1.0);
+    // Shown with --nocapture: the per-component match.
+    println!("{label}: {actual_lb:.2} lb vs FLOPS {expected_lb:.2} lb");
     assert!(
         error <= relative,
         "{label}: {actual_lb:.2} lb vs FLOPS {expected_lb:.2} lb ({:.3}% off)",
@@ -107,6 +110,7 @@ mod large_single_aisle_2 {
             aeroelastic_tailoring: 0.0,
             strut_bracing: 0.0,
             wing_load_fraction: 1.0,
+            bending_stress_factor: 1.0,
             fuselage_count: 1,
             variable_sweep_penalty: 0.0,
             wing_mounted_engine_count: 2,
@@ -122,11 +126,13 @@ mod large_single_aisle_2 {
             vertical_tail_area_m2: ft2(284.499_779_284_585),
             vertical_tail_taper_ratio: 0.210_820_826_388_98,
             vertical_tail_count: 1,
+            fin_mounted_tailplane_factor: 1.0,
             fuselage_length_m: ft(124.75),
             fuselage_width_m: ft(12.33),
             fuselage_depth_m: ft(13.0208),
             scaled_fuselage_engines: 0.0,
             military_cargo_floor: 0.0,
+            main_deck_cargo_door_fraction: 0.0,
             design_landing_mass_kg: lbm(146_328.0),
             main_gear_oleo_length_m: 84.0 * INCH,
             nose_gear_oleo_length_m: 58.8 * INCH,
@@ -207,6 +213,7 @@ mod large_single_aisle_2 {
             nozzle_scaling_exponent: 1.0,
             nozzle_scope: alas_config::FlopsNozzleScope::IncludedInBaseline,
             thrust_reversers_installed: true,
+            thrust_reverser_engine_count: None,
             maximum_mach: MAX_MACH,
             nacelle_diameter_m: ft(NACELLE_DIAMETER_FT),
             maximum_fuel_capacity_kg: lbm(FUEL_CAPACITY_LB),
@@ -253,6 +260,8 @@ mod large_single_aisle_2 {
             first_class_passenger_count: 12,
             business_class_passenger_count: 0,
             tourist_class_passenger_count: 150,
+            systems_passenger_count: None,
+            all_coach_passenger_count: None,
             flight_crew_count: 2,
             flight_attendant_count: 5,
             galley_crew_count: 1,
@@ -267,12 +276,15 @@ mod large_single_aisle_2 {
             fuel_tank_count: 7,
             containerized_cargo_kg: lbm(4_077.0),
             apu_installed: true,
+            // FLOPS prices no pneumatic group; these cases reproduce FLOPS runs.
+            bleed_air_system: false,
             containerized_baggage_kg: lbm(162.0 * 35.0),
             cargo_loading: alas_config::CargoHoldLoading::Containerized,
             cabin_equipment_method: alas_config::CabinEquipmentMethod::FlopsTransportV1,
             haul_class: alas_config::OperatingHaulClass::ShortMediumHaul,
             propulsion_sizing: PropulsionSizing::RatedThrust,
             military_cargo: None,
+            executive_cabin: None,
         };
         let breakdown = estimate_flops_transport(&inputs).expect("complete inputs");
         let systems = breakdown.systems;
@@ -310,9 +322,9 @@ mod large_single_aisle_2 {
         check("cargo containers", items.cargo_containers_kg, 1_925.0, 1e-9);
         // The published deck's `WOPIT` includes the container tare, which is
         // the FLOPS convention. This product reports the tare outside
-        // operating empty mass, because Boeing D6-58333 Rev Q section 2.1 and
-        // FAA AC 120-27F both exclude unit load devices from the mass their
-        // operating-empty figures are stated on. Reproducing the deck is a
+        // operating empty mass, the boundary FAA AC 120-85B tracks ULD tare
+        // on (with the load); Boeing D6-58333 Rev Q 2.1 and AC 120-27F A.3
+        // name no unit load device either way. Reproducing the deck is a
         // statement about the equations and must stay on the source's own
         // boundary, so it is checked against the preserved FLOPS total; the
         // line below then pins that the two differ by exactly the tare and by
@@ -341,6 +353,112 @@ mod large_single_aisle_2 {
         let margin_lb: f64 = 0.00514 * groups_lb;
         assert!((margin_lb - 451.3).abs() < 0.1, "{margin_lb}");
         assert!((groups_lb + margin_lb - 88_246.0).abs() < 0.5);
+    }
+}
+
+/// `LargeSingleAisle2FLOPS` with the detailed wing method, from the same
+/// pinned commit (`large_single_aisle_2_detailwing_FLOPS_data.py`): the bending
+/// term and the pod relief move, the other two wing terms stay.
+mod large_single_aisle_2_detailed_wing {
+    use super::*;
+
+    const DG_LB: f64 = 174_200.0;
+    const SPAN_FT: f64 = 112.57;
+    const POD_LB: f64 = 10_350.0;
+
+    /// Thirty-two intervals in the first section, open end, and sixty-nine stations
+    /// in the second: Aviary's division of the deck's one hundred integration
+    /// stations, `floor(section / target + 0.5)` per section and one more on the last.
+    fn stations() -> Vec<WingStation> {
+        let inp = [0.0, 0.3238, 1.0];
+        let chord = [0.4441, 0.2313, 0.0729];
+        let tc = [0.145, 0.115, 0.104];
+        let mut out = Vec::new();
+        let mut push = |eta: f64, section: usize, sweep: f64| {
+            let t = (eta - inp[section]) / (inp[section + 1] - inp[section]);
+            out.push(WingStation {
+                eta,
+                chord_per_semispan: chord[section] + t * (chord[section + 1] - chord[section]),
+                thickness_to_chord: tc[section] + t * (tc[section + 1] - tc[section]),
+                load_intensity: elliptical_load_intensity(eta),
+                load_path_sweep_deg: sweep,
+            });
+        };
+        for i in 0..32 {
+            push(inp[1] * f64::from(i) / 32.0, 0, 0.0);
+        }
+        for i in 0..69 {
+            push(inp[1] + (inp[2] - inp[1]) * f64::from(i) / 68.0, 1, 22.0);
+        }
+        out
+    }
+
+    #[test]
+    fn the_detailed_wing_reproduces_the_flops_run() {
+        let factor = detailed_bending_factor(&stations(), &[0.28131], 9.42519, 0.0, 0.0)
+            .expect("the case integrates");
+        println!("BT: {} vs FLOPS 9.0236", factor.bt);
+        assert!(
+            (factor.bt - 9.0236).abs() / 9.0236 < 1.0e-4,
+            "BT {}",
+            factor.bt
+        );
+        let caye = 1.0 - factor.bte / factor.bt * POD_LB / DG_LB;
+        println!("CAYE: {caye} vs FLOPS 0.959104");
+        assert!((caye - 0.959_104).abs() < 5.0e-4, "CAYE {caye}");
+        let wing = alas_mass::flops_transport::structure::wing_mass(&FlopsWingInputs {
+            design_gross_mass_kg: lbm(DG_LB),
+            wing_area_m2: ft2(1_341.0),
+            wing_span_m: ft(SPAN_FT),
+            taper_ratio: 0.237_343_146_184_852,
+            quarter_chord_sweep_deg: 25.03,
+            thickness_to_chord: 0.131_732_727_515_702,
+            movable_surface_area_m2: ft2(0.333 * 1_341.0),
+            ultimate_load_factor: 3.75,
+            composite_utilization: 0.0,
+            aeroelastic_tailoring: 0.0,
+            strut_bracing: 0.0,
+            wing_load_fraction: 1.0,
+            bending_stress_factor: 1.0,
+            fuselage_count: 1,
+            variable_sweep_penalty: 0.0,
+            wing_mounted_engine_count: 2,
+            // The computed factors, not ones derived from the published CAYE, so
+            // the comparison below closes on the integration itself.
+            bending: WingBendingFactor::Detailed {
+                bt: factor.bt,
+                bte: factor.bte,
+                pod_mass_kg: lbm(POD_LB),
+            },
+        });
+        check(
+            "W1 bending material",
+            wing.bending_material_kg,
+            6_276.3,
+            QUOTED,
+        );
+        check(
+            "W2 shear and control",
+            wing.shear_and_control_kg,
+            7_552.6,
+            QUOTED,
+        );
+        check("W3 miscellaneous", wing.miscellaneous_kg, 1_718.7, QUOTED);
+        check("wing", wing.total_kg, 15_548.0, QUOTED);
+    }
+
+    /// Equation 30 sums the moment arms of the pods on one semi-wing, so each pod
+    /// relieves the bending its own weight would. Two pods at once are the sum of
+    /// each alone, and the factor keeps the floor of equation 39 downstream.
+    #[test]
+    fn two_pods_on_a_semi_wing_relieve_the_sum_of_each_alone() {
+        let bte = |pods: &[f64]| {
+            detailed_bending_factor(&stations(), pods, 9.42519, 0.0, 0.0)
+                .expect("the case integrates")
+                .bte
+        };
+        let sum = bte(&[0.28]) + bte(&[0.55]);
+        assert!((bte(&[0.28, 0.55]) - sum).abs() < 1.0e-9 * sum);
     }
 }
 
@@ -429,6 +547,7 @@ mod large_single_aisle_1 {
             aeroelastic_tailoring: 0.0,
             strut_bracing: 0.0,
             wing_load_fraction: 1.0,
+            bending_stress_factor: 1.0,
             fuselage_count: 1,
             variable_sweep_penalty: 0.0,
             wing_mounted_engine_count: 2,
@@ -471,6 +590,7 @@ mod large_single_aisle_1 {
                 aeroelastic_tailoring: 0.0,
                 strut_bracing: 0.0,
                 wing_load_fraction: 1.0,
+                bending_stress_factor: 1.0,
                 fuselage_count: 1,
                 variable_sweep_penalty: 0.0,
                 wing_mounted_engine_count: 2,
@@ -481,11 +601,13 @@ mod large_single_aisle_1 {
             vertical_tail_area_m2: ft2(284.0),
             vertical_tail_taper_ratio: 0.33,
             vertical_tail_count: 1,
+            fin_mounted_tailplane_factor: 1.0,
             fuselage_length_m: ft(128.0),
             fuselage_width_m: ft(12.33),
             fuselage_depth_m: ft(13.17),
             scaled_fuselage_engines: 0.0,
             military_cargo_floor: 0.0,
+            main_deck_cargo_door_fraction: 0.0,
             design_landing_mass_kg: lbm(152_800.0),
             main_gear_oleo_length_m: 102.0 * INCH,
             nose_gear_oleo_length_m: 67.0 * INCH,
@@ -536,6 +658,7 @@ mod large_single_aisle_1 {
             nozzle_scaling_exponent: 1.0,
             nozzle_scope: alas_config::FlopsNozzleScope::IncludedInBaseline,
             thrust_reversers_installed: false,
+            thrust_reverser_engine_count: None,
             maximum_mach: 0.785,
             nacelle_diameter_m: ft(7.94),
             maximum_fuel_capacity_kg: lbm(45_694.0),
@@ -570,6 +693,8 @@ mod large_single_aisle_1 {
             first_class_passenger_count: 11,
             business_class_passenger_count: 0,
             tourist_class_passenger_count: 158,
+            systems_passenger_count: None,
+            all_coach_passenger_count: None,
             flight_crew_count: 2,
             flight_attendant_count: 3,
             galley_crew_count: 0,
@@ -586,12 +711,15 @@ mod large_single_aisle_1 {
             // containerized mass is the 7,436 lb of checked baggage.
             containerized_cargo_kg: 0.0,
             apu_installed: true,
+            // FLOPS prices no pneumatic group; these cases reproduce FLOPS runs.
+            bleed_air_system: false,
             containerized_baggage_kg: lbm(7_436.0),
             cargo_loading: alas_config::CargoHoldLoading::Containerized,
             cabin_equipment_method: alas_config::CabinEquipmentMethod::FlopsTransportV1,
             haul_class: alas_config::OperatingHaulClass::ShortMediumHaul,
             propulsion_sizing: PropulsionSizing::RatedThrust,
             military_cargo: None,
+            executive_cabin: None,
         };
         let breakdown = estimate_flops_transport(&inputs).expect("complete inputs");
         let systems = breakdown.systems;

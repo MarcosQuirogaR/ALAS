@@ -51,7 +51,10 @@ pub fn run_nastran95_analysis(
     work_dir: &Path,
     solver: &Nastran95Solver,
 ) -> NastranResults {
-    let mut results = NastranResults::default();
+    let mut results = NastranResults {
+        solver_is_nastran95: true,
+        ..NastranResults::default()
+    };
     // Name any panel the solver's absolute CQUAD4 test would reject before it
     // is started; the solver itself only reports an opaque fatal 2224.
     let flagged = super::quad_guard::degenerate_quads(deck, PRODUCT_UNITS);
@@ -94,9 +97,9 @@ pub fn run_nastran95_analysis(
                             .map_or(String::new(), |e| format!("{e}; "))
                     ));
                 } else {
-                    let excluded = deck.load_introduction_elements(
-                        &node_index.engine_nids,
-                        crate::mesh::LOAD_INTRODUCTION_LAYERS,
+                    let excluded = deck.load_introduction_elements_within(
+                        node_index,
+                        crate::mesh::LOAD_INTRODUCTION_DEPTHS,
                     );
                     for case in &stress.cases {
                         let peak = case
@@ -115,6 +118,12 @@ pub fn run_nastran95_analysis(
                         }
                     }
                 }
+                result.cover_panel_stress = super::static_stress::read_cover_panel_stress(
+                    &print,
+                    deck,
+                    &stress,
+                    PRODUCT_UNITS,
+                );
                 result.shell_stress = Some(stress);
                 result
             }
@@ -133,7 +142,7 @@ pub fn run_nastran95_analysis(
 
     if config.run_sol_vibration_sine || config.run_sol_vibration_random {
         results.vibration = VibrationResult {
-            status: ResultStatus::Error,
+            status: ResultStatus::NotConfigured,
             error: Some(
                 "NASTRAN-95 backend does not provide the modern SOL 111 modal frequency-response contract"
                     .to_owned(),
@@ -180,7 +189,9 @@ pub(super) fn solve_and_retain(
     fs::create_dir_all(&solution_dir)
         .map_err(|error| format!("cannot create {solution} artifact directory: {error}"))?;
     let transient_dir = solver.workspace_for(&solution_dir)?;
+    let guard = super::run::WorkspaceGuard::new(solver, transient_dir.clone());
     let outcome = run_nastran95(solver, deck, &transient_dir, config.timeout_s);
+    drop(guard);
     fs::write(solution_dir.join(format!("wing_{solution}.bdf")), deck)
         .map_err(|error| format!("cannot retain {solution} BDF: {error}"))?;
     match outcome {
@@ -299,6 +310,64 @@ pub(super) fn read_modes_print_limited(
         }
     };
     let mut mode_shapes = Vec::new();
+    // The rear spar is the last spar line; both spars are exported raw, before
+    // the peak normalisation below, so bending and twist can be separated. The
+    // two lines need not have the same grids (a truncated rib may skip one), so
+    // the rear value at each front station is interpolated in span.
+    let mut rear_sorted: Vec<(f64, i64)> = node_index
+        .spar_upper_nids
+        .last()
+        .filter(|_| node_index.spar_upper_nids.len() >= 2)
+        .map(|rear| rear.iter().map(|&nid| (deck.node_y(nid), nid)).collect())
+        .unwrap_or_default();
+    rear_sorted.retain(|(y, _)| y.is_finite());
+    rear_sorted.sort_by(|a, b| a.0.total_cmp(&b.0));
+    let at_front_station = |y: f64, value: &dyn Fn(i64) -> f64| -> f64 {
+        let upper = rear_sorted.partition_point(|(ry, _)| *ry < y);
+        let pick = |index: usize| rear_sorted.get(index).copied();
+        match (upper.checked_sub(1).and_then(pick), pick(upper)) {
+            (_, Some((ry, nid))) if (ry - y).abs() <= 1.0e-9 * y.abs().max(1.0) => value(nid),
+            (Some((y0, n0)), Some((y1, n1))) if y1 > y0 => {
+                let t = (y - y0) / (y1 - y0);
+                (1.0 - t) * value(n0) + t * value(n1)
+            }
+            _ => f64::NAN,
+        }
+    };
+    let x_of = |nid: i64| deck.grid_xyz(nid).map_or(f64::NAN, |xyz| xyz[0]);
+    let has_rear = !rear_sorted.is_empty();
+    let spar_chord_m = has_rear.then(|| {
+        ordered
+            .iter()
+            .map(|&(y, front)| at_front_station(y, &x_of) - x_of(front))
+            .collect::<Vec<_>>()
+    });
+    let z_of = |mode_index: usize, nid: i64| {
+        eigenvector_tables
+            .get(mode_index)
+            .or_else(|| displacement_tables.get(mode_index))
+            .and_then(|table| table.iter().find(|&&(grid, _)| grid == nid))
+            .map_or(f64::NAN, |&(_, row)| row[2])
+    };
+    let mut spar_z_front = Vec::new();
+    let mut spar_z_rear = Vec::new();
+    for &mode_index in &kept {
+        spar_z_front.push(
+            ordered
+                .iter()
+                .map(|&(_, nid)| z_of(mode_index, nid))
+                .collect::<Vec<_>>(),
+        );
+        if has_rear {
+            let rear_z = |nid: i64| z_of(mode_index, nid);
+            spar_z_rear.push(
+                ordered
+                    .iter()
+                    .map(|&(y, _)| at_front_station(y, &rear_z))
+                    .collect::<Vec<_>>(),
+            );
+        }
+    }
     for &mode_index in &kept {
         // Keep one shape slot for every retained frequency, even when the
         // print file omitted that mode's eigenvector table.  The public result
@@ -332,6 +401,9 @@ pub(super) fn read_modes_print_limited(
         frequencies_hz,
         mode_shapes,
         mode_shape_y_m: Some(mode_shape_y_m),
+        spar_z_front,
+        spar_z_rear,
+        spar_chord_m,
         ..ModesResult::default()
     }
 }
@@ -382,7 +454,9 @@ fn configured_solver(
     let rf_stage = nonempty_path(&config.nastran95_rf_stage_path);
     let open_core_words = nonempty_text(&config.nastran95_open_core_words);
     if dir.as_os_str().is_empty() {
-        Nastran95Solver::from_env().or_else(Nastran95Solver::from_adjacent_bundle)
+        Nastran95Solver::from_env()
+            .or_else(Nastran95Solver::from_adjacent_bundle)
+            .or_else(Nastran95Solver::from_installed_tool)
     } else {
         Nastran95Solver::from_paths(
             dir,
@@ -429,7 +503,7 @@ mod tests {
     fn disabled_discovery_skips_configured_local_solver_selection() -> std::io::Result<()> {
         let root =
             std::env::temp_dir().join(format!("alas-nastran95-discovery-{}", std::process::id()));
-        let executable = root.join("build/bin/nastran.exe");
+        let executable = root.join(Nastran95Solver::EXECUTABLE_RELATIVE);
         fs::create_dir_all(root.join("build/bin"))?;
         fs::create_dir_all(root.join("rf"))?;
         fs::write(&executable, b"test")?;
@@ -488,6 +562,7 @@ mod tests {
             rf_stage: None,
             open_core_words: None,
             max_open_core_words: 1,
+            private_work: false,
         };
         let config = StructuresConfig {
             run_sol_static: true,

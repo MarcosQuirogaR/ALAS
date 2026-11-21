@@ -37,11 +37,10 @@ pub fn figure_openvsp_cad_preview(
     theme: Option<&str>,
 ) -> Scene {
     let Some(export) = export else {
-        return status_scene(
+        return crate::status_figure::skipped_status_scene(
             "OpenVSP CAD preview unavailable",
             "No OpenVSP export was retained for this run.",
-            false,
-            theme,
+            crate::theme::get_palette(theme),
         );
     };
     if export.preview_available && export.preview_path.is_file() {
@@ -69,7 +68,10 @@ pub fn figure_openvsp_cad_preview(
         &format!(
             "status={}; expected artifact (native screenshot): {}; {detail}",
             export.status.as_str(),
-            export.preview_path.display()
+            export
+                .preview_path
+                .file_name()
+                .map_or_else(String::new, |name| name.to_string_lossy().into_owned())
         ),
         false,
         theme,
@@ -499,7 +501,7 @@ mod tests {
     }
 
     #[test]
-    fn unavailable_preview_has_one_red_visible_title_and_keeps_metadata() {
+    fn a_preview_with_no_retained_export_has_one_neutral_visible_title_and_keeps_metadata() {
         let scene = figure_openvsp_cad_preview(None, Some("dark"));
         assert_eq!(
             scene.title.as_deref(),
@@ -516,7 +518,9 @@ mod tests {
                 _ => None,
             })
             .collect::<Vec<_>>();
-        assert_eq!(title_elements, vec![(Color::from_hex("#c0392b"), true)]);
+        // No export retained means the stage never ran: a muted note, not a failure.
+        let muted = Color::from_hex(crate::theme::get_palette(Some("dark")).tick);
+        assert_eq!(title_elements, vec![(muted, true)]);
     }
 
     #[test]

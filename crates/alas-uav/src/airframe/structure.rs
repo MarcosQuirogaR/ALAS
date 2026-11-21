@@ -1,7 +1,7 @@
 // SPDX-License-Identifier: AGPL-3.0-or-later
 // Copyright (C) 2026 Marcos Quiroga Rodriguez
 
-//! Structural mass estimates from areas and areal densities (UAV-PLAN 3.7).
+//! Structural mass estimates from areas and areal densities.
 //!
 //! Every item produced here is tagged [`MassBasis::Estimate`]: the areal
 //! densities are inputs, not database facts, and the generic preset is an

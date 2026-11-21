@@ -368,3 +368,38 @@ fn identical_units_are_evaluated_once_with_the_per_unit_sum_preserved() {
         }
     }
 }
+
+/// A running engine does not burn less than at flight idle: at any normalized force, the fuel
+/// flow is at least that of the flight-idle rating at the same state.
+#[test]
+fn a_normalized_force_never_burns_less_than_flight_idle() {
+    let system = atr_system();
+    let mut floored = 0;
+    for altitude_m in [1_000.0, 3_000.0, 6_000.0, 8_000.0] {
+        for mach in [0.2, 0.3, 0.45] {
+            let condition = flight(altitude_m, mach);
+            let idle = system
+                .evaluate(&request(
+                    condition,
+                    PropulsionDemand::Rating(PropulsionRating::FlightIdle),
+                ))
+                .expect("idle point");
+            let idle_fuel = idle.resource_flows[0].mass_flow_kg_s.expect("idle fuel");
+            for step in 0..=100 {
+                let demand = PropulsionDemand::NormalizedForce(f64::from(step) / 100.0);
+                let Ok(result) = system.evaluate(&request(condition, demand)) else {
+                    continue;
+                };
+                let fuel = result.resource_flows[0].mass_flow_kg_s.expect("fuel");
+                assert!(
+                    fuel >= idle_fuel - 1.0e-12,
+                    "{altitude_m} m M{mach} step {step}: {fuel} kg/s below the idle {idle_fuel} kg/s"
+                );
+                if (fuel - idle_fuel).abs() <= 1.0e-12 {
+                    floored += 1;
+                }
+            }
+        }
+    }
+    assert!(floored > 0, "the grid never reaches the idle floor");
+}

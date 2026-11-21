@@ -6,7 +6,10 @@
 
 use super::architecture::HYDRAULIC_3000_PSI_PA;
 use super::Evidence;
-use crate::{CabinEquipmentMethod, CargoHoldLoading, FlopsInputEvidence, OperatingHaulClass};
+use crate::{
+    CabinEquipmentMethod, CargoHoldLoading, ExecutiveCabinDeclaration, FlopsInputEvidence,
+    OperatingHaulClass,
+};
 
 /// (maximum Mach, design range nmi, flight crew, hydraulic pressure Pa,
 /// fuselage engines, published tank count, maximum fuel kg, mission
@@ -51,6 +54,31 @@ pub(super) fn narrowbody_rows(name: &str) -> Option<Row> {
                 uncertainty: "ESTIMATE: the 3,000 psi hydraulic pressure and the two-tank mapping are not stated in the retained documents; containerized cargo is zero for the bulk-loaded holds",
             },
         ),
+        "LJ60" => (
+            0.81,
+            2_493.0,
+            2,
+            HYDRAULIC_3000_PSI_PA,
+            2,
+            Some(3),
+            Some(3_588.0),
+            Evidence {
+                document: "Jane's All the World's Aircraft 2008-09, Learjet 60",
+                revision: "2008-09 edition",
+                location: "p 791: MMO 0.81; range with two crew and four passengers, NBAA IFR, 2,493 n miles",
+                applicability: "Learjet 60 at 10,659 kg MTOW; the quoted range is a study proxy for the design range",
+                kind: FlopsInputEvidence::UserDeclared,
+                uncertainty: "compiled handbook values; the range is at four passengers, not at maximum payload",
+            },
+            Evidence {
+                document: "EASA TCDS IM.A.212 Learjet M60",
+                revision: "Issue 04",
+                location: "III.7 fuel (two wing tanks, one fuselage tank), III.9 crew of two; FlightSafety Learjet 60 PTM fig 1-2 rear-fuselage engines",
+                applicability: "Learjet Model 60, PW305A, two rear-fuselage engines",
+                kind: FlopsInputEvidence::UserDeclared,
+                uncertainty: "ESTIMATE: the 3,000 psi class hydraulic pressure is not read from a retained document; the transport correlations are applied to a business jet",
+            },
+        ),
         "C919" => (
             0.82,
             2_200.0,
@@ -92,7 +120,7 @@ pub(super) fn narrowbody_rows(name: &str) -> Option<Row> {
 ///
 /// Per aircraft, from the manufacturer's airport-planning description of the
 /// cargo compartments (full evidence, with the quotations and the retrieval
-/// failures, in `evidence-cargo-loading.md` of the 2026-09-16 dispatch):
+/// failures):
 ///
 /// * **ATR 72-600 - bulk.** The passenger aircraft has no lower hold at all:
 ///   the forward and aft baggage compartments are on the main deck and are
@@ -146,9 +174,9 @@ pub(super) fn narrowbody_rows(name: &str) -> Option<Row> {
 /// [`CargoHoldLoading::Mixed`] is not declared on a fraction this project
 /// would have had to invent.
 ///
-/// The accounting caveat is resolved in the evaluator, not here: Boeing's own OEW definition (D6-58333 Rev Q section
-/// 2.1) and the FAA basic operating weight of AC 120-27F exclude unit load
-/// devices, and AC 120-85B treats a ULD as tare tracked with the load.
+/// The accounting caveat is resolved in the evaluator, not here: Boeing's OEW definition (D6-58333
+/// Rev Q section 2.1) and the FAA basic operating weight of AC 120-27F (Appendix A, A.3) name no
+/// unit load device, and AC 120-85B (2.4.7.3, 2.6.2.5) tracks ULD tare with the load.
 /// `alas_mass::flops_transport::FlopsOperatingItemsBreakdown` therefore
 /// computes the tare for every configuration from this declaration and reports
 /// it *outside* operating empty mass, with FLOPS' own `WOPIT` convention
@@ -231,9 +259,20 @@ pub(super) fn narrowbody_rows(name: &str) -> Option<Row> {
 /// layout, which this module does not own - and until it is, a real share of
 /// the remaining operating-empty deficits is a cabin difference rather than a
 /// mass method being wrong.
+///
+/// **A business jet is outside both populations.** A preset that declares
+/// [`crate::presets::AircraftClass::BusinessJet`] takes
+/// [`CabinEquipmentMethod::ExecutiveJetV1`], Torenbeek's furnishing and
+/// equipment group "for transport and executive aircraft" (1982, Table 8-12,
+/// p. 291), whatever its mass and seats: FLOPS prices an executive seat as an
+/// airline tourist seat. The class is the preset's own declaration, read here
+/// and nowhere else; no aircraft name is matched.
 pub(super) fn declared_cabin_equipment_method(
     preset: &crate::AircraftPreset,
 ) -> CabinEquipmentMethod {
+    if preset.class == crate::presets::AircraftClass::BusinessJet {
+        return CabinEquipmentMethod::ExecutiveJetV1;
+    }
     let mtom_kg = preset
         .reference
         .mtow_kg
@@ -249,6 +288,55 @@ pub(super) fn declared_cabin_equipment_method(
     )
 }
 
+/// The installed executive interior each business jet declares, read only by
+/// [`CabinEquipmentMethod::ExecutiveJetV1`]. Published internal dimensions and
+/// declared monuments; no mass is declared here. The oxygen row's `N_pax` is
+/// the preset's own certified maximum (`certified_max_seats`); without one no
+/// interior is declared and the method refuses rather than guessing.
+pub(super) fn declared_executive_cabin(
+    name: &str,
+    certified_max_seats: Option<i64>,
+) -> Option<ExecutiveCabinDeclaration> {
+    let certified_passenger_count = u32::try_from(certified_max_seats?).ok()?;
+    match name {
+        // Jane's All the World's Aircraft 2008-09, Learjet 60 entry,
+        // ACCOMMODATION (printed p. 790): "full-across aft lavatory", "total
+        // 1.67 m3 (59 cu ft) baggage capacity", "galley cabinet has warming
+        // oven, cold liquid dispensers, ice compartment" (a snack pantry, no
+        // main-meal galley); DIMENSIONS, INTERNAL (printed p. 791): length
+        // excl flight deck 5.38 m, floor area excl flight deck 6.40 m2, volume
+        // excl flight deck 12.8 m3. EASA TCDS IM.A.212 Issue 04: maximum
+        // operating altitude 51,000 ft. No extended overwater equipment is
+        // standard.
+        //
+        // The 12.8 m3 includes the in-flight baggage compartment (this
+        // module's reading of the same entry): the 1.67 m3 is divided between
+        // an external hold and an "internal pressurised, heated compartment
+        // that is accessible in flight", and the gross pressure-cabin volume,
+        // 15.57 m3, leaves only 2.77 m3 beyond the 12.8 m3 - the 1.69 m flight
+        // deck (cabin length 7.07 m incl, 5.38 m excl) - so the internal
+        // compartment lies inside the 12.8 m3. The entry does not publish the
+        // split between the two compartments, so the overlap is declared
+        // unknown (`None`) and V_pc + V_ch counts it twice: under 13.3 kg of
+        // linings even if all 1.67 m3 were internal.
+        "LJ60" => Some(ExecutiveCabinDeclaration {
+            cabin_floor_area_m2: 6.40,
+            passenger_cabin_volume_m3: 12.8,
+            passenger_compartment_length_m: 5.38,
+            cargo_hold_volume_m3: 1.67,
+            in_cabin_baggage_volume_m3: None,
+            certified_passenger_count,
+            main_meal_galleys: 0,
+            snack_pantries: 1,
+            coffee_bars: 0,
+            lavatories: 1,
+            maximum_operating_altitude_m: 51_000.0 * 0.3048,
+            extended_overwater: false,
+        }),
+        _ => None,
+    }
+}
+
 /// Which of the two LTH operating-item relations each aircraft would take.
 ///
 /// Read only by [`crate::CabinEquipmentMethod::LthCivilTransportV1`], which
@@ -261,7 +349,7 @@ pub(super) fn declared_cabin_equipment_method(
 /// ATR 72-600 takes `m_opp = 32.907 n_pax^1.021`.
 pub(crate) fn declared_haul_class(name: &str) -> OperatingHaulClass {
     match name {
-        "A340-300" | "A380-800" | "B787-9" | "DC-10" | "B747-400" | "AVE" => {
+        "A340-300" | "A350-900" | "A380-800" | "B787-9" | "DC-10" | "B747-400" | "AVE" => {
             OperatingHaulClass::LongHaul
         }
         _ => OperatingHaulClass::ShortMediumHaul,
@@ -270,7 +358,9 @@ pub(crate) fn declared_haul_class(name: &str) -> OperatingHaulClass {
 
 pub(crate) fn declared_cargo_loading(name: &str) -> CargoHoldLoading {
     match name {
-        "ATR72-600" | "A220-300" | "A320-200" | "E195-E2" => CargoHoldLoading::Bulk,
+        "ATR72-600" | "A220-300" | "A320-200" | "E195-E2" | "LJ60" | "C295" => {
+            CargoHoldLoading::Bulk
+        }
         _ => CargoHoldLoading::Containerized,
     }
 }

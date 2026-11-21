@@ -34,9 +34,13 @@ use super::law::trapezoid;
 use super::torque_cases;
 pub use super::torque_cases::{aileron_schedule, AileronSchedule};
 
-/// Ratio of the design cruising to the design dive speed, `V_C <= 0.8 V_D`
-/// (CS 25.335(b), PDF p. 212 of CS-25 Amdt 27).
-pub(crate) const CRUISE_TO_DIVE_SPEED_RATIO: f64 = 0.8;
+/// The design cruising speed VC, m/s EAS, of the design dive speed of `req`:
+/// the inverse of the CS 25.335(b) rule (`alas_config::design_speeds`), VC = VMO
+/// for a preset whose VD was set from its VMO.
+#[must_use]
+pub fn design_cruise_eas_m_s(req: &DesignRequirements) -> f64 {
+    req.design_cruise_speed_eas_m_s()
+}
 
 /// Factor of safety on the prescribed limit load (CS 25.303, PDF p. 201).
 const FACTOR_OF_SAFETY: f64 = 1.5;
@@ -114,9 +118,9 @@ pub fn discrete_gusts(
     req: &DesignRequirements,
 ) -> Option<[gust::DiscreteGust; 2]> {
     let speeds = GustSpeeds {
-        cruise_eas_m_s: CRUISE_TO_DIVE_SPEED_RATIO * req.dive_speed_m_s,
+        cruise_eas_m_s: design_cruise_eas_m_s(req),
         dive_eas_m_s: req.dive_speed_m_s,
-        cruise_mach: req.cruise_mach,
+        cruise_mach: req.design_cruise_mach_limit(),
     };
     gust::critical_discrete_gusts(
         &GustWing::from_geometry(wsg),
@@ -189,6 +193,9 @@ pub(super) struct CaseLoads {
     pub(super) moment: Vec<f64>,
     /// Relieved vertical shear plus the web-equivalent of the torque, N.
     pub(super) shear_equivalent: Vec<f64>,
+    /// Magnitude of the Bredt-Batho torsional shear flow around the box, N/m:
+    /// the shear the cover skins carry (the vertical shear is the webs').
+    pub(super) skin_shear_flow: Vec<f64>,
 }
 
 /// Net load and relieved moment of an aerodynamic running load, signed throughout: a push-down
@@ -278,7 +285,12 @@ pub(super) fn case_loads(
             } else {
                 case.total_force_n
             };
-            let q_base = loads::elliptic_distributed_load(y, wsg.semi_span, base_total);
+            let q_base = loads::wing_lift_distribution(
+                wsg,
+                y,
+                base_total,
+                loads::level_semi_wing_lift_n(req),
+            );
             let mut q_aero = q_base.clone();
             if let Some((lift, _)) = &variant.extra_lift {
                 for (q, extra) in q_aero.iter_mut().zip(lift) {
@@ -320,6 +332,9 @@ pub(super) fn case_loads(
             // The worst web carries the uniform shear of the vertical load
             // plus the torsional shear flow, q_V + q_T with q_V = V / sum(h),
             // so the equivalent uniform-web shear is V + q_T sum(h).
+            let skin_shear_flow: Vec<f64> = (0..n)
+                .map(|j| torsion::bredt_shear_flow_n_per_m(torque[j], area[j]).abs())
+                .collect();
             let shear_equivalent = (0..n)
                 .map(|j| {
                     shear[j].abs()
@@ -340,6 +355,7 @@ pub(super) fn case_loads(
                 q_net,
                 moment,
                 shear_equivalent,
+                skin_shear_flow,
             }
         })
         .collect()
@@ -366,6 +382,8 @@ pub(super) struct StationEnvelope {
     pub(super) shear_n: Vec<f64>,
     /// Relieved 1 g level-flight moment, N m, for the fatigue limit.
     pub(super) level_moment_nm: Vec<f64>,
+    /// Design torsional shear flow in the cover skins, N/m.
+    pub(super) skin_shear_flow_n_per_m: Vec<f64>,
 }
 
 /// Reduce the cases to the station envelope.
@@ -374,8 +392,11 @@ pub(super) fn station_envelope(cases: &[CaseLoads]) -> StationEnvelope {
     let mut moment_nm = vec![0.0_f64; n];
     let mut shear_n = vec![0.0_f64; n];
     let mut level_moment_nm = vec![0.0_f64; n];
+    let mut skin_shear_flow_n_per_m = vec![0.0_f64; n];
     for loaded in cases {
         for j in 0..n {
+            skin_shear_flow_n_per_m[j] = skin_shear_flow_n_per_m[j]
+                .max(loaded.skin_shear_flow[j] * (1.0 + RELIEF_RESIDUAL_GUARD));
             moment_nm[j] = moment_nm[j].max(loaded.moment[j].abs() * (1.0 + RELIEF_RESIDUAL_GUARD));
             shear_n[j] = shear_n[j].max(loaded.shear_equivalent[j] * (1.0 + RELIEF_RESIDUAL_GUARD));
             if loaded.case.name == "level" {
@@ -387,6 +408,7 @@ pub(super) fn station_envelope(cases: &[CaseLoads]) -> StationEnvelope {
         moment_nm,
         shear_n,
         level_moment_nm,
+        skin_shear_flow_n_per_m,
     }
 }
 
@@ -657,6 +679,7 @@ mod tests {
             &sizing.y_stations,
             front,
             rear,
+            crate::tanks::JET_FUEL_DENSITY_KG_M3,
         );
         let own = crate::sizing::box_running_mass_kg_m(&sizing, skin, web, cap, front, rear);
         for (mass, own) in running.iter_mut().zip(own) {
@@ -691,7 +714,8 @@ mod tests {
         }
         let shift = first / (ea + added);
         let inertia = ei + second - first * first / (ea + added);
-        let half = sizing.spars[0].h[0] * 0.5;
+        // The lower fibre is the contour depth between the spars (cover_shape::cover_depth_m).
+        let half = 0.5 * sizing.spars[0].h[0].max(sizing.cover_depth_at(0));
         let stress = cap.e_pa * level.moment[0].abs() * (half - shift) / inertia;
         let limit = st.lower_cover_fatigue_stress_1g_pa;
         // The check relief is the geometric fuel estimate the sizing also
@@ -740,7 +764,13 @@ mod tests {
         assert!(gauges.iter().all(|g| *g >= minimum * (1.0 - 1.0e-12)));
         assert!(gauges[0] > 2.0 * minimum, "root gauge {}", gauges[0]);
         assert!((gauges[gauges.len() - 1] - minimum).abs() <= 1.0e-9 * minimum);
-        // The gauge follows the local shear and panel depth: it is not uniform        // and the inboard half carries more of it than the outboard half        // (it is not monotone: spar depth and rib pitch change along the span).        let half = gauges.len() / 2;        let inboard: f64 = gauges[..half].iter().sum();        let outboard: f64 = gauges[half..].iter().sum();        assert!(inboard > 1.5 * outboard, "{inboard} {outboard}");
+        // The gauge follows the local shear and panel depth: it is not uniform
+        // and the inboard half carries more of it than the outboard half
+        // (it is not monotone: spar depth and rib pitch change along the span).
+        let half = gauges.len() / 2;
+        let inboard: f64 = gauges[..half].iter().sum();
+        let outboard: f64 = gauges[half..].iter().sum();
+        assert!(inboard > 1.5 * outboard, "{inboard} {outboard}");
     }
 
     fn torque_relief(probe: &Probe, req: &DesignRequirements) -> (Vec<f64>, WingInertiaRelief) {

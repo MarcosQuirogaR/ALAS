@@ -107,8 +107,12 @@ fn solve_dense(n: usize, m: &[f64], b: &[f64]) -> Option<Vec<f64>> {
 /// Section plane: chordwise axis `e` (leading to trailing edge, aft), span
 /// direction `s` (first panel's left to right vertex), and `u = e x s`
 /// (up for a wing in the xy plane).  For panel `j` with front and back edge
-/// midpoints at `(xi, zeta)` in that plane, the slope is `dzeta/dxi` and the
-/// tangency condition reads `alpha - slope_i = sum_j gamma_j / (2 pi (xi_c,i -
+/// midpoints at `(xi, zeta)` in that plane, the slope is the one the lattice
+/// imposes, `-(n . e) / (n . u)` of the panel's flow-tangency normal `n`: it
+/// carries the camber slope at the collocation point, not the panel-mean
+/// `dzeta/dxi` of the corners, so this law and the lattice share one zero-lift
+/// angle (Katz and Plotkin sec. 12.1, see `alas_aero`'s collocation slope).
+/// The tangency condition reads `alpha - slope_i = sum_j gamma_j / (2 pi (xi_c,i -
 /// xi_v,j))` with `gamma = Gamma / V`; the section lift is `cl = 2 sum(gamma)
 /// / chord`.
 fn thin_section(strip: &WingStrip, panels: &[PanelSample]) -> Option<(f64, f64)> {
@@ -124,15 +128,18 @@ fn thin_section(strip: &WingStrip, panels: &[PanelSample]) -> Option<(f64, f64)>
     for p in panels {
         let f = sub(mid(p.front_left, p.front_right), le);
         let b = sub(mid(p.back_left, p.back_right), le);
-        let (xf, zf) = (dot(f, e), dot(f, u));
-        let (xb, zb) = (dot(b, e), dot(b, u));
+        let (xf, xb) = (dot(f, e), dot(b, e));
         let dx = xb - xf;
         if !(dx.is_finite() && dx > 0.0) {
             return None;
         }
+        let (n_e, n_u) = (dot(p.normal_direction, e), dot(p.normal_direction, u));
+        if !(n_e.is_finite() && n_u.abs() > f64::EPSILON) {
+            return None;
+        }
         xi_vortex.push(xf + 0.25 * dx);
         xi_colloc.push(xf + 0.75 * dx);
-        slope.push((zb - zf) / dx);
+        slope.push(-n_e / n_u);
     }
     let two_pi = std::f64::consts::TAU;
     let mut m = vec![0.0; n * n];

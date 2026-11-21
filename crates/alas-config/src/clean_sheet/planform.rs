@@ -34,7 +34,8 @@ impl WingPlanformSummary {
     /// Measure `wing` drawn with `design`; `None` when it does not build or
     /// the integrals are not finite and positive.
     pub fn of(wing: &WingConfig, design: &DesignVector) -> Option<Self> {
-        let planform = wing.transport_planform(design).ok()?;
+        // The statistics describe wings, and a fillet is a blend body.
+        let planform = wing.transport_planform(design).ok()?.without_blends();
         let stations = planform.stations();
         let (mut half_area, mut chord_sq, mut chord_x) = (0.0, 0.0, 0.0);
         for pair in stations.windows(2) {

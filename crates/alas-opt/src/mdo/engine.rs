@@ -18,6 +18,9 @@ use alas_prop::turboprop::{Pw127mRating, TurbopropCommand, TurbopropCondition, T
 
 use super::propulsion::turboprop_unit_model;
 
+pub mod oversize;
+pub(super) mod sizing;
+
 /// ISA sea-level density, kg/m^3.
 const SEA_LEVEL_DENSITY_KG_M3: f64 = alas_atmo::SEA_LEVEL_DENSITY_ICAO_KG_M3;
 /// ISA sea-level temperature, K.
@@ -161,24 +164,31 @@ mod tests {
     /// Documentation of the retired closed form: full shaft power through an
     /// actuator disc at figure of merit 0.75 over the unit model's
     /// (P - accessory) x gearbox at 0.70 is (0.75/0.70)^(2/3) x
-    /// (P / ((P - 25 kW) 0.98))^(2/3), about 1.071 for the PW127M.
+    /// (P / ((P - 25 kW) gearbox))^(2/3). The gearbox efficiency is 1
+    /// (EASA TCDS IM.E.041 Issue 07 pp. 9, 13, 15: the PW100
+    /// rating is already reduction-gearbox output power), so the ratio is
+    /// about 1.057 for the PW127M; with the former unsourced 0.98 it was
+    /// about 1.071.
     #[test]
-    fn the_retired_closed_form_overstated_the_static_thrust_by_about_seven_percent() {
+    fn the_retired_closed_form_overstated_the_static_thrust_by_about_six_percent() {
         let config = atr_config();
         let Ok(alas_config::ActiveEngineModel::Turboprop(spec)) =
             config.geometry.engine.active_model()
         else {
             panic!("ATR72-600 is a turboprop");
         };
+        let model = turboprop_unit_model(spec);
         let disk_area_m2 = std::f64::consts::PI * (spec.propeller_diameter_m / 2.0).powi(2);
         let shaft_power_w = spec.takeoff_shaft_power_kw * 1_000.0;
         let retired_n = 0.75_f64.powf(2.0 / 3.0)
             * (2.0 * SEA_LEVEL_DENSITY_KG_M3 * disk_area_m2 * shaft_power_w * shaft_power_w).cbrt();
         let unit_n = turboprop_static_thrust_n(spec).unwrap();
         let ratio = retired_n / unit_n;
-        let expected = (0.75_f64 / 0.70).powf(2.0 / 3.0)
-            * (shaft_power_w / ((shaft_power_w - 25_000.0) * 0.98)).powf(2.0 / 3.0);
+        let expected = (0.75_f64 / model.static_figure_of_merit).powf(2.0 / 3.0)
+            * (shaft_power_w
+                / ((shaft_power_w - model.accessory_power_w) * model.gearbox_efficiency))
+                .powf(2.0 / 3.0);
         assert!((ratio - expected).abs() < 1.0e-9, "{ratio} vs {expected}");
-        assert!((ratio - 1.071).abs() < 0.005, "{ratio}");
+        assert!((ratio - 1.057).abs() < 0.005, "{ratio}");
     }
 }

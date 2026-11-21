@@ -72,9 +72,9 @@ impl Mses {
             timeout_mses_s: config.timeout_mses_s,
             enabled: config.enabled,
             mses_dir: mses_dir.to_path_buf(),
-            mset_exe: mses_dir.join("mset.exe"),
-            mses_exe: mses_dir.join("mses.exe"),
-            mplot_exe: mses_dir.join("mplot.exe"),
+            mset_exe: super::super::program_path(mses_dir, "mset"),
+            mses_exe: super::super::program_path(mses_dir, "mses"),
+            mplot_exe: super::super::program_path(mses_dir, "mplot"),
             osmap_required: osmap.required,
             osmap_status: osmap.status,
             osmap_path: osmap.path,
@@ -156,6 +156,10 @@ impl Mses {
 
         let converged = outcome.accumulated.get("alpha").map_or(0, Vec::len);
         result.converged_alpha_count = converged;
+        result.stopped.clone_from(&outcome.stopped);
+        if let (0, Some(stop)) = (converged, &outcome.stopped) {
+            return result.into_failure(stop.status, stop.message.clone());
+        }
         if converged == 0 {
             return result.into_error("MSES did not converge at any swept alpha".to_owned());
         }
@@ -182,7 +186,18 @@ impl Mses {
             classify_requested_points(alphas.len(), &result.point_diagnostics, &converged_points);
         let outside = result.count_class(MsesPointClass::OutsideValidityDomain);
         result.status = classified_completion_status(alphas.len(), converged, outside);
-        if result.status == MsesStatus::OutsideValidityDomain {
+        if let Some(stop) = &outcome.stopped {
+            // The angles past the stop were never solved: an incomplete sweep,
+            // never an attached-flow verdict on them.
+            result.status = MsesStatus::PartialConvergence;
+            result.error = Some(format!(
+                "MSES sweep stopped at requested alpha {:.6} deg by a solver {} ({}); {converged} of {} requested alpha points converged before it",
+                stop.alpha_deg,
+                stop.status.as_str(),
+                stop.message,
+                alphas.len()
+            ));
+        } else if result.status == MsesStatus::OutsideValidityDomain {
             result.error = Some(format!(
                 "MSES converged at {converged} of {} requested alpha points; the other {outside} show                  separated flow and lie outside the section's attached-flow validity domain",
                 alphas.len()

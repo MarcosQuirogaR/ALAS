@@ -56,13 +56,6 @@ pub struct GroundClearances {
     pub tip_droop_m: f64,
 }
 
-impl GroundClearances {
-    /// Tip low point above ground with the wing drooped, m.
-    pub fn tip_loaded_m(&self) -> f64 {
-        self.tip_unloaded_m - self.tip_droop_m
-    }
-}
-
 /// Clearances of the built `plane` (unloaded shape) above `ground_z_m` after
 /// the wing deflects by `deflection`.
 pub fn ground_clearances(

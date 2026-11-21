@@ -120,6 +120,7 @@ fn torenbeek_group(wing: &Wing, mtow_kg: f64, ultimate_load_factor: f64) -> Tore
         FLAP_DEFLECTION_DEG,
         None,
         flap_area,
+        true,
     );
     TorenbeekWingGroup {
         group_total_kg: mass_wing_with_control_surface_area(
@@ -133,6 +134,7 @@ fn torenbeek_group(wing: &Wing, mtow_kg: f64, ultimate_load_factor: f64) -> Tore
             FLAP_DEFLECTION_DEG,
             None,
             flap_area,
+            true,
         ),
         high_lift_devices_kg: breakdown.high_lift_devices_kg,
         spoilers_and_speedbrakes_kg: breakdown.spoilers_and_speedbrakes_kg,
@@ -153,6 +155,7 @@ fn a320_flops(wing: &Wing, mtow_kg: f64, ultimate_load_factor: f64) -> FlopsWing
         aeroelastic_tailoring: 0.0,
         strut_bracing: 0.0,
         wing_load_fraction: 1.0,
+        bending_stress_factor: 1.0,
         fuselage_count: 1,
         variable_sweep_penalty: 0.0,
         wing_mounted_engine_count: 2,
@@ -341,6 +344,30 @@ fn a_missing_aileron_run_is_reported_as_a_missing_item() {
         Some(0.0)
     );
     assert!(inventory.status().is_complete());
+}
+
+#[test]
+fn a_wing_without_spoiler_panels_is_not_missing_a_spoiler_item() {
+    let wing = a320_wing();
+    let mut inputs = a320_inputs(&wing, 6_000.0, A320_MTOW_KG, A320_ULTIMATE_LOAD_FACTOR);
+    inputs.surfaces.spoilers = MovableSurface::NONE;
+    inputs.torenbeek.spoilers_and_speedbrakes_kg = 0.0;
+    let inventory = build_wing_inventory(&inputs).expect("evaluable");
+    assert!(!inventory
+        .status()
+        .findings()
+        .any(|finding| matches!(finding, WingInventoryFinding::MissingItem { .. })));
+
+    // Declared spoiler panels without a priced item are still a missing item.
+    let mut unpriced = a320_inputs(&wing, 6_000.0, A320_MTOW_KG, A320_ULTIMATE_LOAD_FACTOR);
+    unpriced.torenbeek.spoilers_and_speedbrakes_kg = 0.0;
+    let inventory = build_wing_inventory(&unpriced).expect("evaluable");
+    assert!(inventory.status().findings().any(|finding| matches!(
+        finding,
+        WingInventoryFinding::MissingItem {
+            name: "spoilers_and_speedbrakes"
+        }
+    )));
 }
 
 #[test]

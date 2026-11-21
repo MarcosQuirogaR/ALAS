@@ -5,6 +5,10 @@
 use crate::scene::Scene;
 use alas_config::AlasConfig;
 
-pub(super) fn figure_turboprop_cycle_preview(config: &AlasConfig, theme: Option<&str>) -> Scene {
-    super::ts_preview::turboprop_preview(config, theme)
+pub(super) fn figure_turboprop_cycle_preview(
+    config: &AlasConfig,
+    theme: Option<&str>,
+    canvas: (f64, f64),
+) -> Scene {
+    super::ts_preview::turboprop_preview(config, theme, canvas)
 }

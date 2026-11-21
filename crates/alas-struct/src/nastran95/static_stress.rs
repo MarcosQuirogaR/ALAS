@@ -7,10 +7,13 @@
 
 use std::collections::{BTreeMap, HashMap, HashSet};
 
+use super::units::UnitScale;
 use crate::loads::LoadCase;
 use crate::mesh::Deck;
+use crate::mesh::ShellStressAxes;
 use crate::nastran::{
-    StaticCaseIdentity, StaticShellStressCase, StaticShellStressResponse, StaticShellStressSample,
+    cover_panel_case, StaticCaseIdentity, StaticCoverPanelStressResponse, StaticShellStressCase,
+    StaticShellStressResponse, StaticShellStressSample,
 };
 
 /// Read every submitted shell's two centroid fibers in every explicit case.
@@ -32,6 +35,119 @@ pub fn read_static_shell_stress_print(
             case_identity: StaticCaseIdentity::Unresolved,
         },
     }
+}
+
+/// Cover-panel stresses from the SI shell stresses already read and the
+/// printed CBAR axial stresses (deck units, scaled here). `None` when the
+/// deck has no cover panels.
+pub(crate) fn read_cover_panel_stress(
+    print: &str,
+    deck: &Deck,
+    shells: &StaticShellStressResponse,
+    units: UnitScale,
+) -> Option<StaticCoverPanelStressResponse> {
+    let panels = deck.cover_panels();
+    if panels.is_empty() {
+        return None;
+    }
+    let failed = |error: String| StaticCoverPanelStressResponse {
+        cases: Vec::new(),
+        error: Some(error),
+    };
+    if let Some(error) = &shells.error {
+        return Some(failed(format!("shell stress unavailable: {error}")));
+    }
+    let bars = match read_bar_axial_print(print) {
+        Ok(bars) => bars,
+        Err(error) => return Some(failed(error)),
+    };
+    let mut response = StaticCoverPanelStressResponse::default();
+    for case in &shells.cases {
+        let mut membrane: HashMap<i64, ([f64; 3], u32)> = HashMap::new();
+        for sample in &case.samples {
+            let entry = membrane.entry(sample.element_id).or_insert(([0.0; 3], 0));
+            entry.0[0] += sample.normal_x_pa;
+            entry.0[1] += sample.normal_y_pa;
+            entry.0[2] += sample.shear_xy_pa;
+            entry.1 += 1;
+        }
+        let axial = bars.get(&case.subcase_id);
+        match cover_panel_case(
+            &panels,
+            ShellStressAxes::Nastran95,
+            case.subcase_id,
+            case.name,
+            |eid| {
+                membrane
+                    .get(&eid)
+                    .filter(|(_, fibers)| *fibers == 2)
+                    .map(|(sum, _)| sum.map(|v| v / 2.0))
+            },
+            |eid| {
+                axial
+                    .and_then(|rows| rows.get(&eid))
+                    .map(|v| v / units.stress())
+            },
+        ) {
+            Ok(panels) => response.cases.push(panels),
+            Err(error) => return Some(failed(error)),
+        }
+    }
+    Some(response)
+}
+
+/// Printed CBAR end-A rows (`0 EID SA1 SA2 SA3 SA4 AXIAL SA-MAX SA-MIN
+/// [M.S.-T]`) by explicit subcase: element id to axial stress, deck units.
+fn read_bar_axial_print(print: &str) -> Result<BTreeMap<i64, HashMap<i64, f64>>, String> {
+    let mut output: BTreeMap<i64, HashMap<i64, f64>> = BTreeMap::new();
+    let mut pending_case = None;
+    let mut active = None;
+    for line in crate::nastran::text::splitlines(print) {
+        if let Some((_, tail)) = line.rsplit_once("SUBCASE") {
+            if let Some(id) = tail
+                .split_whitespace()
+                .next()
+                .and_then(|v| v.parse::<i64>().ok())
+            {
+                pending_case = Some(id);
+            }
+        }
+        if line.contains("S T R E S S E S")
+            || line.contains("F O R C E S")
+            || line.contains("D I S P L A C E M E N T")
+        {
+            active = if line.contains("S T R E S S E S   I N   B A R") {
+                Some(
+                    pending_case
+                        .take()
+                        .ok_or("bar stress page lacks explicit SUBCASE identity")?,
+                )
+            } else {
+                None
+            };
+            continue;
+        }
+        let Some(sid) = active else {
+            continue;
+        };
+        let tokens: Vec<_> = line.split_whitespace().collect();
+        if tokens.first() != Some(&"0") || !(9..=10).contains(&tokens.len()) {
+            continue;
+        }
+        let Ok(eid) = tokens[1].parse::<i64>() else {
+            continue;
+        };
+        let axial: f64 = tokens[6]
+            .parse()
+            .map_err(|_| "unreadable bar axial stress")?;
+        if !axial.is_finite() {
+            return Err("nonfinite bar axial stress".into());
+        }
+        if output.entry(sid).or_default().insert(eid, axial).is_some() {
+            return Err("repeated bar stress element in one case".into());
+        }
+    }
+    Ok(output)
 }
 
 /// Plane-stress invariant; hypot scaling avoids squaring overflow.

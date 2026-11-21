@@ -21,7 +21,7 @@
 //! is parallel over points with a sequential sum per point.
 
 use alas_geom::aircraft::airplane::Airplane;
-use alas_geom::aircraft::wing::{SpacingFunction, Wing};
+use alas_geom::aircraft::wing::{SpacingFunction, Wing, WingXSec};
 use alas_math::linalg::DenseMatrix;
 use rayon::prelude::*;
 use std::sync::atomic::{AtomicUsize, Ordering};
@@ -54,6 +54,9 @@ mod fast_rows;
 mod cache;
 pub use cache::VlmGeometryCache;
 
+mod memo;
+mod superposition;
+
 // The incidence-offset boundary condition is split into its own file to keep
 // this one under its production-line budget.
 mod incidence;
@@ -70,8 +73,29 @@ mod incidence;
 /// this a backstop against collapse rather than a second opinion on meshing.
 const MAX_PIVOT_RATIO: f64 = 1.0e4;
 
+/// The largest 1-norm condition estimate `kappa` at which a mesh whose pivot
+/// ratio exceeds [`MAX_PIVOT_RATIO`] is still solved.
+///
+/// The pivot ratio is a proxy, `max |pivot| / min |pivot|` of the partial-pivot
+/// LU, and a large pivot of a well-conditioned matrix inflates it: the A400M
+/// at 24 chordwise panels reports a ratio of 2.0e4 (391 at 23) while its
+/// condition estimate is 2.3e3 (2.2e3 at 23) and its lift, moments and
+/// sideslip derivatives continue smoothly across the step. The estimate
+/// (`alas_math::linalg::LuFactorization::condition_estimate`) is a
+/// property of the matrix alone. Measured on the A320 and A400M lattices, the
+/// meshes that solve correctly sit at or below 2.4e3 (A400M 1x25), and the
+/// ones that must be refused at or above 9.4e5 (A320 10x2, a wrong-signed
+/// yawing moment; 4x1: 2.1e6; 6x1: 9.5e10; 10x1, a lift coefficient of
+/// -2.1e7: 1.4e16). The limit sits between, 40 times the first and a tenth of
+/// the second, the same measured-separation reasoning as [`MAX_PIVOT_RATIO`];
+/// the round-off bound `kappa u` is far below the physical failure, which is
+/// meaninglessness of the discretization, not numerical error.
+const MAX_CONDITION_ESTIMATE: f64 = 1.0e5;
+
 mod mesh;
 pub(super) use mesh::*;
+pub use mesh::{lattice_components, lattice_grouping_diagnostics, LatticeGroupingDiagnostic};
+mod surface_flow;
 
 /// One airplane's panel mesh and factored influence matrix at a fixed
 /// resolution, ready to solve at any operating point.
@@ -91,7 +115,11 @@ pub struct VlmSystem<'a> {
     /// a system solved only once can evaluate its kernel directly.
     /// Holds `None` above `kernel_cache::KERNEL_CACHE_MAX_PANELS`, where every
     /// solve evaluates the kernel directly. Both paths are bit-identical.
-    kernel_cache: OnceLock<Option<Arc<Vec<[f64; 3]>>>>,
+    /// Shared by the systems of one lattice held in [`memo`].
+    kernel_cache: memo::KernelSlot,
+    /// The superposition basis of this lattice, see [`superposition`];
+    /// shared like the kernel.
+    basis: superposition::BasisSlot,
     /// The Trefftz-plane drag form of this lattice, built on the first
     /// [`VlmSystem::trefftz_induced_drag_coefficient`]; geometry-only.
     trefftz: Arc<OnceLock<Option<super::trefftz::TrefftzOperator>>>,
@@ -110,13 +138,57 @@ impl<'a> VlmSystem<'a> {
         spanwise_resolution: usize,
         chordwise_resolution: usize,
     ) -> Result<Self, VlmError> {
+        Self::assemble_with_core(airplane, spanwise_resolution, chordwise_resolution, false)
+    }
+
+    /// [`Self::assemble`] with the frozen reference lattice: the legs seen by
+    /// another lattice component keep the inter-surface core of one surface's
+    /// halves. For parity fixtures only; product callers use
+    /// [`Self::assemble`].
+    ///
+    /// # Errors
+    ///
+    /// See [`Self::assemble`].
+    pub fn assemble_reference_compatibility(
+        airplane: &'a Airplane,
+        spanwise_resolution: usize,
+        chordwise_resolution: usize,
+    ) -> Result<Self, VlmError> {
+        Self::assemble_with_core(airplane, spanwise_resolution, chordwise_resolution, true)
+    }
+
+    fn assemble_with_core(
+        airplane: &'a Airplane,
+        spanwise_resolution: usize,
+        chordwise_resolution: usize,
+        reference_core: bool,
+    ) -> Result<Self, VlmError> {
         let _profile =
             alas_math::stage_profile::scope(alas_math::stage_profile::Stage::VlmAssembly);
         alas_math::stage_profile::count(alas_math::stage_profile::Counter::VlmAssemblies, 1);
-        alas_math::stage_profile::count(alas_math::stage_profile::Counter::VlmRefactorizations, 1);
-        let panels = mesh_panels(airplane, spanwise_resolution, chordwise_resolution)?;
+        let mut panels = mesh_panels(
+            airplane,
+            spanwise_resolution,
+            chordwise_resolution,
+            !reference_core,
+        )?;
+        if reference_core {
+            use_reference_component_core(&mut panels);
+        }
+        if let Some((factorization, kernel_cache, basis)) = memo::get(&panels, reference_core) {
+            return Ok(Self {
+                airplane,
+                panels,
+                factorization,
+                kernel_cache,
+                basis,
+                trefftz: Arc::default(),
+                solves: AtomicUsize::new(0),
+            });
+        }
         let n = panels.len();
         alas_math::stage_profile::count(alas_math::stage_profile::Counter::VlmColdAssemblies, 1);
+        alas_math::stage_profile::count(alas_math::stage_profile::Counter::VlmRefactorizations, 1);
         let fill_profile =
             alas_math::stage_profile::scope(alas_math::stage_profile::Stage::VlmColdFill);
 
@@ -132,7 +204,7 @@ impl<'a> VlmSystem<'a> {
             if let Some(columns) = &columns {
                 fast_rows::evaluate_row(
                     collocation_panel.collocation_point,
-                    collocation_panel.wing_index,
+                    collocation_panel.core_component,
                     columns,
                     (1.0, unit_constant),
                     scratch,
@@ -154,7 +226,7 @@ impl<'a> VlmSystem<'a> {
                     source_panel.left_vortex_vertex,
                     source_panel.right_vortex_vertex,
                     (1.0, unit_constant),
-                    inter_surface_core(collocation_panel.wing_index, source_panel),
+                    inter_surface_core(collocation_panel.core_component, source_panel),
                 );
                 *entry = dot3(induced, collocation_panel.normal_direction);
             }
@@ -179,11 +251,22 @@ impl<'a> VlmSystem<'a> {
         let factorization = DenseMatrix::from_row_major(n, &aic)
             .factor()
             .map_err(VlmError::SingularAic)?;
+        let factorization = Arc::new(AicFactorization::Full(factorization));
+        let kernel_cache = memo::KernelSlot::default();
+        let basis = superposition::BasisSlot::default();
+        memo::put(
+            &panels,
+            reference_core,
+            &factorization,
+            &kernel_cache,
+            &basis,
+        );
         Ok(Self {
             airplane,
             panels,
-            factorization: Arc::new(AicFactorization::Full(factorization)),
-            kernel_cache: OnceLock::new(),
+            factorization,
+            kernel_cache,
+            basis,
             trefftz: Arc::default(),
             solves: AtomicUsize::new(0),
         })
@@ -240,7 +323,11 @@ impl<'a> VlmSystem<'a> {
     ///
     /// [`VlmError::NonFiniteResult`].
     pub fn solve(&self, op_point: &OperatingPoint) -> Result<VlmResult, VlmError> {
-        self.solve_about(op_point, self.airplane.xyz_ref, None)
+        self.solve_about(
+            op_point,
+            self.airplane.xyz_ref,
+            incidence::NormalChange::None,
+        )
     }
 
     /// Solve at `op_point` with an incidence offset on every panel's
@@ -271,7 +358,11 @@ impl<'a> VlmSystem<'a> {
         if offsets_rad.len() != self.panels.len() || !offsets_rad.iter().all(|o| o.is_finite()) {
             return Err(VlmError::NonFiniteResult);
         }
-        self.solve_about(op_point, self.airplane.xyz_ref, Some(offsets_rad))
+        self.solve_about(
+            op_point,
+            self.airplane.xyz_ref,
+            incidence::NormalChange::Offsets(offsets_rad),
+        )
     }
 
     /// Solve at `op_point` with the frozen reference convention, rotation
@@ -285,14 +376,14 @@ impl<'a> VlmSystem<'a> {
         &self,
         op_point: &OperatingPoint,
     ) -> Result<VlmResult, VlmError> {
-        self.solve_about(op_point, [0.0; 3], None)
+        self.solve_about(op_point, [0.0; 3], incidence::NormalChange::None)
     }
 
     fn solve_about(
         &self,
         op_point: &OperatingPoint,
         rotation_reference: [f64; 3],
-        incidence_offsets: Option<&[f64]>,
+        normal_change: incidence::NormalChange<'_>,
     ) -> Result<VlmResult, VlmError> {
         let _profile = alas_math::stage_profile::scope(alas_math::stage_profile::Stage::VlmSolve);
         alas_math::stage_profile::count(alas_math::stage_profile::Counter::VlmSolves, 1);
@@ -301,6 +392,7 @@ impl<'a> VlmSystem<'a> {
         let n = panels.len();
 
         let steady_freestream_velocity = op_point.freestream_velocity_geometry_axes();
+        let flow = surface_flow::SurfaceFlow::new(airplane, panels);
 
         let collocation_points: Vec<[f64; 3]> =
             panels.iter().map(|p| p.collocation_point).collect();
@@ -315,28 +407,15 @@ impl<'a> VlmSystem<'a> {
             .enumerate()
             .map(|(index, (panel, &rotation_velocity))| {
                 let freestream_velocity = add3(steady_freestream_velocity, rotation_velocity);
-                let normal = match incidence_offsets {
-                    None => panel.normal_direction,
-                    Some(offsets) => incidence::rotated_normal(panel, offsets[index]),
-                };
+                let normal = normal_change.normal(panel, index);
                 -dot3(freestream_velocity, normal)
             })
             .collect();
 
-        let (vortex_strengths, solve_diagnostics) = self.factorization.solve_vector(&rhs);
-        if !solve_diagnostics.residual_norm.is_finite()
-            || !solve_diagnostics.normalized_residual.is_finite()
-            || !solve_diagnostics.pivot_ratio.is_finite()
-            || !solve_diagnostics.minimum_pivot.is_finite()
-        {
-            return Err(VlmError::NonFiniteResult);
-        }
-        if solve_diagnostics.pivot_ratio > MAX_PIVOT_RATIO {
-            return Err(VlmError::IllConditionedAic {
-                pivot_ratio: solve_diagnostics.pivot_ratio,
-            });
-        }
-
+        // A repeated solve reads the kernel cache and, without rotation
+        // rates, combines the lattice's basis solves (see `superposition`):
+        // the same solve to rounding. A first solve stays direct, so a
+        // system solved once pays for no basis.
         let vortex_centers: Vec<[f64; 3]> = panels.iter().map(|p| p.vortex_center).collect();
         let kernel = if self.solves.fetch_add(1, Ordering::Relaxed) == 0 {
             None
@@ -346,15 +425,53 @@ impl<'a> VlmSystem<'a> {
                 .as_ref()
                 .map(|entries| entries.as_slice())
         };
-        let v_centers = velocity_at_points(
-            &vortex_centers,
-            panels,
-            &vortex_strengths,
-            op_point,
-            steady_freestream_velocity,
-            rotation_reference,
+        let (vortex_strengths, solve_diagnostics, induced) = superposition::strengths(
+            &self.basis,
+            &self.factorization,
             kernel,
+            panels,
+            op_point,
+            &normal_change,
+            &rhs,
         );
+        if !solve_diagnostics.residual_norm.is_finite()
+            || !solve_diagnostics.normalized_residual.is_finite()
+            || !solve_diagnostics.pivot_ratio.is_finite()
+            || !solve_diagnostics.minimum_pivot.is_finite()
+        {
+            return Err(VlmError::NonFiniteResult);
+        }
+        if !solve_diagnostics.residual_is_bounded() {
+            return Err(VlmError::UnboundedResidual {
+                normalized_residual: solve_diagnostics.normalized_residual,
+                limit: alas_math::linalg::MAX_NORMALIZED_RESIDUAL,
+            });
+        }
+        if solve_diagnostics.pivot_ratio > MAX_PIVOT_RATIO && {
+            let condition = self.factorization.condition_estimate();
+            condition.is_nan() || condition > MAX_CONDITION_ESTIMATE
+        } {
+            return Err(VlmError::IllConditionedAic {
+                pivot_ratio: solve_diagnostics.pivot_ratio,
+                limit: MAX_PIVOT_RATIO,
+            });
+        }
+
+        let v_centers = match induced {
+            Some(induced) => induced
+                .into_iter()
+                .map(|sum| add3(sum, steady_freestream_velocity))
+                .collect(),
+            None => velocity_at_points(
+                &vortex_centers,
+                panels,
+                &vortex_strengths,
+                op_point,
+                steady_freestream_velocity,
+                rotation_reference,
+                kernel,
+            ),
+        };
 
         let density = op_point.atmosphere.density();
         let mut force_geometry = [0.0; 3];
@@ -363,15 +480,21 @@ impl<'a> VlmSystem<'a> {
         // same operations in the same order, so the totals are unaffected;
         // this is only an additional read-out.
         let mut panel_forces_geometry = Vec::with_capacity(n);
-        for ((panel, &gamma), &v_center) in panels.iter().zip(&vortex_strengths).zip(&v_centers) {
+        for (index, ((panel, &gamma), &v_center)) in panels
+            .iter()
+            .zip(&vortex_strengths)
+            .zip(&v_centers)
+            .enumerate()
+        {
             let vi_cross_li = cross3(v_center, panel.vortex_bound_leg);
-            let force_panel = scale3(vi_cross_li, density * gamma);
+            let force_panel = scale3(vi_cross_li, density * gamma * flow.force_scale(index));
             let moment_panel = cross3(sub3(panel.vortex_center, airplane.xyz_ref), force_panel);
             force_geometry = add3(force_geometry, force_panel);
             moment_geometry = add3(moment_geometry, moment_panel);
             panel_forces_geometry.push(force_panel);
         }
 
+        let vortex_strengths = flow.reported_circulations(vortex_strengths);
         let (fbx, fby, fbz) = op_point.convert_axes(
             force_geometry[0],
             force_geometry[1],
@@ -482,6 +605,7 @@ impl<'a> VlmSystem<'a> {
                     vortex_center: p.vortex_center,
                     is_trailing_edge: p.is_trailing_edge,
                     wing_index: p.wing_index,
+                    normal_direction: p.normal_direction,
                 })
                 .collect(),
             panel_forces_geometry,

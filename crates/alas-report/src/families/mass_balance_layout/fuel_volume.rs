@@ -3,8 +3,10 @@
 
 // Ported from alas/reporting/visualization.py:figure_fuel_volume_check (L3018-3087)
 
-use crate::chart_kit::{draw_horizontal_legend_columns, draw_title, LegendMarker};
-use crate::scene::{Axes2D, Color, Fill, Scene, SceneElement, Stroke, TextAlign, TextBaseline};
+use crate::chart_kit::{draw_horizontal_legend_columns, draw_title, major_ticks, LegendMarker};
+use crate::scene::{
+    Axes2D, Color, Fill, Scale, Scene, SceneElement, Stroke, TextAlign, TextBaseline,
+};
 use crate::theme::get_palette;
 use alas_config::AlasConfig;
 use alas_geom::aircraft::spacing::linspace;
@@ -64,6 +66,7 @@ pub fn figure_fuel_volume_check(
         required_fuel_kg,
         "Tank capacity",
         "Required fuel",
+        crate::chart_kit::MTOW_SIZING_BASIS,
         theme,
     )
 }
@@ -91,11 +94,19 @@ pub fn figure_fuel_volume_check_for_loading(
         FuelCapacityEvidence::GeometryEstimate => "Geometry-estimated usable capacity",
         FuelCapacityEvidence::Unavailable => "Usable capacity",
     };
+    // Under a hard MTOW the analyzed load is the sized design loading and the
+    // route is flown at its own dispatch mass; otherwise it is the flown one.
+    let basis = if loading.flown_carried_fuel_kg.is_some() {
+        crate::chart_kit::MTOW_SIZING_BASIS
+    } else {
+        "flown route"
+    };
     draw_fuel_storage_check(
         capacity_kg,
         carried_kg,
         capacity_label,
         "Analyzed carried fuel",
+        basis,
         theme,
     )
 }
@@ -124,6 +135,7 @@ fn draw_fuel_storage_check(
     carried_fuel_kg: f64,
     capacity_label: &str,
     carried_label: &str,
+    basis: &str,
     theme: Option<&str>,
 ) -> Scene {
     let pal = get_palette(theme);
@@ -138,12 +150,13 @@ fn draw_fuel_storage_check(
     };
     let color = if sufficient { "#27ae60" } else { "#e74c3c" };
 
-    let mut scene = Scene::new(700.0, 320.0, Some(Color::from_hex(pal.bg)));
+    let mut scene = Scene::new(700.0, 400.0, Some(Color::from_hex(pal.bg)));
     let title = "Wing Fuel-Volume Check";
     scene.title = Some(title.to_owned());
     draw_title(&mut scene, title, pal);
     scene.suppress_derived_title();
-    let axes = Axes2D::new((145.0, 62.0, 485.0, 150.0), (-0.5, 1.5), (0.0, bar_max));
+    crate::chart_kit::draw_basis_subtitle(&mut scene, basis, carried_fuel_kg, pal);
+    let axes = Axes2D::new((145.0, 62.0, 485.0, 230.0), (-0.5, 1.5), (0.0, bar_max));
     draw_categorical_frame(&axes, &mut scene, pal, &[]);
 
     let category_width = 0.32;
@@ -171,11 +184,18 @@ fn draw_fuel_storage_check(
         fill: Some(Fill::new(Color::from_hex(color))),
         stroke: None,
     });
+    let line_y = axes.map_point(axes.x_min, cap_t.clamp(axes.y_min, axes.y_max))[1];
     for (x, value) in [(capacity_x, cap_t), (required_x, req_t)] {
         let p = axes.map_point(x, value.clamp(axes.y_min, axes.y_max));
+        // A value label sits above its bar; where the dashed capacity line
+        // would strike it, it moves above the line instead.
+        let mut label_y = p[1] - 6.0;
+        if line_y > label_y - 13.0 && line_y < label_y + 3.0 {
+            label_y = line_y - 5.0;
+        }
         scene.add(SceneElement::Text {
             text: format!("{value:.1} t"),
-            pos: [p[0], p[1] - 6.0],
+            pos: [p[0], label_y],
             font_size: 8.5,
             color: Color::from_hex(pal.title),
             align: TextAlign::Center,
@@ -204,7 +224,7 @@ fn draw_fuel_storage_check(
             LegendMarker::Patch(Color::from_hex(color)),
         ),
     ];
-    draw_horizontal_legend_columns(&mut scene, [118.0, 274.0], &entries, pal, 8.5);
+    draw_horizontal_legend_columns(&mut scene, [118.0, 354.0], &entries, pal, 8.5);
 
     scene
 }
@@ -228,13 +248,33 @@ fn draw_categorical_frame(
         fill: None,
         stroke: Some(Stroke::new(spine, 1.0)),
     });
-    for i in 0..=4 {
-        let value = axes.y_min + (axes.y_max - axes.y_min) * i as f64 / 4.0;
+    // Round tick values, not quarters of the axis end (54, 108, 163, 217 t).
+    for value in major_ticks(axes.y_min, axes.y_max, Scale::Linear, 5) {
         let p = axes.map_point(axes.x_min, value);
         scene.add(SceneElement::Line {
             p1: [axes.left, p[1]],
             p2: [axes.left + axes.width, p[1]],
             stroke: Stroke::dashed(Color::rgba(spine.r, spine.g, spine.b, 105), 0.7, 2.0, 3.0),
+        });
+        // Tick mark and value, so the bars can be read against the axis.
+        scene.add(SceneElement::Line {
+            p1: [axes.left - 4.0, p[1]],
+            p2: [axes.left, p[1]],
+            stroke: Stroke::new(spine, 1.0),
+        });
+        scene.add(SceneElement::Text {
+            text: if axes.y_max >= 10.0 {
+                format!("{value:.0}")
+            } else {
+                format!("{value:.1}")
+            },
+            pos: [axes.left - 7.0, p[1]],
+            font_size: 8.5,
+            color: tick,
+            align: TextAlign::Right,
+            baseline: TextBaseline::Middle,
+            angle_deg: 0.0,
+            bold: false,
         });
     }
     for (index, label) in labels.iter().enumerate() {

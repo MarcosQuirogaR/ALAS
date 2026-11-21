@@ -31,7 +31,7 @@ pub enum MassCoordinateModel<'a> {
 
 /// The mass of each primary component, in kg, with one field per canonical
 /// component name (see the module doc).
-#[derive(Debug, Clone, Copy, PartialEq)]
+#[derive(serde::Serialize, serde::Deserialize, Debug, Clone, Copy, PartialEq)]
 pub struct MassBreakdown {
     /// [`WING`]'s mass.
     pub wing: f64,
@@ -156,7 +156,7 @@ impl MassCoordinates {
 
 /// The three payload-layout attributes `run_mass_analysis` reads. A small
 /// local type keeps this crate independent of the payload crate.
-#[derive(Debug, Clone, Copy, PartialEq)]
+#[derive(Debug, Clone, Copy, PartialEq, Default)]
 pub struct PayloadLayoutSummary {
     /// The layout's total mass, kg.
     pub total_mass: f64,
@@ -164,4 +164,9 @@ pub struct PayloadLayoutSummary {
     pub cg_x: f64,
     /// The layout's lateral centre of gravity, m.
     pub cg_y: f64,
+    /// Declared operating-empty equipment (furnished zones, mounted racks),
+    /// kg, added to the furnishings line. Zero for a layout with none.
+    pub equipment_mass: f64,
+    /// Where that equipment sits, [x, y, z] m.
+    pub equipment_cg: [f64; 3],
 }

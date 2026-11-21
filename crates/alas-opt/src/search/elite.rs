@@ -77,10 +77,59 @@ pub(crate) fn select(
         .collect()
 }
 
+/// Up to `size` members of `scored`, best first by the feasibility rule,
+/// each at least `radius` (normalized distance) from every better member
+/// and from the `excluded` points: the candidates an exploration promotes to
+/// a finer model. Repeats of one design count once.
+pub(crate) fn best_distinct(
+    scored: &[ScoredPoint],
+    bounds: &[(f64, f64)],
+    size: usize,
+    radius: f64,
+    excluded: &[Vec<f64>],
+) -> Vec<ScoredPoint> {
+    let mut ranked: Vec<usize> = (0..scored.len()).collect();
+    ranked.sort_by_key(|&index| (scored[index].feasibility_key(), index));
+    let mut chosen: Vec<usize> = Vec::new();
+    for candidate in ranked {
+        if chosen.len() >= size {
+            break;
+        }
+        let clear = chosen
+            .iter()
+            .map(|&other| &scored[other].values)
+            .chain(excluded)
+            .all(|other| normalized_distance(&scored[candidate].values, other, bounds) >= radius);
+        if clear {
+            chosen.push(candidate);
+        }
+    }
+    chosen
+        .into_iter()
+        .map(|index| scored[index].clone())
+        .collect()
+}
+
 #[cfg(test)]
 mod tests {
     use super::*;
     use crate::search_methods::Tier;
+
+    #[test]
+    fn the_promoted_set_is_the_best_first_list_thinned_by_its_radius() {
+        let bounds = [(0.0, 1.0), (0.0, 1.0)];
+        let scored: Vec<ScoredPoint> = (0..20)
+            .map(|i| point([0.004 * i as f64, 0.0], i as f64, Tier::Feasible, 0.0))
+            .collect();
+        // Radius 0.01 on two free coordinates is 0.01 * sqrt(2) along one.
+        let promoted = best_distinct(&scored, &bounds, 4, 0.01, &[]);
+        let costs: Vec<f64> = promoted.iter().map(|p| p.cost).collect();
+        assert_eq!(costs, vec![0.0, 4.0, 8.0, 12.0]);
+        // The excluded baseline repels its neighbourhood and is not picked.
+        let promoted = best_distinct(&scored, &bounds, 2, 0.01, &[vec![0.0, 0.0]]);
+        assert_eq!(promoted[0].cost, 4.0);
+        assert!(best_distinct(&scored, &bounds, 0, 0.01, &[]).is_empty());
+    }
 
     fn point(values: [f64; 2], cost: f64, tier: Tier, violation: f64) -> ScoredPoint {
         ScoredPoint {

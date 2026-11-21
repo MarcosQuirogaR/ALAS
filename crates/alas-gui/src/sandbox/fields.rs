@@ -24,6 +24,7 @@ use serde_json::Value;
 mod aft_body;
 mod belly_upsweep;
 mod empennage_placement;
+mod gear_sponson;
 mod hump;
 mod nose;
 mod profile;
@@ -101,6 +102,9 @@ pub enum FieldKind {
     Bool,
     /// An airfoil name from the library.
     Airfoil,
+    /// An airfoil name that may be unset (the fin section: unset builds the
+    /// fin from the tail section).
+    OptionalAirfoil,
     /// A catalogue engine name.
     Engine,
     /// Three real coordinates in metres.
@@ -217,6 +221,15 @@ const STATIONS: &str = "Stations";
 const PROFILE: &str = "Profile";
 const INSTALLATION: &str = "Installation";
 const NACELLE: &str = "Nacelle";
+
+/// Leaves of the geometry groups that select a model rather than shape the
+/// aircraft. The sandbox edits shape; these stay on the Advanced Settings
+/// forms, which draw every schema leaf.
+#[cfg(test)]
+pub(crate) const MODEL_CHOICE_LEAVES: &[&str] = &[
+    // The drag-divergence law (Korn or its alternatives) of the wing drag build-up.
+    "geometry.wing.drag_divergence_law",
+];
 
 const SPECS: &[Spec] = &[
     // Wing planform: the design vector owns the chords, span and sweep.
@@ -695,6 +708,9 @@ const SPECS: &[Spec] = &[
     aft_body::TAILCONE_LENGTH,
     aft_body::HOLD_END,
     belly_upsweep::SPEC,
+    gear_sponson::LENGTH,
+    gear_sponson::HALF_WIDTH,
+    gear_sponson::DEPTH,
     aft_body::NOSE_LENGTH,
     aft_body::TAIL_END_Z,
     aft_body::TAIL_END_WIDTH,
@@ -725,9 +741,10 @@ const SPECS: &[Spec] = &[
     empennage_placement::HSTAB_ROOT_LE_X,
     empennage_placement::HSTAB_ROOT_STATION_Y,
     empennage_placement::VSTAB_ROOT_LE_X,
-    empennage_placement::DORSAL_X_START,
+    empennage_placement::DORSAL_LENGTH,
     empennage_placement::DORSAL_HEIGHT,
     empennage_placement::DORSAL_IN_AERO,
+    empennage_placement::FIN_AIRFOIL,
     cfg(
         "geometry.fuselage.n_subdivisions",
         Discipline::Fuselage,
@@ -1033,6 +1050,9 @@ pub fn value_in_domain(field: &SandboxField, value: &Value) -> bool {
         FieldKind::Airfoil | FieldKind::Engine => {
             value.as_str().is_some_and(|s| !s.trim().is_empty())
         }
+        FieldKind::OptionalAirfoil => {
+            value.is_null() || value.as_str().is_some_and(|s| !s.trim().is_empty())
+        }
     }
 }
 
@@ -1110,6 +1130,9 @@ mod tests {
             };
             for leaf in &node.fields {
                 let id = format!("geometry.{group}.{}", leaf.name);
+                if MODEL_CHOICE_LEAVES.contains(&id.as_str()) {
+                    continue;
+                }
                 if !fields.iter().any(|f| f.id == id) {
                     missing.push(id);
                 }

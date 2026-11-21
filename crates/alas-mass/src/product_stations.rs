@@ -247,7 +247,13 @@ fn mass_coordinates_sharing_box(
             .map_err(|error| error.to_string())?;
     let fuel_position =
         analyzed_fuel_centroid(config, design, plane, masses).unwrap_or(fallback.fuel);
-    let coords = stations.mass_coordinates(masses, fallback.payload, fuel_position);
+    let mut coords = stations.mass_coordinates(masses, fallback.payload, fuel_position);
+    crate::flops_transport::main_deck_freight::shift_lumped_coordinates(
+        config,
+        plane,
+        masses,
+        &mut coords,
+    );
     let cg = calculate_physical_cg(masses, &coords);
     Ok((coords, cg, stations.propulsion_station_fallback()))
 }

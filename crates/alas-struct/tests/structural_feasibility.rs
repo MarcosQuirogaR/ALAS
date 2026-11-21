@@ -21,6 +21,9 @@ fn beam(level_tip_m: f64, semispan_m: f64) -> (WingboxSizing, StructuralAnalysis
     let sizing = WingboxSizing {
         y_stations: y.clone(),
         axis_cos: Vec::new(),
+        cover_shape: Vec::new(),
+        cover_depth_m: Vec::new(),
+        cover_shear_flow_n_per_m: Vec::new(),
         eta_stations: y.iter().map(|v| v / semispan_m).collect(),
         chord: vec![2.0; count],
         spar_fracs: vec![0.25],
@@ -36,6 +39,7 @@ fn beam(level_tip_m: f64, semispan_m: f64) -> (WingboxSizing, StructuralAnalysis
             margin_of_safety: vec![0.0; count],
         }],
         t_skin: 0.006,
+        skin_gauge_m: Vec::new(),
         num_ribs: 101,
         rib_spacing_m: semispan_m / 100.0,
         mass_breakdown_kg: MassBreakdown {
@@ -72,6 +76,7 @@ fn beam(level_tip_m: f64, semispan_m: f64) -> (WingboxSizing, StructuralAnalysis
                         / (24.0 * ei)
                 })
                 .collect(),
+            shear_deflection_m: Vec::new(),
             tip_deflection_m: load_factor * level_tip_m,
             spar_stress: vec![SparStressResult {
                 chord_fraction: 0.25,
@@ -323,7 +328,9 @@ fn explicit_fuel_relief_is_used_in_the_analyzed_design_load() {
     assert!(stiffened.assessment.passes());
     assert!(stiffened.assessment.max_linear_curvature_relative_error
         >= 0.99 * target.max_curvature_relative_error,
-        "self-weight redistribution should use the stiffness budget instead of retaining a heavy first feasible iterate");
+        "self-weight redistribution should use the stiffness budget instead of retaining a heavy first feasible iterate: {} against target {}",
+        stiffened.assessment.max_linear_curvature_relative_error,
+        target.max_curvature_relative_error);
     assert!(stiffened.sizing.total_mass_kg > sized.total_mass_kg);
     assert_eq!(
         stiffened.assessment.primary_mass_kg,

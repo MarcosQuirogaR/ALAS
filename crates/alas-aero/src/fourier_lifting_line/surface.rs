@@ -128,6 +128,34 @@ pub enum FourierLiftingLineError {
 /// `x/c = (1 - cos(theta))/2`. Coordinates and the result are dimensionless
 /// and radians respectively.
 pub fn thin_airfoil_zero_lift_angle_rad(airfoil: &Airfoil) -> Result<f64, FourierLiftingLineError> {
+    let zero_lift_angle = camber_slope_integral(airfoil, |theta| 1.0 - theta.cos())? / PI;
+    if zero_lift_angle.is_finite() {
+        Ok(zero_lift_angle)
+    } else {
+        Err(FourierLiftingLineError::InvalidAirfoil)
+    }
+}
+
+/// Compute a section's pitching-moment coefficient about its quarter chord,
+/// the aerodynamic centre of thin-airfoil theory, from its mean-camber line.
+///
+/// Thin-airfoil theory gives `c_m,c/4 = (pi/4)(A_2 - A_1)` with
+/// `A_n = (2/pi) integral(dz/dx cos(n theta) dtheta)`, that is
+/// `c_m,c/4 = (1/2) integral(dz/dx (cos(2 theta) - cos(theta)) dtheta)`, with
+/// `x/c = (1 - cos(theta))/2`: independent of the angle of attack. The result
+/// is dimensionless, nose-up positive.
+pub fn thin_airfoil_quarter_chord_moment(
+    airfoil: &Airfoil,
+) -> Result<f64, FourierLiftingLineError> {
+    camber_slope_integral(airfoil, |theta| 0.5 * ((2.0 * theta).cos() - theta.cos()))
+}
+
+/// `integral(dz/dx weight(theta) dtheta)` over the mean-camber line, midpoint
+/// rule in `theta` on [`THIN_AIRFOIL_INTERVALS`] intervals.
+fn camber_slope_integral(
+    airfoil: &Airfoil,
+    weight: impl Fn(f64) -> f64,
+) -> Result<f64, FourierLiftingLineError> {
     if airfoil.upper_coordinates().len() < 2
         || airfoil.lower_coordinates().len() < 2
         || airfoil
@@ -162,11 +190,10 @@ pub fn thin_airfoil_zero_lift_angle_rad(airfoil: &Airfoil) -> Result<f64, Fourie
             return Err(FourierLiftingLineError::InvalidAirfoil);
         }
         let camber_slope = (camber[1] - camber[0]) / delta_x;
-        integral += camber_slope * (1.0 - theta_mid.cos()) * interval_angle;
+        integral += camber_slope * weight(theta_mid) * interval_angle;
     }
-    let zero_lift_angle = integral / PI;
-    if zero_lift_angle.is_finite() {
-        Ok(zero_lift_angle)
+    if integral.is_finite() {
+        Ok(integral)
     } else {
         Err(FourierLiftingLineError::InvalidAirfoil)
     }

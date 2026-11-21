@@ -3,10 +3,10 @@
 
 //! [`AircraftPreset`] and the reference data a registered aircraft carries.
 
-use super::speed_schedules::{apply_a320_200_speed_schedule, apply_atr72_600_speed_schedule};
 use super::{
     CgEnvelopeEvidence, DesignMissionEvidence, PartialDesignMissionEvidence,
-    PayloadRangeDesignPoint, PlanningCgEnvelope, PublishedAftCgNoseLoad,
+    PayloadRangeDesignPoint, PlanningCgEnvelope, PublishedAftCgNoseLoad, SourcedTailIceProtection,
+    UsableCgRangeSource,
 };
 use crate::{
     DesignRequirements, DesignVector, GeometryConfig, LandingGearConfig, MassModelConfig,
@@ -54,8 +54,10 @@ pub struct CertifiedExitPair {
 pub struct CertifiedExitLayout {
     /// Human-readable pair sequence, for example `C-III-C`.
     pub label: &'static str,
-    /// Exit pairs in source order, forward to aft.
+    /// Exit pairs in source order, forward to aft (the main deck's).
     pub pairs: &'static [CertifiedExitPair],
+    /// The upper deck's pairs; empty keeps the generic rule there.
+    pub upper_deck_pairs: &'static [CertifiedExitPair],
     /// Overall body length of the drawing the pair stations are measured
     /// on, m. Stations are only usable together with it, because a built
     /// body of another length moves the aft doors with the tail.
@@ -128,6 +130,11 @@ pub struct AircraftReferenceData {
     pub mtow_kg: Option<f64>,
     /// Maximum landing weight.
     pub mlw_kg: Option<f64>,
+    /// The secondary source of [`Self::mlw_kg`], when no type-certificate or
+    /// airport-planning document publishes it; `None` when the value comes
+    /// from the primary documents of [`Self::sources`]. A secondary MLW is
+    /// kept out of the class landing-ratio statistics.
+    pub mlw_secondary_source: Option<&'static str>,
     /// Maximum zero-fuel weight.
     pub mzfw_kg: Option<f64>,
     /// Same-aircraft OEW for conditional comparison, from [`crate::oew_reference`].
@@ -152,6 +159,11 @@ pub struct AircraftReferenceData {
     pub design_mission_evidence: DesignMissionEvidence,
     /// Relevant public range/mission material that is not a complete mission.
     pub partial_design_mission_evidence: Vec<PartialDesignMissionEvidence>,
+    /// Per-datum provenance of the design mission (range, payload, profile,
+    /// reserve policy). A preset is mission-verified only when
+    /// [`DesignMissionProvenanceSet::admits_source_backed_promotion`] holds;
+    /// the default (nothing registered) refuses all four.
+    pub mission_provenance: super::DesignMissionProvenanceSet,
     /// Charted design range and payload the takeoff-mass design modes close on.
     pub design_point: Option<PayloadRangeDesignPoint>,
     /// What kind of CG evidence is publicly available.
@@ -161,11 +173,25 @@ pub struct AircraftReferenceData {
     /// This is deliberately absent for presets whose type-certificate source
     /// delegates the limits to the AFM/WBM.
     pub planning_cg_envelope: Option<PlanningCgEnvelope>,
+    /// Published envelope whose width at each mass is this type's minimum
+    /// usable CG range (in place of `DesignRequirements::cg_range_pct_mac`,
+    /// the clean-sheet default), when a primary source publishes one.
+    pub usable_cg_range: Option<UsableCgRangeSource>,
     /// Static nose-gear share the airport-planning document publishes at the
-    /// most-aft CG against weight; it sets the per-state ground minimum
-    /// nose-gear load in place of the class default (see
+    /// most-aft CG against weight: plausibility reference data (the published
+    /// aft limit), not an input of the model's ground limit (see
     /// [`PublishedAftCgNoseLoad`]).
     pub aft_cg_nose_load: Option<PublishedAftCgNoseLoad>,
+    /// Ice protection of the horizontal stabiliser as a published type
+    /// description states it; `None` (a clean-sheet design, or a type whose
+    /// description does not say) is checked as unprotected.
+    pub horizontal_tail_ice_protection: Option<SourcedTailIceProtection>,
+    /// Certified VMO and MMO from the type certificate data sheet, copied into
+    /// the mission profile (see [`super::OperatingSpeedLimits::apply`]).
+    pub operating_speed_limits: Option<super::OperatingSpeedLimits>,
+    /// High speed protection function of the certification basis, with its special condition
+    /// or CRI; `None` (no such document on file, or a clean-sheet design) is CS 25.335(b)(1)(i).
+    pub high_speed_protection: Option<super::SourcedHighSpeedProtection>,
     /// Revision-locked primary documents supporting this record.
     pub sources: Vec<&'static str>,
 }
@@ -180,6 +206,43 @@ pub struct UnknownAircraftPreset {
     pub available: Vec<String>,
 }
 
+/// The class of aircraft a preset belongs to, as the preset declares it.
+///
+/// The class decides which design-variable guardrails bound a study of the
+/// aircraft and which fleet statistics a clean-sheet start is drawn from: the
+/// transport fleet's relations (cabin sections, haul classes, wing-mounted
+/// engine pairs) do not describe a business jet with aft-fuselage engines.
+///
+/// A clean-sheet brief, which has no preset, declares it in
+/// [`crate::DesignSpaceConfig::aircraft_class`].
+#[derive(
+    Debug, Clone, Copy, PartialEq, Eq, Hash, Default, serde::Serialize, serde::Deserialize,
+)]
+#[serde(rename_all = "snake_case")]
+pub enum AircraftClass {
+    /// Passenger and cargo transports, civil and military.
+    #[default]
+    Transport,
+    /// Business jets.
+    BusinessJet,
+}
+
+impl AircraftClass {
+    /// Serialized names, in declaration order.
+    pub const OPTIONS: &'static [&'static str] = &["transport", "business_jet"];
+
+    /// Whether this is the default class, which a saved file leaves out.
+    pub fn is_transport(&self) -> bool {
+        *self == Self::Transport
+    }
+}
+
+impl crate::Leaf for AircraftClass {
+    fn kind(&self, _name: &str) -> crate::Kind {
+        crate::Kind::Str
+    }
+}
+
 /// One complete aircraft configuration.
 #[derive(Debug, Clone, PartialEq)]
 pub struct AircraftPreset {
@@ -189,6 +252,8 @@ pub struct AircraftPreset {
     pub display_name: &'static str,
     /// What kind of aircraft it is, in one sentence.
     pub description: &'static str,
+    /// The class it belongs to.
+    pub class: AircraftClass,
     /// Exact model, weight variant, engine and modification identity.
     pub identity: AircraftVariantIdentity,
     /// Revision-locked primary-source validation values.
@@ -225,6 +290,21 @@ pub struct AircraftPreset {
     /// area; other field inputs remain conceptual assumptions. `None` uses
     /// the global defaults.
     pub performance: Option<PerformanceConfig>,
+    /// Where its climb and descent speed schedule comes from.
+    pub speed_schedule_source: SpeedScheduleSource,
+}
+
+/// Where a preset's climb and descent speed schedule comes from.
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub enum SpeedScheduleSource {
+    /// A CAS/Mach ladder from a sourced performance file (WRAP), or a named proxy of one;
+    /// the ladder carries its own provenance (`speed_schedules::ladder_provenance`).
+    SourcedLadder,
+    /// A schedule written for the type from its own documents (A320-200, ATR 72-600, A400M).
+    HandWritten,
+    /// The default rule: a CAS/Mach schedule built from the preset's declared cruise Mach,
+    /// cruise level, VMO, MMO and VD (`speed_schedules::apply_default_ladder`).
+    DefaultRule,
 }
 
 /// Representative operating defaults used when an aircraft is selected.
@@ -320,6 +400,9 @@ impl AircraftPreset {
             _ => {}
         }
         super::cabin_sources::seed_freight_hold(self.name, &mut cabin);
+        if let Some(wall_m) = super::cabin_sources::sourced_wall_thickness_m(self.name) {
+            cabin.passenger.wall_thickness_m = wall_m;
+        }
         if self.name == "A320-200" {
             // Airbus A320 ACAP Figure 2-4-1: 28/29 in pitch for the 180-seat
             // single-class arrangement; the 28 in lower bound is used.
@@ -331,18 +414,66 @@ impl AircraftPreset {
         if self.name == "E195-E2" {
             cabin.cargo.hold_compartments = super::narrowbody::e195_e2_hold_compartments();
         }
-        if let Some(holds) = super::lower_holds::declared_lower_holds(self.name) {
-            cabin.cargo.hold_compartments = holds;
+        super::lower_holds::seed_cargo_sources(self.name, &mut cabin.cargo);
+        if super::lower_holds::main_deck_freighter_is_conversion(self.name) {
+            cabin.cargo.converted_freighter_seats =
+                u32::try_from(self.requirements.num_passengers).ok();
+        }
+        if let Some(uld) = super::lower_holds::declared_lower_uld(self.name) {
+            cabin.cargo.lower_deck_uld = uld.to_owned();
         }
         if self.name == "ATR72-600" {
             cabin.cargo.hold_compartments = super::atr72_600_baggage_holds();
         }
+        if self.name == "LJ60" {
+            cabin.cargo.hold_compartments = super::lj60::lj60_baggage_holds();
+        }
         cabin
+    }
+
+    /// The container type of this preset's optional lower-deck container fit,
+    /// where its as-delivered holds are loose-bulk and its source document
+    /// prints a container option (`None` otherwise); see
+    /// `lower_holds::optional_container_lower_uld`.
+    pub fn optional_container_lower_uld(&self) -> Option<&'static str> {
+        super::lower_holds::optional_container_lower_uld(self.name)
     }
 
     /// Where each engine hangs along the span, in metres from the centerline.
     pub fn engine_spanwise_positions(&self) -> &[f64] {
         &self.geometry.engine.spanwise_positions_m
+    }
+
+    /// Where the landing-flap VFE the mission flies below comes from: the type certificate
+    /// where the preset declares one from it, otherwise the declared default.
+    pub fn landing_vfe_source(&self) -> super::LandingVfeSource {
+        let stated = self
+            .reference
+            .operating_speed_limits
+            .is_some_and(|limits| limits.vfe_landing_cas_m_s > 0.0);
+        if stated {
+            super::LandingVfeSource::TypeCertificate
+        } else {
+            super::LandingVfeSource::DesignFlapSpeedDefault
+        }
+    }
+
+    /// The declared default landing-flap VFE, m/s calibrated
+    /// ([`super::default_landing_vfe_cas_m_s`]),
+    /// at the published maximum landing weight, or the maximum takeoff weight (an upper bound on
+    /// the landing mass, so a higher VFE) where none is published, on the reference wing area
+    /// with the preset's landing maximum lift coefficient.
+    pub fn default_landing_vfe_cas_m_s(&self) -> Option<f64> {
+        let landing_mass_kg = self.reference.mlw_kg.unwrap_or(self.requirements.mtow_kg);
+        let wing_area_m2 = self
+            .reference
+            .reference_wing_area_m2
+            .unwrap_or(self.requirements.max_wing_area_m2);
+        let cl_max_land = self.performance.as_ref().map_or_else(
+            || crate::PerformanceConfig::default().cl_max_land,
+            |performance| performance.cl_max_land,
+        );
+        super::default_landing_vfe_cas_m_s(landing_mass_kg, wing_area_m2, cl_max_land)
     }
 
     /// Representative route and speed schedule loaded by interactive clients.
@@ -392,7 +523,7 @@ impl AircraftPreset {
                 "Frankfurt (EDDF)",
                 "Madrid Barajas (LEMD)",
                 37_000.0 * 0.3048,
-                "PLACEHOLDER sector of about 1,000 nmi typical of a 158-seat narrowbody: the C919 flies only Chinese domestic routes (China Eastern Shanghai Hongqiao-Chengdu from 2023-05-28, press reports) and the airport table holds no Chinese airport, so no real C919 route can be named; not a COMAC design-mission claim",
+                "Representative sector of about 1,000 nmi typical of a 158-seat narrowbody: the C919 flies only Chinese domestic routes (China Eastern Shanghai Hongqiao-Chengdu from 2023-05-28, press reports) and the airport table holds no Chinese airport, so no real C919 route can be named; not a COMAC design-mission claim",
             ),
             "E195-E2" => (
                 "Madrid Barajas (LEMD)",
@@ -400,11 +531,23 @@ impl AircraftPreset {
                 35_000.0 * 0.3048,
                 "Representative European short-haul pairing for a 132-seat single-class E195-E2 (Embraer lists Binter Canarias and Azul among its operators; accessed 2026-10-04); operational example only, not an Embraer design-mission claim",
             ),
+            "LJ60" => (
+                "Madrid Barajas (LEMD)",
+                "London Heathrow (EGLL)",
+                12_500.0,
+                "Representative business-jet sector, not a Bombardier design-mission claim",
+            ),
             "A400M" => (
                 "Frankfurt (EDDF)",
                 "Madrid Barajas (LEMD)",
                 11_278.0,
                 "Representative European airlift sector; operational example only, not an A400M design-mission claim (the design point is the 20 t / 6300 km brochure entry)",
+            ),
+            "C295" => (
+                "Madrid Barajas (LEMD)",
+                "Palma de Mallorca (LEPA)",
+                6_100.0,
+                "Representative Spanish airlift sector; operational example only, not an Airbus design-mission claim",
             ),
             "DC-10" => (
                 "Madrid Barajas (LEMD)",
@@ -412,7 +555,7 @@ impl AircraftPreset {
                 35_000.0 * 0.3048,
                 "Iberia Flight 933, a scheduled Madrid Barajas to Boston Logan service flown with a McDonnell Douglas DC-10-30 (EC-CBN, 1973-12-17): Wikipedia 'Iberia Flight 933' infobox, read 2026-10-19, which cites Aviation Safety Network; evidence grade C. Historical because scheduled passenger DC-10 service has ended. Replaces Osaka-Honolulu, whose airway-planned distance (4,253 nmi) exceeded the 4,120 nmi charted design point",
             ),
-            // ESTIMATE: representative historical long-haul 747-400 route
+            // Representative historical long-haul 747-400 route
             // declared for this study; not checked against a timetable.
             "B747-400" => (
                 "London Heathrow (EGLL)",
@@ -445,36 +588,28 @@ impl AircraftPreset {
         profile.cruise_3_air_speed_m_s = cruise_tas_m_s;
 
         super::speed_schedules::apply_registered_ladder(self, &mut profile, cruise_altitude_m);
-        if self.name == "A320-200" {
-            apply_a320_200_speed_schedule(
-                &mut profile,
-                cruise_altitude_m,
-                self.requirements.mtow_kg,
-                self.reference
-                    .reference_wing_area_m2
-                    .unwrap_or(self.requirements.max_wing_area_m2),
-                self.performance.as_ref().map_or_else(
-                    || crate::PerformanceConfig::default().cl_max_to,
-                    |p| p.cl_max_to,
-                ),
-            );
+        if self.speed_schedule_source == SpeedScheduleSource::HandWritten {
+            let apply =
+                super::speed_schedules::hand_written_applier(self.name).unwrap_or_else(|| {
+                    panic!(
+                        "preset {} declares a hand-written speed schedule but none is registered",
+                        self.name
+                    )
+                });
+            apply(self, &mut profile, cruise_altitude_m);
         }
-        if self.name == "A400M" {
-            super::military::apply_a400m_speed_schedule(&mut profile);
+        if let Some(limits) = &self.reference.operating_speed_limits {
+            limits.apply(&mut profile);
         }
-        if self.name == "ATR72-600" {
-            apply_atr72_600_speed_schedule(
-                &mut profile,
-                self.requirements.mtow_kg,
-                self.reference
-                    .reference_wing_area_m2
-                    .unwrap_or(self.requirements.max_wing_area_m2),
-                self.performance.as_ref().map_or_else(
-                    || crate::PerformanceConfig::default().cl_max_to,
-                    |p| p.cl_max_to,
-                ),
-            );
+        if self.landing_vfe_source() == super::LandingVfeSource::DesignFlapSpeedDefault {
+            if let Some(vfe) = self.default_landing_vfe_cas_m_s() {
+                profile.vfe_landing_cas_m_s = vfe;
+            }
         }
+        // After the declared limits: the default rule reads VMO and MMO.
+        super::speed_schedules::apply_default_ladder(self, &mut profile, cruise_altitude_m);
+        // Last: whatever schedule set the approach, it is flown below VFE.
+        profile.hold_approach_to_vfe();
 
         OperationalMissionDefaults {
             departure_airport,

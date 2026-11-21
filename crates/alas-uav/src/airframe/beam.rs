@@ -1,7 +1,7 @@
 // SPDX-License-Identifier: AGPL-3.0-or-later
 // Copyright (C) 2026 Marcos Quiroga Rodriguez
 
-//! Euler-Bernoulli cantilever for a wing spar (UAV-PLAN M4, section 3.7 / 9.1).
+//! Euler-Bernoulli cantilever for a wing spar.
 //!
 //! The half-wing is a clamped beam at the root (`y = 0`) with a free tip
 //! (`y = L`, `L` = semispan).  Sign convention: upward loads and upward

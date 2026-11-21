@@ -8,10 +8,10 @@ use crate::aero::ground_effect::{induced_drag_factor, GroundModel};
 use super::PerfError;
 
 /// Standard gravity, m/s^2 (CGPM 1901).
-pub const G0: f64 = 9.806_65;
+pub const G0: f64 = alas_atmo::STANDARD_GRAVITY;
 
 /// Drag polar entering the mission model. Implemented by the aerodynamic
-/// lane; [`ParabolicPolar`] is the built-in closed form.
+/// module; [`ParabolicPolar`] is the built-in closed form.
 pub trait DragPolar {
     /// Profile and induced drag coefficients at lift coefficient `cl`
     /// (free air, no ground effect).
@@ -64,7 +64,7 @@ pub struct Environment {
 impl Environment {
     /// ISA density at a density altitude, with a headwind.
     pub fn at_density_altitude(altitude_m: f64, headwind_m_s: f64) -> Result<Self, PerfError> {
-        let atm = alas_atmo::Atmosphere::try_isa(altitude_m)
+        let atm = alas_atmo::Atmosphere::try_new(altitude_m)
             .map_err(|e| PerfError::InvalidInput(format!("density altitude: {e}")))?;
         Self::new(atm.density(), headwind_m_s)
     }

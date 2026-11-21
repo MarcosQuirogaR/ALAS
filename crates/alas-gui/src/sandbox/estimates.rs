@@ -11,8 +11,7 @@
 //! kilometres per hour.
 
 use alas_pipeline::quick_analysis::{
-    QuickBasis, QuickFeasibility, QuickMetric, QuickOutcome, QuickPayloadRange, QuickRouteFuel,
-    QuickValue,
+    QuickBasis, QuickMetric, QuickOutcome, QuickPayloadRange, QuickRouteFuel, QuickValue,
 };
 use egui::{pos2, vec2, RichText, ScrollArea, Stroke, Ui};
 
@@ -27,7 +26,7 @@ const NAUTICAL_MILE_M: f64 = 1852.0;
 fn format_quantity(metric: QuickMetric, value: f64) -> String {
     match metric {
         QuickMetric::CruiseAltitude | QuickMetric::ServiceCeiling => {
-            format!("{value:.0} m (FL{:.0})", value / FOOT_M / 100.0)
+            format!("{value:.0} m (FL{:03.0})", value / FOOT_M / 100.0)
         }
         QuickMetric::Range => format!(
             "{:.0} km ({:.0} NM)",
@@ -69,6 +68,12 @@ fn show_value(ui: &mut Ui, metric: QuickMetric, value: &QuickValue) {
 /// excess over the great circle once the route fuel is known.
 fn metric_title(metric: QuickMetric, state: &MetricState) -> String {
     let MetricState::Done(QuickOutcome::Route(route)) = state else {
+        // The closure flies the declared route, not the design mission at
+        // full tanks: say so, or the number reads as a (low) computed MTOW
+        // next to the full analysis' design-mission takeoff mass.
+        if metric == QuickMetric::TakeoffMass {
+            return tr("Takeoff mass for the declared route");
+        }
         return tr(metric.label());
     };
     let source = match route.source.as_str() {
@@ -224,30 +229,6 @@ fn show_basis(ui: &mut Ui, basis: QuickBasis) {
         .on_hover_text(explanation);
 }
 
-fn show_feasibility(ui: &mut Ui, flags: &QuickFeasibility) {
-    let (text, color) = if flags.feasible {
-        (
-            tr("No blocking flag"),
-            crate::theme::success_color(ui.visuals()),
-        )
-    } else {
-        (tr("Blocking flags raised"), ui.visuals().error_fg_color)
-    };
-    ui.label(RichText::new(text).color(color).strong());
-    for flag in &flags.flags {
-        let color = if flag.blocking {
-            ui.visuals().error_fg_color
-        } else {
-            ui.visuals().warn_fg_color
-        };
-        ui.label(
-            RichText::new(format!("{}: {}", flag.code, flag.message))
-                .color(color)
-                .small(),
-        );
-    }
-}
-
 /// Render the estimates strip.
 pub fn show_estimates_strip(state: &mut AppState, ui: &mut Ui) {
     ui.horizontal(|ui| {
@@ -257,7 +238,7 @@ pub fn show_estimates_strip(state: &mut AppState, ui: &mut Ui) {
                 .color(ui.visuals().hyperlink_color),
         )
         .on_hover_text(tr(
-            "In-process analysis of the drawn aircraft at fixed geometry: a mission-sized mass closure flown on the segment mission model with reserve-inclusive fuel plans, then the full baseline analysis the Full Analysis runs. Each card states whether its value is the Full Analysis' own or an estimate. Not a validated performance figure.",
+            "In-process analysis of the drawn aircraft at fixed geometry: a mission-sized mass closure flown on the segment mission model with reserve-inclusive fuel plans, then the full baseline analysis the Full Analysis runs. Each card states whether its value is the Full Analysis' own or an estimate.",
         ));
         ui.with_layout(egui::Layout::right_to_left(egui::Align::Center), |ui| {
             if crate::theme::close_icon_button(ui, tr("Collapse")).clicked() {
@@ -327,7 +308,7 @@ pub fn show_estimates_strip(state: &mut AppState, ui: &mut Ui) {
                         }
                         MetricState::Done(QuickOutcome::Route(route)) => show_route(ui, route),
                         MetricState::Done(QuickOutcome::Feasibility(flags)) => {
-                            show_feasibility(ui, flags)
+                            super::feasibility_cards::show_feasibility_cards(ui, flags)
                         }
                         MetricState::Done(QuickOutcome::Failed(message)) => {
                             ui.label(

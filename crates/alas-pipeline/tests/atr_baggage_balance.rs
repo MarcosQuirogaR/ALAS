@@ -68,9 +68,68 @@ const TARGET_CG_TOLERANCE_PCT_MAC: f64 = 1.5;
 #[test]
 fn aircraft_with_lower_holds_keep_their_zero_fuel_and_takeoff_cg() {
     for name in ["A320-200", "A220-300"] {
-        let ([oew_cg, zfw_cg, tow_cg], _, _) = balance(name);
+        let ([oew_cg, zfw_cg, tow_cg], config, design) = balance(name);
+        // A container or bulk position holds at most its stowable volume at the ICAO
+        // default density of 161 kg/m3 (`STOWAGE_DENSITY_KG_M3`); the loose
+        // bulk blocks carried 1,333 kg each before; a loose block takes its share of its
+        // compartment's volume at that density. On the A320 the three forward blocks stow
+        // 2,068 kg at most of the 2,400 kg of bags, so the zero-fuel CG follows the
+        // operating-empty CG only until the forward hold is full: the rest goes aft. The
+        // equality therefore holds, or the forward blocks are full.
+        let forward_full = {
+            let plane = alas_geom::builder::AircraftBuilder::new(Some(config.geometry.clone()))
+                .build(Some(&design), true)
+                .unwrap();
+            let g = alas_payload::build::product_cabin_geometry(&plane, &config).unwrap();
+            let (wingbox_start_m, _) = g.lower_hold_gap_x_range();
+            let manager = alas_payload::CargoLoadManager::new(
+                &g,
+                alas_config::CargoDeckConfig {
+                    use_main_deck: false,
+                    ..config.cabin.cargo.clone()
+                },
+            );
+            let capacity_kg: f64 = manager
+                .slots
+                .iter()
+                .filter(|slot| slot.x < wingbox_start_m)
+                .map(|slot| slot.max_net())
+                .sum();
+            let mut report_config = config.clone();
+            report_config.mission.enabled = false;
+            report_config.mses.enabled = false;
+            report_config.structures.enabled = false;
+            let report = FullAnalysis::new(report_config).run(&design, true).unwrap();
+            let layout = report.payload_layout.as_ref().unwrap();
+            let carried_kg: f64 = layout
+                .items
+                .iter()
+                .filter(|item| item.kind == ItemKind::Bag && item.x < wingbox_start_m)
+                .map(|item| item.mass)
+                .sum();
+            let bag_total_kg = match &layout.summary {
+                alas_payload::LayoutSummary::Passenger(s) => 1000.0 * s.bag_mass_t,
+                alas_payload::LayoutSummary::Cargo(_) => panic!("passenger layout"),
+            };
+            let full = capacity_kg > 0.0 && carried_kg >= capacity_kg - 1.0;
+            if full {
+                // When the forward hold is full, everything above its capacity rides aft.
+                let aft_kg: f64 = layout
+                    .items
+                    .iter()
+                    .filter(|item| item.kind == ItemKind::Bag && item.x >= wingbox_start_m)
+                    .map(|item| item.mass)
+                    .sum();
+                assert!(
+                    (aft_kg - (bag_total_kg - capacity_kg)).abs() < 1.0,
+                    "{name}: {aft_kg:.1} kg aft, expected {:.1} kg",
+                    bag_total_kg - capacity_kg
+                );
+            }
+            full
+        };
         assert!(
-            (zfw_cg - oew_cg).abs() < TARGET_CG_TOLERANCE_PCT_MAC,
+            (zfw_cg - oew_cg).abs() < TARGET_CG_TOLERANCE_PCT_MAC || forward_full,
             "{name} ZFW CG {zfw_cg:.2} vs OEW CG {oew_cg:.2} %MAC"
         );
         if name == "A320-200" {

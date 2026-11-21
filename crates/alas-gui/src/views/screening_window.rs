@@ -41,7 +41,7 @@ pub fn show_custom_airfoil_import_window(state: &mut AppState, ctx: &egui::Conte
             ui.heading(tr("Import custom airfoil"));
             egui::Grid::new("custom_airfoil_import_fields")
                 .num_columns(2)
-                .spacing([12.0, 8.0])
+                .spacing(crate::theme::space::GRID_SPACING)
                 .show(ui, |ui| {
                     ui.label(tr("Selig .dat path"));
                     ui.horizontal(|ui| {

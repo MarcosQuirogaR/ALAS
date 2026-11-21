@@ -144,16 +144,8 @@ pub enum OperatingMode {
     Normal,
     /// Engine running at its airborne idle schedule.
     FlightIdle,
-    /// Engine running at its ground idle schedule.
-    GroundIdle,
     /// Engine and propulsor stopped where physically possible.
     Shutdown,
-    /// Commanded reverse thrust or propeller beta operation.
-    Reverse,
-    /// Propeller blades commanded to the feather angle.
-    Feathered,
-    /// Unpowered rotating machinery driven by the freestream.
-    Windmilling,
 }
 
 /// Failure selection for capability and operating-point calculations.
@@ -273,6 +265,21 @@ pub enum ValidityStatus {
     },
 }
 
+impl ValidityStatus {
+    /// Whether the evaluation lies inside the declared evidence domain.
+    pub fn is_valid(&self) -> bool {
+        matches!(self, Self::Valid)
+    }
+
+    /// The exceeded boundary of an extrapolated evaluation, `None` when valid.
+    pub fn extrapolation_reason(&self) -> Option<&str> {
+        match self {
+            Self::Valid => None,
+            Self::Extrapolated { reason } => Some(reason),
+        }
+    }
+}
+
 /// Scalar residual exposing numerical or conservation closure.
 #[derive(Debug, Clone, PartialEq)]
 pub struct Residual {
@@ -324,6 +331,39 @@ pub struct PropulsionResult {
     pub provenance: ModelProvenance,
     /// Optional technology detail for diagnostics and migration parity.
     pub trace: Option<TechnologyTrace>,
+}
+
+/// What a solver's inner loop reads from one operating point: the force,
+/// Jet-A mass flow, active limits and trace of a [`PropulsionResult`], the
+/// same numbers, without the bookkeeping (moment, state derivatives,
+/// validity verdict, provenance) a model may skip building there.
+#[derive(Debug, Clone, PartialEq)]
+pub struct PropulsionPoint {
+    /// Installed net force in aircraft body axes `[x, y, z]`, N.
+    pub body_force_n: [f64; 3],
+    /// Mass flow of the first Jet-A resource flow, kg/s; `None` when there is
+    /// no Jet-A flow or it states no mass flow.
+    pub jet_a_mass_flow_kg_s: Option<f64>,
+    /// Physical or control limits active at the solved point.
+    pub active_limits: Vec<ActiveLimit>,
+    /// Optional technology detail for diagnostics and migration parity.
+    pub trace: Option<TechnologyTrace>,
+}
+
+impl From<PropulsionResult> for PropulsionPoint {
+    fn from(result: PropulsionResult) -> Self {
+        let jet_a_mass_flow_kg_s = result
+            .resource_flows
+            .iter()
+            .find(|flow| flow.resource == ResourceKind::JetA)
+            .and_then(|flow| flow.mass_flow_kg_s);
+        Self {
+            body_force_n: result.body_force_n,
+            jet_a_mass_flow_kg_s,
+            active_limits: result.active_limits,
+            trace: result.trace,
+        }
+    }
 }
 
 /// Available system envelope at one flight condition and failure state.
@@ -381,8 +421,6 @@ pub struct PropulsionMassItem {
     pub name: String,
     /// Installed mass, kg.
     pub mass_kg: f64,
-    /// Component centre-of-mass position in body axes, m.
-    pub body_position_m: [f64; 3],
 }
 
 /// Installed propulsion geometry needed by aero, loads, stability, and export.

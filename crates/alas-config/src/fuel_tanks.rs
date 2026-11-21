@@ -40,7 +40,8 @@ pub struct WingTankConfig {
     #[config(
         label = "Span start",
         unit = "fraction of semi-span",
-        help = "Inboard boundary of the tank as a fraction of the semi-span from the aircraft centreline. The innermost wing tank normally starts at the side of the body; an outer tank starts where the inner one ends."
+        help = "Inboard boundary of the tank as a fraction of the semi-span from the centreline [0-1].",
+        long_help = "Inboard boundary of the tank as a fraction of the semi-span from the aircraft centreline. The innermost wing tank normally starts at the side of the body; an outer tank starts where the inner one ends."
     )]
     pub span_start_fraction: f64,
 
@@ -55,14 +56,16 @@ pub struct WingTankConfig {
     /// Share of the spar-box volume that holds fuel.
     #[config(
         label = "Usable volume fraction",
-        help = "Share of the geometric spar-box volume between the two stations that is usable tank volume, after ribs, stringers, systems and the expansion space. Ninety to ninety-five percent is typical of an integral wing tank."
+        help = "Fraction of the geometric spar-box volume between the two stations that is usable tank volume (dimensionless), after ribs, systems and expansion space. 0.90-0.95 is typical.",
+        long_help = "Share of the geometric spar-box volume between the two stations that is usable tank volume, after ribs, stringers, systems and the expansion space. Ninety to ninety-five percent is typical of an integral wing tank."
     )]
     pub usable_fraction: f64,
 
     /// Order in which the tank is emptied.
     #[config(
         label = "Burn priority",
-        help = "Order in which the tank is consumed in normal operation: lower numbers are used first. Transports burn the centre tank first and keep the outer wing fuel longest, because fuel in the outer wing relieves the root bending moment."
+        help = "Order in which the tank is used in normal operation; lower numbers first.",
+        long_help = "Order in which the tank is consumed in normal operation: lower numbers are used first. Transports burn the centre tank first and keep the outer wing fuel longest, because fuel in the outer wing relieves the root bending moment."
     )]
     pub burn_priority: i64,
 
@@ -70,14 +73,16 @@ pub struct WingTankConfig {
     #[config(
         label = "Published usable volume",
         unit = "L",
-        help = "Usable volume published by the manufacturer for this tank, both sides together. When set it is the authoritative capacity and the geometric estimate only supplies the centroid; leave unset for a notional design."
+        help = "Manufacturer's published usable volume for this tank, both sides together [L]. When set it is the authoritative capacity; the geometry only supplies the centroid.",
+        long_help = "Usable volume published by the manufacturer for this tank, both sides together. When set it is the authoritative capacity and the geometric estimate only supplies the centroid; leave unset for a notional design."
     )]
     pub published_usable_volume_l: Option<f64>,
 
     /// An engine feed tank occupying one end of this cell.
     #[config(
         nested,
-        help = "An engine feed tank inside this cell, at its inboard or outboard end. The engines draw only from the feed tanks; every other wing, center and auxiliary tank is a transfer tank that refills them. Feed tanks are filled first on the ground and emptied last in flight. The cell's own span and published volume stay the totals, feed tank included."
+        help = "An engine feed tank inside this cell, at its inboard or outboard end.",
+        long_help = "An engine feed tank inside this cell, at its inboard or outboard end. The engines draw only from the feed tanks; every other wing, center and auxiliary tank is a transfer tank that refills them. Feed tanks are filled first on the ground and emptied last in flight. The cell's own span and published volume stay the totals, feed tank included."
     )]
     pub feed: FeedTankConfig,
 }
@@ -132,7 +137,8 @@ pub struct FeedTankConfig {
     #[config(
         label = "Published usable volume",
         unit = "L",
-        help = "Usable volume published by the manufacturer for this feed tank, both sides together. It is part of the host cell's published volume, and the rest of that volume is the transfer tank."
+        help = "Manufacturer's published usable volume for this feed tank, both sides together [L].",
+        long_help = "Usable volume published by the manufacturer for this feed tank, both sides together. It is part of the host cell's published volume, and the rest of that volume is the transfer tank."
     )]
     pub published_usable_volume_l: Option<f64>,
 }
@@ -162,14 +168,16 @@ pub struct CenterTankConfig {
     /// Share of the carry-through box volume that holds fuel.
     #[config(
         label = "Usable volume fraction",
-        help = "Share of the geometric carry-through spar-box volume between the two body sides that is usable tank volume. The box is crossed by the keel beam, gear support structure and systems, so this is lower than a wing tank's."
+        help = "Fraction of the carry-through spar-box volume between the body sides that is usable tank volume (dimensionless). Lower than a wing tank: keel, gear and systems cross it.",
+        long_help = "Share of the geometric carry-through spar-box volume between the two body sides that is usable tank volume. The box is crossed by the keel beam, gear support structure and systems, so this is lower than a wing tank's."
     )]
     pub usable_fraction: f64,
 
     /// Order in which the tank is emptied.
     #[config(
         label = "Burn priority",
-        help = "Order in which the centre tank is consumed: lower numbers are used first. It is normally the first tank burned, because centre fuel neither relieves wing bending nor moves the centre of gravity much."
+        help = "Order in which the centre tank is used; lower numbers first.",
+        long_help = "Order in which the centre tank is consumed: lower numbers are used first. It is normally the first tank burned, because centre fuel neither relieves wing bending nor moves the centre of gravity much."
     )]
     pub burn_priority: i64,
 
@@ -177,7 +185,8 @@ pub struct CenterTankConfig {
     #[config(
         label = "Published usable volume",
         unit = "L",
-        help = "Usable volume published by the manufacturer for the centre tank. When set it is the authoritative capacity and the geometric estimate only supplies the centroid; leave unset for a notional design."
+        help = "Manufacturer's published usable volume for the centre tank [L]. When set it is the authoritative capacity; the geometry only supplies the centroid.",
+        long_help = "Usable volume published by the manufacturer for the centre tank. When set it is the authoritative capacity and the geometric estimate only supplies the centroid; leave unset for a notional design."
     )]
     pub published_usable_volume_l: Option<f64>,
 }
@@ -241,6 +250,16 @@ pub struct TrimTankConfig {
         help = "Usable volume published by the manufacturer for the trim tank. When set it is the authoritative capacity and the geometric estimate only supplies the centroid."
     )]
     pub published_usable_volume_l: Option<f64>,
+
+    /// Sustained pump rate of the trim-fuel transfer, kg/s, in either direction.
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    #[config(
+        label = "Trim transfer rate",
+        unit = "kg/s",
+        help = "Sustained pump rate moving trim fuel between the trim tank and the feed tanks [kg/s], from manufacturer data.",
+        long_help = "Sustained pump rate that moves trim fuel between the trim tank and the feed tanks, from the manufacturer's trim-system data. Unset models the trim move as instantaneous, which is an unsourced idealisation."
+    )]
+    pub transfer_rate_kg_s: Option<f64>,
 }
 
 impl Default for TrimTankConfig {
@@ -252,6 +271,7 @@ impl Default for TrimTankConfig {
             span_end_fraction: 0.85,
             burn_priority: 3,
             published_usable_volume_l: None,
+            transfer_rate_kg_s: None,
         }
     }
 }
@@ -263,7 +283,8 @@ pub struct AuxiliaryTankConfig {
     /// Whether the aircraft carries an auxiliary tank.
     #[config(
         label = "Installed",
-        help = "Whether a fuselage auxiliary tank is installed, such as the DC-10-30 centre-wing auxiliary cell or an additional centre tank in the cargo hold. Its capacity is a declared volume, because no spar box sizes it."
+        help = "Whether a fuselage auxiliary tank is installed, such as the Learjet 60 fuselage tank or an extra tank in the cargo hold. Its capacity is a declared volume.",
+        long_help = "Whether a fuselage auxiliary tank is installed, such as the Learjet 60 fuselage tank or an additional centre tank in the cargo hold. Its capacity is a declared volume, because no spar box sizes it."
     )]
     pub enabled: bool,
 
@@ -279,7 +300,8 @@ pub struct AuxiliaryTankConfig {
     #[config(
         label = "Longitudinal position",
         unit = "fraction of fuselage length",
-        help = "Centroid of the auxiliary tank as a fraction of fuselage length from the nose. A cargo-hold auxiliary tank sits near the wing carry-through box so it moves the centre of gravity as little as possible."
+        help = "Centroid of the auxiliary tank as a fraction of fuselage length from the nose [0-1].",
+        long_help = "Centroid of the auxiliary tank as a fraction of fuselage length from the nose. A cargo-hold auxiliary tank sits near the wing carry-through box so it moves the centre of gravity as little as possible."
     )]
     pub x_position_fraction: f64,
 
@@ -348,7 +370,8 @@ pub struct FuelTankLayoutConfig {
     /// Whether the geometric tank volumes are scaled to a published total.
     #[config(
         label = "Calibrate geometry to published capacity",
-        help = "When the aircraft is a registered preset with a published total usable volume, scale every geometric tank estimate by one common factor so their sum reproduces it. The factor is retained and applied to redesigned wings so a changed planform keeps a consistent capacity; individual published tank volumes are never rescaled."
+        help = "For a preset with a published total usable volume, scale every geometric tank estimate by one common factor to reproduce it.",
+        long_help = "When the aircraft is a registered preset with a published total usable volume, scale every geometric tank estimate by one common factor so their sum reproduces it. The factor is retained and applied to redesigned wings so a changed planform keeps a consistent capacity; individual published tank volumes are never rescaled."
     )]
     pub calibrate_to_published_capacity: bool,
 }
@@ -433,6 +456,13 @@ impl FuelTankLayoutConfig {
                 self.trim.span_end_fraction,
             )?;
             validate_fraction("trim", "usable_fraction", self.trim.usable_fraction)?;
+            if let Some(rate) = self.trim.transfer_rate_kg_s {
+                if !rate.is_finite() || rate <= 0.0 {
+                    return Err(format!(
+                        "trim transfer_rate_kg_s must be a finite positive rate, got {rate}"
+                    ));
+                }
+            }
         }
         if self.auxiliary.enabled {
             if !self.auxiliary.usable_volume_l.is_finite() || self.auxiliary.usable_volume_l <= 0.0
@@ -449,52 +479,8 @@ impl FuelTankLayoutConfig {
     }
 }
 
-/// A feed tank must be a strict sub-interval of its host cell sharing one of
-/// its ends, so the transfer remainder is one contiguous bay; a published
-/// feed volume must be a strict part of a published host volume, and a
-/// published host cannot be split without one.
-fn validate_feed(name: &str, cell: &WingTankConfig) -> Result<(), String> {
-    let feed = &cell.feed;
-    if !feed.enabled {
-        return Ok(());
-    }
-    validate_interval(name, feed.span_start_fraction, feed.span_end_fraction)?;
-    let at_inboard_end = feed.span_start_fraction == cell.span_start_fraction
-        && feed.span_end_fraction < cell.span_end_fraction;
-    let at_outboard_end = feed.span_end_fraction == cell.span_end_fraction
-        && feed.span_start_fraction > cell.span_start_fraction;
-    if !(at_inboard_end || at_outboard_end) {
-        return Err(format!(
-            "{name} feed tank must lie inside the cell and share exactly one of its ends"
-        ));
-    }
-    match (feed.published_usable_volume_l, cell.published_usable_volume_l) {
-        (None, None) => Ok(()),
-        (Some(feed_l), Some(cell_l)) if feed_l.is_finite() && feed_l > 0.0 && feed_l < cell_l => {
-            Ok(())
-        }
-        _ => Err(format!(
-            "{name} feed tank published volume must be a positive part of the cell's published volume"
-        )),
-    }
-}
-
-fn validate_interval(name: &str, start: f64, end: f64) -> Result<(), String> {
-    if !start.is_finite() || !end.is_finite() || !(0.0..=1.0).contains(&start) || end > 1.0 {
-        return Err(format!("{name} span fractions must lie in [0, 1]"));
-    }
-    if end <= start {
-        return Err(format!("{name} span end must lie outboard of its start"));
-    }
-    Ok(())
-}
-
-fn validate_fraction(name: &str, field: &str, value: f64) -> Result<(), String> {
-    if !value.is_finite() || !(0.0..=1.0).contains(&value) {
-        return Err(format!("{name} {field} must lie in [0, 1]"));
-    }
-    Ok(())
-}
+mod validate;
+use validate::{validate_feed, validate_fraction, validate_interval};
 
 #[cfg(test)]
 mod tests {

@@ -158,3 +158,44 @@ fn an_invalid_freight_hold_is_ignored_rather_than_laid_out() {
         .iter()
         .all(|slot| !slot.sid.starts_with("RAMP")));
 }
+
+/// A pallet stands on the floor, so it has to fit the lining's chord at the
+/// floor, not the chord at the armrests an airliner's seats are held to. For
+/// every freighter pallet, at the ends and the middle of its footprint, both
+/// outer edges lie inside `lining_chord_at_z` at the freight floor. The
+/// C-295's 88 in (2.235 m) pallet would not stand in the 2.09 m floor chord the
+/// 0.15 m default lining leaves; the Jane's cabin width (2.70 m, wall 0.06 m)
+/// gives it room.
+#[test]
+fn every_freight_pallet_fits_the_lining_chord_at_the_floor() {
+    for name in ["A400M", "C295"] {
+        let (config, plane) = built(name);
+        let h = hold(&config);
+        let g = alas_payload::build::product_cabin_geometry(&plane, &config).expect("cabin frame");
+        let deck = alas_payload::cargo::freight_deck_spec(&g, &h);
+        let layout = build_payload_layout(&plane, &config, 0.0, 0.0).expect("layout");
+        let pallets: Vec<_> = layout
+            .items
+            .iter()
+            .filter(|item| item.kind == ItemKind::Uld && item.deck == MAIN)
+            .collect();
+        assert!(!pallets.is_empty(), "{name}: no pallets placed");
+        for item in pallets {
+            for x in [
+                item.x - 0.5 * item.length,
+                item.x,
+                item.x + 0.5 * item.length,
+            ] {
+                let chord = g.lining_chord_at_z(x, g.floor_z(&deck, x));
+                let reach = item.y.abs() + 0.5 * item.width;
+                assert!(
+                    reach <= 0.5 * chord + 1e-6,
+                    "{name}: pallet at x {:.2} y {:.2} reaches {reach:.3} m, floor chord half {:.3} m",
+                    item.x,
+                    item.y,
+                    0.5 * chord
+                );
+            }
+        }
+    }
+}

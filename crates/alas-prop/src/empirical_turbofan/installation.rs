@@ -43,12 +43,17 @@
 //!
 //! The ICAO LTO fuel-flow ratios are measured at sea-level static only. They
 //! say that TSFC at 85 % and 30 % thrust is 3 % and 8 % below the take-off
-//! value there, and 28 % above it at 7 %. Nothing in the ICAO data or in
-//! the handbooks carries that dip to cruise altitude and Mach (a real engine
-//! has a shallow TSFC minimum near 80-90 % of its cruise rating and rises
-//! below it). [`tsfc_shape`] therefore keeps the sourced part-power RISE at
-//! every condition, and the sourced part-power DIP only at sea level, fading
-//! it out linearly to none at the altitude of the cruise anchor.
+//! value there, and 28 % above it at 7 %. That dip is a static property: in
+//! flight the inlet ram drag takes a growing share of the gross thrust as the
+//! engine is throttled back, and Jenkinson's SFC loops (Figs. 9.19(e)-9.21(e),
+//! [super::sfc_loops]) show TSFC rising below the bucket at every flight Mach
+//! number (BPR 8.0, M 0.25: +21 % from the bucket at `FN/(delta FN*)` 0.55 to
+//! 0.20). [`tsfc_shape`] therefore applies the ICAO shape at static
+//! conditions, the flight loops from Mach 0.25 up, and blends the two
+//! linearly in Mach number between. The earlier form faded the static dip
+//! out with altitude instead of Mach number, so a 30 min hold at 1,500 ft and
+//! Mach 0.35 (about 15 % of `delta FN*`) was priced 5-14 % BELOW the
+//! full-rating TSFC where the loops put it 20-45 % above.
 
 use super::*;
 
@@ -78,6 +83,15 @@ pub const BLEED_SFC_SLOPE_OPTIMUM_PORT: f64 = 1.03;
 /// the 555 of an A380 (0.58 kg/s per engine); against a cruise core flow of
 /// about 20 kg/s (CFM56-5B) and 25 kg/s (Trent 900) that is 2 %.
 pub const TRANSPORT_BLEED_CORE_FRACTION: f64 = 0.02;
+/// Rated thrust lost per unit customer bleed over core mass flow: Raymer
+/// Eq. (13.8), book p. 475, `C_bleed` "approximated as 2.0" (module
+/// documentation, "Bleed"). Charged on the take-off rating only, where a
+/// stated condition (packs on) asks for it; at the other ratings bleed costs
+/// fuel at the same thrust (the SFC slope above).
+pub const BLEED_THRUST_LOSS_SLOPE: f64 = 2.0;
+/// Fresh air the packs deliver per occupant, kg/s: 14 CFR 25.831(a),
+/// 0.55 lb/min.
+pub const FRESH_AIR_PER_OCCUPANT_KG_S: f64 = 0.55 * 0.453_592_37 / 60.0;
 
 /// Aircraft-service losses of the deck: standing loads charged at every
 /// flight condition, per engine, and the SFC coefficients that turn them
@@ -193,6 +207,36 @@ impl EmpiricalTurbofanModel {
     }
 }
 
+impl EmpiricalTurbofanModel {
+    /// `thrust_n` less the take-off-rating thrust the request's customer bleed
+    /// takes: `1 - BLEED_THRUST_LOSS_SLOPE x bleed / core flow`, the core flow
+    /// scaled with corrected flow as in `installation_sfc_factor`. Other
+    /// demands, and a request without bleed, keep `thrust_n`.
+    pub(super) fn takeoff_bleed_thrust_n(&self, request: &PropulsionRequest, thrust_n: f64) -> f64 {
+        let takeoff = matches!(
+            request.demand,
+            PropulsionDemand::Rating(PropulsionRating::TakeoffGoAround)
+                | PropulsionDemand::RatedFraction {
+                    rating: PropulsionRating::TakeoffGoAround,
+                    ..
+                }
+        );
+        let bleed_kg_s = request.loads.bleed_mass_flow_kg_s;
+        if !takeoff || bleed_kg_s.is_nan() || bleed_kg_s <= 0.0 {
+            return thrust_n;
+        }
+        let (total_pressure_pa, total_temperature_k) = total_conditions(request.flight);
+        let corrected = (total_pressure_pa / SEA_LEVEL_PRESSURE_PA)
+            / (total_temperature_k / SEA_LEVEL_TEMPERATURE_K).sqrt();
+        let core_flow_kg_s =
+            self.core_flow.static_core_flow_kg_s * corrected * self.core_flow.engines;
+        if core_flow_kg_s.is_nan() || core_flow_kg_s <= 0.0 {
+            return thrust_n;
+        }
+        thrust_n * (1.0 - BLEED_THRUST_LOSS_SLOPE * bleed_kg_s / core_flow_kg_s).max(0.0)
+    }
+}
+
 /// Freestream stagnation pressure (Pa) and temperature (K) of `flight` from
 /// its static state and Mach number, isentropic air with `gamma` = 1.4.
 pub(super) fn total_conditions(flight: FlightCondition) -> (f64, f64) {
@@ -218,26 +262,35 @@ pub(super) fn checked_loads(loads: PropulsionLoads) -> Result<PropulsionLoads, P
 }
 
 /// Multiplier of the full-rating TSFC at rating utilization `u` (fraction of
-/// the active rating, in `[0.07, 1]`) at `altitude_m`, relative to the TSFC
-/// the anchors define (module documentation, "Part-power shape").
+/// the active rating, in `[0.07, 1]`) at flight Mach number `mach`, relative
+/// to the TSFC the anchors define (module documentation, "Part-power shape").
 ///
-/// `r(u) = f(u) / u` is the ICAO LTO fuel-flow ratio over the thrust ratio.
-/// Where `r > 1` (low power) it applies at every altitude; where `r < 1` the
-/// sea-level-static dip applies with weight `1 - h / h_anchor` (sea level to
-/// the altitude of the cruise anchor), so the anchor altitude carries none.
+/// `full_rating_x` is the corrected thrust `FN/(delta FN*)` of the rating `u`
+/// is a share of at this condition, so the flown corrected thrust is
+/// `u x full_rating_x`; `None` (flight idle, whose fuel is the idle chart
+/// flow) keeps the ICAO shape. `r(u) = f(u) / u`, the ICAO LTO fuel-flow
+/// ratio over the thrust ratio, is the static shape; the flight shape is
+/// [SfcLoopTable::part_power_ratio]; between Mach 0 and the lowest flight
+/// loop (0.25) the two are blended linearly in Mach number.
 pub(super) fn tsfc_shape(
     utilization: f64,
-    altitude_m: f64,
-    anchor_altitude_m: f64,
+    mach: f64,
+    full_rating_x: Option<f64>,
+    loops: &SfcLoopTable,
     ratios: [f64; 4],
 ) -> f64 {
     let u = utilization.clamp(0.07, 1.0);
-    let ratio = part_power_fuel_fraction(u, ratios) / u;
-    if ratio >= 1.0 {
-        ratio
+    let static_ratio = part_power_fuel_fraction(u, ratios) / u;
+    let Some(full_rating_x) = full_rating_x.filter(|x| x.is_finite() && *x > 0.0) else {
+        return static_ratio;
+    };
+    let flight_ratio =
+        |at_mach: f64| loops.part_power_ratio(u * full_rating_x, full_rating_x, at_mach);
+    if mach >= LOOP_MINIMUM_MACH {
+        flight_ratio(mach)
     } else {
-        let weight = (1.0 - altitude_m / anchor_altitude_m).clamp(0.0, 1.0);
-        1.0 + weight * (ratio - 1.0)
+        let weight = (mach / LOOP_MINIMUM_MACH).clamp(0.0, 1.0);
+        static_ratio + weight * (flight_ratio(LOOP_MINIMUM_MACH) - static_ratio)
     }
 }
 
@@ -250,21 +303,32 @@ mod tests {
     const ICAO_CFM56: [f64; 4] = [0.089_316_99, 0.276_707_53, 0.822_241_68, 1.0];
 
     #[test]
-    fn shape_keeps_the_low_power_rise_everywhere_and_the_dip_only_near_sea_level() {
-        for altitude_m in [0.0, 5_000.0, 10_668.0, 12_000.0] {
-            let idle = tsfc_shape(0.07, altitude_m, 10_668.0, ICAO_CFM56);
-            assert!((idle - 0.089_316_99 / 0.07).abs() < 1.0e-12, "{idle}");
+    fn shape_is_icao_static_and_the_flight_loops_in_flight() {
+        let loops = SfcLoopTable::new(5.7);
+        // Flight idle (no rating basis) and static conditions keep the ICAO
+        // shape, dip included.
+        let idle = tsfc_shape(0.07, 0.8, None, &loops, ICAO_CFM56);
+        assert!((idle - 0.089_316_99 / 0.07).abs() < 1.0e-12, "{idle}");
+        let static_85 = tsfc_shape(0.85, 0.0, Some(1.0), &loops, ICAO_CFM56);
+        assert!((static_85 - 0.822_241_68 / 0.85).abs() < 1.0e-12);
+        assert!(static_85 < 1.0);
+        assert_eq!(tsfc_shape(1.0, 0.0, Some(1.0), &loops, ICAO_CFM56), 1.0);
+        // Full rating carries its anchored TSFC at every Mach number.
+        for mach in [0.25, 0.4, 0.6, 0.8, 0.9] {
+            assert_eq!(tsfc_shape(1.0, mach, Some(0.6), &loops, ICAO_CFM56), 1.0);
         }
-        let sea_level = tsfc_shape(0.85, 0.0, 10_668.0, ICAO_CFM56);
-        assert!((sea_level - 0.822_241_68 / 0.85).abs() < 1.0e-12);
-        assert!(sea_level < 1.0);
-        for altitude_m in [10_668.0, 11_500.0] {
-            assert_eq!(tsfc_shape(0.85, altitude_m, 10_668.0, ICAO_CFM56), 1.0);
-            assert_eq!(tsfc_shape(0.60, altitude_m, 10_668.0, ICAO_CFM56), 1.0);
-        }
-        let half = tsfc_shape(0.85, 5_334.0, 10_668.0, ICAO_CFM56);
-        assert!((half - (1.0 + 0.5 * (0.822_241_68 / 0.85 - 1.0))).abs() < 1.0e-12);
-        assert_eq!(tsfc_shape(1.0, 0.0, 10_668.0, ICAO_CFM56), 1.0);
+        // Cruise: utilization 0.85 of a rating at FN/(delta FN*) 0.85 is
+        // above the M 0.8 bucket, so the TSFC is the anchored one.
+        assert_eq!(tsfc_shape(0.85, 0.8, Some(0.85), &loops, ICAO_CFM56), 1.0);
+        // Hold at 1,500 ft and M 0.35: about 26 % of maximum climb at
+        // FN/(delta FN*) 0.58 rises from the bucket instead of dipping.
+        let hold = tsfc_shape(0.26, 0.35, Some(0.58), &loops, ICAO_CFM56);
+        assert!(hold > 1.15 && hold < 1.5, "{hold}");
+        // Between static and M 0.25 the two shapes blend linearly in Mach.
+        let low = tsfc_shape(0.26, 0.25, Some(0.58), &loops, ICAO_CFM56);
+        let icao = part_power_fuel_fraction(0.26, ICAO_CFM56) / 0.26;
+        let blended = tsfc_shape(0.26, 0.125, Some(0.58), &loops, ICAO_CFM56);
+        assert!((blended - 0.5 * (low + icao)).abs() < 1.0e-12);
     }
 
     #[test]

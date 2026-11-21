@@ -157,6 +157,8 @@ pub fn factor(name: &str) -> Option<f64> {
     Some(value)
 }
 
+pub mod notation;
+
 #[cfg(test)]
 mod tests {
     use super::*;

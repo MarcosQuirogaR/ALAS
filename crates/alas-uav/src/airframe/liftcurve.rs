@@ -2,9 +2,13 @@
 // Copyright (C) 2026 Marcos Quiroga Rodriguez
 
 //! Closed-form lifting-surface estimates used by the simple neutral-point
+//!
+//! Status: a design-study library exercised by the airframe tests; the UAV
+//! generator takes fixed tail geometry and `estimate_trim_setup`, so the sizing
+//! routines here are not called by the product pipeline.
 //! method: lift-curve slope, downwash, control-surface effectiveness.
 //!
-//! Sources (page and equation numbers refer to the cited editions):
+//! Sources (cited by title, edition and page):
 //!
 //! * Raymer, Aircraft Design: A Conceptual Approach, 6th ed., Eq. 12.6-12.9,
 //!   p. 400 (wing lift-curve slope, fuselage lift factor).

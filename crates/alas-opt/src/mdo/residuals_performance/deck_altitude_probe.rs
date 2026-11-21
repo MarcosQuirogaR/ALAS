@@ -3,7 +3,7 @@
 
 //! Diagnostic tables for the thrust of the empirical turbofan deck at cruise
 //! altitude against independent lapse forms and against the registered
-//! aircraft's own drag (lane fix-deck-altitude). Ignored tests; they print.
+//! aircraft's own drag (deck-altitude work). Ignored tests; they print.
 #![allow(clippy::unwrap_used, clippy::expect_used, clippy::print_stderr)]
 
 use crate::mdo::propulsion::PropulsionDeck;
@@ -11,7 +11,7 @@ use crate::mdo::sizing::run_candidate;
 use alas_config::{ActiveEngineModel, AlasConfig};
 use alas_prop::system::PropulsionRating;
 
-const G0: f64 = 9.806_65;
+const G0: f64 = alas_atmo::STANDARD_GRAVITY;
 
 /// Mattingly high-bypass maximum-thrust lapse `delta0 (1 - 0.49 sqrt(M))`
 /// over the sea-level static thrust (coefficients as recalled, not re-read).
@@ -302,7 +302,7 @@ fn deck_low_altitude_table() {
 }
 
 /// Residual-climb profile of the registered jets against altitude, with the
-/// thrust and drag behind it (fix lane a220-atr).
+/// thrust and drag behind it (fix a220-atr).
 ///
 /// `cargo test -p alas-opt --release toc_profile_table -- --ignored --nocapture`
 #[test]
@@ -376,7 +376,7 @@ fn toc_profile_table() {
 
 /// Engine-scale sweep of one registered jet: the catalogue cruise point is
 /// declared an engine datum at `k x 0.93 x F_chart_MCL(ref)` (a what-if, not
-/// data), and the hard deck rows are printed (fix lane a220-atr).
+/// data), and the hard deck rows are printed (fix a220-atr).
 ///
 /// `ALAS_PROBE_PRESETS=A220-300 cargo test -p alas-opt --release k_sweep -- --ignored --nocapture`
 #[test]
@@ -456,7 +456,7 @@ fn k_sweep() {
 }
 
 /// Drag build-up of the registered jets at the design cruise point and at the
-/// top-of-climb point (fix lane a220-atr).
+/// top-of-climb point (fix a220-atr).
 ///
 /// `cargo test -p alas-opt --release drag_split_table -- --ignored --nocapture`
 #[test]

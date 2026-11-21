@@ -1,9 +1,9 @@
 // SPDX-License-Identifier: AGPL-3.0-or-later
 // Copyright (C) 2026 Marcos Quiroga Rodriguez
 
-//! Small persistence and validation helpers for the pipeline coordinator.
+//! Small persistence and validation helpers for the pipeline orchestrator.
 //!
-//! Keeping these helpers beside, rather than inside, the coordinator leaves
+//! Keeping these helpers beside, rather than inside, the orchestrator leaves
 //! the stage ordering readable and prevents the orchestration module from
 //! becoming a second export implementation.
 
@@ -139,6 +139,7 @@ fn write_polar_document(result: &MsesPolarResult, path: &Path) -> std::io::Resul
         "converged_alpha_deg": &result.alpha_deg,
         "cl": &result.cl,
         "cd": &result.cd,
+        "cm": &result.cm,
         "cdw": &result.cdw,
         "points": points,
         "solver_attempts": attempts,
@@ -249,9 +250,65 @@ pub(super) fn finite_range_text(values: &[f64], decimals: usize) -> String {
 /// canonical document resolves the largest projected wing to `wings[0]`, as the
 /// builder does.
 pub(super) fn carry_reference_wing(canonical: &mut Airplane, source: &Airplane) {
+    // The document has no field for the tail's dynamic-pressure ratio either.
+    canonical.set_horizontal_tail_dynamic_pressure_ratio(
+        source.horizontal_tail_dynamic_pressure_ratio(),
+    );
     let reference = source.main_wing().and_then(|wing| wing.reference);
     if let (Some(reference), Some(wing)) = (reference, canonical.wings.first_mut()) {
         wing.reference = Some(reference);
+    }
+    let datum = source.main_wing().and_then(|wing| wing.planform_datum);
+    // The document carries the built tail sections; their straight-edged reference
+    // planform is not in it.
+    for wing in &source.wings {
+        if let Some(target) = canonical.wings.iter_mut().find(|w| w.name == wing.name) {
+            target.reference_xsecs.clone_from(&wing.reference_xsecs);
+        }
+    }
+    if let (Some(datum), Some(wing)) = (datum, canonical.wings.first_mut()) {
+        wing.planform_datum = Some(datum);
+    }
+}
+
+/// Carry what a document cannot hold of the bodies of `source` onto the
+/// CPACS-canonicalised `canonical` aircraft, body by body: the lofted surface, whose
+/// exact wetted area and volume the analyses read, and the APU cone. The document's
+/// body record has given back the stations and the scarf.
+pub(super) fn carry_body_lofts(canonical: &mut Airplane, source: &Airplane) {
+    for (body, drawn) in canonical.fuselages.iter_mut().zip(&source.fuselages) {
+        if body.name == drawn.name {
+            body.loft.clone_from(&drawn.loft);
+            body.apu_cone.clone_from(&drawn.apu_cone);
+        }
+    }
+}
+/// `options` with the search switched off when it has nothing to search: no
+/// caller bounds, every design variable of the configured envelope at
+/// `nominal` held (a baseline sandbox) and no band takeoff mass. Such a run
+/// is the baseline analysis of the aircraft; running the staged search and
+/// the reporting ladder on its one point cost three to four baseline
+/// analyses and reported the same aircraft twice.
+pub(super) fn searched(
+    config: &AlasConfig,
+    options: &super::PipelineOptions,
+    nominal: &DesignVector,
+    bounds: Option<&[(f64, f64)]>,
+) -> super::PipelineOptions {
+    let nothing_free = bounds.is_none()
+        && config.optimizer.objective.mtow_sizing != alas_config::MtowSizing::MtowBand
+        && config
+            .design_envelope(nominal)
+            .iter()
+            .all(|variable| variable.fixed);
+    if options.optimize && nothing_free {
+        tracing::info!("no free design variable: the run is the baseline analysis");
+        super::PipelineOptions {
+            optimize: false,
+            ..options.clone()
+        }
+    } else {
+        options.clone()
     }
 }
 

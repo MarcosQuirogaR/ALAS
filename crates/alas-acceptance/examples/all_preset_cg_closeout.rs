@@ -114,6 +114,8 @@ fn payload_summary(
         total_mass: layout.total_mass,
         cg_x: layout.cg_x,
         cg_y: layout.cg_y,
+        equipment_mass: layout.equipment_mass(),
+        equipment_cg: layout.equipment_cg(),
     })
 }
 

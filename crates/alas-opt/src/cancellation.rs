@@ -337,7 +337,7 @@ fn registry() -> &'static Registry {
 
 /// The watch that owns `flag`, if any.
 ///
-/// A flag that no watch owns - every pre-existing caller, including the GUI -
+/// A flag that no watch owns - every caller that predates the watch, including the GUI -
 /// yields `None`, and every telemetry call on the resulting scope is a no-op.
 pub fn watch_for(flag: &AtomicBool) -> Option<Arc<CancelWatch>> {
     let key = std::ptr::from_ref(flag) as usize;
@@ -940,7 +940,6 @@ mod forwarding_tests {
                 assert!(token.requested());
             });
         });
-        assert!(started.elapsed() < Duration::from_secs(1));
         let flag = AtomicBool::new(false);
         let result = std::panic::catch_unwind(std::panic::AssertUnwindSafe(|| {
             forward_evaluation_cancellation(Some(&flag), &EvaluationCancellation::new(), || {

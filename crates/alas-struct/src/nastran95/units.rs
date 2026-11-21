@@ -14,7 +14,7 @@
 //! 28 mm long and 0.47 mm high (half-edges 14 mm and 0.24 mm,
 //! `|V1 x V2|^2` of about 1.1e-11) sits on the limit, so any wing whose box
 //! closes towards the trailing edge (B747-400, DC-10, E195-E2 in the
-//! 2026-10-07 matrix: 11, 12 and 2 elements) fails before a stiffness is
+//! preset sweep: 11, 12 and 2 elements) fails before a stiffness is
 //! formed. The check has no relative form.
 //!
 //! # Why not millimetres

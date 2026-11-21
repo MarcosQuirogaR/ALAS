@@ -13,8 +13,8 @@ use alas_config::AlasConfig;
 ///
 /// The document does not match the configuration schema.
 pub fn load_config_value(value: &serde_json::Value) -> Result<AlasConfig, String> {
-    let (config, notes) = AlasConfig::from_value_with_notes(value)
-        .map_err(|error| format!("invalid config structure: {error:?}"))?;
+    let (config, notes) = alas_mission::preset_load::load_document(value)
+        .map_err(|error| format!("invalid config structure: {error}"))?;
     for message in notes.messages() {
         tracing::warn!("{message}");
     }
@@ -35,5 +35,16 @@ mod tests {
         assert!(config.mission.enabled);
         assert_eq!(config.preset, "AVE");
         assert!(load_config_value(&serde_json::json!({ "no_such_group": 1 })).is_err());
+    }
+
+    #[test]
+    fn a_rejected_document_is_reported_in_words_not_as_a_debug_dump() {
+        let message = load_config_value(&serde_json::json!({
+            "preset": "A320-200",
+            "requirements": { "mtow_kgg": 1 }
+        }))
+        .expect_err("misspelled key is refused");
+        assert!(message.contains("mtow_kgg"), "{message}");
+        assert!(!message.contains("Rejected {"), "{message}");
     }
 }

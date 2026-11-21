@@ -269,6 +269,10 @@ fn easa_style_reserves(
                 distance_m: alternate_distance_m,
             },
         }
+    } else if policy.scheme == FuelScheme::StudyConvention {
+        // The study convention reads its terms as given: no alternate is no
+        // alternate quantity. The fifteen-minute allowance is the EASA rule's.
+        FuelQuantity::NONE
     } else {
         let kg = holding_fuel_kg(
             model,
@@ -685,6 +689,41 @@ mod tests {
         )
         .unwrap();
         assert!(agrees(plan.alternate.kg, expected_kg, Tier::Closed));
+    }
+
+    /// A trip-fraction contingency and a final hold with no alternate, the
+    /// MIL-C-5011B form (5 % trip fuel, 30 min at 1,500 ft): the study
+    /// convention carries exactly those, without the EASA no-alternate hold.
+    #[test]
+    fn the_study_convention_with_no_alternate_carries_no_alternate_quantity() {
+        let policy = FuelPolicyConfig {
+            scheme: FuelScheme::StudyConvention,
+            contingency_trip_fraction: 0.05,
+            contingency_minimum_hold_min: 0.0,
+            alternate_distance_nmi: 0.0,
+            final_reserve_hold_min: 30.0,
+            ..Default::default()
+        };
+        let model = toy_model();
+        let plan = plan_fuel(&policy, &model, TOW_KG, RANGE_M).unwrap();
+        assert_eq!(plan.alternate, FuelQuantity::NONE);
+        assert!(agrees(
+            plan.contingency.kg,
+            0.05 * plan.trip.kg,
+            Tier::Closed
+        ));
+        assert_eq!(
+            plan.reserve_landing_mass_kg,
+            plan.destination_landing_mass_kg
+        );
+        let hold_kg = holding_fuel_kg(
+            &model,
+            plan.destination_landing_mass_kg,
+            policy.holding_altitude_ft * FOOT,
+            30.0,
+        )
+        .unwrap();
+        assert!(agrees(plan.final_reserve.kg, hold_kg, Tier::Closed));
     }
 
     #[test]

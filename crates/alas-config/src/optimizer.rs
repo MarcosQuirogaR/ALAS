@@ -19,13 +19,14 @@
 
 mod aerodrome_code;
 pub mod design_space;
+mod guardrails;
 pub mod mtow_plan;
 mod objective;
 pub mod plausibility;
 mod solver;
 mod weights;
 
-pub use aerodrome_code::{AerodromeReferenceCode, SPAN_CODE_MARGIN_M};
+pub use aerodrome_code::{AerodromeReferenceCode, SPAN_CODE_MARGIN_M, WING_POSITION_VARIABLE};
 pub use design_space::{DesignMode, DesignSpaceConfig, VariableEnvelope};
 pub use mtow_plan::{
     DesignMission, DesignPayloadSource, DesignRange, MtowPlan, StructuralBasis,
@@ -34,8 +35,9 @@ pub use mtow_plan::{
 pub use objective::{MtowSizing, ObjectiveConfig, ObjectiveKind, DEFAULT_MTOW_BAND_FRACTION};
 pub use plausibility::PlausibilityLimits;
 pub use solver::{
-    SeedOutOfRange, SolverSettings, StageBudget, DEFAULT_REPRODUCIBLE_EVALUATIONS, DEFAULT_SEED,
-    LEGACY_METHOD_TOKENS, MAXIMUM_STAGE_TIME_LIMIT_S, PRODUCT_DE_METHOD,
+    SeedOutOfRange, SolverSettings, StageBudget, DEFAULT_REFINEMENT_EVALUATIONS,
+    DEFAULT_REPRODUCIBLE_EVALUATIONS, DEFAULT_SEED, LEGACY_METHOD_TOKENS,
+    MAXIMUM_STAGE_TIME_LIMIT_S, PRODUCT_DE_METHOD,
 };
 pub use weights::ObjectiveWeights;
 
@@ -50,6 +52,7 @@ pub struct OptimizerConfig {
     /// What the search rewards and what it penalizes.
     #[config(
         nested,
+        label = "Planform constraints and failure cost",
         help = "Transport-planform thresholds and the failure cost the mission-sized search reads."
     )]
     pub weights: ObjectiveWeights,
@@ -65,7 +68,8 @@ pub struct OptimizerConfig {
     #[serde(default)]
     #[config(
         nested,
-        help = "Used by the mission-sized differential_evolution profile: select block fuel, takeoff mass, empty mass or fuel per seat-kilometre over the design range, plus the takeoff-mass closure and hard requirements."
+        help = "Mission-sized differential_evolution objective: block fuel, takeoff mass, empty mass or fuel per seat-km over the design range, plus takeoff-mass closure.",
+        long_help = "Used by the mission-sized differential_evolution profile: select block fuel, takeoff mass, empty mass or fuel per seat-kilometre over the design range, plus the takeoff-mass closure and hard requirements."
     )]
     pub objective: ObjectiveConfig,
 
@@ -73,7 +77,8 @@ pub struct OptimizerConfig {
     #[serde(default, skip_serializing_if = "DesignSpaceConfig::is_default")]
     #[config(
         nested,
-        help = "Design boundary for clean-sheet studies, reference-aircraft adaptation, and the fixed baseline sandbox. The resolved mutable/fixed envelope is recorded with each run and is enforced by the evaluator as well as the search bounds."
+        help = "Design boundary for clean-sheet studies, reference-aircraft adaptation and the fixed baseline sandbox.",
+        long_help = "Design boundary for clean-sheet studies, reference-aircraft adaptation, and the fixed baseline sandbox. The resolved mutable/fixed envelope is recorded with each run and is enforced by the evaluator as well as the search bounds."
     )]
     pub design_space: DesignSpaceConfig,
 
@@ -85,7 +90,8 @@ pub struct OptimizerConfig {
     #[config(
         nested,
         label = "Model validity domain",
-        help = "The window of shapes this program's own mass, drag and stability correlations were fitted for. These are not performance requirements: a design outside one of them is a result the correlations cannot be trusted to have computed, which is why every window is set wider than every registered aircraft. They reach the search as hard Geometry residuals."
+        help = "The window of shapes the program's mass, drag and stability correlations were fitted for.",
+        long_help = "The window of shapes this program's own mass, drag and stability correlations were fitted for. These are not performance requirements: a design outside one of them is a result the correlations cannot be trusted to have computed, which is why every window is set wider than every registered aircraft. They reach the search as hard Geometry residuals."
     )]
     pub plausibility: PlausibilityLimits,
 }

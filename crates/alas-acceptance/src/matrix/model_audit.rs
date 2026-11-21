@@ -94,8 +94,8 @@ pub struct StructuresAudit {
     pub status: String,
     /// Sized semi-wing primary-structure mass.
     pub wingbox_mass_kg: Option<f64>,
-    /// Empirical whole-wing mass used for comparison.
-    pub torenbeek_wing_mass_kg: Option<f64>,
+    /// Complete-wing mass of the mass ledger, for comparison.
+    pub ledger_complete_wing_mass_kg: Option<f64>,
     /// Number of modeled spars.
     pub spar_count: Option<usize>,
     /// Spar positions as fractions of local chord.
@@ -104,7 +104,7 @@ pub struct StructuresAudit {
     pub rib_count: Option<i64>,
     /// Sized rib pitch.
     pub rib_spacing_m: Option<f64>,
-    /// Skin thickness.
+    /// Thickest cover skin gauge over the span.
     pub skin_thickness_m: Option<f64>,
     /// Analytical tip deflection by load case.
     pub tip_deflection_m: BTreeMap<String, f64>,
@@ -242,10 +242,10 @@ fn extract_structures(result: &PipelineResult) -> StructuresAudit {
     };
     let mut output = StructuresAudit {
         status: structural.status.clone(),
-        torenbeek_wing_mass_kg: structural
-            .torenbeek_wing_mass_kg
+        ledger_complete_wing_mass_kg: structural
+            .ledger_complete_wing_mass_kg
             .is_finite()
-            .then_some(structural.torenbeek_wing_mass_kg),
+            .then_some(structural.ledger_complete_wing_mass_kg),
         nastran_status: structural
             .nastran
             .as_ref()
@@ -258,7 +258,7 @@ fn extract_structures(result: &PipelineResult) -> StructuresAudit {
         output.spar_chord_fractions = sizing.spar_fracs.clone();
         output.rib_count = Some(sizing.num_ribs);
         output.rib_spacing_m = Some(sizing.installed_rib_spacing_m());
-        output.skin_thickness_m = Some(sizing.t_skin);
+        output.skin_thickness_m = Some(sizing.max_skin_gauge_m());
     }
     if let Some(analysis) = structural.analysis.as_ref() {
         let mut max_stress = 0.0_f64;

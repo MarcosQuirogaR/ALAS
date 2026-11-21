@@ -73,21 +73,15 @@ impl Refreeze<'_> {
         let (mut pass_model, mut solution, mut freezes) = match first {
             Ok((frozen, solution, _planned_at_kg)) => (frozen, solution, 1),
             Err(FreezeError::Fuel(FuelModelError::Cancelled)) => {
-                return Err(CandidateFailure {
-                    reason: "cancelled",
-                })
+                return Err(CandidateFailure::new("cancelled"))
             }
             // An under-resolved trip is a numerical failure of the candidate,
             // not a reason to fly the dispatch unfrozen.
             Err(FreezeError::StepUnconverged { .. }) => {
-                return Err(CandidateFailure {
-                    reason: MISSION_STEP_UNCONVERGED,
-                })
+                return Err(CandidateFailure::new(MISSION_STEP_UNCONVERGED))
             }
             Err(_) if (self.budget_spent)(self.model) => {
-                return Err(CandidateFailure {
-                    reason: SIZING_BUDGET_EXHAUSTED,
-                })
+                return Err(CandidateFailure::new(SIZING_BUDGET_EXHAUSTED))
             }
             // No plan can be made at this mass (the trip is not flyable there
             // even with level and climb adaptation): the dispatch brackets its
@@ -126,14 +120,10 @@ impl Refreeze<'_> {
                     (pass_model, solution) = (refrozen, resolved);
                 }
                 Err(FreezeError::Fuel(FuelModelError::Cancelled)) => {
-                    return Err(CandidateFailure {
-                        reason: "cancelled",
-                    })
+                    return Err(CandidateFailure::new("cancelled"))
                 }
                 Err(FreezeError::StepUnconverged { .. }) => {
-                    return Err(CandidateFailure {
-                        reason: MISSION_STEP_UNCONVERGED,
-                    })
+                    return Err(CandidateFailure::new(MISSION_STEP_UNCONVERGED))
                 }
                 // Keep the plan frozen at the seed.
                 Err(_) => break,

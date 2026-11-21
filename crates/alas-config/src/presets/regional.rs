@@ -16,6 +16,8 @@ use crate::{
 };
 
 /// ATR 72-212A marketed as the ATR 72-600, in the 23,000 kg configuration.
+// Drawn-view stations are measured data; a fraction near 1/pi is not that constant.
+#[allow(clippy::approx_constant)]
 pub fn atr72_600() -> AircraftPreset {
     let mut engine = EngineConfig {
         engine_name: "PW127M".to_owned(),
@@ -25,43 +27,21 @@ pub fn atr72_600() -> AircraftPreset {
     // geometry. The embedded catalogue is the authoritative source for the
     // PW127M/568F power ratings; the preset owns where that system is mounted.
     engine.apply_engine_spec();
-    // Outline read off the ATR 72-600 factsheet 2020 p.22 plan and side
-    // renders (raster, +-0.2 m; low confidence): spinner tip to the aft
-    // nacelle fairing is 6.2 m (the nacelle runs back over the wing to
-    // 14.7 m aft of the nose, past the trailing edge), 1.25-1.3 m across
-    // between 2.8 and 4.6 m, spinner cone over the first 0.7 m.
-    engine.nacelle_profile = vec![
-        (0.0, 0.20),
-        (0.3, 0.42),
-        (0.7, 0.62),
-        (1.3, 0.84),
-        (2.0, 0.97),
-        (2.8, 1.0),
-        (4.6, 1.0),
-        (5.4, 0.72),
-        (6.4, 0.28), // Step B: aft end 6.2 -> 6.4 m (side view zoom, drawn 14.96 m aft of the nose, C)
-    ];
-    engine.radius_scale_m = 0.65;
-    // ATR 72-600 factsheet 2020 p.22 states an 8.10 m propeller-axis
-    // separation; half of that is the single-engine spanwise station.
+    // Nacelle length and radius come from the PW127M engine catalogue entry: apply_engine_spec overwrites anything set here when a preset loads.
+    // The 8.10 m printed on both ATR three-views runs between the propeller axes (the extension lines drop to the hubs).
     engine.spanwise_positions_m = vec![4.05, -4.05];
-    engine.z_m = -0.70;
-    // ATR 72-600 factsheet 2020 p.22 side view: the spinner tip sits
-    // 8.45 +/- 0.15 m aft of the nose (read against both the printed
-    // 27.166 m length and the 10.77 m wheelbase, which disagree by 3 %),
-    // 2.70 m ahead of the wing leading edge at the 4.05 m nacelle station.
-    // Independent check: JCAB TCDS No. 75 Rev 3, ATR 72-212A item (17)(a),
-    // engine oil H-arm 12.190 m, i.e. 9.828 m aft of the nose with the
-    // 2.362 m datum of item (9). The propulsion mass station (40 % of the
-    // 6.2 m nacelle from the spinner tip, 10.91 m) lands 1.08 m aft of it; the
-    // earlier mid-length rule (11.53 m) landed 1.70 m aft of it, not 0.10 m as
-    // this comment used to state (fix lane cg-atr-a400m 2026-10-14).
-    // Step B: 2.70 -> 2.613 m so the spinner stays at 8.428 m with the root datum 11.0060 m and the 0.5 deg inboard LE at the nacelle station.
-    engine.inlet_x_offset_m = 2.613;
+    // ATR 72 three view drawing (EWADE 2011 presentation, p.3), side view: nacelle centre z 1.135 m (top 1.78 m, bottom 0.49 m), below the wing plane at 1.47 m.
+    // ATR Aircraft Recovery Manual 1-10-06 Fig. 1-28 agrees: propeller hub 3.09 m over the 1.965 m ground plane is z 1.125 m.
+    // Measured from the local wing line, which is 1.487 m at the nacelle: axis at z 1.10 m (front view circle fit 1.09 m).
+    engine.z_m = -0.387;
+    // Same drawing: spinner tip 8.50 m aft of the nose (plan 8.54 m, side 8.43 m), ahead of the 11.05 m wing leading edge.
+    // JCAB TCDS No. 75 Rev 3, ATR 72-212A item (17)(a) engine oil H-arm 12.190 m is 9.828 m aft of the nose, a coarse check.
+    engine.inlet_x_offset_m = 2.55;
 
     AircraftPreset {
         name: "ATR72-600",
         display_name: "ATR 72-600",
+        class: crate::presets::AircraftClass::Transport,
         description: "ATR 72-212A (ATR 72-600), 23 t variant, with PW127M engines and 568F-1 propellers.",
         identity: AircraftVariantIdentity {
             model: "ATR 72-212A",
@@ -97,9 +77,21 @@ pub fn atr72_600() -> AircraftPreset {
             reference_wing_area_m2: Some(61.0),
             planning_seats: Some(72),
             design_point: Some(crate::PayloadRangeDesignPoint {
+                long_range_cruise: Some("ATR 72-600 brochure 2026 p.2: 'Range with max pax at long-range cruise speed' (footnote (1)); no speed printed"),
+                cruise: None,
                 range_nmi: 758.0,
-                payload_kg: None,
-                source: "ATR 72-600 Factsheet (PW127M/N edition, 2020-07) p.2: range with maximum passengers (72 seats) 758 nmi; reserves and payload mass not stated, so the planning cabin is the payload",
+                payload_kg: Some(72.0 * 95.0),
+                source: "ATR 72-600 Factsheet (PW127M/N edition, 2020-07) p.2: range with maximum passengers (72 seats) 758 nmi; the sheet prints no basis, which ATR states for the same quantity as 95 kg per passenger, EASA fuel reserves, 100 NM alternate, 10 min taxi (ATR 72-600 brochure 2026 p.2 footnote (1))",
+                reserve: Some(crate::presets::DesignPointReserve {
+                    scheme: None,
+                    contingency_trip_fraction: None,
+                    contingency_minimum_hold_min: None,
+                    alternate_distance_nmi: Some(100.0),
+                    final_reserve_hold_min: None,
+                    flag_flight_time_fraction: None,
+                    holding_altitude_ft: None,
+                    source: "ATR 72-600 brochure 2026 p.2 footnote (1): EASA fuel reserves, 100 NM alternate; every other term is the configured (EASA basic) fuel policy's",
+                }),
             }),
             certified_max_seats: Some(78),
             certified_exit_layout: Some(crate::presets::ATR72_600_EXIT_LAYOUT),
@@ -121,6 +113,29 @@ pub fn atr72_600() -> AircraftPreset {
                 ],
                 source: "ATR ATR 72-600 Facts and Figures, product specification (accessed 2026-08-30)",
             }],
+            // Design mission, one provenance row per datum: the factsheet's range with maximum
+            // passengers; ATR prints the passenger mass and reserve basis of that figure in its
+            // 2026 brochure, which is the regulatory EASA policy with a 100 NM alternate.
+            mission_provenance: crate::DesignMissionProvenanceSet {
+                range: Some(crate::MissionDatumProvenance::exact(
+                    crate::MissionEvidenceTier::Manufacturer,
+                    "range with maximum passengers (72 seats at 29 in), PW127M/N, 758 nmi; the factsheet prints no basis, which ATR states for the same quantity as 95 kg per passenger, EASA fuel reserves, 100 NM alternate, 10 min taxi, long-range cruise speed",
+                    "ATR 72-600 factsheet (PW127M/N edition, 19T0916 V7, 2020) p.2; basis: ATR 72-600 brochure 2026 p.2 footnote (1)",
+                )),
+                payload: Some(crate::MissionDatumProvenance::exact(
+                    crate::MissionEvidenceTier::Manufacturer,
+                    "72 passengers at 95 kg: 6,840 kg",
+                    "ATR 72-600 factsheet (2020) p.2 (72 seats); ATR 72-600 brochure 2026 p.2 footnote (1) (95 kg per passenger)",
+                )),
+                profile: Some(crate::MissionDatumProvenance::exact(
+                    crate::MissionEvidenceTier::Manufacturer,
+                    "long-range cruise speed, ISA; no climb or descent schedule is printed, so the model's configured cruise and speed schedules apply",
+                    "ATR 72-600 brochure 2026 p.2 ('Range with max pax at long-range cruise speed' and footnote (1))",
+                )),
+                reserve_fuel: Some(crate::MissionDatumProvenance::regulatory_reserve(
+                    "the 2020 factsheet prints no reserve basis; ATR states 'EASA fuel reserves - 100 NM alternate' for the same quantity (ATR 72-600 brochure 2026 p.2 footnote (1)), so the design mission applies the regulatory policy with a 100 nmi alternate. The range comparison carries this reserve-basis uncertainty",
+                )),
+            },
             cg_evidence: CgEnvelopeEvidence::AfmRequired,
             sources: vec![
                 "ATR ATR 72-600 Airport Planning Manual, Issue 8, 2021, aircraft characteristics and limitations",
@@ -129,6 +144,8 @@ pub fn atr72_600() -> AircraftPreset {
                 "ATR Weight and Balance Manual, LIMITATIONS LIM.1 p.03, 15 JAN 2021, weight variant F2/75 (MAC 2.303 m; station 0 is 2.362 m forward of the fuselage nose; station 0 to reference chord leading edge 13.604 m)",
                 "ATR ATR 72-600 Facts and Figures, product specification (accessed 2026-08-30)",
             ],
+            horizontal_tail_ice_protection: Some(crate::presets::tail_ice::ATR72_600),
+            operating_speed_limits: Some(crate::presets::operating_limits::ATR72_212A),
             ..AircraftReferenceData::default()
         },
         engine_name: "PW127M",
@@ -137,8 +154,14 @@ pub fn atr72_600() -> AircraftPreset {
             n_nlg_wheels: 2,
             n_mlg_struts: 2,
             wheels_per_mlg_strut: 2,
-            // Approximate 4.1 m main-wheel track divided by 2.77 m fuselage width.
-            track_diameter_factor: 4.1 / 2.77,
+            // Main tire: UK CAA TCDS A.159 sec. 22: H 34 x 10.0 R16 for all ATR 72 models; Goodyear Data Book 2022 Sec. 4F PDF p.11.
+            // A ~0.81 m main-tyre diameter (32x8.8R16) has no source on disk and conflicts with this declared
+            // H34x10.0R16 (0.885 m). The 1.17 m class tyre is replaced by this certified tyre. Read the ATR
+            // main-tyre size from the TCDS or the ATR 72 ARM wheel table before any change here.
+            mlg_tire: "H34x10.0R16/14PR".to_owned(),
+            nlg_tire: "450x190-5/10PR".to_owned(),
+            // Printed 4.10 m main-wheel track over the 2.865 m fuselage width (was over 2.77 m, which built 4.24 m).
+            track_diameter_factor: 4.1 / 2.865,
             // Longitudinal gear stations, measured, in the nose-tip frame.
             //
             // Source A, the stations. ATR 42 / ATR 72 *Aircraft Recovery
@@ -195,20 +218,58 @@ pub fn atr72_600() -> AircraftPreset {
                 (1.728 + 10.772) / 27.166,
                 (1.728 + 10.772) / 27.166,
             ]),
-            // UK AAIB Bulletin AAIB-31376 (ATR 72-212A G-OASB, PW127M), p.3:
-            // pre-flight full-and-free check "left elevator range of +12.7 deg
-            // to -21.8 deg" (negative = nose-up). One airframe's measured
-            // stop, not the AMM nominal travel; the stabiliser is fixed and
-            // trimmed by elevator tabs (ATSB AO-2014-032, Fig. 4), so no
-            // takeoff stabiliser setting is credited.
-            elevator_up_travel_deg: Some(21.8),
+            // FAA TCDS A53EU (ATR 72-101 to -212A; FAA DRS title Rev 35, page header Rev 34), p. 28 of 34, "Control Surface
+            // Movements": elevator ("Pitch") up 23 deg (+1/-0), down 13 deg (+1/-0.6); pitch trim by elevator tab
+            // (+5 deg +-0.25, -1.5 deg +-0.1). The stabiliser is fixed (ATSB AO-2014-032, Fig. 4), so no takeoff stabiliser
+            // setting is credited. Was 21.8 deg, one airframe's pre-flight full-and-free check (UK AAIB Bulletin AAIB-31376,
+            // ATR 72-212A G-OASB, p.3: "left elevator range of +12.7 deg to -21.8 deg"), below the sheet's rigging range.
+            elevator_up_travel_deg: Some(23.0),
+            // Same TCDS page: pitch trim by elevator tab, +5 deg (+-0.25) and -1.5 deg (+-0.1);
+            // the larger travel is read as the nose-up (trailing-edge-down) one, as a fixed
+            // stabiliser needs its nose-up trim at forward CG and low speed. The pitch control
+            // is cables from the control columns to the rear fuselage (ATSB AO-2014-032, second
+            // interim report, pitch-system flexibility) with trim by tab, so the elevator is
+            // reversible.
+            elevator_trim_tab_nose_up_deg: Some(5.0),
+            // The same tab is geared to its elevator: UK AAIB Bulletin 2/2017 (ATR 72-212A
+            // G-COBO, EW/C2016/03/02), p. 17, "Pitch trim": the tabs are "linked mechanically
+            // to their associated elevator" and move in the opposite direction, 0.5 deg of tab
+            // per deg of elevator from the trim (null) position.
+            elevator_balance_tab_gearing: Some(-0.5),
+            // VMCA 98 kt CAS at sea level, OAT 15 C, 5 deg bank: AFM LIM.3 p. 15 (Takeoff
+            // VMCA) as reviewed by AvioConsult, Critical Limited Review ATR Manuals on
+            // Engine-out Operations (2022), pp. 31 and 35.
+            published_vmca_m_s: Some(98.0 * 0.514_444),
+            // Belly clearance from the points of ATR 42 / ATR 72 Aircraft Recovery Manual chapter 1-10-06 Figure 1-28
+            // (vertical clearances, ATR 72 table), maximum ramp weight 21,530 kg. The table has no fuselage-bottom point (A..E are nose, door sills and tail points); the ground
+            // plane is the one that puts the model on three tabulated heights: G propeller hub 3.09 m, H propeller tip 1.11 m (G - H =
+            // 1.98 m = the 1.965 m propeller radius (3.93 m is the diameter), so H is the lowest blade tip), J wing tip 3.72 m.
+            // Brought to a level fuselage (the table angle -1.183 deg, nose down, at CG 14 % MAC; -0.550 deg at CG 37 %) the model needs 0.684 / 0.695 / 0.575 m
+            // (CG 14 %) and 0.669 / 0.684 / 0.548 m (CG 37 %), mean 0.64 m; spread +-0.07 m. The model nose bottom reads 0.8 m above its
+            // belly where the real flat-bottomed ATR nose is level with it (B 0.54 m), which is why B is not used. Direction: the
+            // wing-tip point J alone, the one point not tied to the propeller datum, needs 0.575 / 0.548 m, so the plane may sit up to
+            // 0.09 m lower than the mean, which only lowers every clearance row (at 0.548 m the static propeller row is still
+            // 0.88 m and the tyre-deflated one 0.45 m above their limits). The model tail-down angle on this static plane is
+            // 6.9 deg (9.2 deg at the 0.35 D = 1.0 m plane it replaced; about 9.4 deg with the lift-off oleo extension). The
+            // 8 deg below is a take-off/landing tail-skid design attitude, not a static gear-compressed contact angle, so the
+            // static 6.9 deg is not measured against it and the plane is not set from either value.
+            fuselage_ground_clearance_m: Some(0.64),
             // Tail-strike attitude 8 deg: the ATR maintenance manual's tail skid "is
             // designed to avoid fuselage contact with the runway when the take-off or
             // landing attitude has an angle of 8 deg or greater" (quoted in UK AAIB
             // Bulletin 8/2006, ATR 72-212A D-ANFH, EW/C2005/09/04, p.3); the skid sits
-            // between frames 38 and 39. The generic tailcone loft understates the
-            // geometric tail-down angle, so this is the floor.
+            // between frames 38 and 39. That is the take-off or landing attitude (main
+            // gear extended or unloading) the skid protects, not a static,
+            // gear-compressed fuselage-contact angle: in the same event the fuselage
+            // touched at frames 36-38 (p.3) at 6.5 deg pitch and a 2.7 g touchdown (p.5).
+            // The model's static tail-down angle (6.9 deg) is therefore no evidence of a
+            // contour defect. The published 8 deg is kept as the tip-back floor.
             min_tip_back_deg: 8.0,
+            // The same 8 deg is the rotation attitude the built fuselage must reach
+            // without touching: the attitude the real aircraft reaches before its
+            // skid does (AAIB Bulletin 8/2006 p.3, above). Gear state not stated.
+            required_rotation_angle_deg: 8.0,
+            required_rotation_basis: crate::landing_gear::RotationAngleBasis::PublishedStateUnspecified,
             ..LandingGearConfig::default()
         },
         design_vector: DesignVector {
@@ -221,13 +282,15 @@ pub fn atr72_600() -> AircraftPreset {
             root_chord_m: 2.590_444,
             break_chord_m: 2.590_444,
             tip_chord_m: 1.604_089,
-            // Leading-edge sweep, an engineering estimate: no value is
-            // published, and the factsheet three-view shows a nearly unswept
-            // inboard leading edge and about 4 deg outboard of the nacelle,
-            // which one straight leading edge cannot carry.
-            // Step B (kinked LE, measure/ATR72-600, C +-0.6 deg): inboard LE 0.5 deg (drawn 0, drawn constant-chord centre section, rows 311-329 px flat) and 4.5 deg outboard of the
-            // 0.32 kink through wing.outboard_le_sweep_deg; was one straight 3.0 deg LE (tip LE x 11.62 -> 11.64 m, drawn 11.71). Chords, kink and the 61 m^2 / 2.303 m MAC are unchanged.
-            sweep_deg: 0.5, // 0.0 is refused by the design-space +-10 % sweep guardrail test; 0.5 deg is 0.04 m over the inboard panel
+            // S: Jane's All the World's Aircraft 2008-09, ATR 72 entry, STRUCTURE: "sweepback on outer panels 2 deg 18 min at
+            // quarter-chord". Outer-panel LE from the exact straight-panel identity
+            // tan(LE) = tan(c/4) + (c_kink - c_tip) / (4 (y_tip - y_kink)), with the chords above and the 0.32 kink
+            // (y 4.328 to 13.525 m): tan 2.30 deg + 0.98636 / 36.788 = 0.06698, 3.832 deg. The printed angle (to the minute)
+            // is finer than the drawing: the ATR 72 three view (EWADE 2011, p.3) reads 4.5 deg from LE 11.24 / 11.45 / 11.67 m
+            // at y 6.76 / 9.47 / 12.17 m, but a 0.06 m reading error over that 5.41 m base is 0.6 deg; 3.83 deg puts the
+            // tip LE 0.11 m forward of that reading. Unswept to the kink (wing.inboard_le_sweep_deg), as the drawing shows.
+            sweep_deg: 3.832,
+            // Not published (Jane's 2008-2009 gives the root only): [E].
             tip_twist_deg: -2.0,
             wing_x_shift_m: 0.0,
             tail_scale: 1.0,
@@ -237,10 +300,11 @@ pub fn atr72_600() -> AircraftPreset {
             airfoil_camber_scale: 1.0,
             ..DesignVector::default()
         },
+        speed_schedule_source: crate::presets::SpeedScheduleSource::HandWritten,
         airfoil_class_source: "Not transonic: the 0.44 cruise Mach is below the wave-drag onset Mach, so the class does not enter its drag. Declared conventional, matching the drawn NACA 23018 root and 23012 tip sections.",
         geometry: GeometryConfig {
             wing: WingConfig {
-                // Reference wing = the manufacturer's published values (geometry freeze 2026-10-12, owner decision); the drawn planform stays the geometry.
+                // Reference wing = the manufacturer's published values; the drawn planform stays the geometry.
                 // S 61.0 m2: ATR 72-600 reference wing area; MAC 2.303 m and the MAC leading edge 13.604 m aft of station 0 (= 11.242 m aft of the nose,
                 // station 0 2.362 m ahead of the nose): ATR Weight and Balance Manual LIM.1 p.03 (15 JAN 2021).
                 reference_wing: crate::ReferenceWingConfig::published(61.0, Some(2.303), Some(11.242)),
@@ -250,15 +314,24 @@ pub fn atr72_600() -> AircraftPreset {
                 // which is 2.362 m forward of the nose, so 11.242 m aft of the
                 // nose. This datum puts the built wing's MAC leading edge
                 // (`Wing::aerodynamic_center(0.0)`) on that station.
-                // Step B: 10.916 -> 11.0060 m so the MAC leading edge stays where the 3.0 deg straight LE put it (11.216 m) with the kinked LE (drawn root LE 11.05 m, 0.044 m away).
-                root_datum_x_m: 11.0060,
-                root_z_m: 1.85,
-                break_z_m: 1.85,
+                // ATR 72 three view drawing (EWADE 2011 presentation, p.3): LE 11.05 m closes the plan LE and TE and gives the MAC LE 11.24 m (was 11.006 m).
+                root_datum_x_m: 11.05,
+                // Same drawing: front view upper surface rises 1.5 deg inboard and 1.4 deg outboard of the nacelle, tip top 0.165 m over the earlier flat-centre
+                // fit; the side view holds the absolute height (centre top 1.72 m), so the rise is split: root lowered 0.02 m, break +0.02 m, tip +0.05 m.
+                root_z_m: 1.45,
+                break_z_m: 1.49,
                 tip_z_m: 1.85,
+                // Root incidence 2 deg: Jane's All the World's Aircraft
+                // 2008-2009, ATR 42 entry, p. 300 (constant-chord,
+                // no-dihedral centre section, 2 deg incidence at the root),
+                // which the ATR 72 entry (p. 302, "As ATR 42") shares. The break and tip
+                // incidences are not published there: estimates [E].
                 root_twist_deg: 2.0,
                 break_twist_deg: 0.0,
                 break_span_fraction: 0.32,
                 kink_span_fraction: None,
+                // On the 1.4325 m fuselage half width; the inherited default 0.10 is inside the body.
+                side_of_body_span_fraction: Some(0.106),
                 // The fuselage-side station carries the constant centre-section
                 // chord. Meshing it as an explicit section keeps the lattice of
                 // the neutral-point condition probes resolvable: without it
@@ -267,7 +340,10 @@ pub fn atr72_600() -> AircraftPreset {
                 // to the clean one.
                 side_of_body_chord_ratio: Some(1.0),
                 outboard_sweep_decrement_deg: 0.0,
-                outboard_le_sweep_deg: Some(4.5),
+                inboard_le_sweep_deg: Some(0.0),
+                // Same drawing, plan view: the tip rounds from the LE line at 0.97 span to a 0.85 m chord on the straight TE, drawn as a rake.
+                tip_rake_start_span_fraction: Some(0.97),
+                tip_rake_tip_chord_m: Some(0.85),
                 root_airfoil: "naca23018".to_owned(),
                 tip_airfoil: "naca23012".to_owned(),
                 airfoil_class: crate::AirfoilClass::Conventional,
@@ -275,45 +351,42 @@ pub fn atr72_600() -> AircraftPreset {
             },
             empennage: EmpennageConfig {
                 tail_airfoil: "naca0012".to_owned(),
-                // Approximate reconstruction of ATR's 2020 factsheet p.22,
-                // not certified surface stations: +/-0.3 m digitization/model
-                // uncertainty. Nose x=0, barrel centre z=0, z positive up.
-                // The T-tail root and fin tip share (x,z)=(24.8,4.7) m.
-                // geo/tailfit 2026-10-11: tailplane straight-edge fit to the drawing, centreline values; was off 27.166 - 25.0, chords 1.9/1.2, tip (0.75, 3.7, 0.0)
-                hstab_offset_from_tail_m: 27.166 - 24.85,
-                // Step B (measure/ATR72-600, C; DECISIONS.md T-tail rule): the fin top is raised +0.75 m (3.7 -> 4.45 m above the root line; drawn top 5.45 m over the barrel centre,
-                // published height 7.65 m agrees) and the hstab moves with it, 4.7 -> 5.45 m, so the root stays on the fin tip. Drawn hstab is 0.72 m below the fin top; not modelled.
-                // Root LE 24.8 -> 25.0 m and root chord 1.8 -> 1.9 m (equal to the fin tip chord; drawn 1.95 m, LE 24.8 m, TE 26.75 m): the builder test keeps the root on the fin tip in x and chord, so the drawn values are met within the +-0.2 m read. Tip chord 1.2 m unchanged; tip LE offset (0.6, 3.6) -> (0.75, 3.7) m (drawn 11.5 deg LE sweep vs 9.5, semispan 3.69 m).
-                // geo/close 2026-10-12 (owner review, front view): the drawn tailplane sits 0.60 m below the drawn fin top (front sheet: model tailplane 0.5 m high; Step B already noted 0.72 m).
-                // The fin top stays at the side-view height 4.45 m, so the tailplane root is no longer on the fin tip in z (x seat kept): the fin cap above the tailplane is drawn and cannot be held
-                // by an attached fin tip. CONFLICT with the T-tail attachment rule recorded in geo-close-2026-10-12.md. was 5.45 (= vstab_z_m + fin tip z)
-                hstab_z_m: 4.85,
-                hstab_root_chord_m: 2.0,
-                hstab_tip_chord_m: 1.34,
+                // ATR 72 three view drawing (EWADE 2011 presentation, p.3), plan and side views on the printed 27.166 m length;
+                // nose x=0, barrel centre z=0, z up, +-0.08 m per raster pixel. The tailplane root LE sits on the fin tip LE.
+                // Tailplane: root LE 24.90 m, TE 26.85 m at the centreline; tip LE 25.36 m, TE 26.52 m at y 3.66 m (plan, the
+                // 7.25 m drawn tip to tip against 7.31 m published). The 8.10 m on the drawing is the propeller axes, not this span.
+                hstab_offset_from_tail_m: 27.166 - 24.90,
+                // Side view: tailplane lens centre 4.72 m, 0.75 m below the fin top (was 4.87 m, 0.15 m above the drawn lens); the front view upper surface agrees at 4.90 m.
+                hstab_z_m: 4.72,
+                hstab_root_chord_m: 1.95,
+                hstab_tip_chord_m: 1.16,
                 hstab_root_twist_deg: -1.0,
                 hstab_tip_twist_deg: -1.0,
-                hstab_tip_le_m: (0.41, 3.7, 0.0),
-                // Step B (side view fit incl. the dorsal fairing, +-0.5 m, C): root LE 22.3 -> 20.2 m (offset 6.966, was 27.166 - 22.3 = 4.866), root chord 3.8 -> 5.4 m (TE 25.6 m),
-                // tip LE offset 2.5 -> 4.8 m (46 deg LE sweep, was 34; drawn 5.0 m / 48 deg, reduced so the fin tip LE sits at the hstab root LE 25.0 m), height 3.7 -> 4.45 m above the crown line. Tip chord 1.8 m kept. The fin root chord includes the dorsal fairing (not modelled).
-                // FINAL MERGE (DECISIONS, ATR72-600 fin): the step B dorsal-inclusive silhouette (root LE 20.2 m, root chord 5.4 m) gave Sv 16.3 m2 (+55 %) and is REJECTED.
-                // Fin = sourced vertical-tail area convention: root LE back to 22.3 m (offset 4.866, the pre-step-B value), Sv held at the pre-step-B built 10.4 m2 (published
-                // ~10.5 m2 per the coordinator's earlier sourcing; no primary ATR fin area could be retrieved offline, flagged for verification) with the measured 4.45 m height:
-                // root chord 3.8 -> 2.82 m (area (2.82 + 1.9) / 2 * 4.45 = 10.5 m2), tip LE x offset 4.8 -> 2.7 m so the tip LE stays at the hstab root LE 25.0 m. The drawn dorsal
-                // shoulder is the separate geometry-only dorsal surface below (not in the fin area).
-                // geo/tailfit 2026-10-11: fin straight-edge fit to the drawing at the root line (rms 0.011/0.020 m); was off 27.166 - 22.3, chords 2.82/1.9, tip (2.7, 0.0, 4.45)
-                vstab_offset_from_tail_m: 27.166 - 22.36,
+                hstab_tip_le_m: (0.46, 3.66, 0.0),
+                // Same drawing, plan: the LE runs ahead of its straight line inboard of y 2.6 m, 0.115 m at the fuselage side, and is held there down to the root;
+                // the tip LE corner rounds aft over the last 0.5 m of span, with the TE 0.05 m aft of its line near the tip.
+                hstab_edge_stations: [(0.22, -0.115, 0.0), (0.71, 0.0, 0.0), (0.85, 0.0, 0.0), (0.90, 0.09, 0.03), (0.93, 0.13, 0.05), (0.95, 0.22, 0.05), (0.97, 0.43, 0.05), (1.0, 0.62, 0.0)]
+                    .map(|(span_fraction, le_offset_m, te_offset_m)| crate::TailEdgeStation { span_fraction, le_offset_m, te_offset_m })
+                    .to_vec(),
+                // Fin, side view: the drawn LE is curved below z 3.5 m (x 21.4/22.1/23.1/23.5/24.2/24.7 m at z 2.1/2.4/3.1/3.3/4.1/4.9 m) and straight above;
+                // the fin LE is a 35.6 deg line to the tip LE 24.98 m (within 0.15 m above z 3.3 m); TE line (25.90, 1.0) to (27.06, 5.47) m on the drawn TE (within 0.06 m); ink top z 5.47 m, 7.62 m over the drawn ground (7.65 m printed).
+                vstab_offset_from_tail_m: 27.166 - 21.78,
                 vstab_z_m: 1.0,
-                vstab_root_chord_m: 3.57,
-                vstab_tip_chord_m: 2.42, // drawn 1.9 m; was 1.8
-                vstab_tip_le_m: (2.49, 0.0, 4.45),
-                // Step B: dorsal fairing shoulder (side view, C): from the crown at x 19.8 m rising to the fin LE at ~1.0 m above the root line. Geometry only (vstab_dorsal_in_aero false).
-                // geo/tailfit 2026-10-11: dorsal re-fitted to the drawn LE; was x Some(19.8), height Some(1.0)
-                vstab_dorsal_x_start_m: Some(18.82),
-                vstab_dorsal_height_m: Some(1.8),
+                vstab_root_chord_m: 4.12,
+                vstab_tip_chord_m: 2.08,
+                vstab_tip_le_m: (3.20, 0.0, 4.47),
+                // Dorsal: side view, leaves the crown at x 17.3 m, joins the fin LE about z 2.25 m.
+                vstab_dorsal_length_m: Some(4.48),
+                vstab_dorsal_height_m: Some(1.25),
+                // Drawn fin LE below the fitted line (fillet into the dorsal) and the small bow above it, read off the side view at z 2.06/2.42/3.05/3.58/4.71 m;
+                // the last three stations round the top corners, z 5.16/5.36/5.47 m.
+                vstab_edge_stations: [(0.237, -1.10, 0.0), (0.318, -0.71, 0.0), (0.458, -0.21, 0.0), (0.577, 0.18, 0.0), (0.83, 0.10, 0.0), (0.93, 0.15, 0.0), (0.975, 0.30, -0.14), (1.0, 0.62, -0.40)]
+                    .map(|(span_fraction, le_offset_m, te_offset_m)| crate::TailEdgeStation { span_fraction, le_offset_m, te_offset_m })
+                    .to_vec(),
                 ..EmpennageConfig::default()
             },
             fuselage: FuselageConfig {
-                // 2.865 m (geometry phase step A; old value 2.77): third-party
+                // 2.865 m (was 2.77): third-party
                 // ATR 72-600 familiarisation handout "maximum cabin width"
                 // 2865 mm, read as the external width (secondary; no primary
                 // external width in EASA TCDS EASA.A.084, the 2020 factsheet or
@@ -343,18 +416,35 @@ pub fn atr72_600() -> AircraftPreset {
                 nose_windshield_angle_deg: Some(38.6),
                 nose_crown_end_fraction: Some(1.0),
                 nose_radome_length_fraction: Some(0.21),
+                // Needs data: the real ATR 72-600 nose is flat-bottomed (ARM point B 0.54 m above ground, ATR 42/72 ARM 1-10-06 Fig. 1-28, not on disk), while the
+                // loft's nose bottom sits 0.8 m above the belly. The nose law here is fitted to the side view and has no lower-nose section data; a drawn nose-bottom outline (or a
+                // sourced nose section table) is needed before the keel law can be re-fitted.
                 nose_keel_exponent: Some(2.91),
                 nose_plan_exponent: Some(1.8),
                 nose_section_exponent: Some(2.0),
                 belly_upsweep_length_m: Some(7.3),
+                // Needs data: the aft lower contour (belly ramp, frames 38-39 where the tail skid sits) is not on disk; no drawing shows this loft wrong.
+                // The 8 deg tip-back floor is a take-off/landing skid attitude (UK AAIB Bulletin 8/2006, D-ANFH, p.3), not the static gear-compressed angle
+                // (model 6.9 deg), so the two are not a contour gap; a gear-compressed tail-strike attitude from a primary ATR or investigation source is
+                // the comparison still wanted. Neither this exponent nor the 8 deg floor is a tuning lever.
                 aft_belly_exponent: Some(1.42),
                 tail_end_z_m: Some(0.64),
                 tail_end_width_m: Some(0.38),
                 tail_end_height_m: Some(0.5),
+                // D: side view x 9.5 to 15.4 m, bottom z -1.7 m against the keel at -1.32 m;
+                // front view lobes to y 1.82 m at the 2.865 m hull width. Parasite drag only, not built.
+                gear_sponson_length_m: Some(5.9),
+                gear_sponson_half_width_m: Some(1.82),
+                gear_sponson_depth_m: Some(0.38),
                 aft_plan_length_m: Some(8.7),
                 aft_plan_exponent: Some(1.0),
                 aft_crown_length_m: Some(6.44),
                 aft_crown_exponent: Some(1.0),
+                // Cabin section: floor 2.04 m below the inner cabin crown on ATR's cabin cross-section (EWADE 2011 p. 5) plus the loft's own 0.074 m of skin ((2.718 m outer height - 2.570 m inner circle) / 2); the class section leaves no underfloor hold; cabin-datum-evidence.md.
+                // Needs data: the floor datum here (2.114 m below the crown) gives a main floor about 2.0 m above the registered plane, while the ATR 72 ARM
+                // door-sill points D (1.67 m) and E (1.42 m) (not on disk) imply a floor 0.2 to 0.74 m lower depending on the door. Re-deriving the floor depth needs the
+                // measured section floor line (S1/05 datum); the EWADE 2011 value above is not revised without it.
+                cabin_section: Some(crate::CabinSectionConfig { cabin_widths: Some(crate::CabinWidthsConfig { armrest_m: 2.559, shoulder_m: 2.509 }), floor_below_crown_m: Some(2.114), hold: None }),
                 ..FuselageConfig::default()
             },
             engine,
@@ -371,8 +461,8 @@ pub fn atr72_600() -> AircraftPreset {
             num_passengers: 72,
             cargo_payload_kg: 7_550.0,
             max_structural_payload_kg: 7_550.0,
-            // Preliminary-design VD consistent with the ATR transport-speed
-            // envelope; retained as a modelling input, not an AFM limitation.
+            // Superseded at registration: the profile declares the TCDS VMO/MMO, so VD is the
+            // CS 25.335(b) value on VC = VMO (`crate::design_speeds`, `registry`).
             dive_speed_m_s: 150.0,
             ..DesignRequirements::default()
         },
@@ -399,10 +489,10 @@ mod tests {
         let h_x = length - e.hstab_offset_from_tail_m;
         let v_x = length - e.vstab_offset_from_tail_m;
         // Builder's nominal tail_scale=1, tail_x_shift=0 coordinates.
-        assert!((h_x - (v_x + e.vstab_tip_le_m.0)).abs() < 1e-10);
-        // geo/close: tailplane 0.6 m below the fin top (cap above), x seat only
-        assert!((e.hstab_z_m - (e.vstab_z_m + e.vstab_tip_le_m.2 - 0.60)).abs() < 1e-10);
-        // geo/tailfit: the drawn fin tip chord (2.42 m) exceeds the drawn tailplane root chord (2.0 m);
+        assert!((h_x - (v_x + e.vstab_tip_le_m.0)).abs() < 0.10);
+        // Tailplane 0.75 m below the fin top (cap above), x seat only
+        assert!((e.hstab_z_m - (e.vstab_z_m + e.vstab_tip_le_m.2 - 0.75)).abs() < 1e-10);
+        // tail fit: the drawn fin tip chord (2.16 m) exceeds the drawn tailplane root chord (1.95 m);
         // the T-tail rule only seats the tailplane root LE on the fin tip LE, so the chords are free.
         assert!(e.hstab_root_chord_m > 0.0 && e.vstab_tip_chord_m > 0.0);
         assert!((e.hstab_z_m - 4.85).abs() < 0.3);

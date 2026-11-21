@@ -75,18 +75,25 @@ pub fn draw_colorbar(
     });
 }
 
+/// One decimal count for all three ticks, set by the half-span so adjacent ticks differ
+/// in their second significant digit: no crowding, no mixed precision.
 fn format_colorbar_tick(value: f64, vmin: f64, vmax: f64) -> String {
-    let magnitude = vmin.abs().max(vmax.abs()).max(value.abs());
-    let decimals = if magnitude >= 1_000.0 {
-        0
-    } else if magnitude >= 100.0 {
-        1
-    } else if magnitude >= 10.0 {
-        2
+    let half_span = (vmax - vmin).abs() * 0.5;
+    let decimals = if half_span.is_finite() && half_span > 0.0 {
+        (1.0 - half_span.log10().floor()).clamp(0.0, 4.0) as usize
     } else {
-        3
+        2
     };
-    format!("{value:.decimals$}")
+    let text = format!("{value:.decimals$}");
+    if text
+        .trim_start_matches('-')
+        .chars()
+        .all(|c| c == '0' || c == '.')
+    {
+        format!("{:.decimals$}", 0.0)
+    } else {
+        text
+    }
 }
 
 fn title_case_label(label: &str) -> String {
@@ -311,4 +318,63 @@ fn note_legend_rows(scene: &mut Scene, entries: &[(String, LegendMarker)]) {
         };
         scene.data_trace.note_legend(label, &color);
     }
+}
+
+/// Draw one row of legend entries that start at `pos` and follow each other,
+/// each a colour swatch and its label as given (no case change). Returns the x
+/// where the row ends so a caller can place a note after it.
+///
+/// The widths are estimates (the scene has no text measurement); the row is the
+/// caller's to keep inside the canvas.
+pub fn draw_inline_legend(
+    scene: &mut Scene,
+    pos: Point2D,
+    entries: &[(String, LegendMarker)],
+    pal: &Palette,
+    font_size: f64,
+) -> f64 {
+    note_legend_rows(scene, entries);
+    let _chrome = crate::plot_data::ChromeGuard::begin();
+    let mut x = pos[0];
+    let mid_y = pos[1];
+    for (label, marker) in entries {
+        match marker {
+            LegendMarker::Line(stroke) => scene.add(SceneElement::Line {
+                p1: [x, mid_y],
+                p2: [x + 22.0, mid_y],
+                stroke: stroke.clone(),
+            }),
+            LegendMarker::Patch(color) => scene.add(SceneElement::Rect {
+                x,
+                y: mid_y - font_size * 0.4,
+                width: 16.0,
+                height: font_size * 0.8,
+                rx: 1.0,
+                fill: Some(Fill::new(*color)),
+                stroke: None,
+            }),
+            LegendMarker::Circle(color) => scene.add(SceneElement::Circle {
+                center: [x + 8.0, mid_y],
+                radius: 4.5,
+                fill: Some(Fill::new(*color)),
+                stroke: None,
+            }),
+        }
+        scene.add(SceneElement::Text {
+            text: label.clone(),
+            pos: [x + 28.0, mid_y],
+            font_size,
+            color: Color::from_hex(pal.tick),
+            align: TextAlign::Left,
+            baseline: TextBaseline::Middle,
+            angle_deg: 0.0,
+            bold: false,
+        });
+        // The label's width in px: the font size is in points. The gap
+        // before the next swatch is wide enough to read as a gap.
+        x += 28.0
+            + label.chars().count() as f64 * font_size * crate::scene::CSS_PIXELS_PER_POINT * 0.56
+            + 30.0;
+    }
+    x
 }

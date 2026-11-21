@@ -32,7 +32,10 @@
 
 use alas_math::hybrd::{self, Settings, Status};
 
+use crate::envelope::{ENVELOPE_TOLERANCE, LOWEST_COMMAND};
 use crate::segments::{MissionAnalyses, Segment, SegmentError, SegmentSpec};
+
+mod rating;
 
 /// How one segment's solve came out.
 #[derive(Debug, Clone, PartialEq)]
@@ -169,6 +172,7 @@ pub fn converge_root(
 
     let solution = {
         let segment = &mut *segment;
+        let mut memo = crate::PointMemo::new(analyses, segment.conditions.len());
         hybrd::solve(
             |point, residual| {
                 segment.unpack_unknowns(point);
@@ -180,7 +184,7 @@ pub fn converge_root(
                 // Jacobian column vanishes and `hybrd` stalls rather than
                 // reporting the shortfall. The envelope is enforced after the
                 // solve.
-                segment.iterate(analyses);
+                segment.iterate_with(&mut memo);
                 residual.copy_from_slice(&segment.pack_residuals());
             },
             &start,
@@ -193,6 +197,9 @@ pub fn converge_root(
     })?;
 
     segment.unpack_unknowns(&solution.x);
+    if segment.is_rating_limited() {
+        return rating::settle_on_rating(segment, analyses, solution, &start, &settings);
+    }
     // The *requested* peak, read before the clamp below and before the final
     // `iterate` writes deliverable commands into `conditions`. The published
     // conditions are clamped on purpose - an engine cannot be shown running
@@ -211,14 +218,17 @@ pub fn converge_root(
         .copied()
         .filter(|throttle| throttle.is_finite())
         .fold(f64::NAN, f64::min);
+    // The ceiling is one force either way: the maximum-climb force, or on a take-off-rated leg
+    // (`takeoff_rated`) the take-off rating's at the point.
+    let limit = 1.0;
     let requested_above_limit = segment
         .throttle
         .iter()
-        .any(|throttle| throttle.is_finite() && *throttle > 1.0);
+        .any(|throttle| throttle.is_finite() && *throttle > limit + ENVELOPE_TOLERANCE);
     let requested_throttle = segment.throttle.clone();
     if analyses.enforce_throttle_envelope {
         for throttle in &mut segment.throttle {
-            *throttle = throttle.clamp(0.0, 1.0);
+            *throttle = throttle.clamp(LOWEST_COMMAND, limit);
         }
     }
     segment.iterate(analyses);
@@ -234,7 +244,7 @@ pub fn converge_root(
         .iter()
         .zip(segment.conditions.available_throttle_floor.iter())
         .filter(|(throttle, floor)| {
-            throttle.is_finite() && floor.is_finite() && **throttle < **floor
+            throttle.is_finite() && floor.is_finite() && **throttle < **floor - ENVELOPE_TOLERANCE
         })
         .fold((0_usize, f64::NAN), |(count, worst), (_, floor)| {
             (count + 1, worst.max(*floor))
@@ -246,7 +256,14 @@ pub fn converge_root(
             .conditions
             .throttle
             .iter()
-            .all(|throttle| throttle.is_finite() && *throttle >= 0.0 && *throttle <= 1.0);
+            .zip(segment.conditions.available_throttle_floor.iter())
+            .all(|(throttle, floor)| {
+                // The lowest command is zero, or the negative floor where the engine's
+                // flight-idle net force is a drag.
+                throttle.is_finite()
+                    && *throttle >= floor.min(0.0) - ENVELOPE_TOLERANCE
+                    && *throttle <= limit + ENVELOPE_TOLERANCE
+            });
     // A root the solver could only reach by asking for a force the aeroplane
     // cannot produce is not a flown segment, and that holds at *both* bounds:
     // the force is continued outside the deck's domain, so such a root exists
@@ -278,7 +295,7 @@ pub fn converge_root(
                 .conditions
                 .throttle
                 .iter()
-                .any(|throttle| throttle.is_finite() && *throttle >= 1.0 - 1.0e-9));
+                .any(|throttle| throttle.is_finite() && *throttle >= limit - 1.0e-9));
     let idle_floor_limited = !converged && requested_below_limit;
     segment.numerics.converged = Some(converged);
     if !converged {
@@ -503,8 +520,31 @@ impl MissionResult {
             } else {
                 "did not converge"
             };
+            // Where it happened, and what would change it: a leg at the throttle
+            // limit is asking for more thrust than the rating has at that point.
+            let state = self
+                .segments
+                .get(index)
+                .map_or_else(String::new, |segment| {
+                    let middle =
+                        |values: &[f64]| values.get(values.len() / 2).copied().unwrap_or(f64::NAN);
+                    format!(
+                        " at {:.0} m, Mach {:.3}, load factor {:.2}",
+                        middle(&segment.conditions.altitude_m),
+                        middle(&segment.conditions.mach),
+                        segment.spec.load_factor,
+                    )
+                });
+            let remedy = if solution.throttle_limited {
+                format!(
+                    "; the leg needs {:.2} times the thrust of its rating, so lower its load factor, altitude or speed, or raise the installed thrust",
+                    solution.peak_throttle
+                )
+            } else {
+                String::new()
+            };
             return Some(format!(
-                "segment {} of {} ({tag}) {cause} ({:?}, {} residual evaluations, peak throttle {:.3})",
+                "segment {} of {} ({tag}) {cause}{state} ({:?}, {} residual evaluations, peak throttle {:.3}){remedy}",
                 index + 1,
                 self.scheduled_segment_count,
                 solution.status,
@@ -561,7 +601,7 @@ impl MissionResult {
     fn physical_summary(&self) -> Option<CompletedMissionSummary> {
         let takeoff_mass_kg = self.initial_mass_kg();
         let landing_mass_kg = self.final_mass_kg();
-        let trip_fuel_kg = takeoff_mass_kg - landing_mass_kg;
+        let trip_fuel_kg = self.fuel_burned_kg();
         let block_time_s = self.block_time_s();
         let distance_flown_m = self
             .segments
@@ -606,8 +646,30 @@ impl MissionResult {
     }
 
     /// Fuel burned over the whole mission, kg.
+    ///
+    /// Where every segment starts at the mass the one before it ended at, that
+    /// is the mass lost between the first and the last point. Where a payload
+    /// drop, a store or an air-to-air refuelling changed the mass between
+    /// segments, only the mass lost *within* segments is fuel, so those are
+    /// summed.
     pub fn fuel_burned_kg(&self) -> f64 {
-        self.initial_mass_kg() - self.final_mass_kg()
+        let first_last = |segment: &Segment| {
+            let mass = &segment.conditions.total_mass_kg;
+            (mass.first().copied(), mass.last().copied())
+        };
+        let continuous = self.segments.windows(2).all(|pair| {
+            matches!((first_last(&pair[0]).1, first_last(&pair[1]).0), (Some(end), Some(start)) if end == start)
+        });
+        if continuous {
+            return self.initial_mass_kg() - self.final_mass_kg();
+        }
+        self.segments
+            .iter()
+            .map(|segment| match first_last(segment) {
+                (Some(first), Some(last)) => first - last,
+                _ => 0.0,
+            })
+            .sum()
     }
 
     /// Total time in the air, seconds: the sum of the segment spans rather
@@ -639,55 +701,7 @@ impl Mission {
     /// [`MissionError::Setup`] if a segment could not be built and
     /// [`MissionError::Solver`] if the root finder would not start on one.
     pub fn evaluate(&self, analyses: &MissionAnalyses) -> Result<MissionResult, MissionError> {
-        let mut segments = Vec::with_capacity(self.schedule.len());
-        let mut solutions = Vec::with_capacity(self.schedule.len());
-        let mut initials = None;
-        let mut fuel_exhaustion = None;
-
-        for (segment_index, spec) in self.schedule.iter().enumerate() {
-            let tag = spec.tag.clone();
-            let mut segment =
-                Segment::new(spec.clone(), initials).map_err(|source| MissionError::Setup {
-                    tag: tag.clone(),
-                    source,
-                })?;
-            let solution = converge_root(&mut segment, analyses)?;
-            segment.finalize();
-
-            if let Some(minimum_mass_kg) = analyses.minimum_mass_kg {
-                let crossing_mass_kg = segment
-                    .conditions
-                    .total_mass_kg
-                    .iter()
-                    .copied()
-                    .find(|mass| *mass < minimum_mass_kg);
-                if let Some(crossing_mass_kg) = crossing_mass_kg {
-                    fuel_exhaustion = Some(FuelExhaustion {
-                        segment_index,
-                        segment_tag: tag,
-                        available_fuel_kg: analyses.takeoff_mass_kg - minimum_mass_kg,
-                        burned_fuel_kg: analyses.takeoff_mass_kg - crossing_mass_kg,
-                        minimum_mass_kg,
-                    });
-                }
-            }
-
-            let next_initials = segment.initials_for_next();
-            let converged = solution.converged;
-            segments.push(segment);
-            solutions.push(solution);
-            if fuel_exhaustion.is_some() || !converged {
-                break;
-            }
-            initials = Some(next_initials);
-        }
-
-        Ok(MissionResult {
-            segments,
-            solutions,
-            scheduled_segment_count: self.schedule.len(),
-            fuel_exhaustion,
-        })
+        self.evaluate_with_changes(analyses, &[])
     }
 }
 
@@ -951,6 +965,13 @@ mod tests {
             true_course_rad: 0.0,
             temperature_deviation_k: 0.0,
             number_control_points: 4,
+            takeoff_rated: false,
+            rating_limited: false,
+            configuration_delta_cd: 0.0,
+            load_factor: 1.0,
+            entry_speed_m_s: 0.0,
+            exit_speed_m_s: 0.0,
+            speed_profile: Vec::new(),
         };
         let mut segment = Segment::new(spec, None)
             .unwrap_or_else(|error| panic!("a four-point cruise sets up: {error}"));

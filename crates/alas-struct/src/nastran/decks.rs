@@ -46,7 +46,7 @@ pub fn build_sol101_bulk(
 }
 
 /// [`build_sol101_bulk`] with the lift distributed by the trapezoid rule
-/// ([`elliptic_forces_by_y_trapezoid`]). The product solve uses this; the
+/// ([`elliptic_forces_by_y_consistent`]). The product solve uses this; the
 /// reference form stays for the frozen parity fixture.
 pub fn build_sol101_bulk_product(
     deck: &Deck,
@@ -83,7 +83,6 @@ fn build_sol101(
         .collect();
 
     let cases = loads::load_cases(req, cfg.additional_safety_factor);
-
     let mut out = vec![
         "SOL 101".to_string(),
         "CEND".to_string(),
@@ -125,6 +124,8 @@ fn build_sol101(
             &nid_y,
             semi_span,
             trapezoid,
+            deck,
+            node_index,
         ));
     }
 
@@ -148,6 +149,8 @@ fn load_case_cards(
     nid_y: &[(i64, f64)],
     semi_span: f64,
     trapezoid: bool,
+    deck: &Deck,
+    node_index: &MeshNodeIndex,
 ) -> Vec<String> {
     let gravity_magnitude = case.load_factor.abs() * req.gravity_m_s2;
     let lift_sign = case.lift_sign();
@@ -162,10 +165,25 @@ fn load_case_cards(
             free_field(gravity_sign)
         ),
     ];
-    for (nid, force) in distribute_elliptic(nid_y, case.total_force_n.abs(), semi_span, trapezoid) {
+    let distribution = if trapezoid {
+        super::forces::product_lift_forces(
+            deck,
+            node_index,
+            nid_y,
+            case.total_force_n,
+            loads::level_semi_wing_lift_n(req),
+            semi_span,
+        )
+    } else {
+        distribute_elliptic(nid_y, case.total_force_n.abs(), semi_span, false)
+            .into_iter()
+            .map(|(nid, force)| (nid, force * lift_sign))
+            .collect()
+    };
+    for (nid, force) in distribution {
         out.push(format!(
             "FORCE,{force_sid},{nid},0,{},0.,0.,1.",
-            free_field(force.abs() * lift_sign)
+            free_field(force)
         ));
     }
     out.push("$".to_string());

@@ -11,10 +11,12 @@
 //! and the word must not be written into the editor's own value suffix, or a
 //! numeric field would briefly render the non-numeric text "3.5  Modified".
 //!
-//! The marker is drawn once, in the field's label row beside the reset
-//! arrow, so it never overlaps a value, a combo-box arrow or a slider.
+//! The marker is drawn once, on the last line of the field's caption beside
+//! the reset arrow, so it never overlaps a value, a combo-box arrow or a
+//! slider. It is a dot in the success colour, the word on hover, so it fits
+//! the caption's `MARKER_ROOM` with the reset glyph.
 
-use egui::{RichText, Ui};
+use egui::{vec2, Sense, Ui, WidgetInfo, WidgetType};
 use serde_json::Value;
 
 use crate::theme::success_color;
@@ -25,20 +27,33 @@ use crate::views::tr;
 /// This is the same comparison the reset arrow uses, so the two affordances
 /// can never disagree about whether a field was modified.
 pub(super) fn differs_from_default(slot: &Value, default: &Value) -> bool {
-    slot != default
+    // `1` and `1.0` are the same quantity.
+    match (slot.as_f64(), default.as_f64()) {
+        (Some(a), Some(b)) if slot.is_number() && default.is_number() => a != b,
+        _ => slot != default,
+    }
 }
+
+/// Diameter of the dot that marks a modified field, pt.
+pub(crate) const MODIFIED_DOT: f32 = 7.0;
 
 /// Draw the marker for a field whose value differs from its default.
 pub(super) fn modified_marker(ui: &mut Ui, show: bool) {
     if !show {
         return;
     }
-    ui.label(
-        RichText::new(tr("Modified"))
-            .size(11.0)
-            .color(success_color(ui.visuals())),
-    )
-    .on_hover_text(tr("This value differs from the preset default."));
+    let (rect, response) = ui.allocate_exact_size(vec2(MODIFIED_DOT, MODIFIED_DOT), Sense::hover());
+    ui.painter().circle_filled(
+        rect.center(),
+        MODIFIED_DOT * 0.5,
+        success_color(ui.visuals()),
+    );
+    let word = tr("Modified");
+    response.widget_info(|| WidgetInfo::labeled(WidgetType::Label, true, &word));
+    response.on_hover_text(format!(
+        "{word}: {}",
+        tr("This value differs from the preset default.")
+    ));
 }
 
 #[cfg(test)]

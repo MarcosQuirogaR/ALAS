@@ -48,6 +48,63 @@ pub(super) fn design_point_nearest(
     }
 }
 
+/// The polar at exactly `cl_target`: the angle by linear interpolation
+/// between the two samples that bracket it, the drag by the quadratic through
+/// the bracketing pair and the next sample (the polar is a parabola in `CL`,
+/// so the sample spacing does not quantise the answer), and `CL / CD` for the
+/// lift-to-drag ratio. A target outside the sweep, or a sweep that is not
+/// monotone in lift or has non-finite values, falls back to
+/// [`design_point_nearest`].
+pub(super) fn design_point_at_cl(
+    polar: &PolarSweep,
+    cl_target: f64,
+) -> Result<DesignPoint, String> {
+    let n = polar.cl.len();
+    let aligned = [polar.alpha_deg.len(), polar.cd.len(), polar.l_over_d.len()]
+        .iter()
+        .all(|&len| len == n);
+    let finite = polar
+        .cl
+        .iter()
+        .chain(&polar.cd)
+        .chain(&polar.alpha_deg)
+        .all(|v| v.is_finite());
+    let rising = polar.cl.windows(2).all(|w| w[1] > w[0]);
+    if n < 3 || !aligned || !finite || !rising || !cl_target.is_finite() {
+        return design_point_nearest(polar, cl_target);
+    }
+    let Some(i) = (0..n - 1).find(|&i| polar.cl[i] <= cl_target && cl_target <= polar.cl[i + 1])
+    else {
+        return design_point_nearest(polar, cl_target);
+    };
+    let (c0, c1) = (polar.cl[i], polar.cl[i + 1]);
+    let t = (cl_target - c0) / (c1 - c0);
+    let alpha_deg = polar.alpha_deg[i] + t * (polar.alpha_deg[i + 1] - polar.alpha_deg[i]);
+    // Three samples for the parabola: the bracket plus its neighbour on the
+    // side with the nearer target.
+    let first = if i + 2 < n && (t >= 0.5 || i == 0) {
+        i
+    } else {
+        i - 1
+    };
+    let idx = [first, first + 1, first + 2];
+    let cd: f64 = (0..3)
+        .map(|a| {
+            let weight: f64 = (0..3)
+                .filter(|&b| b != a)
+                .map(|b| (cl_target - polar.cl[idx[b]]) / (polar.cl[idx[a]] - polar.cl[idx[b]]))
+                .product();
+            weight * polar.cd[idx[a]]
+        })
+        .sum();
+    Ok(DesignPoint {
+        alpha_deg,
+        cl: cl_target,
+        cd,
+        l_over_d: cl_target / cd,
+    })
+}
+
 #[cfg(test)]
 // Failed expectations and unwraps here are failed test assertions.
 #[allow(clippy::unwrap_used, clippy::expect_used)]
@@ -59,6 +116,7 @@ mod tests {
         PolarSweep {
             alpha_deg: (0..n).map(|i| i as f64 - 1.0).collect(),
             geometric_alpha_deg: vec![0.0; n],
+            compressible_mach: None,
             cl,
             cd: vec![0.02; n],
             cd_induced: vec![0.0; n],
@@ -67,6 +125,45 @@ mod tests {
             cm: vec![0.0; n],
             l_over_d: vec![0.0; n],
         }
+    }
+
+    #[test]
+    fn the_interpolated_design_point_is_exact_on_a_parabolic_polar() {
+        // CD = 0.02 + 0.05 (CL - 0.1)^2 on a coarse lift grid, alpha linear.
+        let cl = vec![-0.1, 0.1, 0.3, 0.5, 0.7, 0.9];
+        let mut polar = sweep(cl.clone());
+        polar.alpha_deg = cl.iter().map(|c| 10.0 * c).collect();
+        polar.cd = cl
+            .iter()
+            .map(|c| 0.02 + 0.05 * (c - 0.1) * (c - 0.1))
+            .collect();
+        for target in [0.12, 0.31, 0.45, 0.5, 0.88] {
+            let point = design_point_at_cl(&polar, target).unwrap();
+            assert_eq!(point.cl, target);
+            assert!((point.alpha_deg - 10.0 * target).abs() < 1e-12);
+            let cd = 0.02 + 0.05 * (target - 0.1) * (target - 0.1);
+            assert!(
+                (point.cd - cd).abs() < 1e-12,
+                "{target}: {} vs {cd}",
+                point.cd
+            );
+            assert!((point.l_over_d - target / cd).abs() < 1e-9);
+        }
+    }
+
+    #[test]
+    fn the_interpolated_design_point_falls_back_to_the_nearest_sample() {
+        let polar = sweep(vec![0.1, 0.3, 0.5]);
+        // Outside the sweep.
+        let beyond = design_point_at_cl(&polar, 0.9).unwrap();
+        assert_eq!(beyond.cl, 0.5);
+        // Not monotone in lift.
+        let ragged = sweep(vec![0.1, 0.5, 0.3, 0.6]);
+        assert_eq!(
+            design_point_at_cl(&ragged, 0.45).unwrap(),
+            design_point_nearest(&ragged, 0.45).unwrap()
+        );
+        assert!(design_point_at_cl(&sweep(Vec::new()), 0.5).is_err());
     }
 
     #[test]

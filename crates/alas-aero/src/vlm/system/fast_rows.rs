@@ -23,8 +23,9 @@ pub(super) struct Columns {
     pub(super) index: Vec<usize>,
     left: [Vec<f64>; 3],
     right: [Vec<f64>; 3],
-    wing_index: Vec<usize>,
+    core_component: Vec<super::CoreComponent>,
     leg_core_radius: Vec<f64>,
+    other_component_core_radius: Vec<f64>,
 }
 
 impl Columns {
@@ -43,8 +44,9 @@ impl Columns {
                 pick(&|s| s.right[1]),
                 pick(&|s| s.right[2]),
             ],
-            wing_index: indices.iter().map(|&j| sources[j].wing_index).collect(),
+            core_component: indices.iter().map(|&j| sources[j].core_component).collect(),
             leg_core_radius: pick(&|s| s.leg_core_radius),
+            other_component_core_radius: pick(&|s| s.other_component_core_radius),
             index: indices,
         }
     }
@@ -63,10 +65,10 @@ pub(super) struct RowScratch {
 }
 
 /// Velocity of every source in `columns` (strength `gamma`, strength constant
-/// `constant = gamma / (4 pi)`) at `field`, a point of wing `field_wing`.
+/// `constant = gamma / (4 pi)`) at `field`, a point of core component `field_component`.
 pub(super) fn evaluate_row(
     field: [f64; 3],
-    field_wing: usize,
+    field_component: super::CoreComponent,
     columns: &Columns,
     (gamma, constant): (f64, f64),
     scratch: &mut RowScratch,
@@ -75,10 +77,17 @@ pub(super) fn evaluate_row(
     scratch.core.clear();
     scratch.core.extend(
         columns
-            .wing_index
+            .core_component
             .iter()
-            .zip(&columns.leg_core_radius)
-            .map(|(&wing, &core)| if wing == field_wing { 0.0 } else { core }),
+            .zip(
+                columns
+                    .leg_core_radius
+                    .iter()
+                    .zip(&columns.other_component_core_radius),
+            )
+            .map(|(&component, (&within, &between))| {
+                super::core_seen(field_component, component, within, between)
+            }),
     );
     for axis in &mut scratch.velocity {
         axis.clear();

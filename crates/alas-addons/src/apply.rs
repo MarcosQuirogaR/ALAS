@@ -110,30 +110,7 @@ pub fn plan(
         let value = *outputs
             .get(&spec.name)
             .ok_or_else(|| AddonError::Apply(format!("output `{}` was not produced", spec.name)))?;
-        let target = Target::parse(target_text).map_err(AddonError::Apply)?;
-        let before =
-            match &target {
-                Target::Config(pointer) => {
-                    let parent = pointer.rsplit_once('/').map_or("", |(parent, _)| parent);
-                    if !config.pointer(parent).is_some_and(Value::is_object) {
-                        return Err(AddonError::Apply(format!(
-                            "target `{target_text}` does not exist in this configuration"
-                        )));
-                    }
-                    match config.pointer(pointer) {
-                        None | Some(Value::Null) => None,
-                        Some(Value::Number(number)) => number.as_f64(),
-                        Some(_) => {
-                            return Err(AddonError::Apply(format!(
-                                "target `{target_text}` is not a number"
-                            )))
-                        }
-                    }
-                }
-                Target::Design(name) => Some(*design.get(name).ok_or_else(|| {
-                    AddonError::Apply(format!("`{name}` is not a design variable"))
-                })?),
-            };
+        let before = current_value(target_text, config, design)?;
         rows.push(PlannedChange {
             addon: manifest.name.clone(),
             version: manifest.version.clone(),
@@ -145,6 +122,100 @@ pub fn plan(
         });
     }
     Ok(rows)
+}
+
+/// The value a target holds now; `None` when a configuration field is unset.
+fn current_value(
+    target_text: &str,
+    config: &Value,
+    design: &BTreeMap<String, f64>,
+) -> Result<Option<f64>, AddonError> {
+    match Target::parse(target_text).map_err(AddonError::Apply)? {
+        Target::Config(pointer) => {
+            let parent = pointer.rsplit_once('/').map_or("", |(parent, _)| parent);
+            if !config.pointer(parent).is_some_and(Value::is_object) {
+                return Err(AddonError::Apply(format!(
+                    "target `{target_text}` does not exist in this configuration"
+                )));
+            }
+            match config.pointer(&pointer) {
+                None | Some(Value::Null) => Ok(None),
+                Some(Value::Number(number)) => Ok(number.as_f64()),
+                Some(_) => Err(AddonError::Apply(format!(
+                    "target `{target_text}` is not a number"
+                ))),
+            }
+        }
+        Target::Design(name) => design
+            .get(&name)
+            .copied()
+            .map(Some)
+            .ok_or_else(|| AddonError::Apply(format!("`{name}` is not a design variable"))),
+    }
+}
+
+/// Largest overlay file read, bytes.
+const MAX_OVERLAY_BYTES: u64 = 1024 * 1024;
+
+/// Read a configuration-overlay file: a JSON object of target to number
+/// (`{"mass_model.some_field": 0.11, "design_vector.span_m": 60.0}`), the
+/// same targets a manifest output may name.
+pub fn read_overlay(path: &std::path::Path) -> Result<BTreeMap<String, f64>, AddonError> {
+    let io = |error: std::io::Error| AddonError::Io(format!("{}: {error}", path.display()));
+    if std::fs::metadata(path).map_err(io)?.len() > MAX_OVERLAY_BYTES {
+        return Err(AddonError::Apply(format!(
+            "overlay {} is larger than 1 MiB",
+            path.display()
+        )));
+    }
+    let text = std::fs::read_to_string(path).map_err(io)?;
+    let value: Value = serde_json::from_str(&text)
+        .map_err(|error| AddonError::Apply(format!("overlay is not valid JSON: {error}")))?;
+    let object = value
+        .as_object()
+        .ok_or_else(|| AddonError::Apply("overlay must be a JSON object".to_owned()))?;
+    let mut overlay = BTreeMap::new();
+    for (target, value) in object {
+        Target::parse(target).map_err(AddonError::Apply)?;
+        let number = value
+            .as_f64()
+            .filter(|number| number.is_finite())
+            .ok_or_else(|| {
+                AddonError::Apply(format!(
+                    "overlay value for `{target}` is not a finite number"
+                ))
+            })?;
+        overlay.insert(target.clone(), number);
+    }
+    if overlay.is_empty() {
+        return Err(AddonError::Apply("the overlay sets nothing".to_owned()));
+    }
+    Ok(overlay)
+}
+
+/// Before/after rows for a configuration overlay. The rows go through the same
+/// preview, validation, apply and provenance path as targeted outputs.
+pub fn plan_overlay(
+    addon: &str,
+    version: &str,
+    overlay: &BTreeMap<String, f64>,
+    config: &Value,
+    design: &BTreeMap<String, f64>,
+) -> Result<Vec<PlannedChange>, AddonError> {
+    overlay
+        .iter()
+        .map(|(target, &after)| {
+            Ok(PlannedChange {
+                addon: addon.to_owned(),
+                version: version.to_owned(),
+                output: target.clone(),
+                unit: String::new(),
+                target: target.clone(),
+                before: current_value(target, config, design)?,
+                after,
+            })
+        })
+        .collect()
 }
 
 /// Accepts or refuses a candidate design before it is committed. Receives the
@@ -326,6 +397,37 @@ name = "shown"
         let json = provenance_json(&rows);
         let parsed: Value = serde_json::from_str(&json).unwrap();
         assert_eq!(parsed["set_by_addon"][0]["addon_version"], json!("2.0"));
+    }
+
+    #[test]
+    fn an_overlay_file_plans_the_same_rows_as_targeted_outputs() {
+        let path = std::env::temp_dir().join(format!("alas-overlay-{}.json", std::process::id()));
+        std::fs::write(
+            &path,
+            r#"{"mass.override_kg": 99.5, "design_vector.span_m": 61.0}"#,
+        )
+        .unwrap();
+        let overlay = read_overlay(&path).unwrap();
+        let config = json!({"mass": {"override_kg": 1.0}});
+        let rows = plan_overlay("Demo", "2.0", &overlay, &config, &design()).unwrap();
+        assert_eq!(rows.len(), 2);
+        assert_eq!(rows[0].target, "design_vector.span_m");
+        assert_eq!((rows[0].before, rows[0].after), (Some(50.0), 61.0));
+        assert_eq!((rows[1].before, rows[1].after), (Some(1.0), 99.5));
+        let mut next = config.clone();
+        let mut vars = design();
+        let accept = |_: &Value, _: &BTreeMap<String, f64>| Ok(());
+        let records = apply(&rows, &mut next, &mut vars, &accept).unwrap();
+        assert!(records[0]
+            .provenance_line()
+            .contains("set by add-on Demo 2.0"));
+        assert_eq!(next["mass"]["override_kg"], json!(99.5));
+        // Malformed overlays are refused, never half-read.
+        for bad in ["[1]", r#"{"a..b": 1}"#, r#"{"mass.x": "text"}"#, "{}"] {
+            std::fs::write(&path, bad).unwrap();
+            assert!(read_overlay(&path).is_err(), "{bad}");
+        }
+        let _ = std::fs::remove_file(&path);
     }
 
     #[test]

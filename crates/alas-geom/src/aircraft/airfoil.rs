@@ -70,7 +70,7 @@ const DEFAULT_N_POINTS_PER_SIDE: usize = 200;
 /// [`Airfoil::lower_coordinates`] assume. Nothing in this module enforces
 /// that order; it is a precondition inherited from upstream, which does not
 /// enforce it either.
-#[derive(Debug, Clone, PartialEq)]
+#[derive(serde::Serialize, serde::Deserialize, Debug, Clone, PartialEq)]
 pub struct Airfoil {
     /// The airfoil's name, e.g. `"naca2412"`.
     pub name: String,

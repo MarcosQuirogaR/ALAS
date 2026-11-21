@@ -41,12 +41,22 @@ pub(super) fn wing_bays(kind: TankKind, cell: &WingTankConfig) -> Vec<WingBay> {
     if !feed.enabled {
         return vec![whole];
     }
+    let host = kind.id_prefix().trim_start_matches("wing_");
+    if feed.span_start_fraction <= cell.span_start_fraction
+        && feed.span_end_fraction >= cell.span_end_fraction
+    {
+        // The whole cell feeds an engine: one feed bay, no transfer bay.
+        return vec![WingBay {
+            kind: TankKind::WingFeed,
+            id_stem: format!("{}_{host}", TankKind::WingFeed.id_prefix()),
+            ..whole
+        }];
+    }
     let (transfer_start, transfer_end) = if feed.span_start_fraction <= cell.span_start_fraction {
         (feed.span_end_fraction, cell.span_end_fraction)
     } else {
         (cell.span_start_fraction, feed.span_start_fraction)
     };
-    let host = kind.id_prefix().trim_start_matches("wing_");
     vec![
         WingBay {
             span_start_fraction: transfer_start,

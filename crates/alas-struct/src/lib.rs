@@ -45,6 +45,7 @@ pub mod non_optimum;
 pub mod op2;
 pub mod scope;
 pub mod sizing;
+pub mod span_load;
 pub mod tanks;
 pub mod torque_sources;
 pub mod torsion;

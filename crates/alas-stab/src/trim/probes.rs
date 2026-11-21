@@ -9,6 +9,7 @@ use std::sync::{Arc, Mutex};
 pub(super) struct TrimAssembly<'a> {
     pub(super) analysis: &'a AnalysisConfig,
     cache: Option<&'a Arc<Mutex<VlmGeometryCache>>>,
+    reference_compatibility: bool,
 }
 
 impl<'a> TrimAssembly<'a> {
@@ -16,10 +17,44 @@ impl<'a> TrimAssembly<'a> {
         analysis: &'a AnalysisConfig,
         cache: Option<&'a Arc<Mutex<VlmGeometryCache>>>,
     ) -> Self {
-        Self { analysis, cache }
+        Self {
+            analysis,
+            cache,
+            reference_compatibility: false,
+        }
+    }
+
+    /// The frozen reference lattice of [`assemble_reference_compatibility`],
+    /// uncached.
+    pub(super) fn reference_compatibility(analysis: &'a AnalysisConfig) -> Self {
+        Self {
+            analysis,
+            cache: None,
+            reference_compatibility: true,
+        }
+    }
+
+    /// Whether trial incidences may first be iterated on one reference
+    /// lattice (see `normal_rotation`): the cached product lattice only. The
+    /// frozen compatibility form keeps its historical iteration.
+    pub(super) fn rotates_normals(&self) -> bool {
+        self.cache.is_some() && !self.reference_compatibility
+    }
+
+    /// The persistent companion of this assembly's cache for the family of
+    /// stretched lattices, or `None` for an uncached assembly.
+    pub(super) fn companion_cache(&self) -> Option<Arc<Mutex<VlmGeometryCache>>> {
+        let mut cache = self
+            .cache?
+            .lock()
+            .unwrap_or_else(std::sync::PoisonError::into_inner);
+        Some(cache.companion())
     }
 
     pub(super) fn assemble<'p>(&self, airplane: &'p Airplane) -> Result<VlmSystem<'p>, VlmError> {
+        if self.reference_compatibility {
+            return assemble_reference_compatibility(airplane, self.analysis);
+        }
         let Some(cache) = self.cache else {
             return assemble(airplane, self.analysis);
         };
@@ -64,6 +99,20 @@ pub(crate) fn assemble<'a>(
     )
 }
 
+/// [`assemble`] with the frozen reference lattice
+/// ([`VlmSystem::assemble_reference_compatibility`]): the parity form's
+/// mesh. For parity fixtures only.
+pub(crate) fn assemble_reference_compatibility<'a>(
+    airplane: &'a Airplane,
+    analysis: &AnalysisConfig,
+) -> Result<VlmSystem<'a>, VlmError> {
+    VlmSystem::assemble_reference_compatibility(
+        airplane,
+        resolution(analysis.spanwise_resolution),
+        resolution(analysis.chordwise_resolution),
+    )
+}
+
 /// The configuration's `i64` mesh resolution as the `usize` [`VlmSystem::assemble`]
 /// takes: floored at one, as `alas-aero::analysis` does: a zero or negative
 /// resolution is not a mesh, and both fields are documented multipliers of at
@@ -94,8 +143,9 @@ pub(crate) fn hstab(airplane: &Airplane) -> Option<&Wing> {
 }
 
 /// A clone of `airplane` with every [`HSTAB_NAME`] section's twist set to
-/// `twist_deg`: the rigid stabilizer perturbation, on a copy. See the module
-/// doc for why this is a clone rather than a mutate-and-restore.
+/// `twist_deg`: the rigid stabilizer perturbation, on a copy, about each
+/// section's own spanwise axis (the frozen compatibility form). See the
+/// module doc for why this is a clone rather than a mutate-and-restore.
 pub(super) fn with_hstab_twist(airplane: &Airplane, twist_deg: f64) -> Airplane {
     let mut plane = airplane.clone();
     for wing in plane.wings.iter_mut().filter(|w| w.name == HSTAB_NAME) {
@@ -104,6 +154,36 @@ pub(super) fn with_hstab_twist(airplane: &Airplane, twist_deg: f64) -> Airplane 
         }
     }
     plane
+}
+
+/// [`with_hstab_twist`] with the incidence measured in the plane of symmetry
+/// (`Wing::twist_about_pitch_axis`), the product stabilizer setting: each
+/// chord stays in its `xz` plane, so the two halves never cross at the root.
+pub(super) fn with_hstab_incidence(airplane: &Airplane, incidence_deg: f64) -> Airplane {
+    let mut plane = with_hstab_twist(airplane, incidence_deg);
+    for wing in plane.wings.iter_mut().filter(|w| w.name == HSTAB_NAME) {
+        wing.twist_about_pitch_axis = true;
+    }
+    plane
+}
+
+/// Whether `airplane` already is [`with_hstab_incidence`] at `incidence_deg`:
+/// every stabilizer section at that twist and, unless the surface already
+/// twists about the pitch axis, no dihedral, where both axes coincide. The
+/// base probes then serve as the incidence derivative's reference solve.
+pub(super) fn is_at_hstab_incidence(airplane: &Airplane, incidence_deg: f64) -> bool {
+    airplane
+        .wings
+        .iter()
+        .filter(|w| w.name == HSTAB_NAME)
+        .all(|wing| {
+            wing.xsecs.iter().all(|xsec| xsec.twist == incidence_deg)
+                && (wing.twist_about_pitch_axis
+                    || wing
+                        .xsecs
+                        .windows(2)
+                        .all(|pair| pair[1].xyz_le[2] == pair[0].xyz_le[2]))
+        })
 }
 
 /// Refine the closed-form trim estimate against the nonlinear VLM residuals.
@@ -128,19 +208,91 @@ pub(super) fn refine_trim(
     mut alpha_deg: f64,
     mut incidence_deg: f64,
     body_cm_per_deg: f64,
-) -> Result<(f64, f64, bool), VlmError> {
+    jacobian_at_trim: bool,
+) -> Result<RefinedTrim, VlmError> {
     const MAX_ITERATIONS: usize = 8;
     const RESIDUAL_TOLERANCE: f64 = 1.0e-7;
     const ALPHA_STEP_DEG: f64 = 0.1;
     const INCIDENCE_STEP_DEG: f64 = 0.1;
     const MAX_UPDATE_DEG: f64 = 5.0;
 
+    let unsettled = |alpha_deg, incidence_deg| RefinedTrim {
+        alpha_deg,
+        incidence_deg,
+        converged: false,
+        jacobian: None,
+    };
     if !alpha_deg.is_finite() || !incidence_deg.is_finite() || !cl_target.is_finite() {
-        return Ok((alpha_deg, incidence_deg, false));
+        return Ok(unsettled(alpha_deg, incidence_deg));
     }
+    if assembly.rotates_normals() && alas_aero::vlm::speed::normal_rotation_trim() {
+        if let Some(settled) = super::normal_rotation::refine(
+            airplane,
+            assembly,
+            cl_target,
+            atmosphere,
+            velocity,
+            alpha_deg,
+            incidence_deg,
+            body_cm_per_deg,
+            jacobian_at_trim,
+        )? {
+            return Ok(settled);
+        }
+    }
+    let (start_alpha_deg, start_incidence_deg) = (alpha_deg, incidence_deg);
+    // The Newton iteration stalled: the trim as a bracketed root, on the same
+    // plane-of-symmetry incidence setting, with the Jacobian at that root on
+    // the Newton steps when asked for.
+    let bracketed = |last: (f64, f64)| -> Result<RefinedTrim, VlmError> {
+        let lattice = |alpha_deg: f64, incidence_deg: f64| -> Result<(f64, f64), VlmError> {
+            let plane = with_hstab_incidence(airplane, incidence_deg);
+            let solved = probe(&assembly.assemble(&plane)?, atmosphere, velocity, alpha_deg)?;
+            Ok((
+                solved.cl_lift,
+                solved.cm_pitch + body_cm_per_deg * alpha_deg,
+            ))
+        };
+        let root = super::bracket::bracketed_trim::<VlmError>(
+            lattice,
+            cl_target,
+            start_alpha_deg,
+            start_incidence_deg,
+            RESIDUAL_TOLERANCE,
+        )?;
+        let Some((alpha_deg, incidence_deg)) = root else {
+            return Ok(unsettled(last.0, last.1));
+        };
+        let jacobian = if jacobian_at_trim {
+            let (cl, cm) = lattice(alpha_deg, incidence_deg)?;
+            let (cl_a, cm_a) = lattice(alpha_deg + ALPHA_STEP_DEG, incidence_deg)?;
+            let (cl_i, cm_i) = lattice(alpha_deg, incidence_deg + INCIDENCE_STEP_DEG)?;
+            // `lattice` includes the body slope in both moment probes; the
+            // alpha row keeps it, as on the converged Newton path.
+            Some([
+                [
+                    (cl_a - cl) / ALPHA_STEP_DEG,
+                    (cl_i - cl) / INCIDENCE_STEP_DEG,
+                ],
+                [
+                    (cm_a - cm) / ALPHA_STEP_DEG,
+                    (cm_i - cm) / INCIDENCE_STEP_DEG,
+                ],
+            ])
+            .filter(|rows: &[[f64; 2]; 2]| rows.iter().flatten().all(|v| v.is_finite()))
+        } else {
+            None
+        };
+        Ok(RefinedTrim {
+            alpha_deg,
+            incidence_deg,
+            converged: true,
+            jacobian,
+        })
+    };
 
     for _ in 0..MAX_ITERATIONS {
-        let at_incidence = with_hstab_twist(airplane, incidence_deg);
+        let at_incidence = with_hstab_incidence(airplane, incidence_deg);
         let at_incidence = assembly.assemble(&at_incidence)?;
         let base = probe(&at_incidence, atmosphere, velocity, alpha_deg)?;
         let residual_cl = base.cl_lift - cl_target;
@@ -149,7 +301,46 @@ pub(super) fn refine_trim(
             && residual_cm.is_finite()
             && residual_cl.abs().max(residual_cm.abs()) <= RESIDUAL_TOLERANCE
         {
-            return Ok((alpha_deg, incidence_deg, true));
+            // The derivatives at the trimmed state itself, on the same steps
+            // as the Newton iteration's: a consumer that moves the trim along
+            // its own Jacobian (a lift change at fixed CG) then errs at second
+            // order in the move, not at first order in the distance from the
+            // probe points to the trim.
+            let jacobian = if jacobian_at_trim {
+                let alpha_probe = probe(
+                    &at_incidence,
+                    atmosphere,
+                    velocity,
+                    alpha_deg + ALPHA_STEP_DEG,
+                )?;
+                drop(at_incidence);
+                let turned = with_hstab_incidence(airplane, incidence_deg + INCIDENCE_STEP_DEG);
+                let incidence_probe = probe(
+                    &assembly.assemble(&turned)?,
+                    atmosphere,
+                    velocity,
+                    alpha_deg,
+                )?;
+                Some([
+                    [
+                        (alpha_probe.cl_lift - base.cl_lift) / ALPHA_STEP_DEG,
+                        (incidence_probe.cl_lift - base.cl_lift) / INCIDENCE_STEP_DEG,
+                    ],
+                    [
+                        (alpha_probe.cm_pitch - base.cm_pitch) / ALPHA_STEP_DEG + body_cm_per_deg,
+                        (incidence_probe.cm_pitch - base.cm_pitch) / INCIDENCE_STEP_DEG,
+                    ],
+                ])
+                .filter(|rows: &[[f64; 2]; 2]| rows.iter().flatten().all(|v| v.is_finite()))
+            } else {
+                None
+            };
+            return Ok(RefinedTrim {
+                alpha_deg,
+                incidence_deg,
+                converged: true,
+                jacobian,
+            });
         }
 
         let alpha_probe = probe(
@@ -161,7 +352,7 @@ pub(super) fn refine_trim(
         // Both results own their data; release this geometry's kernel before
         // updating the cache for the incidence probe.
         drop(at_incidence);
-        let incidence_probe = with_hstab_twist(airplane, incidence_deg + INCIDENCE_STEP_DEG);
+        let incidence_probe = with_hstab_incidence(airplane, incidence_deg + INCIDENCE_STEP_DEG);
         let incidence_probe = probe(
             &assembly.assemble(&incidence_probe)?,
             atmosphere,
@@ -180,16 +371,16 @@ pub(super) fn refine_trim(
         ];
         let rhs = vec![vec![residual_cl], vec![residual_cm]];
         let Ok(update) = linalg::solve(&jacobian, &rhs) else {
-            return Ok((alpha_deg, incidence_deg, false));
+            return bracketed((alpha_deg, incidence_deg));
         };
         let Some(delta_alpha) = update.first().and_then(|row| row.first()).copied() else {
-            return Ok((alpha_deg, incidence_deg, false));
+            return bracketed((alpha_deg, incidence_deg));
         };
         let Some(delta_incidence) = update.get(1).and_then(|row| row.first()).copied() else {
-            return Ok((alpha_deg, incidence_deg, false));
+            return bracketed((alpha_deg, incidence_deg));
         };
         if !delta_alpha.is_finite() || !delta_incidence.is_finite() {
-            return Ok((alpha_deg, incidence_deg, false));
+            return bracketed((alpha_deg, incidence_deg));
         }
 
         let scale = 1.0_f64
@@ -198,11 +389,45 @@ pub(super) fn refine_trim(
         alpha_deg -= scale * delta_alpha;
         incidence_deg -= scale * delta_incidence;
         if !alpha_deg.is_finite() || !incidence_deg.is_finite() {
-            return Ok((alpha_deg, incidence_deg, false));
+            return bracketed((start_alpha_deg, start_incidence_deg));
         }
     }
 
-    Ok((alpha_deg, incidence_deg, false))
+    bracketed((alpha_deg, incidence_deg))
+}
+
+/// The result of [`refine_trim`]: the attitude, whether it met the residual
+/// tolerance, and, when asked for and converged, `[[dCL/dalpha, dCL/di_h],
+/// [dCm/dalpha, dCm/di_h]]` per degree at that attitude, on the lattice's own
+/// moment (the body slope included).
+#[derive(Debug, Clone, Copy, PartialEq)]
+pub(super) struct RefinedTrim {
+    pub(super) alpha_deg: f64,
+    pub(super) incidence_deg: f64,
+    pub(super) converged: bool,
+    pub(super) jacobian: Option<[[f64; 2]; 2]>,
+}
+
+/// The airplane the product stability functions solve: `airplane` with the
+/// horizontal tail at the dynamic-pressure ratio of a stated
+/// `analysis.tail_efficiency` unless the caller already gave it one (the
+/// pipelines that build the aircraft from a configuration do, from the stated
+/// value or from the geometry), so the trim, the drag and the neutral point carry
+/// one tail effectiveness whichever entry point is used.
+pub(crate) fn with_product_tail<'a>(
+    airplane: &'a Airplane,
+    analysis: &AnalysisConfig,
+) -> std::borrow::Cow<'a, Airplane> {
+    match analysis.tail_efficiency {
+        Some(stated)
+            if airplane.horizontal_tail_dynamic_pressure_ratio() == 1.0 && stated != 1.0 =>
+        {
+            let mut tailed = airplane.clone();
+            tailed.set_horizontal_tail_dynamic_pressure_ratio(stated);
+            std::borrow::Cow::Owned(tailed)
+        }
+        _ => std::borrow::Cow::Borrowed(airplane),
+    }
 }
 
 // A test asserts on values it constructed here directly, so a failed unwrap or

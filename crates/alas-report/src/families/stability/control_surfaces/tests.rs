@@ -110,8 +110,8 @@ fn a_real_probe_aircraft_with_a_vstab_draws_the_expected_polygon_count() {
             _ => None,
         })
         .collect();
-    assert!(texts.iter().any(|t| t.starts_with("Vh")));
-    assert!(texts.iter().any(|t| t.starts_with("Vv")));
+    assert!(texts.iter().any(|t| t.starts_with("V_H")));
+    assert!(texts.iter().any(|t| t.starts_with("V_V")));
 }
 
 #[test]
@@ -183,4 +183,33 @@ fn no_wings_renders_a_status_message_not_a_panic() {
         .elements
         .iter()
         .any(|e| matches!(e, SceneElement::Text { text, .. } | SceneElement::TextBlock { text, .. } if text.contains("geometry"))));
+}
+
+#[test]
+fn the_control_surface_top_view_labels_the_longitudinal_coordinate_not_its_negative() {
+    let axes = TopAxes::new((60.0, 70.0, 300.0, 460.0), (-10.0, 10.0), (2.0, 30.0));
+    assert!(axes.0.y_tick_negated);
+    // The nose (smaller X) is drawn above the tail.
+    assert!(axes.point(0.0, 2.0)[1] < axes.point(0.0, 30.0)[1]);
+}
+
+#[test]
+fn plot_data_names_every_surface_polygon() {
+    let report = probe_report(probe_airplane(true, true));
+    let config = AlasConfig::default();
+    let data = crate::plot_data::with_capture(|| {
+        let scene = figure_control_surfaces(&report, &config, Some("light"));
+        crate::plot_data::PlotData::from_scene(&scene, "control_surfaces", None).unwrap()
+    });
+    let names: Vec<&str> = data
+        .panels
+        .iter()
+        .flat_map(|p| p.series.iter().map(|s| s.name.as_str()))
+        .collect();
+    assert!(names.iter().all(|n| !n.starts_with("polygon")), "{names:?}");
+    assert!(
+        names.iter().any(|n| n.ends_with("planform +Y")),
+        "{names:?}"
+    );
+    assert!(names.contains(&"Rudder"), "{names:?}");
 }

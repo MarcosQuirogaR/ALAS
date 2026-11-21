@@ -364,7 +364,7 @@ fn neuralfoil_matches_the_nasa_eppler_387_data_inside_the_plan_thresholds() {
         }
     }
     // KNOWN WEAK SPOT: at 8 deg the network predicts the bubble drag rise 20-40 %
-    // too early (UAV-PLAN 3.1: bubble-dominated drag is the largest model risk).
+    // too early (bubble-dominated drag is the largest model risk).
     let p = section.eval(8.03_f64.to_radians(), 2.0e5, 0.05).unwrap();
     assert!(p.cd / 0.0174 > 1.2);
 }

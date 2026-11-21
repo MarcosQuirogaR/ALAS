@@ -9,7 +9,7 @@
 
 use super::AircraftPreset;
 
-const STANDARD_GRAVITY_M_S2: f64 = 9.806_65;
+const STANDARD_GRAVITY_M_S2: f64 = alas_atmo::STANDARD_GRAVITY;
 const KNOT_M_S: f64 = 1852.0 / 3600.0;
 
 /// Published minimum takeoff safety speed and the source condition supporting it.
@@ -50,6 +50,38 @@ pub fn published_takeoff_references() -> &'static [PublishedTakeoffReference] {
     &REFERENCES
 }
 
+/// Highest `V2 / VS1g` an Airbus type's take-off performance is computed to:
+/// Airbus, *Getting to Grips with Aircraft Performance* (January 2002),
+/// Appendix 2, sec. 2.3.1.2 "V2/VS Range", printed p. 194: "a too high V2
+/// speed requires long takeoff distances and leads to the reduction of climb
+/// performance ... the V2/VS ratio is limited to a maximum value (V2/VS
+/// maxi), which depends on aircraft type": 1.35 VS (A300/A310), 1.35 VS1g
+/// (A320 family), 1.40 VS1g (A330), 1.50 VS1g (A340). A type without a
+/// printed value takes the A320-family 1.35 VS1g, the lowest printed on the
+/// 1-g basis the model's `VSR` uses, so an overspeed the manufacturer would
+/// not schedule is reported as a climb limit rather than flown.
+pub const DEFAULT_V2_MAX_OVER_VS1G: f64 = 1.35;
+
+const V2_MAX_SOURCE: &str = "Airbus, Getting to Grips with Aircraft Performance (Jan 2002), App. 2 sec. 2.3.1.2, p. 194 (V2/VS maxi)";
+
+/// The printed `V2/VS maxi` of a registered type on the 1-g stall basis.
+const PUBLISHED_V2_MAX_OVER_VS1G: [(&str, f64); 2] = [("A320-200", 1.35), ("A340-300", 1.50)];
+
+/// The take-off overspeed limit `V2max / VS1g` of `preset` and its basis:
+/// the type's printed value, else [`DEFAULT_V2_MAX_OVER_VS1G`].
+pub fn v2_max_over_vs1g(preset: &str) -> (f64, String) {
+    match PUBLISHED_V2_MAX_OVER_VS1G
+        .iter()
+        .find(|(name, _)| *name == preset)
+    {
+        Some((name, limit)) => (*limit, format!("{name} V2/VS maxi, {V2_MAX_SOURCE}")),
+        None => (
+            DEFAULT_V2_MAX_OVER_VS1G,
+            format!("no printed value for the type: the A320-family V2/VS maxi, the lowest printed on the 1-g basis, {V2_MAX_SOURCE}"),
+        ),
+    }
+}
+
 /// Source minimum speed for one real-aircraft preset, when the condition is known.
 pub fn published_takeoff_reference(name: &str) -> Option<&'static PublishedTakeoffReference> {
     REFERENCES
@@ -60,11 +92,20 @@ pub fn published_takeoff_reference(name: &str) -> Option<&'static PublishedTakeo
 pub(super) fn apply(preset: &mut AircraftPreset) {
     if let Some(reference) = published_takeoff_reference(preset.name) {
         let performance = preset.performance.get_or_insert_with(Default::default);
-        // The model flies the effective V2/VSR of the CS 25.107 rule
-        // (selected factor, V2MIN 1.13 or 1.08 VSR, 1.10 VMC estimate), so
-        // the published V2 minimum is inverted with that ratio and the model
-        // reproduces it by construction.
-        let ratio = performance.takeoff_speed_ratios().v2;
+        // A published V2 minimum is the CS 25.107(b)(1) minimum, 1.13 VSR for a
+        // two-engine aeroplane, not the 1.20 VSR class selection: inverting with
+        // 1.20 overstated the coefficient by (1.20 / 1.13)^2 = 1.128 and gave the
+        // ATR 72-600 a take-off CLmax of 2.44 at flaps 15 for the same V2.
+        performance.v2_vstall_factor = performance.v2_min_vsr_factor;
+        // The model flies the V2/VSR of the CS 25.107 rule: the greatest of the
+        // selected factor, V2MIN from stall and 1.10 VMC. The control term depends on
+        // the aircraft as built (its computed VMC replaces the declared fallback),
+        // so the published minimum is inverted with the part that does not: the
+        // aircraft whose control speed does not bind flies exactly the published V2
+        // in the stage check, the gate and the reference; one whose control speed
+        // binds flies above it (a minimum), and the declared fallback ratio
+        // (1.10 x 1.13) does too. Inverting with the fallback instead made the built aircraft fly 3.5 % below the published V2.
+        let ratio = performance.control_free_v2_over_vsr();
         performance.cl_max_to = reference.cl_max_to(ratio);
         performance.cl_max_to_source = format!(
             "{}; effective model CLmax_TO recovered as 2*m*g/(rho*S*(V2_min/{ratio:.4})^2), rho={} kg/m^3; {}",
@@ -73,16 +114,28 @@ pub(super) fn apply(preset: &mut AircraftPreset) {
     }
 }
 
-const REFERENCES: [PublishedTakeoffReference; 1] = [PublishedTakeoffReference {
-    preset_name: "ATR72-600",
-    mass_kg: 23_000.0,
-    reference_area_m2: 61.0,
-    v2_min_m_s: 116.0 * KNOT_M_S,
-    density_kg_m3: 1.225,
-    speed_uncertainty_m_s: KNOT_M_S,
-    source: "ATR 72-600 PW127M/N Factsheet, 2020, p.2: Take-off speed (V2 min @ MTOW) 116 KCAS; weight table includes option-1 MTOW 23,000 kg and wing area 61 m^2; https://www.atr-aircraft.com/wp-content/uploads/2020/07/Factsheets_-_ATR_72-600.pdf",
-    applicability: "The single family-wide V2 minimum line is not column-paired with the 22,800 kg basic or 23,000 kg optional MTOW; assigning it to the preset's 23,000 kg option is a declared applicability assumption. The minimum is taken as the model-selected V2; the model V2/VSR is the CS 25.107 rule max(selected 1.20, V2MIN 1.13 VSR, 1.10 VMC estimate = 1.10 x 1.13 VSR) = 1.243, so the published minimum is inverted with that ratio. Flap configuration and whether V2 min is stall-, control- or climb-limited are unpublished. Effective lift recovery does not establish measured CLmax, VMC or a certified V2 schedule; speed reconstruction is an input check, not independent validation. Source CAS is interpreted on the ISA sea-level equivalent-density basis.",
-}];
+const REFERENCES: [PublishedTakeoffReference; 2] = [
+    PublishedTakeoffReference {
+        preset_name: "ATR72-600",
+        mass_kg: 23_000.0,
+        reference_area_m2: 61.0,
+        v2_min_m_s: 116.0 * KNOT_M_S,
+        density_kg_m3: 1.225,
+        speed_uncertainty_m_s: KNOT_M_S,
+        source: "ATR 72-600 PW127M/N Factsheet, 2020, p.2: Take-off speed (V2 min @ MTOW) 116 KCAS; weight table includes option-1 MTOW 23,000 kg and wing area 61 m^2; https://www.atr-aircraft.com/wp-content/uploads/2020/07/Factsheets_-_ATR_72-600.pdf",
+        applicability: "The single family-wide V2 minimum line is not column-paired with the 22,800 kg basic or 23,000 kg optional MTOW; assigning it to the preset's 23,000 kg option is a declared applicability assumption. The minimum is read as the CS 25.107(b)(1) minimum of a two-engine turbopropeller aeroplane, 1.13 VSR, which is what the model selects; the built aircraft (computed VMC below the declared 1.13 VSR) flies the published V2, a larger control speed would raise V2 above it, and the declared fallback ratio (1.10 x 1.13 = 1.243) also flies above it. Flap configuration and whether V2 min is stall-, control- or climb-limited are unpublished. Effective lift recovery does not establish measured CLmax, VMC or a certified V2 schedule; speed reconstruction is an input check, not independent validation. Source CAS is interpreted on the ISA sea-level equivalent-density basis.",
+    },
+    PublishedTakeoffReference {
+        preset_name: "LJ60",
+        mass_kg: 23_500.0 * 0.453_592_37,
+        reference_area_m2: 24.57,
+        v2_min_m_s: 153.0 * KNOT_M_S,
+        density_kg_m3: 1.225,
+        speed_uncertainty_m_s: KNOT_M_S,
+        source: "Learjet 60 Airplane Flight Manual FM-123, Section V, Fig. 5-42 p. 5-59 (Uncorrected Takeoff Speeds, flaps 8 deg): V2 153 KIAS, VR 145 KIAS at 23,500 lb, sea level; the stall chart Fig. 5-22 p. 5-34 reads about 126 KCAS flaps 8 at that weight, so V2 = 1.2 VS; 24.57 m^2 is the preset's reference wing area",
+        applicability: "FAR 25 at the type's certification basis: 1.2 VS read as the requested 1.13 VS1g equivalent (AMC 25.103), IAS treated as CAS; VMCA flaps 8 is 120 KIAS (TCDS), so V2 is stall limited, not control limited.",
+    },
+];
 
 #[cfg(test)]
 mod tests {
@@ -103,6 +156,15 @@ mod tests {
                 );
             }
         }
+    }
+
+    #[test]
+    fn the_overspeed_limit_is_the_printed_type_value_else_the_a320_family_one() {
+        assert_eq!(v2_max_over_vs1g("A320-200").0, 1.35);
+        assert_eq!(v2_max_over_vs1g("A340-300").0, 1.50);
+        let (limit, basis) = v2_max_over_vs1g("B787-9");
+        assert_eq!(limit, DEFAULT_V2_MAX_OVER_VS1G);
+        assert!(basis.contains("no printed value"));
     }
 
     #[test]
@@ -130,7 +192,7 @@ mod tests {
             .ok_or("ATR performance is absent")?;
         let reference = published_takeoff_reference(preset.name).ok_or("ATR source is absent")?;
         assert!(
-            (performance.cl_max_to / reference.cl_max_to(performance.takeoff_speed_ratios().v2)
+            (performance.cl_max_to / reference.cl_max_to(performance.control_free_v2_over_vsr())
                 - 1.0)
                 .abs()
                 < 1e-12

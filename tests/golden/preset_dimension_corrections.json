@@ -2,9 +2,9 @@
   "pins": {
     "A340-300/drawn_planform_area_m2": {
       "abs_tol": 0.5,
-      "note": "Drawn trapezoidal planform area of the A340-300 wing (m^2) against the published 361.6 m^2 reference area; the drawn planform is larger than the reference wing by design.",
+      "note": "Drawn trapezoidal planform area of the A340-300 wing (m^2) against the published 361.6 m^2 reference area; the drawn planform is larger than the reference wing by design (383.6 m^2 before the 08b-A340 outboard trailing-edge break, 0.71 semispan, -0.45 m: 374.24 m^2, +3.5 %).",
       "rel_tol": 0.0,
-      "value": 383.6
+      "value": 374.236472
     },
     "A380-800/hstab_trapezoid_area_m2": {
       "abs_tol": 0.0001,

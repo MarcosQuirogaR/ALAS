@@ -11,7 +11,7 @@ use alas_config::{airport_dataset, AlasConfig, MissionProfileConfig};
 use egui::{vec2, Align2, Color32, FontId, Pos2, Rect, Rounding, Sense, Stroke, Ui};
 
 use crate::theme::{card_frame, success_color};
-use crate::views::{tr, tr_fields};
+use crate::views::{tr, tr_fields, tr_label};
 
 const ACTIVE_FRACTION: f64 = 1.0e-6;
 const METRES_PER_FOOT: f64 = 0.3048;
@@ -33,24 +33,12 @@ struct PreviewSegment {
 
 /// Render the current mission profile as a non-interactive altitude figure.
 ///
-/// The Advanced Mission page uses [`show_interactive_mission_profile_preview`]
+/// The Mission page plots the stage list instead (`mission_stage_editor`)
 /// so a click can select a phase and open its detached editor. This wrapper is
 /// used by the mission form and by report-side previews
 /// that only need the figure.
 pub(crate) fn show_mission_profile_preview(ui: &mut Ui, config: &AlasConfig) {
     show_mission_profile_preview_inner(None, ui, config);
-}
-
-/// Render the live mission profile and route clicks to the detached phase
-/// editor. The profile is derived from the same `mission.profile` values that
-/// the solver consumes, so the click target never edits a parallel view-only
-/// model.
-pub(crate) fn show_interactive_mission_profile_preview(
-    state: &mut crate::state::AppState,
-    ui: &mut Ui,
-    config: &AlasConfig,
-) {
-    show_mission_profile_preview_inner(Some(state), ui, config);
 }
 
 fn show_mission_profile_preview_inner(
@@ -60,7 +48,7 @@ fn show_mission_profile_preview_inner(
 ) {
     card_frame(ui).show(ui, |ui| {
         ui.set_min_width(ui.available_width());
-        ui.label(egui::RichText::new(tr("Live mission profile")).strong());
+        ui.label(egui::RichText::new(tr_label("Live mission profile")).strong());
         ui.add_space(4.0);
 
         let segments = preview_segments(config);
@@ -215,7 +203,7 @@ fn preview_segments(config: &AlasConfig) -> Vec<PreviewSegment> {
     segments
 }
 
-fn airport_elevation_m(name: &str) -> f64 {
+pub(crate) fn airport_elevation_m(name: &str) -> f64 {
     airport_dataset::resolve(name)
         .ok()
         .and_then(|airport| airport.elevation_m.value)
@@ -284,7 +272,7 @@ fn paint_profile(ui: &Ui, rect: Rect, config: &AlasConfig, segments: &[PreviewSe
     painter.text(
         Pos2::new(plot.center().x, rect.bottom() - 8.0),
         Align2::CENTER_BOTTOM,
-        tr("Mission progress (schematic)"),
+        tr_label("Mission progress (schematic)"),
         FontId::proportional(10.0),
         weak,
     );
@@ -333,7 +321,7 @@ fn paint_profile(ui: &Ui, rect: Rect, config: &AlasConfig, segments: &[PreviewSe
         Pos2::new(plot.right(), plot.top()),
         Align2::RIGHT_TOP,
         tr_fields(
-            "Configured segments: {count}",
+            "Configured Segments: {count}",
             &[("count", segments.len().to_string())],
         ),
         FontId::proportional(10.0),

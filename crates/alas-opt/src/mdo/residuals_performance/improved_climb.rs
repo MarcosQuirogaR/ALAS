@@ -19,8 +19,8 @@ use std::borrow::Cow;
 use alas_config::airports::Airport;
 use alas_config::AlasConfig;
 use alas_perf::performance::{
-    assess_oei_climb, compute_v_speeds_at_masses, far25_oei_gradient, oei_cl_at_v2,
-    select_improved_v2, ImprovedClimbSelection, VSpeeds, TOC_RESIDUAL_CLIMB_M_S,
+    compute_v_speeds_at_masses, far25_oei_gradient, oei_cl_at_v2, select_improved_v2,
+    ImprovedClimbSelection, VSpeeds, TOC_RESIDUAL_CLIMB_M_S,
 };
 
 use super::oei_deck::{second_segment_evidence, EngineOutModel};
@@ -41,6 +41,9 @@ pub struct ImprovedClimbInputs<'a> {
     pub drag: &'a CandidateDrag,
     /// Installed all-engine static thrust over the take-off weight.
     pub installed_tw_sls: f64,
+    /// Wing aspect ratio `b_ref^2 / s_ref` of the candidate, for the `V2`
+    /// climb-out locus the second-segment state is read from.
+    pub aspect_ratio: f64,
 }
 
 /// `config` with the improved-climb `V2 / VSR` resolved into its performance
@@ -73,8 +76,6 @@ pub fn resolve_improved_climb<'a>(
         perf.cl_max_land,
         &schedule_perf,
     );
-    let atmosphere =
-        alas_atmo::us1976_compute_values(departure.elevation_m, departure.isa_deviation_c);
     let required = |x: f64| -> Option<f64> {
         let speeds = VSpeeds {
             v2_ms: x * schedule.v_stall_to_ms,
@@ -92,37 +93,35 @@ pub fn resolve_improved_climb<'a>(
             },
         );
         let cl = oei_cl_at_v2(perf.cl_max_to, x)?;
-        let mach = speeds.v2_ms / atmosphere.speed_of_sound_m_s;
-        let cd = inputs.drag.cd_airport_base_at_atmosphere(
-            cl,
-            mach,
-            departure.elevation_m,
-            departure.isa_deviation_c,
-        );
-        assess_oei_climb(
-            cd,
-            0.0,
-            n_engines,
-            gradient,
-            cl,
-            perf.oei_climb_delta_cd,
-            perf.cl_max_to,
-            Some(evidence.condition),
-        )
-        .required_sls_tw
+        super::net_path::V2ClimbOutPolar::of(config, inputs.aspect_ratio)
+            .assess(
+                n_engines,
+                gradient,
+                cl,
+                perf.cl_max_to,
+                Some(evidence.condition),
+            )
+            .required_sls_tw
     };
+    // The type's overspeed limit V2max / VS1g; the model's VSR is the 1-g
+    // reference stall speed of CS 25.103, so the ratio applies unchanged.
+    let (v2_max_over_vsr, _) = alas_config::presets::v2_max_over_vs1g(&config.preset);
     let Some(selection) = select_improved_v2(
         schedule.v2_ms / schedule.v_stall_to_ms,
         inputs.installed_tw_sls,
+        v2_max_over_vsr,
         &required,
     ) else {
         return (Cow::Borrowed(config), None);
     };
-    // Only a speed that meets the gradient is flown (and charged to the field
-    // length): when even the best-climb speed misses, the schedule speed stands
-    // and the shortfall is reported there, with the best-climb result as a
-    // Diagnostic.
-    let wanted = (selection.improved && selection.meets).then_some(selection.v2_over_vsr);
+    // The lowest speed that meets the gradient is flown (and charged to the
+    // field length); when no speed up to the overspeed limit meets, the
+    // best-climb speed within the limit is flown and the take-off is reported
+    // as climb-limited. The speed is then continuous in
+    // the installed thrust, falling monotonically from the best-climb speed as
+    // thrust grows. Falling back to the schedule speed when nothing meets made
+    // 0.6 % less thrust shorten the A350-900 field by 45 %.
+    let wanted = selection.improved.then_some(selection.v2_over_vsr);
     if wanted == perf.improved_climb_v2_over_vsr {
         return (Cow::Borrowed(config), Some(selection));
     }

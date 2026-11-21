@@ -125,7 +125,7 @@ fn refine(steps: usize, coarse_kg: f64, fine_kg: f64) -> Result<Refinement, Free
 pub const MAX_REFREEZES: u32 = 2;
 
 /// The discrete choices of one trip, made once and reused.
-#[derive(Debug, Clone, PartialEq)]
+#[derive(serde::Serialize, serde::Deserialize, Debug, Clone, PartialEq)]
 pub struct FrozenMissionPlan {
     /// Cruise-level policy the plan was made under.
     pub policy: CruiseAltitudePolicy,
@@ -135,6 +135,12 @@ pub struct FrozenMissionPlan {
     pub range_m: f64,
     /// Planned cruise altitude, m.
     pub cruise_altitude_m: f64,
+    /// Lowest level the trip may cruise at, m: the top of the takeoff band
+    /// (`ProfileGeometry::floor_cruise_m`), where the initial-level search
+    /// lands when no level holds the residual-climb margin. `0` on a plan
+    /// saved before it was recorded.
+    #[serde(default)]
+    pub cruise_floor_m: f64,
     /// Commanded-rate scales of the initial and step-climb rungs.
     pub climb_rate_scales: [f64; 3],
     /// Step-climb starts as fractions of the cruise distance.
@@ -149,9 +155,35 @@ pub struct FrozenMissionPlan {
     pub richardson_error_kg: f64,
 }
 
+impl FrozenMissionPlan {
+    /// Level the plan cruises at once `fraction` of its cruise distance is
+    /// flown, m: the planned (initial) level raised by one step separation
+    /// for every step climb that starts before it, as the trip flies them
+    /// (`cruise_levels::next_same_direction_level_m`, the level `step_levels`
+    /// stacks the steps with, so a legal level is reproduced bit for bit).
+    #[must_use]
+    pub fn level_at_cruise_fraction_m(&self, fraction: f64) -> f64 {
+        let mut altitude_m = self.cruise_altitude_m;
+        for _ in self.step_positions.iter().filter(|&&start| start < fraction) {
+            altitude_m = super::cruise_levels::next_same_direction_level_m(altitude_m);
+        }
+        altitude_m
+    }
+
+    /// Whether the plan cruises above its floor, that is, whether the
+    /// initial-level search found a level that holds the residual-climb
+    /// margin (`cruise_levels::highest_qualifying_m` returns the floor when
+    /// none does, and the trip is then flown to a typed shortfall). A plan
+    /// saved before the floor was recorded counts as holding one.
+    #[must_use]
+    pub fn holds_a_cruise_level(&self) -> bool {
+        self.cruise_altitude_m > self.cruise_floor_m + 1.0
+    }
+}
+
 /// An immutable frozen plan and the first mass at which one of its trips
-/// could not be flown; clones share both. The mass only asks the owner of
-/// the solve for a re-freeze; it never changes what the plan answers.
+/// could not be flown; clones share both. The mass only asks the solve
+/// for a re-freeze; it never changes what the plan answers.
 #[derive(Debug, Clone)]
 pub(crate) struct FrozenHandle {
     plan: Arc<FrozenMissionPlan>,
@@ -244,6 +276,7 @@ impl SegmentMissionModel {
                 takeoff_mass_kg,
                 range_m,
                 cruise_altitude_m: choices.cruise_m,
+                cruise_floor_m: model.geometry().floor_cruise_m(LegKind::Trip),
                 climb_rate_scales: choices.scales,
                 trip_fuel_kg: flown.leg.fuel_kg,
                 step_positions: choices.flown.step_positions,

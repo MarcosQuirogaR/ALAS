@@ -44,9 +44,11 @@ use alas_config::AlasConfig;
 use alas_geom::aircraft::airplane::Airplane;
 use alas_stab::trim::stability_and_trim_with_cache;
 
-use super::drag_table::{DesignTrim, TrimmedDragTable};
+use super::drag_table::{DesignTrim, StretchedBasis, TrimmedDragTable};
 use super::mission_model::ParabolicPolar;
+mod mach_zero;
 use super::types::{CandidateDrag, CandidateFailure, ExternalPolar};
+use mach_zero::{mach_zero_reference, MachZeroInputs};
 
 /// Geometry-only work shared by the initial trim and every CG re-trim.
 pub(crate) type CandidateVlmCache = Arc<Mutex<alas_aero::vlm::VlmGeometryCache>>;
@@ -239,10 +241,8 @@ impl TrimmedPolar {
 /// A trim rejected for a numerical reason: a failed solve, a non-converged
 /// solve, a non-finite or non-physical component, or a residual outside
 /// tolerance.
-fn trim_solve_failure() -> CandidateFailure {
-    CandidateFailure {
-        reason: TRIM_SOLVE_FAILURE,
-    }
+fn trim_solve_failure(detail: impl Into<String>) -> CandidateFailure {
+    CandidateFailure::with_detail(TRIM_SOLVE_FAILURE, detail)
 }
 
 /// Trim the candidate at the cruise lift coefficient the supplied mass
@@ -296,6 +296,14 @@ pub(crate) fn trim_and_polar_with_cache(
     let _profile = alas_math::stage_profile::scope(alas_math::stage_profile::Stage::Trim);
     let req = &config.requirements;
     plane.xyz_ref[0] = cg_x;
+    // The stability solve trims an aeroplane without a tail ratio at a stated
+    // tail. The lift checked against that trim has to come from the same tail.
+    // An unset ratio is the geometry's, which `rebuild_airplane` gave the plane.
+    if let Some(stated) = config.analysis.tail_efficiency {
+        if plane.horizontal_tail_dynamic_pressure_ratio() == 1.0 {
+            plane.set_horizontal_tail_dynamic_pressure_ratio(stated);
+        }
+    }
 
     let atmo = Atmosphere::new(req.cruise_altitude_m);
     let velocity_m_s = req.cruise_mach * atmo.speed_of_sound();
@@ -307,15 +315,22 @@ pub(crate) fn trim_and_polar_with_cache(
     // A non-finite or non-positive target is a degenerate state (zero area,
     // zero dynamic pressure, non-positive mass): numerically unusable.
     if !cl_target.is_finite() || cl_target <= 0.0 {
-        return Err(trim_solve_failure());
+        return Err(trim_solve_failure(format!(
+            "the cruise lift coefficient {cl_target} at {cruise_mass_kg} kg on {} m^2 is not a positive finite number",
+            plane.s_ref
+        )));
     }
     // Needing more lift than the wing can usably produce is a signed physical
     // infeasibility of the requested cruise point, kept visible as its own
     // reason rather than folded into the solver-failure bucket.
     if cl_target > req.max_cruise_cl {
-        return Err(CandidateFailure {
-            reason: TRIM_CRUISE_CL_EXCEEDS_MAX,
-        });
+        return Err(CandidateFailure::with_detail(
+            TRIM_CRUISE_CL_EXCEEDS_MAX,
+            format!(
+                "cruise CL {cl_target:.3} at {cruise_mass_kg:.0} kg, M {:.3}, {:.0} m, limit {:.3}; raise the wing area, the cruise altitude or requirements.max_cruise_cl",
+                req.cruise_mach, req.cruise_altitude_m, req.max_cruise_cl
+            ),
+        ));
     }
 
     let trim = stability_and_trim_with_cache(
@@ -326,7 +341,11 @@ pub(crate) fn trim_and_polar_with_cache(
         req.cruise_altitude_m,
         cache,
     )
-    .map_err(|_| trim_solve_failure())?;
+    .map_err(|error| {
+        trim_solve_failure(format!(
+            "the stability and trim solve at CL {cl_target:.3} with the centre of gravity at x = {cg_x:.2} m failed: {error}"
+        ))
+    })?;
 
     // `converged` is false for a singular Jacobian, an exhausted iteration
     // budget, and for geometry with no horizontal stabilizer (whose
@@ -344,14 +363,17 @@ pub(crate) fn trim_and_polar_with_cache(
         || !trim.cl_alpha.is_finite()
         || !trim.x_np.is_finite()
     {
-        return Err(trim_solve_failure());
+        return Err(trim_solve_failure(format!(
+            "no stabiliser incidence within {:.0} deg of the last estimate holds the pitching moment at CL {cl_target:.3} with the centre of gravity at x = {cg_x:.2} m: last alpha {:.2} deg, stabiliser incidence {:.2} deg, neutral point x = {:.2} m; move the centre of gravity toward the neutral point or enlarge the horizontal tail",
+            alas_stab::trim::TRIM_SEARCH_RANGE_DEG, flight.alpha_deg, flight.incidence_deg, flight.x_np
+        )));
     }
 
     let aero = AeroAnalysis::new(
         plane,
         AeroAnalysis::quarter_chord_sweep_deg(plane, dv.sweep_deg),
         Some(config.geometry.clone()),
-        Some(config.drag_model.clone()),
+        Some(config.resolved_drag_model()),
         Some(config.analysis.clone()),
     )
     .with_vlm_cache(cache.clone());
@@ -360,20 +382,88 @@ pub(crate) fn trim_and_polar_with_cache(
         trim_ih_deg: trim.trim_ih_deg,
         cl_alpha: trim.cl_alpha,
     };
-    let perf = aero
-        .trimmed_performance(&trim_point, req.cruise_mach, req.cruise_altitude_m)
-        .map_err(|_| trim_solve_failure())?;
+    // When the trim ran on the Goethert-stretched lattice (AERL-02) the
+    // cruise state and every node of the drag table are solved there too, at
+    // the compressible attitude, so the mission is flown on the same
+    // compressibility basis as the report (A1G); otherwise on the
+    // incompressible lattice.
+    let stretched = flight.compressible.then(|| {
+        let beta = alas_stab::neutral_point::beta_for_mach(req.cruise_mach);
+        Arc::new(StretchedBasis {
+            plane: alas_stab::neutral_point::goethert_stretch(plane, beta),
+            beta,
+            cm_body_per_deg: flight.cm_body_per_deg,
+        })
+    });
+    let perf = match &stretched {
+        Some(basis) => aero.trimmed_stretched_performance(
+            &basis.plane,
+            &TrimPoint {
+                trim_alpha_deg: flight.alpha_deg,
+                trim_ih_deg: flight.incidence_deg,
+                cl_alpha: flight.cl_alpha,
+            },
+            req.cruise_mach,
+            req.cruise_altitude_m,
+            basis.beta,
+            basis.cm_body_per_deg,
+        ),
+        None => aero.trimmed_performance(&trim_point, req.cruise_mach, req.cruise_altitude_m),
+    }
+    .map_err(|error| {
+        trim_solve_failure(format!(
+            "the trimmed drag solve at CL {cl_target:.3}, alpha {:.2} deg, stabiliser incidence {:.2} deg failed: {error}",
+            flight.alpha_deg, flight.incidence_deg
+        ))
+    })?;
 
     if !finite_and_physical(&perf) {
-        return Err(trim_solve_failure());
+        return Err(trim_solve_failure(format!(
+            "the trimmed point has a non-physical term: CL {:.4}, CD parasite {:.5}, induced {:.5}, wave {:.5}, L/D {:.2}",
+            perf.cl, perf.cd_parasite, perf.cd_induced, perf.cd_wave, perf.l_over_d
+        )));
     }
     if (perf.cl - cl_target).abs() > CL_TARGET_RELATIVE_TOLERANCE * cl_target {
-        return Err(trim_solve_failure());
+        return Err(trim_solve_failure(format!(
+            "the trimmed lift coefficient {:.5} misses the target {cl_target:.5} by more than the {:.1e} relative limit",
+            perf.cl, CL_TARGET_RELATIVE_TOLERANCE
+        )));
     }
     if perf.cm_residual.abs() > CM_RESIDUAL_TOLERANCE {
-        return Err(trim_solve_failure());
+        return Err(trim_solve_failure(format!(
+            "the pitching moment left at the trim is {:.3e}, limit {:.1e}, at alpha {:.2} deg, stabiliser incidence {:.2} deg, centre of gravity x = {cg_x:.2} m",
+            perf.cm_residual, CM_RESIDUAL_TOLERANCE, flight.alpha_deg, flight.incidence_deg
+        )));
     }
 
+    // The Mach-zero end of the table's blend (`trim_mach_zero`).
+    let incompressible = match (&stretched, flight.compressible) {
+        (Some(_), true) => Some(
+            mach_zero_reference(
+                &aero,
+                MachZeroInputs {
+                    plane,
+                    trim,
+                    cruise_attitude: TrimPoint {
+                        trim_alpha_deg: flight.alpha_deg,
+                        trim_ih_deg: flight.incidence_deg,
+                        cl_alpha: flight.cl_alpha,
+                    },
+                    cm_body_per_deg: flight.cm_body_per_deg,
+                    cruise_mach: req.cruise_mach,
+                    cruise_altitude_m: req.cruise_altitude_m,
+                    cl_max_clean: config.performance.cl_max_clean,
+                    cm_tolerance: CM_RESIDUAL_TOLERANCE,
+                },
+            )
+            .map_err(|error| {
+                trim_solve_failure(format!(
+                    "the Mach-zero end of the drag table at CL {cl_target:.3} failed: {error}"
+                ))
+            })?,
+        ),
+        _ => None,
+    };
     let table_profile = alas_math::stage_profile::scope(alas_math::stage_profile::Stage::DragTable);
     let drag_table = TrimmedDragTable::build_with_check_set(
         &aero,
@@ -386,16 +476,20 @@ pub(crate) fn trim_and_polar_with_cache(
             altitude_m: req.cruise_altitude_m,
             cl_max_clean: config.performance.cl_max_clean,
             cm_tolerance: CM_RESIDUAL_TOLERANCE,
+            stretched: stretched.clone(),
+            incompressible,
         },
         screening_drag_table,
     )
     .map_err(|error| {
         tracing::warn!(%error, "trimmed drag table rejected");
-        CandidateFailure {
-            reason: DRAG_TABLE_FAILURE,
-        }
+        CandidateFailure::with_detail(
+            DRAG_TABLE_FAILURE,
+            format!("{error} (centre of gravity at x = {cg_x:.2} m, cruise CL {cl_target:.3})"),
+        )
     })?;
     drop(table_profile);
+    let drag_table = drag_table_with_flap_span_loading(drag_table, config, plane);
 
     // `alpha_report = alpha_0L + beta (alpha - alpha_0L)` with
     // `alpha - alpha_0L = CL / CL_alpha` (`TrimmedPerformance::alpha_deg`).
@@ -404,21 +498,35 @@ pub(crate) fn trim_and_polar_with_cache(
     // the stretched lattice (AERL-02): its angle is the true body angle, so
     // the reporting relabel is the identity (`report_beta` = 1). Otherwise
     // the legacy Prandtl-Glauert relabel of the incompressible angle applies.
+    // The Jacobian at the trimmed attitude where the solve measured it: the
+    // probe-point slopes are secants over the distance from the probes to the
+    // trim, and moving the trim along them errs at first order in that
+    // distance.
+    let [[cl_alpha_at_trim, cl_ih_at_trim], [cm_alpha_at_trim, cm_ih_at_trim]] =
+        flight.jacobian_at_trim.unwrap_or([
+            [flight.cl_alpha, flight.cl_ih],
+            [flight.cm_alpha, flight.cm_ih],
+        ]);
     let attitude = TrimAttitude {
-        cl_alpha: flight.cl_alpha,
-        cl_ih: flight.cl_ih,
-        cm_alpha: flight.cm_alpha,
-        cm_ih: flight.cm_ih,
+        cl_alpha: cl_alpha_at_trim,
+        cl_ih: cl_ih_at_trim,
+        cm_alpha: cm_alpha_at_trim,
+        cm_ih: cm_ih_at_trim,
         report_beta: if flight.compressible {
             1.0
         } else {
             1.0 + (perf.alpha_deg - trim.trim_alpha_deg) / lift_angle_deg
         },
     };
+    // The reported trimmed L/D is that of the drag the missions fly: the
+    // table at the trim point, whose induced term carries the twist allowance
+    // in place of the lattice's basic loading (`drag_table`).
+    let flown_lift_to_drag =
+        perf.cl / drag_table.cd(perf.cl, req.cruise_mach, req.cruise_altitude_m);
     Ok(TrimmedPolar {
         drag: CandidateDrag::Table(Arc::new(drag_table)),
         attitude: Some(attitude),
-        lift_to_drag: perf.l_over_d,
+        lift_to_drag: flown_lift_to_drag,
         alpha_deg: if flight.compressible {
             flight.alpha_deg
         } else {
@@ -464,6 +572,47 @@ fn finite_and_physical(perf: &TrimmedPerformance) -> bool {
         && perf.l_over_d > 0.0
 }
 
+/// The table with the flap span-loading effect of the take-off setting.
+///
+/// The vortex lattice is solved with the flaps undeflected, so its induced drag at the
+/// take-off lift coefficients is that of the clean wing. Obert, Aerodynamic Design of
+/// Transport Aircraft (2009), Figs. 27.38-27.39, printed p. 363, measures the apparent
+/// Oswald factor rising with flap angle, 0.0026 per degree for wing-mounted engines
+/// and 0.0046 per degree for rear-fuselage engines, so the take-off setting (declared
+/// deflection, else the default of `alas_config::presets`) raises the factor by that
+/// rate times its deflection; other flap settings scale with the lift they add.
+fn drag_table_with_flap_span_loading(
+    table: TrimmedDragTable,
+    config: &AlasConfig,
+    plane: &Airplane,
+) -> TrimmedDragTable {
+    use alas_config::presets as p;
+    let shift = super::drag_table::high_lift_lift_shift(
+        config.performance.cl_max_to,
+        config.performance.cl_max_clean,
+    );
+    let positions = &config.geometry.engine.spanwise_positions_m;
+    let mean_arm = positions.iter().map(|y| y.abs()).sum::<f64>() / positions.len().max(1) as f64;
+    // Engines inside a fifth of the semi-span sit on the rear fuselage.
+    let rate = if mean_arm < 0.2 * 0.5 * plane.b_ref {
+        p::OSWALD_GAIN_PER_FLAP_DEG_REAR_ENGINES
+    } else {
+        p::OSWALD_GAIN_PER_FLAP_DEG_WING_ENGINES
+    };
+    let deflection = config
+        .performance
+        .takeoff_flap_deflection_deg
+        .unwrap_or(p::DEFAULT_TAKEOFF_FLAP_DEG);
+    if shift > 0.0 && shift.is_finite() && deflection > 0.0 {
+        table.with_flap_span_loading(super::drag_table::FlapSpanLoading {
+            delta_e: rate * deflection,
+            reference_lift_shift: shift,
+        })
+    } else {
+        table
+    }
+}
+
 // The tests build their own configurations and assert on values they
 // constructed, so a failed `expect` is the assertion failing rather than a
 // library invariant being broken.
@@ -504,6 +653,26 @@ mod tests {
             source: "avl",
             bracketed: true,
         }
+    }
+
+    #[test]
+    fn the_drag_table_at_the_trimmed_cruise_point_is_the_reported_trimmed_drag() {
+        // The table's cruise node and the reported trimmed state are one
+        // solve on one lattice (A1G): the drag the mission is flown on at the
+        // trimmed CL is the drag behind the reported trimmed L/D, to the
+        // table's own interpolation bound.
+        let (config, dv, mut plane, cg_x) = default_candidate();
+        let mass = config.requirements.mtow_kg;
+        let polar = trim_and_polar(&config, &mut plane, cg_x, &dv, mass)
+            .unwrap_or_else(|f| panic!("{}", f.reason));
+        let table = polar.drag.table().expect("a native trim carries its table");
+        let reported_cd = polar.cl_trim / polar.lift_to_drag;
+        let table_cd = table.cd(polar.cl_trim, polar.mach, polar.altitude_m);
+        assert!(
+            (table_cd - reported_cd).abs() <= table.max_abs_error_cd().max(2.0e-5),
+            "table {table_cd} vs trimmed {reported_cd} (bound {})",
+            table.max_abs_error_cd()
+        );
     }
 
     #[test]
@@ -558,7 +727,7 @@ mod tests {
         let (config, dv, mut plane, cg_x) = default_candidate();
         let polar = trim_and_polar(&config, &mut plane, cg_x, &dv, config.requirements.mtow_kg)
             .unwrap_or_else(|f| panic!("{}", f.reason));
-        // `lift_to_drag` is the trimmed re-solve's `CL / CD`.
+        // `lift_to_drag` is the table's `CL / CD` at the trimmed re-solve.
         let direct_cd = polar.cl_trim / polar.lift_to_drag;
         let table_cd = polar.drag.cd(polar.cl_trim, polar.mach, polar.altitude_m);
         assert!(

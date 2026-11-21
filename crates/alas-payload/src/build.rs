@@ -39,10 +39,9 @@ use self::count::{class_config, count_deck, Deck};
 use self::mix_solve::length_mix_for_seat_targets;
 use crate::cabin::{
     build_passenger_layout_reference_compatibility, build_passenger_layout_with_aircraft_cg_target,
-    cabin_deck_segments, ceil_div, count_declared_deck, effective_pair_capacity,
-    largest_pair_rating, max_certifiable_capacity_reference_compatibility,
-    max_certifiable_capacity_with_source_layout, min_exit_pairs, resolve_aisle_width,
-    select_exit_type,
+    ceil_div, count_declared_deck, effective_pair_capacity, largest_pair_rating,
+    max_certifiable_capacity_reference_compatibility, max_certifiable_capacity_with_source_layout,
+    min_exit_pairs, resolve_aisle_width, select_exit_type,
 };
 use crate::cargo::{build_cargo_layout, build_cargo_layout_reference_compatibility};
 use crate::geometry::{CabinGeometry, CabinGeometryError};
@@ -133,7 +132,9 @@ pub fn product_cabin_geometry(
         &config.geometry,
         config.cabin.passenger.wall_thickness_m,
     )?
-    .with_declared_doors(layout.as_ref()))
+    .with_declared_doors(layout.as_ref())
+    .with_reserved_zones(&config.cabin.payload_items)
+    .with_declared_compartments(&config.cabin.cargo.hold_compartments))
 }
 
 /// Resolve the exit arrangement of a passenger cabin: the source-defined one
@@ -219,6 +220,9 @@ fn build_payload_layout_with_mass_semantics(
     x_oew: f64,
     reference_compatibility: bool,
 ) -> Result<PayloadLayout, CabinGeometryError> {
+    if !reference_compatibility && config.cabin.payload_items.validate().is_err() {
+        return Err(CabinGeometryError::InvalidPayloadItems);
+    }
     let g = if reference_compatibility {
         CabinGeometry::new_reference_compatibility(
             plane,
@@ -232,7 +236,19 @@ fn build_payload_layout_with_mass_semantics(
     let source_exit_layout = registered_source_exit_layout(config, reference_compatibility);
     let mut effective = config.clone();
     let mut explicit_count_cabin = false;
-    if !reference_compatibility {
+    // A custom payload lays out no seats and no cargo: the zones and point
+    // masses are the whole payload.
+    let custom_only = !reference_compatibility && config.cabin.payload_items.custom_only;
+    if custom_only {
+        effective.requirements.num_passengers = 0;
+        effective.requirements.cargo_payload_kg = 0.0;
+        effective.cabin.passenger = effective.cabin.passenger.canonicalized_for_product();
+        effective.cabin.passenger.class_mix_mode = "count".to_owned();
+        effective.cabin.passenger.first.count = 0;
+        effective.cabin.passenger.business.count = 0;
+        effective.cabin.passenger.economy.count = 0;
+        effective.cabin.passenger.belly_cargo_kg = 0.0;
+    } else if !reference_compatibility {
         // Premium is retained in saved files but the product layout has the
         // same three-class authority as FLOPS.  Canonicalize before deciding
         // whether an installed count cabin is present, so a legacy Premium
@@ -276,7 +292,7 @@ fn build_payload_layout_with_mass_semantics(
         &effective
     };
     if config.requirements.aircraft_type == "cargo" {
-        let layout = if reference_compatibility {
+        let mut layout = if reference_compatibility {
             build_cargo_layout_reference_compatibility(
                 &g,
                 &config.cabin.cargo,
@@ -287,19 +303,59 @@ fn build_payload_layout_with_mass_semantics(
         } else {
             build_cargo_layout(&g, &config.cabin.cargo, &config.requirements, oew, x_oew)
         };
+        if !reference_compatibility {
+            crate::declared_items::append_declared_items_balanced(
+                &mut layout,
+                &g,
+                config,
+                oew,
+                x_oew,
+            );
+            layout.all_coach_capacity = crate::layout::all_coach::all_coach_capacity(config, &g);
+        }
         Ok(layout)
     } else {
-        // Percent-mode cabin geometry determines the class proportions and
-        // fills the usable floor for every registered or clean-sheet study.
-        // A nonempty count-mode cabin is the exception: its installed count
-        // is explicit and the layout reports any shortfall instead of
-        // replacing it with computed capacity.
-        let layout = if reference_compatibility {
-            build_passenger_layout_reference_compatibility(
+        // Percent-mode cabin geometry determines the class proportions and fills the usable floor
+        // for every registered or clean-sheet study. A nonempty count-mode cabin is the exception:
+        // its installed count is explicit and the layout reports any shortfall instead of replacing
+        // it with computed capacity.
+        let mut layout = if reference_compatibility {
+            let mut layout = build_passenger_layout_reference_compatibility(
                 &g,
                 &config.cabin.passenger,
                 &config.requirements,
-            )
+            );
+            // The row packer can leave the last row of a percent-mode cabin
+            // one seat short of the request. The product path closes that gap
+            // against the layout it actually builds; so does the comparison
+            // path, instead of reporting a passenger without a seat.
+            // (The frozen parity entry point above is not touched.)
+            let mut comparison_config = config.clone();
+            let explicit_count = comparison_config.requirements.aircraft_type == "passenger"
+                && comparison_config.cabin.passenger.class_mix_mode == "count"
+                && comparison_config.cabin.passenger.total_seats() > 0;
+            if !explicit_count {
+                for _ in 0..4 {
+                    let LayoutSummary::Passenger(summary) = &layout.summary else {
+                        break;
+                    };
+                    if summary.unseated_pax == 0 {
+                        break;
+                    }
+                    let target = summary.seated_pax;
+                    comparison_config
+                        .cabin
+                        .passenger
+                        .set_fixed_passenger_count(target);
+                    comparison_config.requirements.num_passengers = target;
+                    layout = build_passenger_layout_reference_compatibility(
+                        &g,
+                        &comparison_config.cabin.passenger,
+                        &comparison_config.requirements,
+                    );
+                }
+            }
+            layout
         } else {
             let mut product_config = config.clone();
             let mut layout = build_passenger_layout_with_aircraft_cg_target(
@@ -313,12 +369,11 @@ fn build_payload_layout_with_mass_semantics(
                 source_exit_layout,
             );
 
-            // The fast capacity solver and the detailed row packer share the
-            // same geometry rules, but row placement still has a few discrete
-            // edge cases (most visibly at a class boundary on a 787). No
-            // study carries an explicit passenger target to fall back on, so
-            // every candidate must never expose an unseated passenger: close
-            // that last-row gap against the actual product layout.
+            // The fast capacity solver and the detailed row packer share the same geometry rules,
+            // but row placement still has a few discrete edge cases (most visibly at a class
+            // boundary on a 787). No study carries an explicit passenger target to fall back on, so
+            // every candidate must never expose an unseated passenger: close that last-row gap
+            // against the actual product layout.
             if !explicit_count_cabin {
                 for _ in 0..4 {
                     let LayoutSummary::Passenger(summary) = &layout.summary else {
@@ -347,13 +402,56 @@ fn build_payload_layout_with_mass_semantics(
             }
             layout
         };
-        let mut layout = layout;
         label_planning_cap(
             &mut layout,
             planning_cap_binds(config, reference_compatibility),
         );
+        if !reference_compatibility {
+            crate::cabin::crew::apply_registered_cabin_crew(&mut layout, config, &g);
+            crate::declared_items::append_declared_items_balanced(
+                &mut layout,
+                &g,
+                config,
+                oew,
+                x_oew,
+            );
+            stamp_container_capability(&mut layout, &g, config);
+            layout.all_coach_capacity = crate::layout::all_coach::all_coach_capacity(config, &g);
+        }
         Ok(layout)
     }
+}
+
+/// Record on a passenger layout the lower-deck container positions its holds
+/// take in the optional container fit of the registered preset, when the
+/// as-delivered holds are loose-bulk. The load and the as-configured counts are
+/// untouched: only `lower_deck_container_capable_positions` changes, so a
+/// reference that states a container capability (the A320's "7 LD3-45W") is
+/// compared with a capability and not with the bulk-loaded installation.
+fn stamp_container_capability(layout: &mut PayloadLayout, g: &CabinGeometry, config: &AlasConfig) {
+    let LayoutSummary::Passenger(summary) = &mut layout.summary else {
+        return;
+    };
+    if summary.hold_capacity.lower_deck_uld_positions > 0 {
+        return;
+    }
+    let Some(uld) = alas_config::presets::get(&config.preset)
+        .ok()
+        .and_then(|preset| preset.optional_container_lower_uld())
+    else {
+        return;
+    };
+    let capable = crate::CargoLoadManager::new(
+        g,
+        alas_config::CargoDeckConfig {
+            use_main_deck: false,
+            lower_deck_uld: uld.to_owned(),
+            ..config.cabin.cargo.clone()
+        },
+    )
+    .capacity_summary()
+    .lower_deck_uld_positions;
+    summary.hold_capacity.lower_deck_container_capable_positions = capable;
 }
 
 /// Seats per class, as the auto-sizer works them out.
@@ -435,7 +533,7 @@ fn simulate_passenger_counts_product(
     )
 }
 
-fn simulate_passenger_counts_with_exit_semantics(
+pub(crate) fn simulate_passenger_counts_with_exit_semantics(
     g: &CabinGeometry,
     pax: &PassengerCabinConfig,
     mix: &[(&str, f64)],
@@ -460,14 +558,14 @@ fn simulate_passenger_counts_with_exit_semantics(
     };
 
     let first_deck = g.passenger_decks.first().map(|deck| deck.name);
-    let geometric = if product_exit_capacity && g.upper_deck.is_some() {
+    let geometric = if product_exit_capacity && crate::cabin::multi_deck(g) {
         max_certifiable_capacity_with_source_layout(g, pax, source_exit_layout, None)
     } else {
         deck_caps.clone()
     };
     let mut source_left =
         crate::cabin::RemainingSourceCap::new(g, &geometric, &deck_caps, source_capacity_cap);
-    for segment in crate::cabin::layout_order(g, cabin_deck_segments(g)) {
+    for segment in crate::cabin::layout_order(g, crate::cabin::seating_segments(g)) {
         let total_length = segment.x1 - segment.x0;
         let deck_cap = source_left.cap(segment.deck.name);
         let seated_before = counts.total();
@@ -631,19 +729,20 @@ mod product_tests {
                 "{name} preset reported a passenger shortfall"
             );
             if name == "DC-10" {
-                // The DC-10 ACAP prints its four door pairs (B-A-A-A, 405,
-                // under the 399-seat maximum) but no LOPA that this generic
-                // cabin can reproduce.  Keep the planning-count shortfall
-                // visible as a source/layout gap instead of treating the
-                // planning count as a hard floor-fill target.  The common
-                // assertions above still require a physically consistent row
-                // pack: no passenger is reported seated without a
-                // mass-bearing row.
+                // The DC-10 ACAP prints its four door pairs (B-A-A-A: pairs
+                // rated for 405 passengers, the type-certificate maximum being
+                // 399 seats) but no LOPA that this generic cabin can reproduce. With the drawn floor datum and the
+                // armrest and shoulder chords the generic cabin
+                // seats the whole planning load, where before the deck
+                // allowance of the section table cut it short; the layout
+                // and capacity stay pinned, and the planning load is a floor.
                 assert_eq!(summary.source_exit_layout, Some("B-A-A-A"));
                 assert_eq!(summary.geometric_capacity, 405);
                 assert!(
-                    summary.total_pax < preset.requirements.num_passengers,
-                    "{name} source/layout gap was hidden by a planning-count pin"
+                    summary.total_pax >= preset.requirements.num_passengers,
+                    "DC-10 capacity fell below its planning load: {} of {}",
+                    summary.total_pax,
+                    preset.requirements.num_passengers
                 );
             } else {
                 assert!(
@@ -710,14 +809,14 @@ mod product_tests {
         let mix = pax.length_share_mix();
         let seats =
             |cap| simulate_passenger_counts_for_seat_mix_with_source_cap(&g, pax, &mix, cap, None);
-        // The floor holds 662 seats (663 before the geometry phase 1 fuselage loft, -0.15 %); a
+        // The floor holds 662 seats (663 on a generated fuselage, -0.15 %); a
         // ceiling below that must be filled to the seat rather than left a whole business row
         // short of it, and a ceiling above the floor must not change the uncapped answer.
         assert_eq!(seats(None).total(), 662);
         assert_eq!(seats(Some(868)), seats(None));
         assert_eq!(seats(Some(555)).total(), 555);
         assert_eq!(seats(Some(600)).total(), 600);
-        assert_eq!(seats(Some(555)).business, 84); // 85 before the geometry phase 1 loft
+        assert_eq!(seats(Some(555)).business, 84); // 85 on a generated fuselage
     }
 
     #[test]

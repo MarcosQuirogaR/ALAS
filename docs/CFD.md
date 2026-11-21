@@ -7,9 +7,14 @@ identity, the exact coordinate snapshot and hash, the SI operating point, the
 boundary and mesh settings, the solver settings, and the versioned case
 template in `study.json`.
 
-The current template is `alas-airfoil-2d-openfoam-gmsh-v7`.  Gmsh creates an
+The current template is `alas-airfoil-2d-openfoam-gmsh-v11`.  Gmsh creates an
 exact straight-edge polygon from the section coordinates, a chord-scaled outer
-domain, and a one-layer extrusion.  `gmshToFoam` converts the mesh and the
+domain, and a one-layer extrusion.  The wall-normal prism stack starts at the
+first cell derived from the target y+ (default 0.1, where the SST skin friction
+no longer depends on the first cell), grows by 1.2 per layer, and ends at the larger of 1.5
+times the flat-plate boundary-layer thickness and the layer whose thickness
+reaches the isotropic near-wall cell size, so the aft suction-side layer at
+high lift stays on graded cells.  `gmshToFoam` converts the mesh and the
 runner enforces these patch contracts:
 
 | Patch | Role | Constraint |
@@ -56,9 +61,8 @@ The native v2606 distribution also supplies `bin/paraFoam` as the official
 ParaView launcher.  It is a shell script, so the Windows route executes it
 through the distribution's MSYS2 `bash.exe`.  `paraFoam -vtk` selects
 ParaView's built-in OpenFOAM reader; it is not a second solver or a separate
-CFD backend.  The launcher is at
-`<OpenFOAM-v2606>/msys64/home/ofuser/OpenFOAM/OpenFOAM-v2606/bin/paraFoam` inside the
-Windows distribution.
+CFD backend.  The launcher is verified locally at
+`<install>/msys64/home/ofuser/OpenFOAM/OpenFOAM-v2606/bin/paraFoam`.
 
 For a native Windows smoke run, configure the directories and run the example
 from the repository root:

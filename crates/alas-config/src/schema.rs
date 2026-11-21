@@ -47,12 +47,43 @@ pub struct Field {
     pub label: &'static str,
     /// Its unit, or the empty string when it is dimensionless.
     pub unit: &'static str,
-    /// What it means, in English.
+    /// What it means, in English: a summary short enough for a tooltip.
     pub help: &'static str,
+    /// The full explanation (sources, derivations, ranges) when `help` is only
+    /// a summary of it, else the empty string. See [`Field::full_help`].
+    pub long_help: &'static str,
     /// Whether the interface hides it until advanced settings are revealed.
     pub advanced: bool,
+    /// The condition under which the interface shows the field at all.
+    pub visible_if: Option<VisibleIf>,
     /// Its value, or its own fields when it is a group.
     pub entry: Entry,
+}
+
+impl Field {
+    /// The complete explanation: `long_help` when the field has one, else
+    /// `help`. This is the text the serialized schema and the documentation
+    /// carry.
+    pub fn full_help(&self) -> &'static str {
+        if self.long_help.is_empty() {
+            self.help
+        } else {
+            self.long_help
+        }
+    }
+}
+
+/// A field that the interface shows only while another value, named by its
+/// dotted path from the configuration root, is one of the listed strings.
+///
+/// Unlike [`ReadonlyUnless`], which greys a field out, this removes it from the
+/// form: the field does not apply to the configuration as it stands.
+#[derive(Debug, Clone, Copy, PartialEq, Serialize)]
+pub struct VisibleIf {
+    /// Dotted path of the controlling value from the configuration root.
+    pub path: &'static str,
+    /// The values of the controlling field that make this one visible.
+    pub any_of: &'static [&'static str],
 }
 
 /// What sits under a field: a nested group, or a value.
@@ -212,7 +243,9 @@ impl Node {
                     label: alas_i18n::t(Some(field.label), lang).into_owned(),
                     unit: field.unit,
                     help: alas_i18n::t(Some(field.help), lang).into_owned(),
+                    long_help: alas_i18n::t(Some(field.long_help), lang).into_owned(),
                     advanced: field.advanced,
+                    visible_if: field.visible_if,
                     entry: match &field.entry {
                         Entry::Node(node) => TranslatedEntry::Node(node.translated(lang)),
                         Entry::Leaf(leaf) => TranslatedEntry::Leaf(leaf.clone()),
@@ -248,8 +281,12 @@ pub struct TranslatedField {
     pub unit: &'static str,
     /// What it means, in the active language.
     pub help: String,
+    /// The full explanation in the active language, or empty.
+    pub long_help: String,
     /// Whether it is hidden until advanced settings are revealed.
     pub advanced: bool,
+    /// The condition under which it is shown.
+    pub visible_if: Option<VisibleIf>,
     /// Its value, or its own fields.
     pub entry: TranslatedEntry,
 }
@@ -278,8 +315,11 @@ impl Serialize for Field {
         map.serialize_entry("name", self.name)?;
         map.serialize_entry("label", self.label)?;
         map.serialize_entry("unit", self.unit)?;
-        map.serialize_entry("help", self.help)?;
+        map.serialize_entry("help", self.full_help())?;
         map.serialize_entry("advanced", &self.advanced)?;
+        if let Some(visible_if) = &self.visible_if {
+            map.serialize_entry("visible_if", visible_if)?;
+        }
         match &self.entry {
             Entry::Node(node) => {
                 map.serialize_entry("kind", &Kind::Nested)?;
@@ -297,8 +337,16 @@ impl Serialize for TranslatedField {
         map.serialize_entry("name", self.name)?;
         map.serialize_entry("label", &self.label)?;
         map.serialize_entry("unit", self.unit)?;
-        map.serialize_entry("help", &self.help)?;
+        let full = if self.long_help.is_empty() {
+            &self.help
+        } else {
+            &self.long_help
+        };
+        map.serialize_entry("help", full)?;
         map.serialize_entry("advanced", &self.advanced)?;
+        if let Some(visible_if) = &self.visible_if {
+            map.serialize_entry("visible_if", visible_if)?;
+        }
         match &self.entry {
             TranslatedEntry::Node(node) => {
                 map.serialize_entry("kind", &Kind::Nested)?;

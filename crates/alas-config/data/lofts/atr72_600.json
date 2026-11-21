@@ -20,6 +20,14 @@
     0.6257822277847309,
     0.6257822277847309,
     0.6257822277847309,
+    0.6809983067069131,
+    0.7362143856290951,
+    0.7914304645512773,
+    0.8466465434734595,
+    0.9018626223956416,
+    0.9570787013178237,
+    0.9705514245748361,
+    0.9889567842155635,
     1.0,
     1.0,
     1.0,
@@ -28,18 +36,26 @@
     1.0
    ],
    "coeffs": [
-    -1.3801234093024302e-15,
-    0.539999999999998,
-    2.250696680044093,
-    2.0520562499999966,
-    2.0520562500000157,
-    2.052056250000012,
-    2.0520562500000055,
-    2.0520562500000024,
-    2.0520562499999873,
-    0.49901381675519885,
-    0.1481198401266572,
-    0.042138379587299275
+    -3.0106172388184707e-15,
+    0.540000000000006,
+    2.2506966800440855,
+    2.0520562499999953,
+    2.0520562500000126,
+    2.0520562500000072,
+    2.0520562500000077,
+    2.0520562500000046,
+    2.052056249999992,
+    2.0246610713095214,
+    1.866910510927536,
+    1.4427218223779033,
+    0.9132545970019424,
+    0.4933738414855547,
+    0.2180932757821773,
+    0.07590844913269633,
+    0.0241602959987835,
+    0.009781384476567255,
+    0.0040520058821352095,
+    0.0024985314196034683
    ]
   },
   "E": {
@@ -56,7 +72,14 @@
     0.2944857542516381,
     0.2944857542516381,
     0.2944857542516381,
-    0.7509386733416771,
+    0.3497018331738202,
+    0.40491791209600236,
+    0.4601339910181845,
+    0.5153500699403666,
+    0.5705661488625487,
+    0.6257822277847309,
+    0.6994036663476404,
+    0.8098358241920047,
     1.0,
     1.0,
     1.0,
@@ -65,19 +88,26 @@
     1.0
    ],
    "coeffs": [
-    -1.3237248619697297e-15,
-    0.540000000000001,
-    0.3365622074372975,
-    1.8360249999999991,
-    1.8360250000000036,
-    1.8360249999999991,
-    1.8360249999999991,
-    1.836024999999992,
-    1.8360249999999942,
-    2.1379953138329775,
-    0.6805794557372168,
-    0.18798581065044767,
-    0.047791104164423164
+    2.0019577350273955e-15,
+    0.5399999999999957,
+    1.378302609298785,
+    1.8360250000000107,
+    1.8360249999999945,
+    1.8360250000000033,
+    1.8360249999999974,
+    1.8360249999999996,
+    1.8360249999999951,
+    1.835925287342025,
+    1.8361827284240901,
+    1.8353860064736354,
+    1.8499945498394643,
+    1.7998083798937112,
+    1.7672316318513206,
+    1.5074361596209793,
+    0.7385710768418515,
+    0.3759615623060054,
+    0.09000547960376062,
+    0.01155492219732613
    ]
   },
   "zc": {
@@ -94,7 +124,14 @@
     0.2944857542516381,
     0.2944857542516381,
     0.2944857542516381,
-    0.7509386733416771,
+    0.3497018331738202,
+    0.40491791209600236,
+    0.4601339910181845,
+    0.5153500699403666,
+    0.5705661488625487,
+    0.6257822277847309,
+    0.6994036663476404,
+    0.8098358241920047,
     1.0,
     1.0,
     1.0,
@@ -103,19 +140,26 @@
     1.0
    ],
    "coeffs": [
-    -0.5232790224032581,
-    -0.5632969848114393,
-    0.052282440312819645,
-    0.02999999999999851,
-    0.030000000000000714,
-    0.029999999999995433,
-    0.029999999999994524,
-    0.02999999999999817,
-    0.02999999999999395,
-    0.13967313272867188,
-    -0.1760806395009864,
-    0.6183857184955852,
-    0.5898554596591604
+    -0.5232790224032582,
+    -0.5657366287716098,
+    -0.06451803739982917,
+    0.029999999999999402,
+    0.030000000000000124,
+    0.02999999999999529,
+    0.029999999999994288,
+    0.02999999999999537,
+    0.0299999999999967,
+    0.031058158914084744,
+    0.035779027805008495,
+    0.043492653988004684,
+    0.03731160011543665,
+    0.06551726274611519,
+    0.003980121400373755,
+    0.0958540446473439,
+    0.318379811281888,
+    0.5628071169819623,
+    0.6847475480108762,
+    0.6878840326880681
    ]
   },
   "n": {
@@ -187,10 +231,10 @@
   "tv_ratio_max": 1.5
  },
  "fit": {
-  "rms_m": 0.06486151575860317,
-  "max_m": 0.27239270938791293,
+  "rms_m": 0.064,
+  "max_m": 0.271,
   "lambda": 1.0,
-  "tool_version": "loft_fit 0.1 + fairfit 1 (quality pass 2026-10-11)"
+  "tool_version": "loft_fit 0.1 + fairfit 1 (quality pass 2026-10-11) + tail_all 1 (aft-only, task 08); rms_m and max_m are over the drawn samples (ink priors and hidden intervals excluded); drawing fit 2026-11-05 on the EWADE three-view side view"
  },
  "provenance": [
   {
@@ -201,7 +245,7 @@
     "title": "ATR 72-600 factsheet 2020 (side/top renders)",
     "page": "factsheet",
     "sha256": "6be6cb95d98fa33199a5e6b35830c2a0b4c8ff8fa91a9f42c5cc3a6b37e4c1e5",
-    "path": "<fit-workdir>/ATR72-600_factsheet2020.pdf"
+    "path": "ATR72-600_factsheet2020.pdf"
    },
    "view": "top",
    "px_per_m": 49.77,
@@ -209,7 +253,7 @@
    "rms_m": 0.051047216789113614,
    "max_m": 0.1003235058471148,
    "confidence": "C",
-   "note": "plan half-width from the calibrated top silhouette (both halves averaged, centreline offset -0.030 m removed); wing/hstab/fairing intervals excluded (exclusions/ATR72-600.json); plateau value = preset D/2, line-width correction +0.000 m/side | quality pass 2026-10-11: refit under the Rust sampled fairness metric (inflections where radius < 50 local half-sizes) with the accuracy gates kept | INTEGRATION STEP A 2026-10-11: plateau forced to D = 2.865 m (secondary source: third-party ATR 72-600 familiarisation handout lists a maximum width of 2865 mm; consistent with the 2.57 m cabin width plus walls). The drawn plan measures 2.974 m (EWADE 2011 three-view; 2.999 m on the 2020 factsheet render), 0.054 m per side wider than the plateau, inside the class C gate. No primary external width exists in the EASA TCDS EASA.A.084 or the factsheets."
+   "note": "plan half-width from the calibrated top silhouette (both halves averaged, centreline offset -0.030 m removed); wing/hstab/fairing intervals excluded (exclusions/ATR72-600.json); plateau value = preset D/2, line-width correction +0.000 m/side | quality pass 2026-10-11: refit under the Rust sampled fairness metric (inflections where radius < 50 local half-sizes) with the accuracy gates kept | INTEGRATION STEP A 2026-10-11: plateau forced to D = 2.865 m (secondary source: third-party ATR 72-600 familiarisation handout lists a maximum width of 2865 mm; consistent with the 2.57 m cabin width plus walls). The drawn plan measures 2.974 m (EWADE 2011 three-view; 2.999 m on the 2020 factsheet render), 0.054 m per side wider than the plateau, inside the class C gate. No primary external width exists in the EASA TCDS EASA.A.084 or the factsheets. | TAIL REFIT task 08 (2026-10-20): tail cone (x >= 8.00 m, the end of the cylinder on the first of the three curves) refitted with the forward coefficients frozen, knots every 1.5 m, curvature-variation weight 1e4, drawn-sample cap = class gate; samples hidden behind the fin / horizontal tail (exclusion intervals, previously bridged by linear priors) carry no accuracy claim (sigma 0.25 m) so the fuselage contour no longer follows the empennage priors"
   },
   {
    "group": "E",
@@ -219,7 +263,7 @@
     "title": "ATR 72-600 factsheet 2020 (side/top renders)",
     "page": "factsheet",
     "sha256": "6be6cb95d98fa33199a5e6b35830c2a0b4c8ff8fa91a9f42c5cc3a6b37e4c1e5",
-    "path": "<fit-workdir>/ATR72-600_factsheet2020.pdf"
+    "path": "ATR72-600_factsheet2020.pdf"
    },
    "view": "side",
    "px_per_m": 36.14812633438857,
@@ -227,7 +271,7 @@
    "rms_m": 0.071733409396473,
    "max_m": 0.27239270938791293,
    "confidence": "C",
-   "note": "half-height from crown and keel of the side silhouette; fin/engine/gear/fairing intervals excluded; plateau = preset height_m/2 (H measured 2.711 m) | quality pass 2026-10-11: refit under the Rust sampled fairness metric (inflections where radius < 50 local half-sizes) with the accuracy gates kept | INTEGRATION STEP A 2026-10-11: H = 2.71 m (factsheet 2020 side render; three-view side 2.70 m), crown datum cabin_z_m 0.03 + H/2 = 1.385 m unchanged."
+   "note": "half-height from crown and keel of the side silhouette; fin/engine/gear/fairing intervals excluded; plateau = preset height_m/2 (H measured 2.711 m) | quality pass 2026-10-11: refit under the Rust sampled fairness metric (inflections where radius < 50 local half-sizes) with the accuracy gates kept | INTEGRATION STEP A 2026-10-11: H = 2.71 m (factsheet 2020 side render; three-view side 2.70 m), crown datum cabin_z_m 0.03 + H/2 = 1.385 m unchanged. | TAIL REFIT task 08 (2026-10-20): tail cone (x >= 8.00 m, the end of the cylinder on the first of the three curves) refitted with the forward coefficients frozen, knots every 1.5 m, curvature-variation weight 1e4, drawn-sample cap = class gate; samples hidden behind the fin / horizontal tail (exclusion intervals, previously bridged by linear priors) carry no accuracy claim (sigma 0.25 m) so the fuselage contour no longer follows the empennage priors | DRAWING FIT 2026-11-05: nose (E control 2, zc controls 1 and 2, tip radius held) and tail cone (x >= 17 m, knots reduced to 19 and 22 m) refitted to the side view of the ATR 72 three view drawing (EWADE 2011 presentation, p.3); hidden fin interval bridged by a concave line; tail ends 0.21 m high"
   },
   {
    "group": "zc",
@@ -237,7 +281,7 @@
     "title": "ATR 72-600 factsheet 2020 (side/top renders)",
     "page": "factsheet",
     "sha256": "6be6cb95d98fa33199a5e6b35830c2a0b4c8ff8fa91a9f42c5cc3a6b37e4c1e5",
-    "path": "<fit-workdir>/ATR72-600_factsheet2020.pdf"
+    "path": "ATR72-600_factsheet2020.pdf"
    },
    "view": "side",
    "px_per_m": 36.14812633438857,
@@ -245,7 +289,7 @@
    "rms_m": 0.071733409396473,
    "max_m": 0.27239270938791293,
    "confidence": "C",
-   "note": "centreline height; z datum: crown of the drawing = cabin_z + H/2 of the preset; nose tip z from the drawing -0.523 m (preset nose_z_m -0.52) | quality pass 2026-10-11: refit under the Rust sampled fairness metric (inflections where radius < 50 local half-sizes) with the accuracy gates kept"
+   "note": "centreline height; z datum: crown of the drawing = cabin_z + H/2 of the preset; nose tip z from the drawing -0.523 m (preset nose_z_m -0.52) | quality pass 2026-10-11: refit under the Rust sampled fairness metric (inflections where radius < 50 local half-sizes) with the accuracy gates kept | TAIL REFIT task 08 (2026-10-20): tail cone (x >= 8.00 m, the end of the cylinder on the first of the three curves) refitted with the forward coefficients frozen, knots every 1.5 m, curvature-variation weight 1e4, drawn-sample cap = class gate; samples hidden behind the fin / horizontal tail (exclusion intervals, previously bridged by linear priors) carry no accuracy claim (sigma 0.25 m) so the fuselage contour no longer follows the empennage priors | DRAWING FIT 2026-11-05: nose (E control 2, zc controls 1 and 2, tip radius held) and tail cone (x >= 17 m, knots reduced to 19 and 22 m) refitted to the side view of the ATR 72 three view drawing (EWADE 2011 presentation, p.3); hidden fin interval bridged by a concave line; tail ends 0.21 m high"
   },
   {
    "group": "n",
@@ -255,7 +299,7 @@
     "title": "ATR 72-600 factsheet 2020 (side/top renders)",
     "page": "factsheet",
     "sha256": "6be6cb95d98fa33199a5e6b35830c2a0b4c8ff8fa91a9f42c5cc3a6b37e4c1e5",
-    "path": "<fit-workdir>/ATR72-600_factsheet2020.pdf"
+    "path": "ATR72-600_factsheet2020.pdf"
    },
    "view": "front",
    "px_per_m": 36.14812633438857,
@@ -273,7 +317,7 @@
     "title": "ATR 72-600 factsheet 2020 (side/top renders)",
     "page": "factsheet",
     "sha256": "6be6cb95d98fa33199a5e6b35830c2a0b4c8ff8fa91a9f42c5cc3a6b37e4c1e5",
-    "path": "<fit-workdir>/ATR72-600_factsheet2020.pdf"
+    "path": "ATR72-600_factsheet2020.pdf"
    },
    "view": "side",
    "px_per_m": 36.14812633438857,
@@ -291,7 +335,7 @@
     "title": "ATR 72-600 factsheet 2020 (side/top renders)",
     "page": "factsheet",
     "sha256": "6be6cb95d98fa33199a5e6b35830c2a0b4c8ff8fa91a9f42c5cc3a6b37e4c1e5",
-    "path": "<fit-workdir>/ATR72-600_factsheet2020.pdf"
+    "path": "ATR72-600_factsheet2020.pdf"
    },
    "view": "side",
    "px_per_m": 36.14812633438857,
@@ -309,7 +353,7 @@
     "title": "ATR 72-600 factsheet 2020 (side/top renders)",
     "page": "factsheet",
     "sha256": "6be6cb95d98fa33199a5e6b35830c2a0b4c8ff8fa91a9f42c5cc3a6b37e4c1e5",
-    "path": "<fit-workdir>/ATR72-600_factsheet2020.pdf"
+    "path": "ATR72-600_factsheet2020.pdf"
    },
    "view": "side",
    "px_per_m": 36.14812633438857,

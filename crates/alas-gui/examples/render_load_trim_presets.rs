@@ -101,6 +101,16 @@ fn main() -> Result<(), Box<dyn std::error::Error>> {
             )?;
             println!("wrote {} ({:?})", path.display(), scene.title);
         }
+        for (id, canvas) in [("landing_gear", None), ("mass_cg", Some((1100.0, 600.0)))] {
+            if let Some(scene) = alas_gui::scene::build_page_preview_sized(&state, id, canvas) {
+                let path = directory.join(format!("{id}_{slug}_sized.png"));
+                std::fs::write(
+                    &path,
+                    alas_viz::raster::render_scene_png(&scene).map_err(std::io::Error::other)?,
+                )?;
+                println!("wrote {}", path.display());
+            }
+        }
     }
     Ok(())
 }

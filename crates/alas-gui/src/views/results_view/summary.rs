@@ -4,9 +4,11 @@
 //! Layout-derived aircraft metrics shown above the result figures.
 
 mod cruise_levels;
+mod cruise_point;
 #[cfg(test)]
 mod layout_export;
 mod metrics;
+mod mission_stages;
 mod propulsion;
 #[cfg(test)]
 mod tests;
@@ -19,6 +21,7 @@ use crate::state::AppState;
 use super::external::show_tool_status_cards;
 use cruise_levels::{cruise_level_rows, cruise_level_summary, localize_thrust_message};
 use metrics::*;
+use mission_stages::show_mission_stages;
 use propulsion::*;
 use widgets::*;
 
@@ -108,6 +111,7 @@ pub(super) fn show_summary(state: &AppState, ui: &mut Ui, result: &alas_pipeline
 
     section_title(ui, "Mission");
     show_stat_tiles(ui, &mission_metrics(result));
+    show_mission_stages(ui, result);
     if let Some(summary) = cruise_level_summary(result) {
         section_title(ui, "Cruise levels and thrust");
         show_stat_tiles(ui, &cruise_level_rows(&summary));

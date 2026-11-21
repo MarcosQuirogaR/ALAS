@@ -12,7 +12,9 @@
 //! **attachment height**: the height at which the root chord's lowest body
 //! top equals the root itself. The root then touches the body at that
 //! lowest point and lies inside it everywhere else, and the tip, which sets
-//! the fin height, does not move.
+//! the fin height, does not move. Coming down from the tip, the first such height
+//! is the one: a fin standing on a pod ends on the pod, and its edges do not run
+//! on through the duct to the body below.
 //!
 //! The body under the fin is the fuselage and any centreline nacelle (a
 //! trijet's tail engine), whose top the fin stands on where it is the higher
@@ -27,6 +29,9 @@ use crate::aircraft::fuselage::Fuselage;
 /// Bisection steps for the attachment height: 2^-48 of a fin height is far
 /// below a millimetre.
 const BISECTION_STEPS: usize = 48;
+
+/// Steps down from the fin tip in the search for the first contact with a body.
+const CONTACT_SEARCH_STEPS: usize = 128;
 
 impl AircraftBuilder {
     /// The seat of the fin on `fuselage` and on the centreline nacelles of
@@ -77,11 +82,21 @@ fn lofted_top(loft: &crate::loft::Loft, body: &Fuselage) -> Vec<[f64; 2]> {
 pub(super) struct FinSeat {
     /// One `(x, z_top)` polyline per body, nose to tail.
     tops: Vec<Vec<[f64; 2]>>,
+    /// The `(x, z_underside)` stations of the first body standing on the fuselage,
+    /// a centreline pod, when there is one.
+    pod_underside: Vec<[f64; 2]>,
 }
 
 impl FinSeat {
     /// The seat formed by `bodies`.
     pub(super) fn new<'a>(bodies: impl IntoIterator<Item = &'a Fuselage>) -> Self {
+        let bodies: Vec<&Fuselage> = bodies.into_iter().collect();
+        let pod_underside = bodies.get(1).map_or_else(Vec::new, |pod| {
+            pod.xsecs
+                .iter()
+                .map(|xsec| [xsec.xyz_c[0], xsec.xyz_c[2] - xsec.height / 2.0])
+                .collect()
+        });
         let tops = bodies
             .into_iter()
             .map(|body| {
@@ -95,11 +110,27 @@ impl FinSeat {
             })
             .filter(|top| top.len() >= 2)
             .collect();
-        Self { tops }
+        Self {
+            tops,
+            pod_underside,
+        }
+    }
+
+    /// The fuselage alone, the first body, when other bodies stand on it.
+    pub(super) fn fuselage_alone(&self) -> Option<Self> {
+        (self.tops.len() > 1).then(|| Self {
+            tops: self.tops.iter().take(1).cloned().collect(),
+            pod_underside: Vec::new(),
+        })
+    }
+
+    /// The underside of the centreline pod at `x_m`; `None` outside it or without one.
+    pub(super) fn pod_underside_at(&self, x_m: f64) -> Option<f64> {
+        interpolate(&self.pod_underside, x_m)
     }
 
     /// The highest body top at `x_m`; `None` where no body lies under it.
-    fn top_at(&self, x_m: f64) -> Option<f64> {
+    pub(super) fn top_at(&self, x_m: f64) -> Option<f64> {
         self.tops
             .iter()
             .filter_map(|top| interpolate(top, x_m))
@@ -239,6 +270,45 @@ impl FinTrapezoid {
             .map(|top| z_m - top)
     }
 
+    /// This fin with its root where its leading edge meets the top of `seat`: the
+    /// reference root of a fin carried through a pod to the fuselage, which does not
+    /// depend on how the fuselage closes under the rest of the chord.
+    pub(super) fn carried_to_leading_edge_on(&self, seat: &FinSeat) -> Self {
+        let tip_z_m = self.tip_le_m[2];
+        let Some(lowest) = seat.lowest() else {
+            return *self;
+        };
+        let bottom = lowest.min(self.root_le_m[2]);
+        let above = |z_m: f64| {
+            seat.top_at(self.section_at(z_m).0[0])
+                .is_none_or(|top| z_m > top)
+        };
+        let step = (tip_z_m - bottom) / CONTACT_SEARCH_STEPS as f64;
+        let Some(index) =
+            (1..=CONTACT_SEARCH_STEPS).find(|index| !above(tip_z_m - *index as f64 * step))
+        else {
+            return *self;
+        };
+        let (mut high, mut low) = (
+            tip_z_m - (index - 1) as f64 * step,
+            tip_z_m - index as f64 * step,
+        );
+        for _ in 0..BISECTION_STEPS {
+            let mid = 0.5 * (low + high);
+            if above(mid) {
+                high = mid;
+            } else {
+                low = mid;
+            }
+        }
+        let (root_le_m, root_chord_m) = self.section_at(high);
+        Self {
+            root_le_m,
+            root_chord_m,
+            ..*self
+        }
+    }
+
     /// This fin with its root moved to the attachment height on `seat`.
     ///
     /// The fin is returned unchanged when the attachment height cannot be
@@ -254,6 +324,13 @@ impl FinTrapezoid {
         let bracketed = above.partial_cmp(&below) == Some(std::cmp::Ordering::Greater);
         if !bracketed || !floats(above) || floats(below) {
             return *self;
+        }
+        let step = (above - below) / CONTACT_SEARCH_STEPS as f64;
+        if let Some(index) =
+            (1..CONTACT_SEARCH_STEPS).find(|index| !floats(tip_z_m - *index as f64 * step))
+        {
+            above = tip_z_m - (index - 1) as f64 * step;
+            below = tip_z_m - index as f64 * step;
         }
         for _ in 0..BISECTION_STEPS {
             let mid = 0.5 * (below + above);

@@ -20,6 +20,19 @@
 //! made. It is appropriate for a strength-based preliminary sizing pass and
 //! is not a certified stress analysis.
 //!
+//! `Al 7075-T6` carries 380 MPa (55 ksi). In the wing box its governing use is
+//! the upper cover in compression, where the allowable is the crippling stress
+//! of the stringer-skin section, not `F_tu`: M. C. Y. Niu, *Airframe Structural
+//! Design*, Conmilit Press, 1988, gives 7075-T6 `F_tu` 78 ksi and `F_cy` 70 ksi
+//! (Fig. 4.2.1, p. 96) and a crippling stress of 57.45 ksi (396 MPa) for a
+//! stocky extruded 7075-T6 Z-stringer (Sec. 5.3 example, p. 136; 36.1 ksi for
+//! the formed sheet one). 380 MPa sits at that extruded-stringer crippling
+//! cut-off, so it is kept. Leaner panels fall below it on the Farrar efficiency
+//! curve (realized mean stress 30 to 45 ksi for inner wings, Fig. 5.6.11,
+//! p. 150), which `alas_struct` applies separately as the cover panel's
+//! structural-index allowable. The lower cover's fatigue limit is applied by the
+//! separate lower-cover fatigue check (`alas_struct` sizing), not folded in here.
+//!
 //! `CFRP QI` is the product's wing-cover laminate proxy and carries a
 //! damage-tolerant design value, not a coupon strength: 220 MPa at its 55 GPa
 //! modulus is an ultimate strain of 0.40 %. Transport composite covers are
@@ -145,18 +158,13 @@ struct Table {
 
 /// Parse the embedded table.
 ///
-/// A parse failure is reported and degrades to an empty table rather than
-/// panicking, matching how this crate's sibling embedded data behaves: the
-/// file is generated and checked in, so this should never happen, and if it
-/// ever does the material lookup reports "unknown material" rather than
-/// taking the program down.
+/// The file is embedded at build time and a unit test parses it, so a failure
+/// here is a build defect. It stops the program with the parse error rather
+/// than serving an empty table that would make every lookup report an unknown
+/// material.
 fn parse() -> Table {
-    serde_json::from_str(MATERIALS_JSON).unwrap_or_else(|error| {
-        tracing::error!(%error, "crates/alas-config/data/materials.json failed to parse");
-        Table {
-            materials: Vec::new(),
-        }
-    })
+    serde_json::from_str(MATERIALS_JSON)
+        .unwrap_or_else(|error| panic!("embedded materials.json failed to parse: {error}"))
 }
 
 // A test asserts on values it constructed here directly, so a failed unwrap

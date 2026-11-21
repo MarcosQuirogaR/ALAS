@@ -1,7 +1,7 @@
 // SPDX-License-Identifier: AGPL-3.0-or-later
 // Copyright (C) 2026 Marcos Quiroga Rodriguez
 
-//! Equivalence harness for the evaluation speed-ups of phase 2 lane L5a.
+//! Equivalence harness for the evaluation speed-ups of.
 //!
 //! Evaluates, at full fidelity, the registered nominal design of each preset
 //! and, optionally, the first N design vectors of a search history written by

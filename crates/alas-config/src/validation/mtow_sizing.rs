@@ -69,6 +69,38 @@ pub(super) fn mtow_sizing_issues(config: &AlasConfig) -> Vec<ValidationIssue> {
             Severity::Warning,
         ));
     }
+    if let Some(mlw_kg) = config.requirements.mlw_kg {
+        let mtow_kg = config.requirements.mtow_kg;
+        if !(mlw_kg.is_finite() && mlw_kg > 0.0) {
+            issues.push(issue(
+                "requirements.mlw_kg",
+                "The maximum landing weight must be a finite positive mass.",
+                Severity::Error,
+            ));
+        } else if mtow_kg.is_finite() && mtow_kg > 0.0 && mlw_kg > mtow_kg {
+            issues.push(issue(
+                "requirements.mlw_kg",
+                "The maximum landing weight must not exceed the MTOW.",
+                Severity::Error,
+            ));
+        }
+    }
+    if let Some(mzfw_kg) = config.requirements.mzfw_kg {
+        let mtow_kg = config.requirements.mtow_kg;
+        if !(mzfw_kg.is_finite() && mzfw_kg > 0.0) {
+            issues.push(issue(
+                "requirements.mzfw_kg",
+                "The maximum zero-fuel weight must be a finite positive mass.",
+                Severity::Error,
+            ));
+        } else if mtow_kg.is_finite() && mtow_kg > 0.0 && mzfw_kg > mtow_kg {
+            issues.push(issue(
+                "requirements.mzfw_kg",
+                "The maximum zero-fuel weight must not exceed the MTOW.",
+                Severity::Error,
+            ));
+        }
+    }
     issues
 }
 
@@ -136,5 +168,39 @@ mod tests {
         );
         config.optimizer.objective.mtow_sizing = MtowSizing::PayloadAdjusted;
         assert_eq!(paths(&config).len(), 2);
+    }
+
+    #[test]
+    fn an_explicit_mzfw_must_be_a_positive_mass_not_above_the_mtow() {
+        let mut config = AlasConfig::default();
+        let mtow_kg = config.requirements.mtow_kg;
+        let error = vec![("requirements.mzfw_kg".to_owned(), Severity::Error)];
+        for bad in [f64::NAN, f64::INFINITY, 0.0, -1.0, 1.01 * mtow_kg] {
+            config.requirements.mzfw_kg = Some(bad);
+            assert_eq!(paths(&config), error, "{bad}");
+        }
+        for good in [0.7 * mtow_kg, mtow_kg] {
+            config.requirements.mzfw_kg = Some(good);
+            assert!(paths(&config).is_empty(), "{good}");
+        }
+    }
+
+    #[test]
+    fn an_explicit_mlw_must_be_a_positive_mass_not_above_the_mtow() {
+        let mut config = AlasConfig::default();
+        let mtow_kg = config.requirements.mtow_kg;
+        let error = vec![("requirements.mlw_kg".to_owned(), Severity::Error)];
+        for bad in [f64::NAN, f64::INFINITY, 0.0, -1.0, 1.01 * mtow_kg] {
+            config.requirements.mlw_kg = Some(bad);
+            assert_eq!(paths(&config), error, "{bad}");
+        }
+        for good in [0.8 * mtow_kg, mtow_kg] {
+            config.requirements.mlw_kg = Some(good);
+            assert!(paths(&config).is_empty(), "{good}");
+        }
+        config.requirements.mlw_kg = Some(-1.0);
+        assert!(crate::validate(&config)
+            .iter()
+            .any(|issue| issue.field_path == "requirements.mlw_kg"));
     }
 }

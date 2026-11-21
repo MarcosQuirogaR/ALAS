@@ -11,8 +11,9 @@ use alas_geom::aircraft::airfoil::Airfoil;
 /// `y_first < y_last` at `x` ~ 1 is a negative trailing-edge gap: the two
 /// surfaces cross just before the end. The `dsma523a` library file carries this
 /// (its last point (1.000000, 0.000498) is above its first (1.000000,
-/// 0.000308)) and so does every section morphed from it (B747-400 and DC-10
-/// root, kink and tip). MSET meshes such a section, but MSES then fails to
+/// 0.000308)) and so does every section morphed from it (the B747-400 and
+/// DC-10 root, kink and tip, before those presets drew conventional-class
+/// sections). MSET meshes such a section, but MSES then fails to
 /// converge even at M 0.3 and Re 5e6 (B747-400 root, 0 of 9 sweeps converged
 /// before; all of them converge with the end points set to their mean). Both
 /// end points are replaced by their mean `y`, a zero-gap closed edge a few

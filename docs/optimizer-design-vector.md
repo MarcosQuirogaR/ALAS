@@ -80,11 +80,31 @@ every stored design vector.
 Wing vertical position (`WingConfig::root_z_m`, default `-2.1` m) is **not** a
 design variable. The optimizer cannot raise or lower the wing on the
 fuselage, so high-, mid- and low-wing layouts are a configuration choice, not
-a search outcome. Engine architecture is fixed the same way.
+a search outcome. Engine architecture (count, stations, cycle) is fixed the
+same way; the engine *rating* is not a coordinate either, but in clean-sheet
+mode it is a sized output of every evaluation (see "Engine sizing" below).
 
 In reference adaptation, `design_space.reference_fixed_variables` also holds
 variables at the registered aircraft's values; the tail scale is always
 derived. The default is `fuselage_length_m, tail_x_shift_m, bump_lower_rear`.
+
+`tip_twist_deg` is held at its nominal value in every mode: the trimmed drag table
+takes the induced drag of the twist as the handbook allowance for a non-optimum twist
+(Jenkinson, Civil Jet Aircraft Design, 1999, pp. 179-180), and no published form gives
+that allowance as a function of the departure from the optimum distribution, so a
+search over the twist has no sourced drag to work with.
+
+The wing-section shape variables (`airfoil_thickness_scale`, `airfoil_camber_scale`
+and the four Hicks-Henne bumps) are held at their nominal values in every mode. The
+in-loop model carries thickness into the wing mass, tank volume, form factor and
+compressibility drag, and camber into the lattice and trim, but neither into the
+section maximum lift (CLmax scales the declared coefficients with planform terms
+only) nor into a section drag polar, so a thinner or more cambered section would be
+credited its drag and lift without the loss of maximum lift with leading-edge
+sharpness (USAF DATCOM Sec. 4.1.3.4) or the profile drag away from the design lift
+(Abbott and von Doenhoff, Theory of Wing Sections, Ch. 7). The ATR 72-600 search of
+2026-11-18 put camber +10 % and thickness -10 % on the window edges.
+
 The rule: hold a variable only if its block-fuel sensitivity at the
 registered design is below 0.1 % of block fuel per full window width on all
 three aircraft below. Sensitivities are central differences at +-5 % of the
@@ -200,8 +220,10 @@ Jane's 2008-2009 (ATR 42-500, ATR 72-500, Dash 8-300, Dash 8 Q400):
 | Route | the curated pair of ordinary aerodromes whose longest generated route (great circle times `mission.max_airway_stretch`) is nearest below the design range, when no airport is named |
 
 Explicit keys still win. The engine is the catalogue entry named by the
-brief (engine scaling is not a design freedom), so installed power is fixed
-by that choice; no class relation sizes it.
+brief, which is the baseline cycle; its rating is not a design-vector
+coordinate but is sized from the thrust requirements of every clean-sheet
+evaluation (see "Engine sizing" below), so the class start only needs an
+engine of the right class.
 
 Explicit keys override the derivation variable by variable in any
 clean-sheet run, with or without a preset:
@@ -319,23 +341,149 @@ reducing the configured evaluation ceiling. A feasible search continues within
 the remaining clock budget when later candidates cost less than its pilot;
 the recorded schedule and evaluation prefix still reproduce its trajectory.
 
-## Known gap: no full geometric interference constraint
+## Geometric interference constraints
 
-The optimizer does not run a mesh intersection test between wing and
-fuselage. `docs/methods.md` states plainly that the exposed-area correction
-"is not a mesh intersection" and does not resolve dihedral crossing the body
-surface; it is an aerodynamic correction, not a feasibility test. Since the
-layout residuals of `crates/alas-opt/src/mdo/residuals_layout.rs` were added,
-the built geometry is checked for wing root leading and trailing edges on the
-fuselage (`wing_root_le_on_fuselage`, `wing_root_te_on_fuselage`), the wing
-apex fraction (`wing_apex_fraction`) and the wingbox root depth fitting the
-fuselage (`wingbox_root_depth_fits_fuselage`), among others. These are
-hard geometry residuals, but they are band and containment checks on station
-positions, not a surface intersection test, and `tail_x_shift_m` is not
-related to `fuselage_length_m` by a dedicated residual.
+The optimizer does not run a mesh intersection test: `docs/methods.md` states
+plainly that the exposed-area correction "is not a mesh intersection" and does
+not resolve dihedral crossing the body surface; it is an aerodynamic
+correction, not a feasibility test. The built geometry is instead checked by
+hard residuals, all Geometry-family constraints:
+
+- `crates/alas-opt/src/mdo/residuals_layout.rs`: wing root leading and trailing
+  edges on the fuselage (`wing_root_le_on_fuselage`,
+  `wing_root_te_on_fuselage`), the wing apex fraction
+  (`wing_apex_fraction`), the wingbox root depth fitting the fuselage
+  (`wingbox_root_depth_fits_fuselage`) and the root within the body envelope.
+- `crates/alas-opt/src/mdo/residuals_hold_clearance.rs`: on a redesign of a
+  registered aircraft whose preset declares its lower holds by station, the
+  centre box and gear bay (front spar to side-of-body trailing edge) reach no
+  further into any declared hold than the registered aircraft's own do
+  (`wing_box_clear_of_lower_holds`, m, feasible iff at most zero).
+- `crates/alas-opt/src/mdo/residuals/interference.rs`, gaps in metres on the
+  built airframe, feasible iff non-negative:
+  `nacelle_clear_of_fuselage` and `nacelle_clear_of_nacelle` (no podded engine
+  body overlaps the fuselage or another engine body: the exact minimum
+  separation of the two superellipse section boundaries, 64-point polylines,
+  at every common station, so offset and elongated sections are judged as
+  they are and not along the line between their centres); `main_gear_clear_of_nacelle`
+  (the extended main wheels, sized tyre diameter and width at the layout's
+  wheel stations, against every engine body at the stations each wheel
+  spans, on the static ground shape); `nacelle_clear_of_wing` (the top of a nacelle hung under the wing
+  stays below the wing's lower surface); `wing_tip_ground_clearance_in_roll`,
+  `nacelle_ground_clearance_in_roll` and `tail_ground_clearance_in_roll`
+  (Raymer ch. 11, p. 342: no strike at the tail-down attitude in a 5 degree
+  roll about the outboard main wheel, on the static ground shape; the
+  nacelle and tail extension is this module's, judged at both level and
+  tail-down attitude); `tail_root_attached` (the horizontal-tail root
+  mid-chord point lies inside the fuselage or the fin).
 
 The consequence is directional: a search that is better at finding the edges
 of the declared box is also better at finding geometry the box does not
 forbid. Bounds are not a substitute for an interference constraint, and no
 result from this optimizer should be read as evidence that a candidate is
 manufacturable.
+
+All registered presets pass them. Eleven stand on a registered `fuselage_ground_clearance_m`:
+E195-E2 1.65 m (Embraer APM 5824 Table 2.7, row 61,700 kg, CG 34 %: nose, nacelle and wing-tip
+heights, which agree within 0.08 m; the table of the E190-E2 is Table 2.4), C919 1.46 m (COMAC
+airport characteristics Table 1 item K), DC-10 2.26 m (Boeing ACAP sec. 2.3 item D), ATR72-600
+0.64 m (ATR Aircraft Recovery Manual Figure 1-28: propeller hub, propeller tip and wing tip,
++-0.07 m; the wing-tip point alone gives 0.55-0.58 m) and A400M 1.21 m (brochure side view against
+its 14.7 m height rule, +-0.05 m; the propeller tip reads 0.05-0.15 m higher than the model). The
+notional AVE declares 2.44 m from the Boeing 777-9 airport-planning ground clearances (D6-86073
+Rev G Table 2-2: each row's min-max pair gives an interval for the belly clearance; fuselage top
+A, engine low point F and wing tip K intersect in 2.43-2.45 m; the tail rows lie above it and are
+a geometry card). A user aircraft with no declared clearance is judged at both ends of the
+documented sample of its class (`alas-mass` `GroundPlaneBasis::{Low, High}`; jets 0.298-0.546 D
+from nine aircraft, turboprops 0.216-0.223 D from the A400M and ATR 72-600 (a turboprop of another layout,
+low wing or nacelle gear, takes the full 0.216-0.546 D and the feasibility report flags it); 0.35 D and 0.22 D are
+the nominal values of reports): the interference rows and the CG envelope are evaluated at both
+ends and the worse result is kept, because no end is conservative for every row (nacelle, wing-tip
+and propeller gaps are worse with a small clearance, the tail gap and the tip-back and turnover
+limits with a large one, and the rotation boundary moves either way: E195-E2 and AVE probes). The
+gear mass of a sponson-legged body stands on the large end. The FLOPS
+eq. 66 gear-leg length was tried as a geometric derivation of the AVE plane and misses the
+documented aircraft by -0.3 to +3.5 m. A turboprop also gets `propeller_ground_clearance`
+(lowest blade tip at least 18 cm above ground, level static attitude, CS 25.925(a))
+and `propeller_ground_clearance_tyre_deflated` (positive clearance with the critical tyre flat
+and its strut bottomed: Raymer ch. 11 Eq. 11.12 stroke at 10 ft/s sink, load factor 2.7,
+efficiency 0.75, 34 % of the stroke below static, flat-tyre drop from the rim ratio of the cited
+46x17.0R20 tyre; the lower of a nose-gear and a main-gear case).
+
+Evidence still missing, tracked as defects rather than described away: the
+gear against the deployed flaps and the gear bay (no public flap deflection,
+hinge and track geometry per type to validate a hard row against, so a row
+would fail the registered presets on assumptions, not geometry), the pylon
+and fairing (Obert, *Aerodynamic Design of Transport Aircraft*, Fig. 12.34
+gives only a wind-tunnel boundary of nacelle position in H/C against X_F/C, an
+interference-drag rule that CFD-based installations (Fig. 12.35) pass, not a
+physical gap) and the horizontal tail against the exhaust plume (no sourced
+turbofan exhaust spreading law; the NASA free-jet reports read are laminar or
+low-Reynolds-number). None of the rows is a surface intersection test, and no
+result from this optimizer is evidence that a
+candidate is manufacturable.
+
+## Engine sizing (clean-sheet mode)
+
+A clean-sheet brief owns thrust requirements, not an engine. With
+`optimizer.design_space.engine_sized_by_requirements` on (the default), every
+evaluation scales the selected catalogue engine, the baseline cycle, to the
+smallest rating that meets the thrust requirements of the closed airframe
+(`crates/alas-opt/src/mdo/engine/sizing.rs`):
+
+- Requirements: the CS 25.113 take-off field against the departure's take-off
+  distance available, the engine-out second segment, final segment and
+  approach climb, the landing climb, and level flight at the design Mach and
+  altitude at the mid-cruise mass on the maximum-cruise rating. Each is met on
+  its nominal value; the scatter bands of the thrust model are uncertainty,
+  not margin to design into. The planner's cruise-level and top-of-climb rows
+  are not sizing rows: the plan lowers the level until they hold, so they hold
+  at any engine.
+- Scaling laws (`alas_config::EngineConfig::scaled_by`): thrust, fuel flow and
+  cruise reference thrust scale with the rating at constant TSFC (Jenkinson,
+  *Civil Jet Aircraft Design*, Sec. 9.10); nacelle length with `x^0.4` and
+  diameter (nacelle radius, fan) with `x^0.5` (Raymer, *Aircraft Design: A
+  Conceptual Approach*, 6th ed., Eqs. 10.1-10.2, p. 283); the engine mass,
+  reversers, controls, starters, pylon and nacelle through the FLOPS equations
+  already in the mass model (engine mass `(T/T0)^1.15`, NASA TM-2017-219627
+  Eq. 75). Turboprops scale shaft powers and fuel flow with the rating, the
+  propeller diameter with `P^0.25` (Raymer Eq. 10.23) at constant tip speed.
+- Closure: the thrust moves the engine, nacelle and pylon mass and the fuel
+  flow the requirements are written on, so the evaluation closes the airframe,
+  finds the requirement on it by bisection over the real residual table, and
+  repeats with the engine at that rating until the installed rating exceeds the
+  requirement by no more than 1 percent (typically two or three closures; the
+  coupling contracts by about a factor of ten per closure).
+- Hard rows: `engine_thrust_match` (installed against required rating, both
+  directions, 1 percent) and `engine_scale_validity` (the sized rating within
+  `engine_rating_window` of the catalogue rating, default 20 percent, the rule
+  of thumb of Jenkinson Sec. 9.10, at most 0.6 (the end of the sizing search);
+  a brief that needs an engine outside it is infeasible rather than
+  extrapolated: select a nearer catalogue engine or widen the window).
+- Switched off (`engine_sized_by_requirements` false) the engine keeps its
+  catalogue rating, the row `engine_thrust_margin` (Diagnostic) reports the
+  requirement and `engine_oversize` (a Diagnostic, warning only) reports a held engine whose requirement is more than the window
+  below its rating (rating above `required / (1 - window)`: 25 percent above
+  the requirement at the default 20 percent window). The design stays
+  feasible; the pipeline emits the Warning finding `engine_oversize` with the
+  numbers (report text and GUI), and the acceptance plausibility rule
+  `ENGINE-OVERSIZE` reads it and flags it at MEDIUM severity. Too weak an
+  engine stays hard (the thrust rows themselves). Reference adaptation and the
+  baseline sandbox always keep the declared engine and are unchanged. An
+  evaluation on an external aerodynamic polar keeps the engine too (the polar
+  belongs to the nacelle it was computed for) and carries the same two
+  Diagnostic rows in the optimizer's table; the pipeline finding and the
+  plausibility rule judge the native assessment of the delivered design.
+
+### Design take-off field length
+
+`toda_override_m` (top-level, advanced, 600-5000 m, unset by default) states a
+design take-off distance available for the case. The effective requirement is
+the shorter of it and the departure aerodrome's take-off distance available
+(`AlasConfig::departure_airport_record`, `settings_takeoff.rs`): it can only
+make the requirement more demanding. A longer value is ignored, never used to
+lengthen the runway, and says so (Diagnostic row `takeoff_field_override_ignored`
+in the optimizer table, warning finding `takeoff_override_ignored` in the
+feasibility findings). The same effective record is read by the take-off
+constraint, the engine sizing, the field-performance findings, the engine-out
+and VMC evidence, the matching chart and the departure LTO figures.

@@ -34,12 +34,8 @@ fn deck_inputs(
         get(&cfg.rib_material),
     )
     .unwrap();
-    let inputs = crate::structural::EvaluationInputs::from_deck(
-        &config,
-        &report,
-        &deck,
-        &node_index.engine_nids,
-    );
+    let inputs =
+        crate::structural::EvaluationInputs::from_deck(&config, &report, &deck, &node_index);
     (config, inputs)
 }
 

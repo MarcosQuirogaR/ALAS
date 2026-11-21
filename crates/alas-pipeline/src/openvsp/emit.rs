@@ -54,15 +54,19 @@ pub(super) fn landing_gear_for_report(
         fus_start,
         fus_end - fus_start,
     )?;
-    let mass_kg = report.component_masses.values().copied().sum();
+    let mass_kg: f64 = report.component_masses.values().copied().sum();
     let diameter_m = config.geometry.fuselage.diameter_m;
 
-    Ok(size_landing_gear_with_group_stations(
+    Ok(size_landing_gear_at_design_state(
         mass_kg,
+        None,
         stations.x_nlg_m,
         stations.x_mlg_m,
         aero_fwd_x,
         aero_aft_x,
+        Some(report.physical_cg[0]),
+        config.mass_model.pct_load_nlg_min,
+        alas_perf::landing_gear::geometry::TipBackBasis::default(),
         diameter_m,
         diameter_m * 1.1,
         &stations.main_gear_x_m,
@@ -70,14 +74,21 @@ pub(super) fn landing_gear_for_report(
     ))
 }
 
+/// OpenVSP `END_CAP_OPTIONS::FLAT_END_CAP`.
+const FLAT_END_CAP: f64 = 1.0;
+
 pub(super) fn emit_fuselage(script: &mut String, index: usize, fuselage: &Fuselage) {
-    if fuselage.xsecs.len() < 2 {
+    // The closed surface: an open tail or nozzle end would leave a hole in the
+    // exported solid. See `Fuselage::closed_stations`.
+    let posed = fuselage.posed_closed_stations();
+    let stations: Vec<_> = posed.iter().map(|(station, _)| *station).collect();
+    if stations.len() < 2 {
         return;
     }
     let id = format!("body_{index}");
     let surf = format!("body_surf_{index}");
-    let first = fuselage.xsecs[0];
-    let last = fuselage.xsecs[fuselage.xsecs.len() - 1];
+    let first = stations[0];
+    let last = stations[stations.len() - 1];
     let length = (last.xyz_c[0] - first.xyz_c[0]).abs().max(1.0e-6);
     let _ = writeln!(script, "    string {id} = AddGeom( \"FUSELAGE\", \"\" );");
     let _ = writeln!(script, "    SetSetFlag( {id}, 4, true );");
@@ -86,6 +97,11 @@ pub(super) fn emit_fuselage(script: &mut String, index: usize, fuselage: &Fusela
         "    SetGeomName( {id}, \"{}\" );",
         script_string(&fuselage.name)
     );
+    // An inlet lip stays an open ring in the section list: the solid gets a flat
+    // end cap there (OpenVSP FLAT_END_CAP = 1).
+    if first.width > 1.0e-9 && first.height > 1.0e-9 {
+        set_parm(script, &id, "CapUMinOption", "EndCap", FLAT_END_CAP);
+    }
     set_parm(script, &id, "Length", "Design", length);
     set_parm(script, &id, "X_Rel_Location", "XForm", first.xyz_c[0]);
     set_parm(script, &id, "Y_Rel_Location", "XForm", first.xyz_c[1]);
@@ -95,13 +111,13 @@ pub(super) fn emit_fuselage(script: &mut String, index: usize, fuselage: &Fusela
         script,
         "    while ( GetNumXSec( {surf} ) > 2 ) {{ CutXSec( {id}, 1 ); }}"
     );
-    for insert_index in 0..fuselage.xsecs.len().saturating_sub(2) {
+    for insert_index in 0..stations.len().saturating_sub(2) {
         let _ = writeln!(
             script,
             "    InsertXSec( {id}, {insert_index}, XS_ELLIPSE );"
         );
     }
-    for (section_index, section) in fuselage.xsecs.iter().enumerate() {
+    for (section_index, section) in stations.iter().enumerate() {
         let x_fraction = (section.xyz_c[0] - first.xyz_c[0]) / length;
         let y_fraction = (section.xyz_c[1] - first.xyz_c[1]) / length;
         let z_fraction = (section.xyz_c[2] - first.xyz_c[2]) / length;
@@ -127,6 +143,10 @@ pub(super) fn emit_fuselage(script: &mut String, index: usize, fuselage: &Fusela
         set_xsec_parm(script, &xsec_id, "XLocPercent", x_fraction);
         set_xsec_parm(script, &xsec_id, "YLocPercent", y_fraction);
         set_xsec_parm(script, &xsec_id, "ZLocPercent", z_fraction);
+        // A scarfed inlet ring: OpenVSP's positive YRotate moves the top aft.
+        if posed[section_index].1 != 0.0 {
+            set_xsec_parm(script, &xsec_id, "YRotate", posed[section_index].1);
+        }
 
         // OpenVSP's default FUSELAGE skin leaves tangent strengths at their
         // nonzero spline defaults. That skin overshoots the ALAS station
@@ -159,13 +179,67 @@ pub(super) fn emit_fuselage(script: &mut String, index: usize, fuselage: &Fusela
         );
     }
     if last.width <= 1.0e-9 || last.height <= 1.0e-9 {
-        let last_xsec_id = format!("body_xsec_{index}_{}", fuselage.xsecs.len() - 1);
+        let last_xsec_id = format!("body_xsec_{index}_{}", stations.len() - 1);
         let _ = writeln!(
             script,
             "    SetXSecTanAngles( {last_xsec_id}, XSEC_BOTH_SIDES, -90 );"
         );
     }
     script.push('\n');
+}
+
+/// OpenVSP's default spanwise points per wing section (`SectTess_U`).
+const DEFAULT_SECTION_POINTS: usize = 6;
+
+/// Spanwise lattice intervals per semispan for a wing lofted through many sections.
+///
+/// OpenVSP gives every section `DEFAULT_SECTION_POINTS` whatever its span, so a
+/// main wing lofted through 24 airfoil sections reaches about 120 spanwise
+/// intervals, crowded where the sections are, and VSPAERO's cost grows with
+/// about the square of the panel count. The spanwise count is set by a
+/// lattice-convergence study (numerical verification, not calibration) on the
+/// A320-200 thin-surface case, chordwise kept at OpenVSP's 33, 8 wake iterations,
+/// alpha -1.2 and 0.2 deg, 3 threads:
+///
+/// | main-wing intervals | lattice loops | CL at -1.2 / 0.2 deg | CMy slope | s per alpha |
+/// |---|---|---|---|---|
+/// | 54 (target 40) | 5 392 | 0.2608 / 0.4370 | 3.27 | 40 |
+/// | 74 (target 60) | 6 800 | 0.2616 / 0.4357 | 3.16 | 71 |
+/// | 92 (target 80) | 10 176 | 0.2617 / 0.4355 | 3.12 | 165, contended |
+/// | ~120 (OpenVSP default) | 11 040 | 0.2623 / 0.4351 | 3.05 | 800 at 1 thread |
+///
+/// The target of 60 keeps lift within 0.3 % and the pitching-moment slope
+/// (per 1.4 deg) within 4 % of the default lattice, with 62 % of its loops
+/// (cost about the square: 2.6 times faster). Halving the chordwise count
+/// instead lost 24 % of the lift.
+const SPANWISE_INTERVALS_PER_SEMISPAN: usize = 60;
+
+/// Per-section `SectTess_U` (points, intervals + 1) that distributes
+/// [`SPANWISE_INTERVALS_PER_SEMISPAN`] in proportion to section span, at least one
+/// interval per section. Empty, keeping OpenVSP's default, for a surface whose
+/// default lattice is not finer than that target (a surface of few sections).
+fn spanwise_tessellation(wing: &Wing) -> Vec<usize> {
+    let spans: Vec<f64> = wing
+        .xsecs
+        .windows(2)
+        .map(|pair| {
+            let dy = pair[1].xyz_le[1] - pair[0].xyz_le[1];
+            let dz = pair[1].xyz_le[2] - pair[0].xyz_le[2];
+            dy.hypot(dz)
+        })
+        .collect();
+    let total: f64 = spans.iter().sum();
+    let default_intervals = spans.len() * (DEFAULT_SECTION_POINTS - 1);
+    if default_intervals <= SPANWISE_INTERVALS_PER_SEMISPAN || total.is_nan() || total <= 0.0 {
+        return Vec::new();
+    }
+    spans
+        .iter()
+        .map(|span| {
+            let share = SPANWISE_INTERVALS_PER_SEMISPAN as f64 * span / total;
+            share.ceil().max(1.0) as usize + 1
+        })
+        .collect()
 }
 
 pub(super) fn emit_wing_in_pose(script: &mut String, index: usize, wing: &Wing, pose: WingPose) {
@@ -176,12 +250,18 @@ pub(super) fn emit_wing_in_pose(script: &mut String, index: usize, wing: &Wing, 
     let surf = format!("wing_surf_{index}");
     let root = &wing.xsecs[0];
     let _ = writeln!(script, "    string {id} = AddGeom( \"WING\", \"\" );");
-    let _ = writeln!(script, "    SetSetFlag( {id}, 3, true );");
+    // Set 3 is the thin-surface lattice VSPAERO solves; a surface outside the
+    // vortex lattice goes with the bodies in the display-only set 4.
+    let set = if wing.is_geometry_only() { 4 } else { 3 };
+    let _ = writeln!(script, "    SetSetFlag( {id}, {set}, true );");
     let _ = writeln!(
         script,
         "    SetGeomName( {id}, \"{}\" );",
         script_string(&wing.name)
     );
+    // Root and tip faces of the solid, explicit rather than the tool's default.
+    set_parm(script, &id, "CapUMinOption", "EndCap", FLAT_END_CAP);
+    set_parm(script, &id, "CapUMaxOption", "EndCap", FLAT_END_CAP);
     set_parm(script, &id, "X_Rel_Location", "XForm", root.xyz_le[0]);
     set_parm(script, &id, "Y_Rel_Location", "XForm", root.xyz_le[1]);
     set_parm(script, &id, "Z_Rel_Location", "XForm", root.xyz_le[2]);
@@ -224,6 +304,7 @@ pub(super) fn emit_wing_in_pose(script: &mut String, index: usize, wing: &Wing, 
         if closes_seam { 0.0 } else { 1.0 },
     );
 
+    let spanwise_points = spanwise_tessellation(wing);
     for section_index in 1..wing.xsecs.len() {
         let inside = &wing.xsecs[section_index - 1];
         let outside = &wing.xsecs[section_index];
@@ -244,6 +325,9 @@ pub(super) fn emit_wing_in_pose(script: &mut String, index: usize, wing: &Wing, 
         set_parm(script, &id, "Sweep", &group, sweep);
         set_parm(script, &id, "Sweep_Location", &group, 0.0);
         set_parm(script, &id, "Dihedral", &group, dihedral);
+        if let Some(points) = spanwise_points.get(section_index - 1) {
+            set_parm(script, &id, "SectTess_U", &group, *points as f64);
+        }
         // OpenVSP solves the active section's driver group (and adjacent
         // chords) on Update, not every section changed since the last call.
         // Flush each segment before moving on so derived Area/AvgChord and
@@ -251,6 +335,12 @@ pub(super) fn emit_wing_in_pose(script: &mut String, index: usize, wing: &Wing, 
         // totals otherwise rescale the whole wing when ReadVSPFile loads it.
         let _ = writeln!(script, "    Update();");
     }
+    // A section that keeps a given plane (`WingXSec::span_axis`, a wingtip
+    // device's root and tip-edge stations) has no OpenVSP counterpart: OpenVSP
+    // 3.51 rolls every interior section to the mean of its adjacent segment
+    // dihedrals and the tip to the last one, whatever its
+    // RotateMatchDideralFlag (measured with CompPnt01), so those sections
+    // export on the derived frame. CPACS states the kept plane exactly.
     // ALAS defines each section's twist about its leading edge.  OpenVSP
     // stores both the root section (XSec_0) and every outboard section's
     // twist in the section group, with a quarter-chord pivot by default.

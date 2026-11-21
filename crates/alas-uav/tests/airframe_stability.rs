@@ -5,7 +5,7 @@
 // evidence, not a panic escaping from library code.
 #![allow(clippy::unwrap_used, clippy::expect_used)]
 
-//! Geometry, neutral point, tail sizing and trim (UAV-PLAN 3.4).
+//! Geometry, neutral point, tail sizing and trim.
 //!
 //! Published verification cases, each re-read on the page of the PDF:
 //!

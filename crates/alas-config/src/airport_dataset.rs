@@ -220,10 +220,8 @@ fn imported_table() -> &'static ImportedTable {
     use std::sync::OnceLock;
     static TABLE: OnceLock<ImportedTable> = OnceLock::new();
     TABLE.get_or_init(|| {
-        serde_json::from_str::<ImportedTable>(OURAIRPORTS_JSON).unwrap_or_else(|_| ImportedTable {
-            source: DatasetProvenance::default(),
-            airports: Vec::new(),
-        })
+        serde_json::from_str::<ImportedTable>(OURAIRPORTS_JSON)
+            .unwrap_or_else(|error| panic!("embedded airport dataset failed to parse: {error}"))
     })
 }
 
@@ -344,6 +342,11 @@ fn finite_longitude(value: Option<f64>) -> bool {
 #[cfg(test)]
 mod tests {
     use super::*;
+
+    #[test]
+    fn the_embedded_dataset_parses_and_is_not_empty() {
+        assert!(!imported_records().is_empty());
+    }
 
     #[test]
     fn curated_fields_keep_declared_distance_provenance() {

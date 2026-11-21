@@ -1,0 +1,104 @@
+name: NASTRAN-95 Linux build (non-publishing)
+
+# Builds NASTRAN-95 from the pinned upstream commit plus ALAS's local patch
+# with tools/nastran95/build-linux.sh on ubuntu-22.04, checks the staging
+# tree against the same contract `cargo xtask dist` enforces, and runs the
+# live NASTRAN-95 solves (static cross-check tier excluded: it needs MSC) through
+# ALAS's own launcher. It uploads build records and logs only (not the solver)
+# for review and publishes nothing. See docs/NASTRAN95-BUNDLE.md.
+on:
+  # Manual only until the NOSA 1.3 agreement is decided.
+  workflow_dispatch:
+
+permissions:
+  contents: read
+
+concurrency:
+  group: nastran95-linux-${{ github.ref }}
+  cancel-in-progress: false
+
+jobs:
+  nastran95:
+    name: Build, stage and smoke-test NASTRAN-95 on ubuntu-22.04
+    runs-on: ubuntu-22.04
+    timeout-minutes: 90
+    steps:
+      - name: Check out source
+        uses: actions/checkout@v4
+
+      - name: Install the repository Rust toolchain
+        uses: dtolnay/rust-toolchain@1.97.1
+
+      - name: Install the Fortran toolchain
+        run: |
+          sudo apt-get update
+          sudo apt-get install -y --no-install-recommends gfortran cmake ninja-build zip
+
+      # ubuntu-22.04 ships GNU Fortran 11. Pinning the major version makes a
+      # runner-image change a visible failure instead of a silent new compiler.
+      - name: Build and stage NASTRAN-95
+        env:
+          NASTRAN95_REQUIRE_GFORTRAN_MAJOR: "11"
+        run: sh tools/nastran95/build-linux.sh --out "$RUNNER_TEMP/NASTRAN-95" --jobs 2
+
+      - name: Rebuild from the pinned inputs and compare the source archive
+        env:
+          NASTRAN95_REQUIRE_GFORTRAN_MAJOR: "11"
+        run: |
+          sh tools/nastran95/build-linux.sh --out "$RUNNER_TEMP/NASTRAN-95-again" --jobs 2
+          cmp "$RUNNER_TEMP/NASTRAN-95/source/NASTRAN-95-source.zip" \
+              "$RUNNER_TEMP/NASTRAN-95-again/source/NASTRAN-95-source.zip"
+          grep -h 'Source archive SHA-256' "$RUNNER_TEMP/NASTRAN-95/SOURCE-REVISION.txt" \
+              "$RUNNER_TEMP/NASTRAN-95-again/SOURCE-REVISION.txt"
+
+      # The same assessment `cargo xtask dist` applies. The licence is supplied by a
+      # human at release time, so a placeholder lets the assessment run on a copy;
+      # the placeholder is never part of an uploaded artifact.
+      - name: Staging passes the xtask dist contract
+        run: |
+          cp -r "$RUNNER_TEMP/NASTRAN-95" "$RUNNER_TEMP/assess"
+          echo "CI placeholder, not a licence" > "$RUNNER_TEMP/assess/LICENSE"
+          cargo test --locked -p xtask dist_nastran95 -- --include-ignored --nocapture
+        env:
+          ALAS_NASTRAN95_STAGING_ASSESS: ${{ runner.temp }}/assess
+
+      # The legacy solver's rigid-format path buffer allows 37 bytes for the staged
+      # directory, so every scratch/stage path here is short ('/tmp/...'); a
+      # runner.temp path (/home/runner/work/_temp/...) is too long.
+      - name: Live solves through ALAS's launcher (modes deck, closed-form cantilever at four length units)
+        env:
+          ALAS_NASTRAN95_DIR: ${{ runner.temp }}/NASTRAN-95
+          ALAS_NASTRAN95_SCRATCH: /tmp/nas-run
+          ALAS_NASTRAN95_BENCH_DIR: /tmp/n95bench
+          ALAS_NASTRAN95_RF_STAGE: /tmp/n95bench-rf
+        shell: bash
+        run: |
+          cargo test --locked -p alas-struct --test parity_nastran95 \
+            the_nastran95_modes_deck_returns_finite_positive_modes -- --ignored --nocapture
+          # Regression against the recorded reference-build peaks (golden/struct/nastran95_build.json),
+          # NASTRAN-95 alone, 0.1 % on the peak deflection and exact peak grid.
+          cargo test --locked -p alas-struct --test parity_nastran95 \
+            the_nastran95_peaks_match_the_recorded_reference_build -- --ignored --nocapture
+          # NASTRAN-95 half of the cross-solver fixture (golden/struct/nastran95.json).
+          cargo test --locked -p alas-struct --test parity_nastran95 \
+            the_nastran95_peaks_match_the_cross_solver_fixture -- --ignored --nocapture
+          # Numerical validation of this compiler's build: shell cantilever vs beam
+          # theory, deflection and flange stress within 5 % (DEFLECTION_TOLERANCE and
+          # STRESS_TOLERANCE in the test), at deck length units 1, 10, 100, 1000.
+          cargo test --locked -p alas-struct --test nastran95_closed_form -- --nocapture | tee closed-form.log
+          # The test skips (and passes) when no solver is found: that must fail here.
+          if grep -q "skipped:" closed-form.log; then echo "closed-form check skipped" >&2; exit 1; fi
+          cargo test --locked -p alas-struct --lib nastran95 -- --nocapture
+
+      # Records and logs only: the solver binary and source archive are not
+      # uploaded until the NOSA 1.3 agreement is decided.
+      - name: Upload build records and logs
+        uses: actions/upload-artifact@v4
+        with:
+          name: nastran95-linux-records
+          path: |
+            ${{ runner.temp }}/NASTRAN-95/build/bin/nastran95-build.txt
+            ${{ runner.temp }}/NASTRAN-95/SOURCE-REVISION.txt
+            ${{ runner.temp }}/NASTRAN-95/runtime/DEPENDENCIES.txt
+            closed-form.log
+          if-no-files-found: warn

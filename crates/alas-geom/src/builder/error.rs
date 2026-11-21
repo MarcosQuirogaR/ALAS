@@ -48,6 +48,18 @@ pub enum BuildError {
     /// The loft a fuselage references is unknown or its file is invalid.
     #[error(transparent)]
     Loft(#[from] alas_config::LoftSpecError),
+    /// The design length leaves no room for the hull ahead of the loft's APU cone.
+    #[error(
+        "loft {loft_id}: design length {length_m:.3} m is not longer than its APU cone ({cone_m:.3} m)"
+    )]
+    ApuConeLength {
+        /// Id of the loft.
+        loft_id: String,
+        /// Design length, m.
+        length_m: f64,
+        /// Length of the cone, m.
+        cone_m: f64,
+    },
     /// A tail placement option (root station, dorsal fin) is inconsistent.
     #[error("tail placement: {0}")]
     TailPlacement(String),

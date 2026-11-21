@@ -194,9 +194,11 @@ pub fn inputs_for(preset_name: &str) -> Option<PresetFlopsInputs> {
     // default present for every other preset and retain the source statement
     // in the architecture provenance rather than applying a turboprop-wide
     // assumption.
-    let apu_installed = preset_name != "ATR72-600";
+    // The Learjet 60 APU is optional and ground-only (PTM APU chapter), and the C-295 TCDS Section 5 III.6
+    // lists its auxiliary power unit as N/A: both are modelled without it.
+    let apu_installed = !matches!(preset_name, "ATR72-600" | "LJ60" | "C295");
     let mut architecture_provenance = declared.architecture.into_provenance();
-    if !apu_installed {
+    if preset_name == "ATR72-600" {
         architecture_provenance.applicability.push_str(
             "; ATR hotel mode supplies aircraft power from the engine instead of an APU (ATR, https://www.atr-aircraft.com/innovation/a-history-of-innovation/)",
         );
@@ -210,6 +212,7 @@ pub fn inputs_for(preset_name: &str) -> Option<PresetFlopsInputs> {
         design_range_nmi: Some(declared.design_range_nmi),
         flight_crew_count: Some(declared.flight_crew_count),
         flight_attendant_count: Some(declared.flight_attendant_count),
+        manual_cabin_inputs: false,
         galley_crew_count: Some(declared.galley_crew_count),
         first_class_passenger_count: Some(declared.class_split.first),
         business_class_passenger_count: Some(declared.class_split.business),
@@ -226,11 +229,19 @@ pub fn inputs_for(preset_name: &str) -> Option<PresetFlopsInputs> {
             .maximum_fuel_capacity_kg
             .or(preset.reference.usable_fuel_mass_kg),
         apu_installed,
+        // The 787 is bleedless: electric cabin compressors and wing ice
+        // protection (Boeing AERO Quarterly 04/2007, "787 No-Bleed Systems").
+        bleed_air_system: preset_name != "B787-9",
         containerized_cargo_kg: Some(declared.containerized_cargo_kg),
         cargo_loading: Some(declared.cargo_loading),
         containerized_baggage_fraction: declared.containerized_baggage_fraction,
         cabin_equipment_method: declared.cabin_equipment_method,
         haul_class: Some(declared.haul_class),
+        executive_cabin: architecture_rows::declared_executive_cabin(
+            preset_name,
+            preset.reference.certified_max_seats,
+        ),
+        all_coach_passenger_count: None,
         provenance: FlopsTransportProvenance {
             mission: declared.mission.into_provenance(),
             cabin: declared.cabin.into_provenance(),
@@ -240,6 +251,7 @@ pub fn inputs_for(preset_name: &str) -> Option<PresetFlopsInputs> {
 
     let mut structure = declared_structure(preset_name);
     military::adjust_structure(preset_name, &mut structure);
+    structure.gust_reference_preset = Some(preset_name.to_owned());
     // The pressurized fuselage of the regional turboprop class sizes its
     // bending at the certified maximum zero-fuel mass.
     if declared
@@ -268,6 +280,7 @@ mod military;
 mod structure;
 use architecture::declared_architecture;
 pub(crate) use architecture_rows::{declared_cargo_loading, declared_haul_class};
+pub use composite::FCOMP_ADVANCED_COMPOSITE_WING;
 use structure::{declared_structure, declared_turboprop};
 
 #[cfg(test)]

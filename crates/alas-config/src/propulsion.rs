@@ -44,7 +44,8 @@ pub struct PropulsionCycleConfig {
     #[config(
         label = "Turboprop design turbine inlet temperature",
         unit = "K",
-        help = "Combustor-exit total temperature for the free-turbine design cycle. Airflow is inferred from this temperature, compression and the selected engine's cruise fuel-flow anchor; the free turbine supplies its cruise shaft rating."
+        help = "Combustor-exit total temperature of the free-turbine design cycle [K].",
+        long_help = "Combustor-exit total temperature for the free-turbine design cycle. Airflow is inferred from this temperature, compression and the selected engine's cruise fuel-flow anchor; the free turbine supplies its cruise shaft rating."
     )]
     pub turboprop_turbine_inlet_temperature_k: f64,
 
@@ -56,11 +57,12 @@ pub struct PropulsionCycleConfig {
     )]
     pub inlet_pressure_recovery: f64,
 
-    /// Fixed booster pressure ratio; the compressor makes up the rest.
+    /// Fixed booster pressure ratio behind the fan hub; the HPC makes up the rest.
     #[config(
         label = "LPC pressure-ratio split",
         unit = "-",
-        help = "Fixed low-pressure-compressor (booster) pressure ratio; the high-pressure compressor makes up the rest of the overall (core) pressure ratio (HPC = OPR / this value). Matches the fixed mission LPC split."
+        help = "Fixed low-pressure-compressor (booster) pressure ratio behind the fan hub; the high-pressure compressor supplies the rest of the overall pressure ratio (HPC = OPR / (FPR x this)).",
+        long_help = "Fixed low-pressure-compressor (booster) pressure ratio. The core stream crosses the fan hub (at the fan pressure ratio) and then the booster, so the high-pressure compressor makes up the rest of the overall pressure ratio pt3/pt2: HPC = OPR / (FPR x this value). The turboprop cycle, which has no fan, applies it directly: HPC = OPR / this value."
     )]
     pub lpc_pressure_ratio_split: f64,
 

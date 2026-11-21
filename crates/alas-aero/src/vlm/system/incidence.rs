@@ -45,3 +45,84 @@ pub(super) fn rotated_normal(panel: &Panel, offset_rad: f64) -> [f64; 3] {
     let length = norm3(rotated);
     scale3(rotated, 1.0 / length)
 }
+
+/// How the flow-tangency normals differ from the meshed ones in one solve.
+///
+/// The influence matrix and its factorization depend on the meshed
+/// geometry alone; only the right-hand side reads the normals.
+#[derive(Clone, Copy)]
+pub(super) enum NormalChange<'a> {
+    /// The meshed normals.
+    None,
+    /// Per-panel incidence offsets about each panel's bound-vortex leg, see
+    /// [`rotated_normal`].
+    Offsets(&'a [f64]),
+    /// The listed surfaces rotated rigidly about the geometry y axis by the
+    /// angle in radians, positive nose-up (an aft point moves down).
+    SurfacePitch(&'a [usize], f64),
+}
+
+impl NormalChange<'_> {
+    pub(super) fn normal(&self, panel: &Panel, index: usize) -> [f64; 3] {
+        match *self {
+            Self::None => panel.normal_direction,
+            Self::Offsets(offsets) => rotated_normal(panel, offsets[index]),
+            Self::SurfacePitch(surfaces, angle_rad) => {
+                if surfaces.contains(&panel.wing_index) {
+                    pitched_normal(panel.normal_direction, angle_rad)
+                } else {
+                    panel.normal_direction
+                }
+            }
+        }
+    }
+}
+
+/// `normal` rotated about the geometry y axis by `angle_rad` (right-handed,
+/// x aft and z up, so a positive angle is nose-up: an aft point moves down).
+/// This is the change of a flat panel's normal when its whole surface is
+/// twisted about the pitch axis by `angle_rad`.
+fn pitched_normal(normal: [f64; 3], angle_rad: f64) -> [f64; 3] {
+    let (sin, cos) = angle_rad.sin_cos();
+    [
+        normal[0] * cos + normal[2] * sin,
+        normal[1],
+        -normal[0] * sin + normal[2] * cos,
+    ]
+}
+
+impl<'a> super::VlmSystem<'a> {
+    /// Solve at `op_point` with the surfaces `wing_indices` (indices into
+    /// `Airplane::wings`) pitched rigidly by `pitch_rad` about the geometry y
+    /// axis as far as the flow-tangency condition is concerned: the
+    /// small-angle boundary-condition change of Katz and Plotkin,
+    /// *Low-Speed Aerodynamics*, 2nd ed., ch. 12. The mesh, the influence
+    /// matrix and its factorization are those of the unrotated airplane, so
+    /// this costs one substitution, not an assembly.
+    ///
+    /// It is the linear-theory image of rebuilding the airplane with those
+    /// surfaces twisted about the pitch axis, exact to first order in
+    /// `pitch_rad`; the second-order geometry change (the surface's own
+    /// vortex positions and its position relative to the wake) is not
+    /// represented. Zero pitch reproduces [`Self::solve`] exactly.
+    ///
+    /// # Errors
+    ///
+    /// [`VlmError::NonFiniteResult`] for a non-finite angle, and as
+    /// [`Self::solve`].
+    pub fn solve_with_surface_pitch(
+        &self,
+        op_point: &crate::operating_point::OperatingPoint,
+        wing_indices: &[usize],
+        pitch_rad: f64,
+    ) -> Result<super::VlmResult, super::VlmError> {
+        if !pitch_rad.is_finite() {
+            return Err(super::VlmError::NonFiniteResult);
+        }
+        self.solve_about(
+            op_point,
+            self.airplane.xyz_ref,
+            NormalChange::SurfacePitch(wing_indices, pitch_rad),
+        )
+    }
+}

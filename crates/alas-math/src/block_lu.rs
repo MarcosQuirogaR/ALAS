@@ -37,7 +37,28 @@ use std::sync::Arc;
 use faer::linalg::solvers::{PartialPivLu, Solve};
 use faer::Mat;
 
-use crate::linalg::{sequential_kernels, SolveDiagnostics};
+use crate::linalg::{max_or_nan, sequential_kernels, SolveDiagnostics};
+
+/// `Mat::from_fn(rows, cols, entry)` for an `entry` that reads a row-major
+/// matrix: the copy runs over square tiles so the strided side stays in
+/// cache. Every entry is the value `entry` returns, unchanged.
+fn gather_tiled(rows: usize, cols: usize, entry: impl Fn(usize, usize) -> f64) -> Mat<f64> {
+    const TILE: usize = 64;
+    let mut out = Mat::<f64>::zeros(rows, cols);
+    for column_start in (0..cols).step_by(TILE) {
+        let column_end = (column_start + TILE).min(cols);
+        for row_start in (0..rows).step_by(TILE) {
+            let row_end = (row_start + TILE).min(rows);
+            for j in column_start..column_end {
+                let column = &mut out.col_as_slice_mut(j)[row_start..row_end];
+                for (offset, slot) in column.iter_mut().enumerate() {
+                    *slot = entry(row_start + offset, j);
+                }
+            }
+        }
+    }
+    out
+}
 
 /// `A_UU`'s LU for a frozen index set.
 #[derive(Debug)]
@@ -78,7 +99,7 @@ impl BlockBase {
             return None;
         }
         sequential_kernels();
-        let block = Mat::from_fn(m, m, |i, j| aic[frozen[i] * n + frozen[j]]);
+        let block = gather_tiled(m, m, |i, j| aic[frozen[i] * n + frozen[j]]);
         let lu = PartialPivLu::new(block.as_ref());
         let (max_pivot, min_pivot) = pivot_range(&lu, m)?;
         Some(Self {
@@ -130,7 +151,7 @@ impl BlockFactorization {
         sequential_kernels();
         let (m, k) = (base.frozen.len(), base.moving.len());
         let (frozen, moving) = (&base.frozen, &base.moving);
-        let mut w = Mat::from_fn(m, k, |i, j| aic[frozen[i] * n + moving[j]]);
+        let mut w = gather_tiled(m, k, |i, j| aic[frozen[i] * n + moving[j]]);
         base.lu.solve_in_place(w.as_mut());
         let a_tu = Mat::from_fn(k, m, |i, j| aic[moving[i] * n + frozen[j]]);
         let product = &a_tu * &w;
@@ -182,12 +203,61 @@ impl BlockFactorization {
         (x, diagnostics)
     }
 
+    /// Solve each of `columns` by the block elimination of
+    /// [`Self::solve_vector`], all columns in one pass, and keep each
+    /// residual vector: see [`crate::linalg::SolvedColumns`].
+    pub fn solve_with_residuals(&self, columns: &[Vec<f64>]) -> crate::linalg::SolvedColumns {
+        let base = &self.base;
+        let n = base.n;
+        let (m, k) = (base.frozen.len(), base.moving.len());
+        let count = columns.len();
+        let mut y = Mat::from_fn(m, count, |i, c| columns[c][base.frozen[i]]);
+        base.lu.solve_in_place(y.as_mut());
+        let reduced = &self.a_tu * &y;
+        let mut x_t = Mat::from_fn(k, count, |i, c| {
+            columns[c][base.moving[i]] - reduced[(i, c)]
+        });
+        self.schur_lu.solve_in_place(x_t.as_mut());
+        let correction = &self.w * &x_t;
+        let mut x = Mat::<f64>::zeros(n, count);
+        for c in 0..count {
+            for (i, &index) in base.frozen.iter().enumerate() {
+                x[(index, c)] = y[(i, c)] - correction[(i, c)];
+            }
+            for (i, &index) in base.moving.iter().enumerate() {
+                x[(index, c)] = x_t[(i, c)];
+            }
+        }
+        // One blocked product for every column against the row-major matrix.
+        let predicted = faer::MatRef::from_row_major_slice(&self.aic, n, n) * &x;
+        let mut solutions = Vec::with_capacity(count);
+        let mut residuals = Vec::with_capacity(count);
+        for (c, b) in columns.iter().enumerate() {
+            residuals.push(
+                predicted
+                    .col_as_slice(c)
+                    .iter()
+                    .zip(b)
+                    .map(|(p, b)| p - b)
+                    .collect(),
+            );
+            solutions.push(x.col_as_slice(c).to_vec());
+        }
+        crate::linalg::SolvedColumns::new(
+            solutions,
+            residuals,
+            (self.norm_inf, self.pivot_ratio, self.minimum_pivot),
+        )
+    }
+
     /// The residual evidence against the matrix as assembled, summed in
     /// ascending column order like [`crate::linalg::LuFactorization`].
     fn diagnostics(&self, x: &[f64], b: &[f64]) -> SolveDiagnostics {
         let n = self.base.n;
         let max_b = b.iter().fold(0.0_f64, |acc, value| acc.max(value.abs()));
-        let max_x = x.iter().fold(0.0_f64, |acc, value| acc.max(value.abs()));
+        let max_x = x
+            .iter()
+            .fold(0.0_f64, |acc, value| max_or_nan(acc, value.abs()));
         // Four rows advance together to overlap the add latency of their
         // running sums; each row still sums its columns in ascending order.
         let mut residual_norm = 0.0_f64;
@@ -209,8 +279,11 @@ impl BlockFactorization {
                 }
             }
             for (value, &target) in predicted.iter().zip(rhs) {
-                residual_norm = residual_norm.max((value - target).abs());
+                residual_norm = max_or_nan(residual_norm, (value - target).abs());
             }
+        }
+        if max_x.is_nan() {
+            residual_norm = f64::NAN;
         }
         let scale = (self.norm_inf * max_x).max(max_b).max(1.0);
         SolveDiagnostics {
@@ -271,6 +344,34 @@ mod tests {
         }
         assert!(diagnostics.normalized_residual < 1.0e-13);
         assert!((diagnostics.pivot_ratio / full_diagnostics.pivot_ratio - 1.0).abs() < 0.2);
+        // The many-column form solves each column to the same rounding and
+        // keeps its residual vector.
+        let other_rhs: Vec<f64> = (0..n).map(|i| (0.3 * i as f64).sin()).collect();
+        let solved = block.solve_with_residuals(&[rhs.clone(), other_rhs]);
+        for (a, b) in solved.solutions[0].iter().zip(&x_block) {
+            assert!((a - b).abs() <= 1.0e-12 * (1.0 + b.abs()), "{a} vs {b}");
+        }
+        let largest = solved.residuals[0]
+            .iter()
+            .fold(0.0_f64, |acc, r| acc.max(r.abs()));
+        let combined = solved.diagnostics(&solved.residuals[0], &solved.solutions[0], &rhs);
+        assert_eq!(combined.residual_norm, largest);
+        assert!(combined.normalized_residual < 1.0e-13);
+    }
+
+    #[test]
+    fn tiled_gather_equals_the_entrywise_copy() {
+        let source: Vec<f64> = (0..150 * 150).map(|k| (k as f64).sin()).collect();
+        for (rows, cols) in [(1, 1), (63, 65), (64, 64), (130, 7), (7, 130), (150, 150)] {
+            let entry = |i: usize, j: usize| source[(149 - i) * 150 + (j * 2) % 150];
+            let tiled = gather_tiled(rows, cols, entry);
+            let plain = Mat::from_fn(rows, cols, entry);
+            for j in 0..cols {
+                for i in 0..rows {
+                    assert_eq!(tiled[(i, j)].to_bits(), plain[(i, j)].to_bits());
+                }
+            }
+        }
     }
 
     #[test]

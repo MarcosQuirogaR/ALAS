@@ -46,6 +46,11 @@ ALAS_ROOT = Path(
 _ACTIVE_RUNTIME = "alas"
 _SUAVE_VERSION = "2.5.2"
 _SUAVE_TREE = "external tools/SUAVE-2.5.2/trunk"
+# The atmosphere the reference ran on. ``add_alas_to_path`` substitutes the
+# U.S. Standard Atmosphere, 1976 for AeroSandbox's fitted model (see
+# ``_us1976.py``), because that is what the product evaluates; the fixture
+# records which one produced it.
+_ATMOSPHERE = "aerosandbox-default"
 
 
 def alas_baseline() -> str:
@@ -66,7 +71,8 @@ def alas_baseline() -> str:
 
     if git("status", "--porcelain"):
         raise SystemExit(
-            f"{ALAS_ROOT} has uncommitted changes; commit or stash them so the "
+            f"{ALAS_ROOT} has uncommitted changes; commit them (or run the "
+            "generator from a clean checkout of the reference) so the "
             "fixtures name a revision that can be checked out again"
         )
     return git("rev-parse", "HEAD")
@@ -75,12 +81,31 @@ def alas_baseline() -> str:
 def environment() -> dict[str, Any]:
     """Versions that could plausibly move a number."""
     versions = {"python": sys.version.split()[0], "platform": platform.platform()}
-    for module in ("numpy", "scipy", "aerosandbox"):
+    for module in ("numpy", "scipy", "aerosandbox", "shapely", "matplotlib", "neuralfoil", "PIL"):
         try:
             versions[module] = __import__(module).__version__
         except Exception:  # noqa: BLE001 - absence is the information wanted
             versions[module] = "absent"
+    # The BLAS/LAPACK build can move the last digits of a double.
+    try:
+        import numpy
+
+        config = numpy.show_config(mode="dicts")
+        blas = config.get("Build Dependencies", {}).get("blas", {})
+        versions["numpy_blas"] = {
+            key: blas.get(key) for key in ("name", "version", "openblas configuration") if key in blas
+        }
+    except Exception:  # noqa: BLE001 - absence is the information wanted
+        versions["numpy_blas"] = "unknown"
     return versions
+
+
+def _write_atomic(path: Path, text: str) -> None:
+    """Replace ``path`` with ``text`` through a temporary file in the same folder."""
+    temporary = path.with_name(path.name + ".tmp")
+    with temporary.open("w", encoding="utf-8", newline="\n") as handle:
+        handle.write(text)
+    os.replace(temporary, path)
 
 
 def _fixture_environment(runtime: str) -> dict[str, Any]:
@@ -88,6 +113,7 @@ def _fixture_environment(runtime: str) -> dict[str, Any]:
     if runtime not in {"alas", "suave"}:
         raise ValueError(f"unknown generator runtime: {runtime}")
     versions = environment()
+    versions["atmosphere"] = _ATMOSPHERE
     if runtime == "suave":
         versions["suave"] = {"version": _SUAVE_VERSION, "tree": _SUAVE_TREE}
     return versions
@@ -99,9 +125,11 @@ def write(family: str, name: str, payload: Any, *, description: str) -> Path:
     directory.mkdir(parents=True, exist_ok=True)
 
     path = directory / f"{name}.json"
-    with path.open("w", encoding="utf-8", newline="\n") as handle:
-        json.dump(payload, handle, indent=2, sort_keys=True)
-        handle.write("\n")
+    # Provenance first: a dirty reference tree aborts before any file changes,
+    # so a fixture is never replaced while its manifest still names the old run.
+    commit = alas_baseline()
+    runtime_environment = _fixture_environment(_ACTIVE_RUNTIME)
+    fixture_text = json.dumps(payload, indent=2, sort_keys=True) + "\n"
 
     manifest_path = directory / "manifest.json"
     manifest: dict[str, Any] = {"fixtures": {}}
@@ -117,13 +145,12 @@ def write(family: str, name: str, payload: Any, *, description: str) -> Path:
         "generator": Path(sys.argv[0]).name,
         "description": description,
         "runtime": _ACTIVE_RUNTIME,
-        "alas_commit": alas_baseline(),
-        "environment": _fixture_environment(_ACTIVE_RUNTIME),
+        "alas_commit": commit,
+        "environment": runtime_environment,
     }
 
-    with manifest_path.open("w", encoding="utf-8", newline="\n") as handle:
-        json.dump(manifest, handle, indent=2, sort_keys=True)
-        handle.write("\n")
+    _write_atomic(path, fixture_text)
+    _write_atomic(manifest_path, json.dumps(manifest, indent=2, sort_keys=True) + "\n")
 
     print(f"wrote {path.relative_to(GOLDEN_DIR)}")
     return path
@@ -153,7 +180,25 @@ def add_suave_to_path() -> None:
 
 def add_alas_to_path() -> None:
     """Put the reference implementation on ``sys.path``."""
-    global _ACTIVE_RUNTIME
+    global _ACTIVE_RUNTIME, _ATMOSPHERE
     _ACTIVE_RUNTIME = "alas"
     if str(ALAS_ROOT) not in sys.path:
         sys.path.insert(0, str(ALAS_ROOT))
+    import _us1976  # noqa: PLC0415 - generator-side substitution
+
+    _us1976.use_us1976()
+    _ATMOSPHERE = "us1976 (generator substitution for aerosandbox.Atmosphere)"
+
+
+def use_suave_geopotential_altitude() -> None:
+    """Have SUAVE's US 1976 atmosphere read altitudes as geopotential.
+
+    For generators whose fixture feeds an altitude into the product's mission
+    or engine sizing, which take pressure (geopotential) altitude. See
+    ``_us1976.use_geopotential_input_in_suave``.
+    """
+    global _ATMOSPHERE
+    import _us1976  # noqa: PLC0415
+
+    _us1976.use_geopotential_input_in_suave()
+    _ATMOSPHERE = "us1976 (SUAVE, altitude read as geopotential)"

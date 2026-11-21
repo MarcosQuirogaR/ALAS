@@ -130,7 +130,17 @@ fn field_descriptor(field: &syn::Field) -> syn::Result<Option<proc_macro2::Token
         .as_ref()
         .map_or_else(|| quote!(#auto_unit), ToTokens::to_token_stream);
     let help = &config.help;
+    let long_help = config
+        .long_help
+        .as_ref()
+        .map_or_else(|| quote!(""), ToTokens::to_token_stream);
     let advanced = config.advanced;
+    let visible_if = match &config.visible_if {
+        Some((path, accepted)) => quote!(::std::option::Option::Some(
+            ::alas_config::VisibleIf { path: #path, any_of: &[#(#accepted),*] }
+        )),
+        None => quote!(::std::option::Option::None),
+    };
 
     let entry = if config.nested {
         quote!(::alas_config::Entry::Node(
@@ -146,7 +156,9 @@ fn field_descriptor(field: &syn::Field) -> syn::Result<Option<proc_macro2::Token
             label: #label,
             unit: #unit,
             help: #help,
+            long_help: #long_help,
             advanced: #advanced,
+            visible_if: #visible_if,
             entry: #entry,
         });
     }))

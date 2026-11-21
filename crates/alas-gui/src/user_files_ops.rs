@@ -59,6 +59,7 @@ impl AppState {
         let base = self.active_preset.clone();
         match save_aircraft(&self.data_dir(), name, &base, &workspace, now_unix()) {
             Ok(path) => {
+                self.settle_case();
                 self.refresh_user_aircraft();
                 self.files.active_aircraft = Some(name.trim().to_owned());
                 let message = tr_fields(
@@ -109,6 +110,7 @@ impl AppState {
         if let (Some(previous), Some(mut config)) = (previous, self.typed_config()) {
             crate::config_edit::preserve_machine_locations(&mut config, &previous);
             self.config_values = crate::config_edit::full_config_values(&config);
+            self.bump_config_revision();
             self.on_config_modified();
         }
         self.files.active_aircraft = Some(header.name.clone());

@@ -145,7 +145,13 @@ fn compare(
                             "dihedral_stations"
                                 | "thickness_stations"
                                 | "tip_rake_start_span_fraction"
+                                | "te_break_span_fraction"
+                                | "te_break_chord_offset_m"
+                                | "te_break_2_span_fraction"
+                                | "te_break_2_chord_offset_m"
+                                | "edge_stations"
                                 | "tip_rake_tip_chord_m"
+                                | "tip_rake_reference_tip_chord_m"
                                 | "wing_profile_interpolation"
                                 | "flight_root_rise_m"
                                 | "flight_tip_rise_semispan_fraction"
@@ -172,6 +178,13 @@ fn compare(
                     // hump fields are native fuselage inputs the frozen
                     // request predates; the geometry tests and the preset
                     // checks cover them.
+                    // The drawn cabin section (floor depth, lining widths, hold
+                    // polygon) is a native fuselage input the frozen
+                    // request predates; the alas-payload and alas-pipeline
+                    // cabin-section tests and the preset ledgers pin it.
+                    if path.ends_with(".geometry_config.fuselage") && key == "cabin_section" {
+                        continue;
+                    }
                     if path.ends_with(".geometry_config.fuselage")
                         && (key == "belly_upsweep_length_m"
                             || key.starts_with("hump_")
@@ -345,7 +358,7 @@ fn request_corrections() -> BTreeMap<&'static str, RequestCorrection> {
             3.5,
             4.01,
         ),
-        // 2026-10-07 geometry fit (fix/geom): A320 tailplane apex moved forward
+        // Geometry fit: A320 tailplane apex moved forward
         // 0.56 m with the tip leading edge held at 35.5 m (drawn 32.8 deg LE
         // sweep, former apex gave 28 deg), and the fin moved 1.2 m forward
         // (crown LE 29.9 m, TE 35.4 m on Fig 2-2-0-991-004-A01). Before/after:
@@ -404,7 +417,7 @@ fn request_corrections() -> BTreeMap<&'static str, RequestCorrection> {
             0.37,
             0.379_3,
         ),
-        // Nose tip heights of the drawing-fitted noses (geometry round 2): read
+        // Nose tip heights of the drawing-fitted noses: read
         // from the manufacturer side view; the frozen nose droop was a class
         // estimate.
         correction("A320-200.geometry_config.fuselage.nose_z_m", -0.3, -0.57),
@@ -414,7 +427,7 @@ fn request_corrections() -> BTreeMap<&'static str, RequestCorrection> {
         // sharklet ground clearances; pinned by the alas-config preset ledger.
         correction("A320-200.geometry_config.wing.break_z_m", -0.2, -0.62),
         correction("A320-200.geometry_config.wing.tip_z_m", 1.5, 0.3262),
-        // Geometry round 2 (wing lane): tailplane dihedral fitted to the front view.
+        // Geometry round 2 (wing): tailplane dihedral fitted to the front view.
         correction(
             "A320-200.geometry_config.empennage.hstab_tip_le_m[2]",
             0.5,
@@ -548,17 +561,18 @@ fn request_corrections() -> BTreeMap<&'static str, RequestCorrection> {
             "LEAP-1A",
             "CFM56-5B4/3",
         ),
-        // Cruise TSFC anchors are now the printed values (fuel-chain lane 2026-10-14): the CFM56
-        // family 0.545 (Scholz engine table; see `cruise_tsfc_source` in engines.json).
+        // Cruise TSFC anchors are the uninstalled values backed out of the Poll and Schumann Part 2
+        // Table 2 overall efficiency of each airframe-engine pair (A320 CFM56-5B4/P, A343 CFM56-5C4;
+        // see `cruise_tsfc_source` in engines.json), on one basis with the airframe drag.
         correction(
             "A320-200.geometry_config.engine.cruise_tsfc_kg_kgf_hr",
             0.52,
-            0.545,
+            0.599,
         ),
         correction(
             "A340-300.geometry_config.engine.cruise_tsfc_kg_kgf_hr",
             0.58,
-            0.545,
+            0.579,
         ),
         correction(
             "A320-200.geometry_config.engine.fan_diameter_m",

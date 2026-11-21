@@ -2,7 +2,8 @@
 // Copyright (C) 2026 Marcos Quiroga Rodriguez
 
 //! Declared exit-pair arrangements of the widebodies whose airport-planning
-//! documents print their doors: the A340-300 and the DC-10-30.
+//! documents or type certificates print their doors: the A340-300, the
+//! DC-10-30, the A350-900 and the A380-800.
 //!
 //! Only the CS 25.807(a) type letter of each pair is declared. Its rating
 //! follows from CS 25.807(g) in the payload crate (A 110, B 75, C 55, I 45,
@@ -32,6 +33,7 @@ const fn pair(exit_type: &'static str) -> CertifiedExitPair {
 pub const A340_300_EXIT_LAYOUT: CertifiedExitLayout = CertifiedExitLayout {
     label: "A-A-I-A",
     pairs: &[pair("A"), pair("A"), pair("I"), pair("A")],
+    upper_deck_pairs: &[],
     station_body_length_m: None,
     source: "Airbus A340-200/-300 Aircraft Characteristics Dec 01/25 pp.55, 69, 80-83 (doors 1, 2, 4 passenger/crew Type A 1.07 x 1.93 m; door 3 emergency exit, Type I)",
 };
@@ -46,6 +48,35 @@ pub const A340_300_EXIT_LAYOUT: CertifiedExitLayout = CertifiedExitLayout {
 pub const DC_10_30_EXIT_LAYOUT: CertifiedExitLayout = CertifiedExitLayout {
     label: "B-A-A-A",
     pairs: &[pair("B"), pair("A"), pair("A"), pair("A")],
+    upper_deck_pairs: &[],
     station_body_length_m: None,
     source: "Boeing DC-10 ACAP 2023 PDF p.20 (entry doors 1: 32 x 76 in; 2, 3, 4: 42 x 76 in; all entry doors are emergency exits) and PDF p.11 (maximum seating capacity 399)",
+};
+
+/// A350-941: four pairs of Type A doors. EASA TCDS EASA.A.151 Issue 33,
+/// section 1 III.2.5 (p.13): the A - A - A - A arrangement is approved for at
+/// most 440 passengers, 4 x 110 under CS 25.807(g).
+pub const A350_900_EXIT_LAYOUT: CertifiedExitLayout = CertifiedExitLayout {
+    label: "A-A-A-A",
+    pairs: &[pair("A"), pair("A"), pair("A"), pair("A")],
+    upper_deck_pairs: &[],
+    station_body_length_m: None,
+    source: "EASA TCDS EASA.A.151 Issue 33, section 1 (A350-900) III.2.5 p.13 (A-A-A-A exit arrangement, 440 passengers)",
+};
+
+/// A380-800: five door pairs on the main deck and three on the upper deck.
+/// Airbus A380 Aircraft Characteristics (Dec 01/25) section 2-8-0, escape
+/// slides: a slide-raft at each of the eight main-deck and six upper-deck
+/// passenger/crew doors, and a ramp/slide at each of the two main-deck
+/// emergency exit doors. The type letters are inferred from the certified
+/// deck maxima (EASA TCDS EASA.A.110 Issue 17 III.3.8: 538 main, 330 upper):
+/// 330 upper-deck seats need three Type A pairs (3 x 110), and 538 main-deck
+/// seats need the emergency-exit pair to be Type A as well (4 x 110 + 75 for a
+/// Type B would give 515).
+pub const A380_800_EXIT_LAYOUT: CertifiedExitLayout = CertifiedExitLayout {
+    label: "A-A-A-A-A / A-A-A",
+    pairs: &[pair("A"), pair("A"), pair("A"), pair("A"), pair("A")],
+    upper_deck_pairs: &[pair("A"), pair("A"), pair("A")],
+    station_body_length_m: None,
+    source: "Airbus A380 Aircraft Characteristics Dec 01/25 section 2-8-0 (escape slides at 8 main-deck and 6 upper-deck passenger/crew doors and 2 main-deck emergency exit doors); Type A letters inferred from EASA TCDS EASA.A.110 Issue 17 III.3.8 deck maxima 538 + 330",
 };

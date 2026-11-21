@@ -23,10 +23,12 @@ mod airfoil;
 mod cabin;
 mod cabin_3d;
 pub(crate) mod cabin_assets;
+mod cabin_seat_layer;
 mod cabin_seat_map;
 mod openvsp;
 mod planform;
 mod sandbox_bsp;
+mod sandbox_framing;
 mod sandbox_scene;
 mod section;
 mod shared;
@@ -37,7 +39,12 @@ pub(crate) use wireframe::{draw_fuselage_wireframe, draw_wing_wireframe};
 
 pub use airfoil::figure_airfoil_evolution;
 pub use cabin::{figure_cabin_payload, figure_main_deck_seat_map};
-pub use cabin_3d::figure_cabin_payload_3d;
+pub use cabin_3d::{
+    figure_cabin_payload_3d, figure_cabin_payload_3d_framed, figure_cabin_payload_3d_sized,
+};
+pub use cabin_seat_layer::{
+    seat_class_color, side_seat_layer, SeatProfile, MIN_SEAT_PITCH_PX, SEAT_BACK_HEIGHT_M,
+};
 pub use openvsp::figure_openvsp_cad_preview;
 pub use planform::{figure_design_evolution, figure_geometry, figure_planform_comparison};
 pub use sandbox_scene::{
@@ -47,7 +54,9 @@ pub use sandbox_scene::{
 pub use section::figure_cabin_section;
 #[doc(hidden)]
 pub use threeview::figure_asb_threeview;
-pub use threeview::figure_threeview;
+pub use threeview::{
+    figure_threeview, figure_threeview_sized, threeview_panel_rects, THREEVIEW_CANVAS,
+};
 pub use wireframe::{
     figure_exterior_3d, figure_wireframe_empennage, figure_wireframe_fuselage,
     figure_wireframe_wing,

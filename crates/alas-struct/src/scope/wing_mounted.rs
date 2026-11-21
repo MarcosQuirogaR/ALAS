@@ -151,6 +151,15 @@ pub fn wing_mounted_relief(
             };
         }
     };
+    // Rear-fuselage engines stand off the centreline but load the fuselage, so
+    // their spanwise stations relieve no wing.
+    if engine_cfg.rear_fuselage_mount().is_some() {
+        return WingMountedRelief {
+            point_masses_kg: Vec::new(),
+            omitted,
+            torque: Default::default(),
+        };
+    }
     if !installed_kg.is_finite() || installed_kg <= 0.0 {
         omitted.push(ENGINE_MODEL_UNRESOLVED);
         return WingMountedRelief {
@@ -207,6 +216,25 @@ mod tests {
     fn preset_named(name: &str) -> AlasConfig {
         AlasConfig::from_value(&serde_json::json!({ "preset": name }))
             .unwrap_or_else(|error| panic!("{name} is a registered preset: {error}"))
+    }
+
+    #[test]
+    fn rear_fuselage_engines_relieve_no_wing() {
+        let config = preset_named("LJ60");
+        let relief = wing_mounted_relief(
+            &config.geometry.engine,
+            &config.mass_model,
+            &config.requirements,
+        );
+        assert!(relief.point_masses_kg.is_empty());
+        // A podded jet still does.
+        let config = preset_named("A320-200");
+        let relief = wing_mounted_relief(
+            &config.geometry.engine,
+            &config.mass_model,
+            &config.requirements,
+        );
+        assert!(!relief.point_masses_kg.is_empty());
     }
 
     #[test]

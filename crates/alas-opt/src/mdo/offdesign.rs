@@ -106,16 +106,14 @@ pub(crate) fn fly_route(
         objective.sizing_max_iterations.max(1) as usize,
         objective.sizing_tolerance_kg,
     )
-    .map_err(|error| CandidateFailure {
-        reason: match error {
+    .map_err(|error| {
+        CandidateFailure::new(match error {
             FreezeError::StepUnconverged { .. } => MISSION_STEP_UNCONVERGED,
             FreezeError::Fuel(_) => "cancelled",
-        },
+        })
     })?;
     if matches!(dispatch.status, DispatchStatus::Cancelled) {
-        return Err(CandidateFailure {
-            reason: "cancelled",
-        });
+        return Err(CandidateFailure::new("cancelled"));
     }
     let takeoff_fuel_kg = dispatch.plan.takeoff_fuel_kg();
     Ok(OffDesignFlight {

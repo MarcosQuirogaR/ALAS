@@ -67,7 +67,9 @@ pub(super) fn deck_with_refinement(model: &Model, divisions: usize) -> io::Resul
         vec![
             Field::Int(1),
             Field::Int(1),
-            Field::Real(model.sizing.t_skin),
+            // One cover property: the validation deck carries the thickest
+            // sized gauge, as it does each spar's root web gauge below.
+            Field::Real(model.sizing.max_skin_gauge_m()),
             Field::Int(1),
             Field::Blank,
             Field::Int(1),
@@ -408,7 +410,7 @@ fn centroid(model: &Model, station: usize) -> f64 {
     for pair in model.sizing.spars.windows(2) {
         let x1 = pair[0].chord_fraction * model.sizing.chord[station];
         let x2 = pair[1].chord_fraction * model.sizing.chord[station];
-        let a = 2.0 * model.skin.e_pa / model.cap.e_pa * model.sizing.t_skin * (x2 - x1);
+        let a = 2.0 * model.skin.e_pa / model.cap.e_pa * model.sizing.skin_at(station) * (x2 - x1);
         area += a;
         first += a * (x1 + x2) / 2.0;
     }

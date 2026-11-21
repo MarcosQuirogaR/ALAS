@@ -21,6 +21,7 @@ mod cargo;
 mod flops_annotation;
 mod seat_class;
 
+use crate::PayloadItemsConfig;
 use allocation::proportional_integer_allocation;
 pub use cargo::{
     BaggagePolicy, CargoDeckConfig, FreightHoldConfig, HoldCompartmentConfig, HoldDeck,
@@ -117,7 +118,8 @@ pub struct PassengerCabinConfig {
         decimals = 1,
         label = "Checked baggage per passenger",
         unit = "kg",
-        help = "Checked-bag mass carried in the holds for each seated passenger. It is part of the combined mass per passenger (Requirements > Mass per passenger): the occupant is that combined mass minus this bag, so changing it moves mass between the cabin and the hold, not the total. Default 16 kg, a typical short- and medium-haul allowance."
+        help = "Checked-bag mass carried in the hold per seated passenger [kg]. Part of the combined mass per passenger: changing it moves mass between cabin and hold, not the total.",
+        long_help = "Checked-bag mass carried in the holds for each seated passenger. It is part of the combined mass per passenger (Requirements > Mass per passenger): the occupant is that combined mass minus this bag, so changing it moves mass between the cabin and the hold, not the total. Default 16 kg, a typical short- and medium-haul allowance."
     )]
     pub checked_bag_mass_kg: f64,
 
@@ -418,6 +420,10 @@ pub struct CabinConfig {
     /// The cargo decks.
     #[config(nested, help = "Which decks carry freight, and how it is loaded.")]
     pub cargo: CargoDeckConfig,
+    /// Declared floor zones and point masses.
+    #[serde(default, skip_serializing_if = "PayloadItemsConfig::is_empty")]
+    #[config(hidden, help = "Declared zones and point masses.")]
+    pub payload_items: PayloadItemsConfig,
 }
 
 // A test asserts on values it constructed here directly, so a failed unwrap

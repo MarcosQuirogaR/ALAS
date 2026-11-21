@@ -352,6 +352,25 @@ fn taw_cmalpha(input: &StaticStabilityInput, surfaces: &[StabilityWing]) -> (f64
     (cm_alpha_surf + cm_alpha_body, cm0_surf)
 }
 
+/// The empirical factor `k` of a single vertical tail's side force due to
+/// sideslip, `CY_beta_v = -k CL_alpha_v (1 + d sigma / d beta) eta_v S_v / S`
+/// (USAF DATCOM Section 5.4.1.1, as reproduced in Roskam, *Airplane Design
+/// Part VI*, Fig. 10.12, p. 385, and Eq. (10.28), p. 386): 0.76 up to a
+/// panel span over body depth `b_v / 2 r_1` of 2, 1.0 from 3.5, linear
+/// between. `b_v` is the panel span from the body centreline and `2 r_1` the
+/// body depth in the region of the fin.
+#[must_use]
+pub fn fin_sideforce_factor(span_over_body_depth: f64) -> f64 {
+    let bf = span_over_body_depth;
+    if bf < 2.0 {
+        0.76
+    } else if bf < 3.5 {
+        0.76 + 0.24 * (bf - 2.0) / 1.5
+    } else {
+        1.0
+    }
+}
+
 /// The tube-and-wing yaw-moment slope `Cn_beta`: `taw_cnbeta`. Reads the
 /// vertical tail through [`extend_to_ref_area`], adds the fuselage
 /// contribution, and takes `ac_vLE` and `x_cg` from the module doc's zero
@@ -406,14 +425,7 @@ fn taw_cnbeta(input: &StaticStabilityInput, vstab: &VerticalStabilizer) -> f64 {
         input.mach,
     );
 
-    let bf = b_v / d_i;
-    let k_v = if bf < 2.0 {
-        0.76
-    } else if bf < 3.5 {
-        0.76 + 0.24 * (bf - 2.0) / 1.5
-    } else {
-        1.0
-    };
+    let k_v = fin_sideforce_factor(b_v / d_i);
 
     // `main_wing.sweeps.quarter_chord` is always set (never `None`), so the
     // `convert_sweep` fallback branch is unreached and not translated.
@@ -646,5 +658,22 @@ mod tests {
             with_fin.cm_alpha,
             without_fin.cm_alpha
         );
+    }
+
+    #[test]
+    fn the_fin_sideforce_factor_follows_the_datcom_chart() {
+        // Roskam Part VI Fig. 10.12, p. 385: flat to 2, linear to 1 at 3.5.
+        for (ratio, k) in [
+            (1.0, 0.76),
+            (2.0, 0.76),
+            (2.75, 0.88),
+            (3.5, 1.0),
+            (6.0, 1.0),
+        ] {
+            assert!(
+                (fin_sideforce_factor(ratio) - k).abs() < 1e-12,
+                "{ratio}: {k}"
+            );
+        }
     }
 }

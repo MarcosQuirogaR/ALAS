@@ -17,10 +17,9 @@
 //! `high_aspect_ratio`), verified by evaluating the corrected build and
 //! reverting only the wave-drag fix to confirm the old fixture values
 //! reproduce exactly under the superseded law. `high_aspect_ratio` and
-//! `narrowbody`'s `trimmed_design_point` fixture entries are stale
-//! (unrelated pre-existing degenerate/unconverged trims -- confirmed
-//! unaffected by this change under both the old and new law) and were left
-//! untouched; the Rust side already returns `None` for both regardless, so
+//! `narrowbody`'s `trimmed_design_point` fixture entries are not
+//! updated (unrelated degenerate/unconverged trims, unaffected by the
+//! wave-drag law under both the old and new law); the Rust side already returns `None` for both regardless, so
 //! this test's `if let (Some, Some)` guard never compares them.
 //!
 //! # Gravity re-pin (physics review v1.2, finding F5)
@@ -107,8 +106,8 @@ fn full_analysis_matches_reference_fixtures() {
         config.mass_model.pct_load_nlg_min = 0.02;
         // The frozen fixtures use the Python drag model: viscous margin 1.10
         // and no lift-dependent viscous term. The product defaults moved to
-        // the calibrated pair (kappa 0.25 with the fitted margin).
-        config.drag_model.viscous_margin = 1.10;
+        // the sourced lift-dependent fraction 0.25 and the propulsion-class margin.
+        config.drag_model.viscous_margin = Some(1.10);
         config.drag_model.lift_dependent_viscous_fraction = 0.0;
         if name == "narrowbody" {
             config.requirements.cruise_mach = 0.78;

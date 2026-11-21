@@ -36,6 +36,17 @@ pub fn figure_mass_distribution(report: &AnalysisReport, theme: Option<&str>) ->
     let title = scene.title.clone().unwrap_or_default();
     draw_title(&mut scene, &title, pal);
     scene.suppress_derived_title();
+    crate::chart_kit::draw_basis_subtitle(
+        &mut scene,
+        crate::chart_kit::MTOW_SIZING_BASIS,
+        report
+            .component_masses
+            .get(alas_mass::breakdown::FUEL)
+            .copied()
+            .unwrap_or(0.0)
+            .max(0.0),
+        pal,
+    );
     if report.component_masses.is_empty() || report.mass_coordinates.is_empty() {
         return no_data_scene(scene, pal, "No mass / coordinate data available");
     }
@@ -69,6 +80,7 @@ pub fn figure_mass_distribution(report: &AnalysisReport, theme: Option<&str>) ->
             stroke: Some(Stroke::new(Color::from_hex("#7f8c8d"), 1.0)),
         });
     }
+    let mut name_rows: Vec<(f64, f64)> = Vec::new();
     for wing in &report.airplane.wings {
         let upper = wing
             .xsecs
@@ -82,23 +94,72 @@ pub fn figure_mass_distribution(report: &AnalysisReport, theme: Option<&str>) ->
             .map(|s| [s.xyz_le[0] + s.chord, s.xyz_le[1]]);
         let mut pts = upper;
         pts.extend(lower);
+        // A surface that starts on the centreline is one closed outline with
+        // its mirror image. One that starts off it (a wingtip device) has a
+        // mirror image of its own: joining the two into one polygon would
+        // draw a band across the whole span.
+        let mut mirror_part: Option<Vec<[f64; 2]>> = None;
         if wing.symmetric {
             let mirror = pts.iter().rev().map(|p| [p[0], -p[1]]).collect::<Vec<_>>();
-            pts.extend(mirror);
+            let on_centreline = wing
+                .xsecs
+                .first()
+                .is_some_and(|s| s.xyz_le[1].abs() < 0.05 * half_span);
+            if on_centreline {
+                pts.extend(mirror);
+            } else {
+                mirror_part = Some(mirror);
+            }
         }
         if pts.len() > 2 {
+            let fill = Fill::new(with_alpha(
+                Color::from_hex(if wing.name.contains("Main") {
+                    "#3498db"
+                } else {
+                    "#95a5a6"
+                }),
+                0.18,
+            ));
+            if let Some(mirror) = &mirror_part {
+                scene.add(SceneElement::Polygon {
+                    points: mirror.iter().map(|&p| axes.map_point(p[1], p[0])).collect(),
+                    fill: Some(fill),
+                    stroke: None,
+                });
+            }
             scene.add(SceneElement::Polygon {
                 points: pts.iter().map(|&p| axes.map_point(p[1], p[0])).collect(),
-                fill: Some(Fill::new(with_alpha(
-                    Color::from_hex(if wing.name.contains("Main") {
-                        "#3498db"
-                    } else {
-                        "#95a5a6"
-                    }),
-                    0.18,
-                ))),
+                fill: Some(fill),
                 stroke: None,
             });
+            // Only the main wing has a bubble of its own; every other lifting
+            // surface is named where it ends, so no grey area is anonymous.
+            if !wing.name.contains("Main") {
+                if let Some(tip) = wing.xsecs.last() {
+                    let at = axes.map_point(tip.xyz_le[1] + 0.2, tip.xyz_le[0] + 0.5 * tip.chord);
+                    // Surfaces that end near each other (the tail group) would
+                    // print their names over one another: step the later
+                    // label down until it clears the earlier ones.
+                    let mut y = at[1];
+                    while name_rows
+                        .iter()
+                        .any(|&(px, py)| (px - at[0]).abs() < 90.0 && (py - y).abs() < 10.0)
+                    {
+                        y += 10.0;
+                    }
+                    name_rows.push((at[0], y));
+                    scene.add(SceneElement::Text {
+                        text: wing.name.clone(),
+                        pos: [at[0].min(axes.left + axes.width - 60.0), y],
+                        font_size: 7.5,
+                        color: Color::from_hex(pal.tick),
+                        align: TextAlign::Left,
+                        baseline: TextBaseline::Middle,
+                        angle_deg: 0.0,
+                        bold: false,
+                    });
+                }
+            }
         }
     }
     // Nacelles are separate fuselages in the aircraft model. They carry
@@ -138,6 +199,7 @@ pub fn figure_mass_distribution(report: &AnalysisReport, theme: Option<&str>) ->
         .filter(|v| v.is_finite() && **v > 0.0)
         .sum::<f64>()
         .max(1.0);
+    let mut labels: Vec<BubbleLabel> = Vec::new();
     let mut names = report.component_masses.keys().collect::<Vec<_>>();
     names.sort();
     for name in names {
@@ -159,21 +221,29 @@ pub fn figure_mass_distribution(report: &AnalysisReport, theme: Option<&str>) ->
         });
         let pct = mass / total * 100.0;
         let (dx, dy) = label_offset(name, y);
-        let label_pos = [
-            (center[0] + dx).clamp(12.0, scene.width - 12.0),
-            (center[1] + dy).clamp(28.0, scene.height - 18.0),
-        ];
+        labels.push(BubbleLabel {
+            anchor: center,
+            pos: [
+                (center[0] + dx).clamp(12.0, scene.width - 12.0),
+                (center[1] + dy).clamp(28.0, scene.height - 18.0),
+            ],
+            right_aligned: dx < 0.0,
+            text: format!("{name}\n{:.1} t  ({pct:.0}%)", mass / 1000.0),
+        });
+    }
+    spread_labels(&mut labels, scene.height);
+    for label in &labels {
         scene.add(SceneElement::Line {
-            p1: center,
-            p2: label_pos,
+            p1: label.anchor,
+            p2: label.pos,
             stroke: Stroke::new(Color::from_hex(pal.border), 0.7),
         });
         scene.add(SceneElement::Text {
-            text: format!("{name}\n{:.1} t  ({pct:.0}%)", mass / 1000.0),
-            pos: label_pos,
+            text: label.text.clone(),
+            pos: label.pos,
             font_size: 7.5,
             color: Color::from_hex(pal.title),
-            align: if dx < 0.0 {
+            align: if label.right_aligned {
                 TextAlign::Right
             } else {
                 TextAlign::Left
@@ -251,5 +321,57 @@ fn label_offset(name: &str, lateral: f64) -> (f64, f64) {
         "H-Stab" => (65.0, 45.0),
         "V-Stab" => (-65.0, 45.0),
         _ => (20.0, if lateral >= 0.0 { 12.0 } else { -20.0 }),
+    }
+}
+
+/// One bubble's label, placed before it is drawn.
+struct BubbleLabel {
+    /// Bubble centre the leader starts at.
+    anchor: [f64; 2],
+    /// Text anchor.
+    pos: [f64; 2],
+    /// Whether the text ends at `pos` rather than starting there.
+    right_aligned: bool,
+    /// Two lines: the component name and its mass.
+    text: String,
+}
+
+/// Height of one two-line label block and the clearance kept between blocks, px.
+const LABEL_BLOCK_PX: f64 = 22.0;
+/// Approximate advance of one bold 7.5 pt character, px.
+const LABEL_CHAR_PX: f64 = 5.2;
+
+/// Push labels apart vertically until no two blocks overlap.
+///
+/// Blocks are taken top to bottom; one that overlaps an earlier block in both
+/// directions moves down to clear it. Anchors do not move, so a leader may
+/// lengthen but still ends on its own bubble.
+fn spread_labels(labels: &mut [BubbleLabel], canvas_height: f64) {
+    let span = |label: &BubbleLabel| {
+        let width = label
+            .text
+            .lines()
+            .map(|line| line.chars().count())
+            .max()
+            .unwrap_or(0) as f64
+            * LABEL_CHAR_PX;
+        if label.right_aligned {
+            (label.pos[0] - width, label.pos[0])
+        } else {
+            (label.pos[0], label.pos[0] + width)
+        }
+    };
+    let mut order: Vec<usize> = (0..labels.len()).collect();
+    order.sort_by(|&a, &b| labels[a].pos[1].total_cmp(&labels[b].pos[1]));
+    for slot in 1..order.len() {
+        let i = order[slot];
+        for &j in &order[..slot] {
+            let (a, b) = (span(&labels[i]), span(&labels[j]));
+            let clear_x = a.1 < b.0 || b.1 < a.0;
+            if !clear_x && labels[i].pos[1] - labels[j].pos[1] < LABEL_BLOCK_PX {
+                labels[i].pos[1] = labels[j].pos[1] + LABEL_BLOCK_PX;
+            }
+        }
+        labels[i].pos[1] = labels[i].pos[1].min(canvas_height - 18.0);
     }
 }

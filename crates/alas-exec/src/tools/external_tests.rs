@@ -616,3 +616,23 @@ fn preference_replacement_leaves_no_partially_written_file() {
         .exists());
     let _ = fs::remove_dir_all(root);
 }
+
+#[test]
+fn adjacent_tool_discovery_without_a_checkout_marker_stops_at_the_parent() {
+    let root = std::env::temp_dir().join(format!("alas-adjacent-bound-{}", std::process::id()));
+    let app = root.join("a/b/c/app");
+    let _ = fs::create_dir_all(&app);
+    let locator = ToolLocator::new(&app, root.join("prefs"));
+    let roots = locator.adjacent_tool_roots();
+    assert!(roots.contains(&app));
+    assert!(roots.contains(&root.join("a/b/c")));
+    assert!(!roots.contains(&root.join("a/b")), "{roots:?}");
+
+    // A checkout (a Cargo.toml marker above the application) keeps the climb.
+    let _ = fs::write(root.join("a/Cargo.toml"), b"[workspace]");
+    let roots = locator.adjacent_tool_roots();
+    assert!(roots.contains(&root.join("a/b")));
+    assert!(roots.contains(&root.join("a")));
+    assert!(!roots.contains(&root));
+    let _ = fs::remove_dir_all(root);
+}

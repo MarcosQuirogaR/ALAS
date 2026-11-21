@@ -16,6 +16,7 @@ mod layout_tests;
 pub(crate) mod log;
 pub(crate) mod results;
 pub(crate) mod study;
+mod study_sweep;
 pub(crate) mod widgets;
 
 use egui::{vec2, Layout, RichText, Ui, ViewportBuilder};
@@ -144,6 +145,12 @@ fn show_status(state: &AppState, ui: &mut Ui) {
         };
         ui.colored_label(color, tr(label))
             .on_hover_text(result.status_detail.as_str());
+        if result.outcome == CfdOutcome::Failed && !result.status_detail.trim().is_empty() {
+            ui.add(
+                egui::Label::new(RichText::new(result.status_detail.as_str()).weak()).truncate(),
+            )
+            .on_hover_text(result.status_detail.as_str());
+        }
         return;
     }
     ui.label(RichText::new(tr(state.cfd.status.as_str())).weak())

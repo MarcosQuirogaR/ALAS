@@ -23,7 +23,9 @@
 //! to the core-nozzle exit (end slope 1.5 times the mean slope) followed by a
 //! quintic plug to a flat tip disc of radius `r_tip`. When the core and fan
 //! lengths are equal there is one body (a turboprop nacelle, a tail pod) whose
-//! boat-tail runs into the plug without a step.
+//! boat-tail runs into the plug without a step. A drawn core-cowl start radius
+//! makes the core cowl a straight cone from that radius; a drawn plug radius
+//! adds a G0 step at the core nozzle and makes the plug a straight cone.
 //!
 //! # Revolve
 //!
@@ -71,19 +73,9 @@ pub enum NacelleError {
     NotMonotone(&'static str),
 }
 
-/// Which body of a nacelle.
-#[derive(Debug, Clone, Copy, PartialEq, Eq)]
-pub enum NacelleBodyKind {
-    /// Lip, cylinder and boat-tail (and the plug, for a single body).
-    FanCowl,
-    /// Core cowl and plug behind the fan-nozzle step.
-    CoreCowl,
-}
-
 /// One body of revolution of the nacelle.
 #[derive(Debug, Clone)]
 pub(super) struct Body {
-    pub kind: NacelleBodyKind,
     pub pieces: Vec<Piece>,
     /// Number of leading pieces on which the radius rises (lip and crest).
     pub rising: usize,
@@ -159,12 +151,6 @@ impl NacelleLoft {
         self.bodies.len()
     }
 
-    /// Kind of body `index`.
-    #[must_use]
-    pub fn body_kind(&self, index: usize) -> Option<NacelleBodyKind> {
-        self.bodies.get(index).map(|b| b.kind)
-    }
-
     /// Axial extent of body `index`.
     #[must_use]
     pub fn body_x_range(&self, index: usize) -> Option<(f64, f64)> {
@@ -237,6 +223,15 @@ impl NacelleLoft {
             };
             for i in 0..=count {
                 if i == 0 && !out.is_empty() {
+                    // A drawn step between pieces keeps its start station, just aft.
+                    let start = piece.eval(0.0);
+                    let previous_end = out.last().map_or(start.r, |(_, s)| s.a);
+                    if (previous_end - start.r).abs() > 1.0e-9 {
+                        out.push((
+                            start.x + POLYLINE_STEP_GAP_M,
+                            self.section_at_radius(start.r),
+                        ));
+                    }
                     continue;
                 }
                 let u = i as f64 / count as f64;
@@ -345,14 +340,6 @@ impl NacelleLoft {
         let r_core = core.eval(0.0).r;
         std::f64::consts::PI * self.shape.ellipticity * (inner * inner - r_core * r_core)
     }
-
-    /// Area of the open inlet highlight disc, m2 (the capture area of the
-    /// outer envelope; the inlet duct is not modelled).
-    #[must_use]
-    pub fn highlight_area_m2(&self) -> f64 {
-        let r = self.shape.highlight_radius_ratio * self.max_radius_m;
-        std::f64::consts::PI * self.shape.ellipticity * r * r
-    }
 }
 
 fn build_bodies(
@@ -408,7 +395,6 @@ fn build_bodies(
     let two_bodies = shape.core_cowl_length_m > x_fn + 1.0e-9;
     if two_bodies {
         bodies.push(Body {
-            kind: NacelleBodyKind::FanCowl,
             pieces: fan,
             rising,
         });
@@ -419,10 +405,25 @@ fn build_bodies(
                 "core nozzle radius not below the fan nozzle radius",
             ));
         }
-        let r_cn0 = r_cn + CORE_COWL_START_FRACTION * (r_fn - r_cn);
+        let drawn_start = shape.core_start_radius_ratio.map(|ratio| ratio * r_max);
+        let r_cn0 = drawn_start.unwrap_or(r_cn + CORE_COWL_START_FRACTION * (r_fn - r_cn));
         let drop = r_cn0 - r_cn;
-        let mut end_slope = -CORE_END_SLOPE_FACTOR * drop / (x_cn - x_fn);
-        if length_m > x_cn + 1.0e-9 {
+        let mean_slope = drop / (x_cn - x_fn);
+        let start_slope = if drawn_start.is_some() {
+            -mean_slope
+        } else {
+            0.0
+        };
+        let mut end_slope = if drawn_start.is_some() {
+            -mean_slope
+        } else {
+            -CORE_END_SLOPE_FACTOR * mean_slope
+        };
+        let r_plug = shape
+            .plug_start_radius_ratio
+            .map_or(r_cn, |ratio| ratio * r_max);
+        let has_plug = length_m > x_cn + 1.0e-9;
+        if has_plug && shape.plug_start_radius_ratio.is_none() {
             // A long shallow plug cannot start steeper than twice its mean slope.
             let plug_mean = (r_cn - r_tip) / (length_m - x_cn);
             end_slope = end_slope.max(-2.0 * plug_mean);
@@ -431,17 +432,21 @@ fn build_bodies(
             x_fn,
             x_cn - x_fn,
             r_cn0,
-            0.0,
+            start_slope,
             0.0,
             r_cn,
             end_slope,
             0.0,
         )];
-        if length_m > x_cn + 1.0e-9 {
-            core.push(plug(x_cn, length_m, r_cn, end_slope, r_tip)?);
+        if has_plug {
+            let plug_start_slope = if shape.plug_start_radius_ratio.is_some() {
+                -(r_plug - r_tip) / (length_m - x_cn)
+            } else {
+                end_slope
+            };
+            core.push(plug(x_cn, length_m, r_plug, plug_start_slope, r_tip)?);
         }
         bodies.push(Body {
-            kind: NacelleBodyKind::CoreCowl,
             pieces: core,
             rising: 0,
         });
@@ -450,7 +455,6 @@ fn build_bodies(
             fan.push(plug(x_fn, length_m, r_fn, -tan_beta, r_tip)?);
         }
         bodies.push(Body {
-            kind: NacelleBodyKind::FanCowl,
             pieces: fan,
             rising,
         });

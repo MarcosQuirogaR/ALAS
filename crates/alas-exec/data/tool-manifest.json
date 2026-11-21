@@ -1,0 +1,241 @@
+{
+  "schema": 1,
+  "tools": [
+    {
+      "id": "openvsp",
+      "name": "OpenVSP / VSPAERO",
+      "licence": "NASA Open Source Agreement 1.3 (as supplied by the selected release)",
+      "publisher_url": "https://openvsp.org/download.php",
+      "kind": "automatic",
+      "summary": "Headless geometry runner (vspscript) and the VSPAERO solver.",
+      "artifacts": {
+        "windows-x86_64": {
+          "version": "3.51.2",
+          "url": "https://openvsp.org/zips/old/windows/OpenVSP-3.51.2-win64-Python3.13.zip",
+          "sha256": "4d08134f5a7ff5b244fe47f557ad5b40787df631234017ea5b0b831117954252",
+          "min_bytes": 1000000,
+          "format": "zip",
+          "directory": "OpenVSP-3.51.2-win64",
+          "strip_single_root": true,
+          "executable": "vspscript.exe",
+          "health": {
+            "args": ["-script", "{dir}/health.vspscript"],
+            "case_files": {
+              "health.vspscript": "void main()\n{\n    string s = \"alas-health-ok\";\n    Print(s);\n}\n"
+            },
+            "expect_stdout_contains": "alas-health-ok",
+            "timeout_seconds": 60
+          }
+        }
+      }
+    },
+    {
+      "id": "gmsh",
+      "name": "Gmsh",
+      "licence": "GPL-2.0-or-later with linking exception",
+      "publisher_url": "https://gmsh.info/",
+      "kind": "automatic",
+      "summary": "Mesher for CFD cases (official 4.15.2 binaries from gmsh.info).",
+      "registers": "gmsh_executable",
+      "artifacts": {
+        "windows-x86_64": {
+          "version": "4.15.2",
+          "url": "https://gmsh.info/bin/Windows/gmsh-4.15.2-Windows64.zip",
+          "sha256": "a8208b56aedee3434907a893e303422acacd9003140766e09f2abbc664ba7157",
+          "size_bytes": 39178263,
+          "min_bytes": 37000000,
+          "format": "zip",
+          "directory": "Gmsh-4.15.2",
+          "strip_single_root": true,
+          "executable": "gmsh.exe",
+          "health": { "args": ["-version"], "expect_stdout_contains": "4.15.2", "timeout_seconds": 120 }
+        },
+        "linux-x86_64": {
+          "version": "4.15.2",
+          "url": "https://gmsh.info/bin/Linux/gmsh-4.15.2-Linux64.tgz",
+          "sha256": "6c62116e072db29fd1f701fdb9d3d34b46ed5373545063e177b965a008274745",
+          "size_bytes": 38329303,
+          "min_bytes": 36000000,
+          "format": "tar.gz",
+          "directory": "Gmsh-4.15.2",
+          "strip_single_root": true,
+          "executable": "bin/gmsh",
+          "health": { "args": ["-version"], "expect_stdout_contains": "4.15.2", "timeout_seconds": 120 }
+        }
+      }
+    },
+    {
+      "id": "paraview",
+      "name": "ParaView",
+      "licence": "BSD-3-Clause",
+      "publisher_url": "https://www.paraview.org/download/",
+      "kind": "automatic",
+      "summary": "Post-processor for CFD results (official 6.2.0 binaries from paraview.org; about 1 GB).",
+      "registers": "paraview_executable",
+      "artifacts": {
+        "windows-x86_64": {
+          "version": "6.2.0",
+          "url": "https://www.paraview.org/files/v6.2/ParaView-6.2.0-Windows-Python3.12-msvc2017-AMD64.zip",
+          "sha256": "f5533d36ac974a4c7597194bd9f516749b37a14b2643d37c52a95c70ad0f1fe9",
+          "size_bytes": 1392860131,
+          "min_bytes": 1300000000,
+          "format": "zip",
+          "directory": "ParaView-6.2.0",
+          "strip_single_root": true,
+          "executable": "bin/paraview.exe",
+          "health_executable": "bin/pvpython.exe",
+          "health": { "args": ["--version"], "expect_stdout_contains": "6.2", "timeout_seconds": 180 }
+        },
+        "linux-x86_64": {
+          "version": "6.2.0",
+          "url": "https://www.paraview.org/files/v6.2/ParaView-6.2.0-MPI-Linux-Python3.12-x86_64.tar.gz",
+          "sha256": "242052db6569073cb77c9e683c8a81a4cd31c06b0901818f72c9c23546420e46",
+          "size_bytes": 945742208,
+          "min_bytes": 900000000,
+          "format": "tar.gz",
+          "directory": "ParaView-6.2.0",
+          "strip_single_root": true,
+          "executable": "bin/paraview",
+          "health_executable": "bin/pvpython",
+          "health": { "args": ["--version"], "expect_stdout_contains": "6.2", "timeout_seconds": 180 }
+        }
+      }
+    },
+    {
+      "id": "openfoam",
+      "name": "OpenFOAM",
+      "licence": "GPL-3.0 (OpenCFD release terms apply)",
+      "publisher_url": "https://www.openfoam.com/download/",
+      "kind": "guided",
+      "summary": "System installation that needs administrator rights, so ALAS shows the steps instead of running them.",
+      "guided_steps": [
+        "Windows: install the OpenCFD OpenFOAM distribution from the publisher page (its own installer asks for administrator rights).",
+        "Linux: install the openfoam package from the OpenCFD apt or rpm repository with your package manager.",
+        "Then set the OpenFOAM location on the External Tools page."
+      ]
+    },
+    {
+      "id": "nastran95",
+      "name": "NASTRAN-95",
+      "licence": "NASA Open Source Agreement 1.3",
+      "publisher_url": "https://github.com/Foadsf/NASTRAN-95",
+      "kind": "build_from_source",
+      "summary": "Source-only upstream: ALAS downloads the pinned NASA source, applies its reviewed local patch and compiles it on this computer. No binary is downloaded or redistributed.",
+      "artifacts": {
+        "windows-x86_64": {
+          "version": "060ed900",
+          "url": "https://codeload.github.com/Foadsf/NASTRAN-95/tar.gz/060ed900db822745353fcce96bddc1565027e7db",
+          "sha256": "a2519ad6ab817d082fcf169362411e32e55c1f8dc5284d47b8a92668c0a9b977",
+          "size_bytes": 89367721,
+          "min_bytes": 80000000,
+          "format": "tar.gz",
+          "directory": "NASTRAN-95",
+          "strip_single_root": true,
+          "executable": "build/bin/nastran.exe"
+        },
+        "linux-x86_64": {
+          "version": "060ed900",
+          "url": "https://codeload.github.com/Foadsf/NASTRAN-95/tar.gz/060ed900db822745353fcce96bddc1565027e7db",
+          "sha256": "a2519ad6ab817d082fcf169362411e32e55c1f8dc5284d47b8a92668c0a9b977",
+          "size_bytes": 89367721,
+          "min_bytes": 80000000,
+          "format": "tar.gz",
+          "directory": "NASTRAN-95",
+          "strip_single_root": true,
+          "executable": "build/bin/nastran"
+        }
+      },
+      "build": {
+        "patch": "nastran95-alas-local",
+        "disk_bytes": 600000000,
+        "toolchain": {
+          "windows-x86_64": [
+            {
+              "version": "winlibs-gcc-16.2.0",
+              "licence": "GCC and MinGW-w64 runtime: GPL-3.0-or-later with the GCC Runtime Library Exception; binutils GPL-3.0-or-later; CMake BSD-3-Clause; Ninja Apache-2.0 (as packaged by the winlibs project)",
+              "url": "https://github.com/brechtsanders/winlibs_mingw/releases/download/16.2.0posix-23.1.3-14.0.0-ucrt-r3/winlibs-x86_64-posix-seh-gcc-16.2.0-mingw-w64ucrt-14.0.0-r3.zip",
+              "sha256": "3c69305081e4a647144339a936244fcf7d3d9e558319e1ad7be2cd2886d4b6a1",
+              "size_bytes": 276414382,
+              "min_bytes": 250000000,
+              "extracted_bytes": 1000000000,
+              "format": "zip",
+              "directory": "winlibs-gcc-16.2.0",
+              "strip_single_root": true,
+              "executable": "bin/gfortran.exe"
+            }
+          ]
+        },
+        "path_dirs": { "windows-x86_64": ["bin"] },
+        "required_commands": { "linux-x86_64": ["gfortran", "cmake", "ninja"] },
+        "missing_commands_hint": {
+          "linux-x86_64": "Install the build tools first: sudo apt-get install gfortran cmake ninja-build"
+        },
+        "steps": {
+          "windows-x86_64": [
+            {
+              "program": "cmake",
+              "args": ["-S", "{src}", "-B", "{src}/build", "-G", "Ninja", "-DCMAKE_Fortran_COMPILER=gfortran", "-DNASTRAN95_OPEN_CORE_WORDS=64000000", "-DCMAKE_EXE_LINKER_FLAGS=-static"],
+              "timeout_seconds": 600
+            },
+            {
+              "program": "cmake",
+              "args": ["--build", "{src}/build", "--target", "nastran", "-j", "{jobs}"],
+              "timeout_seconds": 3600
+            }
+          ],
+          "linux-x86_64": [
+            {
+              "program": "cmake",
+              "args": ["-S", "{src}", "-B", "{src}/build", "-G", "Ninja", "-DCMAKE_Fortran_COMPILER=gfortran", "-DNASTRAN95_OPEN_CORE_WORDS=64000000", "-DCMAKE_EXE_LINKER_FLAGS=-static-libgfortran -static-libgcc"],
+              "timeout_seconds": 600
+            },
+            {
+              "program": "cmake",
+              "args": ["--build", "{src}/build", "--target", "nastran", "-j", "{jobs}"],
+              "timeout_seconds": 3600
+            }
+          ]
+        },
+        "keep": ["build/bin/nastran", "build/bin/nastran.exe", "build/bin/nastran95-open-core.txt", "rf"],
+        "check": "nastran95-closed-form"
+      }
+    },
+    {
+      "id": "mses",
+      "name": "MSES (mset, mses, mplot)",
+      "licence": "Proprietary, per-seat licence from MIT",
+      "publisher_url": "https://tlo.mit.edu/industry-entrepreneurs/available-technologies/mses-software-high-lift-multielement-airfoil",
+      "kind": "guided",
+      "summary": "Licence-gated: MIT supplies it on request.",
+      "guided_steps": [
+        "Request a licence from the MIT Technology Licensing Office (academic, government or commercial).",
+        "Unpack the three programs (mset, mses, mplot) into one folder.",
+        "Set the MSES directory on the External Tools page."
+      ]
+    },
+    {
+      "id": "msc-nastran",
+      "name": "MSC Nastran / Patran",
+      "licence": "Proprietary",
+      "publisher_url": "https://nexus.hexagon.com/home/product/msc-nastran/",
+      "kind": "guided",
+      "summary": "Commercial products licensed by Hexagon.",
+      "guided_steps": [
+        "Obtain a licence and installer from Hexagon (a Student Edition also exists).",
+        "ALAS finds a default MSC installation automatically; otherwise set the executable on the External Tools page."
+      ]
+    },
+    {
+      "id": "flowunsteady",
+      "name": "FLOWUnsteady / Julia adapter",
+      "licence": "User-supplied; follows the selected release",
+      "publisher_url": "https://github.com/byuflowlab/FLOWUnsteady",
+      "kind": "guided",
+      "summary": "A Julia environment whose dependency closure the user chooses.",
+      "guided_steps": [
+        "Install Julia and FLOWUnsteady following the project instructions.",
+        "Set the adapter launcher on the External Tools page."
+      ]
+    }
+  ]
+}

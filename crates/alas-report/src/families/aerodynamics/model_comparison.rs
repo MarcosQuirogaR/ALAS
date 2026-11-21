@@ -18,13 +18,14 @@ use alas_pipeline::{AvlAnalysisResult, VspaeroAnalysisResult};
 
 mod comparison_support;
 mod optimized_comparison;
-use super::support::padded_range;
+use super::polar::polar_up_to_cl_max;
+use super::support::{padded_range, ReportingAxis};
 use crate::chart_kit::{draw_horizontal_legend_columns, LegendMarker};
 use crate::scene::{Axes2D, Color, Scene, Stroke, TextAlign, TextBaseline};
 use crate::theme::get_palette;
 use comparison_support::{
-    build_solver_comparison, draw_avl_condition_panels, fourier_lifting_line_points,
-    helmbold_points, lifting_line_points,
+    build_solver_comparison, compressible_reference_map, draw_avl_condition_panels,
+    fourier_lifting_line_points, helmbold_points, lifting_line_points,
 };
 pub use optimized_comparison::figure_optimized_aircraft_comparison;
 
@@ -101,6 +102,20 @@ pub fn figure_model_comparison(
     avl: Option<&AvlAnalysisResult>,
     theme: Option<&str>,
 ) -> Scene {
+    figure_model_comparison_with_cl_max(report, None, mission, vspaero, avl, theme)
+}
+
+/// [`figure_model_comparison`] with the run's clean CL_max: the ALAS VLM curves stop at the last
+/// sweep point at or below it and the limit is marked (the lattice is linear, with no stall, so
+/// the sweep past CL_max is not a prediction and would squeeze every other curve).
+pub fn figure_model_comparison_with_cl_max(
+    report: &AnalysisReport,
+    cl_max: Option<f64>,
+    mission: Option<&MissionResult>,
+    vspaero: Option<&VspaeroAnalysisResult>,
+    avl: Option<&AvlAnalysisResult>,
+    theme: Option<&str>,
+) -> Scene {
     let pal = get_palette(theme);
     let solver_comparison = build_solver_comparison(report, avl);
     // Row tops below must stay in step with `comparison_support::
@@ -115,19 +130,33 @@ pub fn figure_model_comparison(
     } else {
         ROW2_TOP + ROW2_HEIGHT + ROW_GAP
     };
-    let scene_height = legend_y + 55.0;
+    // Two note lines under the legend when the AVL cross-check rows are drawn.
+    let cross_check = !solver_comparison.coefficient_points.is_empty();
+    let scene_height = legend_y + if cross_check { 70.0 } else { 55.0 };
     let mut scene = Scene::new(900.0, scene_height, Some(Color::from_hex(pal.bg)));
     scene.title = Some("Whole-Aircraft Model Comparison".to_owned());
 
-    let p = &report.polar;
+    let (polar_cut, cut) = polar_up_to_cl_max(&report.polar, cl_max);
+    let p = &polar_cut;
     let lifting_line = lifting_line_points(report);
     let fourier_lifting_line = fourier_lifting_line_points(report);
-    let helmbold = helmbold_points(report);
+    let axis = compressible_reference_map(report).map_or_else(
+        || ReportingAxis::of(&report.polar),
+        |(scale, offset)| ReportingAxis::affine(scale, offset),
+    );
+    let helmbold: Vec<(f64, f64)> = helmbold_points(report)
+        .into_iter()
+        .map(|(alpha, lift)| (axis.map(alpha), lift))
+        .collect();
     let vspaero_points = vspaero
         .and_then(VspaeroAnalysisResult::comparable_polar)
         .map(|polar| polar.points.as_slice())
         .unwrap_or_default();
-    let mission_points: Vec<(f64, f64, f64, f64)> = mission
+    // Cruise-kind segments only, and only at the cruise level: the highest
+    // cruise altitude flown, within 150 m. Low-altitude cruise-kind legs
+    // (reserve, diversion, hold) sit at other lift coefficients and are not
+    // the operating point this comparison names.
+    let cruise_segments: Vec<&_> = mission
         .into_iter()
         .flat_map(|result| result.segments.iter())
         .filter(|segment| {
@@ -136,13 +165,27 @@ pub fn figure_model_comparison(
                 alas_mission::segments::SegmentKind::Cruise { .. }
             )
         })
+        .collect();
+    let cruise_level_m = cruise_segments
+        .iter()
+        .flat_map(|segment| segment.conditions.altitude_m.iter().copied())
+        .filter(|altitude| altitude.is_finite())
+        .fold(f64::NEG_INFINITY, f64::max);
+    let cruise_point_count: usize = cruise_segments
+        .iter()
+        .map(|segment| segment.conditions.altitude_m.len())
+        .sum();
+    let mission_points: Vec<(f64, f64, f64, f64)> = cruise_segments
+        .into_iter()
         .flat_map(|segment| {
             let c = &segment.conditions;
             c.lift_coefficient
                 .iter()
                 .zip(&c.drag_coefficient)
                 .zip(&c.angle_of_attack_rad)
-                .map(|((&cl, &cd), &alpha)| {
+                .zip(&c.altitude_m)
+                .filter(|(_, &altitude)| altitude.is_finite() && altitude >= cruise_level_m - 150.0)
+                .map(|(((&cl, &cd), &alpha), _)| {
                     (
                         cl,
                         cd,
@@ -154,13 +197,16 @@ pub fn figure_model_comparison(
         })
         .collect();
 
-    // VSPAERO is solved at the reporting (compressibility-corrected) angles, so
-    // the ALAS lattice curve is drawn on that axis beside it.
-    let vlm_alpha_deg = if vspaero_points.is_empty() {
-        &p.geometric_alpha_deg
-    } else {
-        &p.alpha_deg
-    };
+    // One more note row when cruise points were dropped by the 150 m rule.
+    let dropped_cruise_points = cruise_point_count.saturating_sub(mission_points.len());
+    let scene_height = scene_height + if dropped_cruise_points > 0 { 14.0 } else { 0.0 };
+    scene.height = scene_height;
+
+    // One angle axis for every figure that draws this sweep: the reporting
+    // angle (the true angle on the compressible lattice, the whole-wing
+    // Prandtl-Glauert one when it is off), on which VSPAERO is flown and the analytical
+    // references above are drawn (see `ReportingAxis`).
+    let vlm_alpha_deg = &p.alpha_deg;
     let x_drag = padded_range(
         p.cd.iter()
             .copied()
@@ -171,6 +217,7 @@ pub fn figure_model_comparison(
     let y_cl = padded_range(
         p.cl.iter()
             .copied()
+            .chain(cl_max.filter(|_| cut))
             .chain(mission_points.iter().map(|v| v.0))
             .chain(lifting_line.iter().map(|point| point.lift_coefficient))
             .chain(
@@ -190,12 +237,12 @@ pub fn figure_model_comparison(
             .chain(
                 lifting_line
                     .iter()
-                    .map(|point| point.alpha_rad.to_degrees()),
+                    .map(|point| axis.map(point.alpha_rad.to_degrees())),
             )
             .chain(
                 fourier_lifting_line
                     .iter()
-                    .map(|point| point.alpha_rad.to_degrees()),
+                    .map(|point| axis.map(point.alpha_rad.to_degrees())),
             )
             .chain(helmbold.iter().map(|point| point.0))
             .chain(vspaero_points.iter().map(|point| point.alpha_deg)),
@@ -282,6 +329,37 @@ pub fn figure_model_comparison(
         alas_vlm.clone(),
     );
 
+    if let Some(limit) = cl_max.filter(|_| cut) {
+        let red = Stroke::dashed(Color::from_hex("#d62728"), 1.0, 4.0, 3.0);
+        axes[0].add_line_series(
+            &mut scene,
+            &[(x_drag.0, limit), (x_drag.1, limit)],
+            red.clone(),
+        );
+        axes[1].add_line_series(&mut scene, &[(x_alpha.0, limit), (x_alpha.1, limit)], red);
+        let at = axes[1].map_point(x_alpha.0, limit);
+        for (line, text) in [
+            format!("Run CLmax {limit:.2}"),
+            "ALAS VLM curve stops here: the lattice has no stall".to_owned(),
+        ]
+        .into_iter()
+        .enumerate()
+        {
+            scene.add(crate::scene::SceneElement::Text {
+                text,
+                // Above the limit line, where only the left end of the curves is
+                // (they rise to the right); 14 px between lines clears 8 pt text.
+                pos: [at[0] + 6.0, at[1] - 4.0 - 14.0 * (1 - line) as f64],
+                font_size: 8.0,
+                color: Color::from_hex("#d62728"),
+                align: TextAlign::Left,
+                baseline: TextBaseline::Bottom,
+                angle_deg: 0.0,
+                bold: false,
+            });
+        }
+    }
+
     if !helmbold.is_empty() {
         axes[1].add_line_series(&mut scene, &helmbold, analytical_stroke(HELMBOLD_COLOR));
     }
@@ -291,7 +369,12 @@ pub fn figure_model_comparison(
             &mut scene,
             &fourier_lifting_line
                 .iter()
-                .map(|point| (point.alpha_rad.to_degrees(), point.lift_coefficient))
+                .map(|point| {
+                    (
+                        axis.map(point.alpha_rad.to_degrees()),
+                        point.lift_coefficient,
+                    )
+                })
                 .collect::<Vec<_>>(),
             analytical_stroke(FOURIER_LIFTING_LINE_COLOR),
         );
@@ -325,7 +408,12 @@ pub fn figure_model_comparison(
             &mut scene,
             &lifting_line
                 .iter()
-                .map(|point| (point.alpha_rad.to_degrees(), point.lift_coefficient))
+                .map(|point| {
+                    (
+                        axis.map(point.alpha_rad.to_degrees()),
+                        point.lift_coefficient,
+                    )
+                })
                 .collect::<Vec<_>>(),
             prandtl.clone(),
         );
@@ -336,7 +424,7 @@ pub fn figure_model_comparison(
                 .filter_map(|point| {
                     point
                         .lift_to_drag
-                        .map(|ratio| (point.alpha_rad.to_degrees(), ratio))
+                        .map(|ratio| (axis.map(point.alpha_rad.to_degrees()), ratio))
                 })
                 .collect::<Vec<_>>(),
             prandtl,
@@ -408,5 +496,37 @@ pub fn figure_model_comparison(
         ));
     }
     draw_horizontal_legend_columns(&mut scene, [60.0, legend_y], &entries, pal, 8.0);
+    super::support::draw_alpha_axis_note(&mut scene, 450.0, scene_height - 12.0, pal);
+    // Which angle each family is drawn against: the references differ, so a
+    // 1-2 deg offset between VLM and the analytical lines is read with this.
+    scene.add(crate::scene::SceneElement::Text {
+        text: "Angle references: VLM, VSPAERO on the reporting angle; lifting-line, \
+               Helmbold on the geometric angle mapped onto it (alpha_0L from wing sections)"
+            .to_owned(),
+        pos: [450.0, scene_height - if cross_check { 40.0 } else { 26.0 }],
+        font_size: 8.0,
+        color: Color::from_hex(pal.tick),
+        align: TextAlign::Center,
+        baseline: TextBaseline::Middle,
+        angle_deg: 0.0,
+        bold: false,
+    });
+    if dropped_cruise_points > 0 {
+        scene.add(crate::scene::SceneElement::Text {
+            text: format!(
+                "{dropped_cruise_points} of {cruise_point_count} cruise points dropped: only points within 150 m of the highest cruise altitude flown are shown."
+            ),
+            pos: [450.0, scene_height - if cross_check { 54.0 } else { 40.0 }],
+            font_size: 8.0,
+            color: Color::from_hex(pal.tick),
+            align: TextAlign::Center,
+            baseline: TextBaseline::Middle,
+            angle_deg: 0.0,
+            bold: false,
+        });
+    }
+    if cross_check {
+        super::support::draw_cross_check_axis_note(&mut scene, 450.0, scene_height - 26.0, pal);
+    }
     scene
 }

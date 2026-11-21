@@ -345,6 +345,10 @@ fn a_declared_compartment_list_replaces_the_derived_one() {
             volume_m3: Some(3.0),
             max_net_kg: Some(300.0),
             deck: HoldDeck::Main,
+            container_rows: None,
+            clear_width_m: None,
+            narrow_forward_part_m: None,
+            behind_seats: false,
         },
         HoldCompartmentConfig {
             name: "Tail".to_owned(),
@@ -353,6 +357,10 @@ fn a_declared_compartment_list_replaces_the_derived_one() {
             volume_m3: Some(6.0),
             max_net_kg: None,
             deck: HoldDeck::Main,
+            container_rows: None,
+            clear_width_m: None,
+            narrow_forward_part_m: None,
+            behind_seats: false,
         },
     ];
     let built = build(&ATR, |config| {
@@ -396,5 +404,140 @@ fn a320_derived_hold_volumes_are_reported_against_the_published_ones() {
     assert!(
         total > 0.8 * published_total && total < 1.6 * published_total,
         "derived {total:.2} m3 against published {published_total:.2} m3 in {derived:?}"
+    );
+}
+
+/// The Learjet 60 has no container positions and two declared loose-bulk
+/// baggage compartments, each centred on its EASA TCDS IM.A.212 III.10 arm:
+/// the cabin one behind the last seat (260 lb at F.S. 367.0 in, ending at the
+/// aft pressure bulkhead, its volume the one the built section encloses) and
+/// the unpressurised tailcone hold aft of the fuel section (300 lb at F.S.
+/// 515.0 in, 24 cu ft declared). The cabin one takes no seat floor, so the
+/// seats are those of the cabin without the declaration. The load plan steers
+/// the loose baggage between the two and never out of them.
+#[test]
+fn the_learjet_baggage_splits_between_the_cabin_compartment_and_the_tailcone_hold() {
+    const LJ60: Case = Case {
+        name: "LJ60",
+        oew_cg_pct_mac: 11.34,
+    };
+    let station = |fs_in: f64| 0.0254 * (fs_in - 12.77);
+    let lb = |pounds: f64| pounds * 0.453_592_37;
+    let built = build(&LJ60, |_| {});
+    let g = geometry(&built);
+    let x_oew = g.pct_mac_to_x(LJ60.oew_cg_pct_mac);
+    let (nominal, _) = layout(&LJ60, &built);
+    let compartments = compartments(&built, &nominal);
+    assert_eq!(compartments.len(), 2, "{compartments:?}");
+    let (cabin, tail) = (&compartments[0], &compartments[1]);
+    let (_, seat_end) = cabin_extent(&nominal);
+    assert!(cabin.x_start_m >= seat_end - 1e-9, "{cabin:?} {seat_end}");
+    assert!(cabin.x_end_m <= g.cabin_end_x + 1e-9, "{cabin:?}");
+    assert!(
+        (cabin.centroid_x_m() - station(367.0)).abs() < 1e-9,
+        "{cabin:?}"
+    );
+    assert!(!cabin.volume_declared && cabin.volume_m3 > 0.0, "{cabin:?}");
+    assert_eq!(cabin.max_net_kg, Some(lb(260.0)));
+    assert!(tail.x_start_m >= g.cabin_end_x, "{tail:?}");
+    assert!(
+        (tail.centroid_x_m() - station(515.0)).abs() < 1e-9,
+        "{tail:?}"
+    );
+    assert!(
+        tail.volume_declared && (tail.volume_m3 - 24.0 * 0.028_316_846_592).abs() < 1e-12,
+        "{tail:?}"
+    );
+    assert_eq!(tail.max_net_kg, Some(lb(300.0)));
+
+    // The cabin compartment is the derived one cut at its arm: the same
+    // section over a shorter span, and never longer.
+    let derived = derive_hold_compartments(&g, &[], Some(cabin_extent(&nominal)), &[]);
+    assert_eq!(derived.len(), 1, "{derived:?}");
+    assert!(cabin.x_start_m >= derived[0].x_start_m - 1e-9);
+    assert!((cabin.x_end_m - derived[0].x_end_m.min(station(378.05))).abs() < 1e-9);
+    let per_metre = |c: &HoldCompartment| c.volume_m3 / c.length_m();
+    assert!(
+        (per_metre(cabin) / per_metre(&derived[0]) - 1.0).abs() < 0.02,
+        "{cabin:?} {derived:?}"
+    );
+
+    // A barrel that ends further forward (a shortened fuselage) carries the
+    // cabin compartment forward with the aft bulkhead at its declared length,
+    // instead of cutting it below the shortest compartment kept.
+    let mut short = g.clone();
+    short.cabin_end_x = cabin.x_end_m - 0.1;
+    let moved = derive_hold_compartments(
+        &short,
+        &[],
+        Some(cabin_extent(&nominal)),
+        &built.config.cabin.cargo.hold_compartments,
+    );
+    assert_eq!(moved.len(), 2, "{moved:?}");
+    assert!(
+        (moved[0].x_end_m - short.cabin_end_x).abs() < 1e-9,
+        "{moved:?}"
+    );
+    assert!(
+        (moved[0].length_m() - cabin.length_m()).abs() < 1e-9,
+        "{moved:?}"
+    );
+
+    // The cabin compartment takes no seat floor.
+    let undeclared = build(&LJ60, |config| {
+        config.cabin.cargo.hold_compartments.clear();
+    });
+    let (bare, _) = layout(&LJ60, &undeclared);
+    let rows = |layout: &PayloadLayout| -> Vec<(f64, f64)> {
+        layout
+            .items
+            .iter()
+            .filter(|item| item.kind == ItemKind::SeatRow)
+            .map(|item| (item.x, item.mass))
+            .collect()
+    };
+    assert_eq!(rows(&nominal), rows(&bare));
+
+    let planned = |plan_x: f64| {
+        let mut config = built.config.clone();
+        config.cabin.cargo.plan_payload_cg_x_m = Some(plan_x);
+        build_payload_layout(&built.plane, &config, built.oew_kg, x_oew).expect("layout builds")
+    };
+    assert!(bag_mass(&nominal) > 0.0);
+    let (forward, aft) = (planned(0.0), planned(2.0 * x_oew));
+    for plan in [&forward, &aft] {
+        assert!((bag_mass(plan) - bag_mass(&nominal)).abs() < 1e-9 * bag_mass(&nominal));
+        let x = bag_cg_x(plan);
+        assert!(
+            x >= cabin.x_start_m && x <= tail.x_end_m,
+            "{x} outside {compartments:?}"
+        );
+    }
+    assert!(bag_cg_x(&forward) < bag_cg_x(&aft));
+}
+
+/// A body with container positions or several compartments and no container
+/// positions (the ATR 72-600) is steered by a load plan: the loose baggage
+/// follows the planned payload station between its compartments.
+#[test]
+fn a_load_plan_steers_the_loose_baggage_between_the_compartments_of_a_body_without_containers() {
+    let built = build(&ATR, |_| {});
+    let g = geometry(&built);
+    let x_oew = g.pct_mac_to_x(ATR.oew_cg_pct_mac);
+    let (nominal, _) = layout(&ATR, &built);
+    let planned = |plan_x: f64| {
+        let mut config = built.config.clone();
+        config.cabin.cargo.plan_payload_cg_x_m = Some(plan_x);
+        build_payload_layout(&built.plane, &config, built.oew_kg, x_oew).expect("layout builds")
+    };
+    let (forward, aft) = (planned(0.0), planned(2.0 * x_oew));
+    let (x_fwd, x_nom, x_aft) = (bag_cg_x(&forward), bag_cg_x(&nominal), bag_cg_x(&aft));
+    assert!(bag_mass(&nominal) > 0.0);
+    for steered in [&forward, &aft] {
+        assert!((bag_mass(steered) - bag_mass(&nominal)).abs() < 1e-9 * bag_mass(&nominal));
+    }
+    assert!(
+        x_fwd <= x_nom && x_nom <= x_aft && x_aft - x_fwd > 0.5,
+        "bag CG forward plan {x_fwd:.3} m, nominal {x_nom:.3} m, aft plan {x_aft:.3} m"
     );
 }

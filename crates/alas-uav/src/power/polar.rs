@@ -224,7 +224,7 @@ impl SectionPolar for TabulatedPolar {
 /// Thin cambered section of the generic blade: NACA 4408 (4 % camber at 40 %
 /// chord, 8 % thick).  APC thin-electric blades are thin and cambered; this
 /// is a structural choice made from the blade type, before any aircraft was
-/// predicted.  The alternatives surveyed by M2 lane A (static CT / CP at 6000
+/// predicted.  The alternatives surveyed earlier (static CT / CP at 6000
 /// rpm for the generic 10x5) were NACA 4408 0.095 / 0.035, NACA 4412
 /// 0.089 / 0.035, NACA 2410 0.083 / 0.029 and symmetric NACA 0010 0.067,
 /// against 0.073 / 0.024 for the analytic placeholder.

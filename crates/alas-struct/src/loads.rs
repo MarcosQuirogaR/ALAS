@@ -82,7 +82,7 @@ impl LoadCase {
 pub fn load_cases(req: &DesignRequirements, additional_safety_factor: f64) -> [LoadCase; 3] {
     let g = req.gravity_m_s2;
     let w_n = req.mtow_kg * g;
-    let n_ult_pos = req.ultimate_load_factor * additional_safety_factor;
+    let n_ult_pos = req.design_ultimate_load_factor() * additional_safety_factor;
     let n_ult_neg = req.limit_load_factor_neg * 1.5 * additional_safety_factor;
     [
         LoadCase {
@@ -273,6 +273,46 @@ pub fn elliptic_distributed_load(y: &[f64], semi_span: f64, total_force_n: f64) 
             q0 * arg.sqrt()
         })
         .collect()
+}
+
+/// Level-flight lift of one semi-wing, N: `mtow g / 2`, the force scale of the
+/// basic loading.
+pub fn level_semi_wing_lift_n(req: &alas_config::DesignRequirements) -> f64 {
+    req.mtow_kg * req.gravity_m_s2 / 2.0
+}
+
+/// Signed spanwise wing lift [N/m] at `y` of a case with total semi-wing lift
+/// `total_force_n` (negative for push-down): the vortex-lattice basic plus
+/// additional loading carried by the geometry,
+/// `F * additional + F_level * basic`, which integrates to `F`; otherwise the
+/// half-ellipse of [`elliptic_distributed_load`], with the sign of `F`. The
+/// fallback is labelled by [`lift_model_label`].
+pub fn wing_lift_distribution(
+    wsg: &alas_geom::wing_structure::WingStructureGeometry,
+    y: &[f64],
+    total_force_n: f64,
+    level_force_n: f64,
+) -> Vec<f64> {
+    match &wsg.span_load {
+        Some(shape) => y
+            .iter()
+            .map(|&yi| {
+                let eta = yi / wsg.semi_span;
+                (total_force_n * shape.density_at(eta) + level_force_n * shape.basic_at(eta))
+                    / wsg.semi_span
+            })
+            .collect(),
+        None => elliptic_distributed_load(y, wsg.semi_span, total_force_n),
+    }
+}
+
+/// Which lift model [`wing_lift_distribution`] uses for this geometry.
+pub fn lift_model_label(wsg: &alas_geom::wing_structure::WingStructureGeometry) -> &'static str {
+    wsg.span_load
+        .as_ref()
+        .map_or("elliptic fallback (no VLM strip lift available)", |shape| {
+            shape.label
+        })
 }
 
 /// Shear `V(y)` and bending moment `M(y)` for a cantilever beam (free at the

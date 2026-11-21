@@ -165,10 +165,10 @@ fn mass_wing_basic_structure(
 /// The mass of the wing's spoilers and speedbrakes:
 /// `mass_wing_spoilers_and_speedbrakes`.
 ///
-/// The mass is a flat 1.5 percent of the basic wing structure; the wing
-/// argument is not read. A wetted-area-based alternative was rejected because
-/// it comes out too high.
-fn mass_wing_spoilers_and_speedbrakes(_wing: &Wing, mass_basic_wing: f64) -> f64 {
+/// The mass is a flat 1.5 percent of the basic wing structure, independent
+/// of the planform. A wetted-area-based alternative was rejected because it
+/// comes out too high.
+fn mass_wing_spoilers_and_speedbrakes(mass_basic_wing: f64) -> f64 {
     0.015 * mass_basic_wing
 }
 
@@ -200,6 +200,8 @@ pub struct WingSecondaryMassBreakdown {
 /// configured flap planform in the wing extent used by the product mass path.
 /// For a symmetric wing that path supplies both sides. A caller holding only
 /// a semi-wing area must convert it consistently before calling this helper.
+/// `has_spoilers` is false for a wing without spoilers or speedbrakes, which
+/// then carries no spoiler and speedbrake mass.
 /// The helper keeps `mass_wing`'s existing total-regression behaviour
 /// unchanged while exposing only the two terms that can be added to a sized
 /// analytical box without adding the empirical basic structure again.
@@ -215,6 +217,7 @@ pub fn wing_secondary_mass_breakdown_with_control_surface_area(
     flap_deflection_angle: f64,
     strut_y_location: Option<f64>,
     control_surface_area_m2: f64,
+    has_spoilers: bool,
 ) -> WingSecondaryMassBreakdown {
     let mass_basic_wing = mass_wing_basic_structure(
         wing,
@@ -239,8 +242,11 @@ pub fn wing_secondary_mass_breakdown_with_control_surface_area(
             flap_deflection_angle,
             control_surface_area_m2,
         );
-    let spoilers_and_speedbrakes_kg =
-        1.2 * mass_wing_spoilers_and_speedbrakes(wing, mass_basic_wing);
+    let spoilers_and_speedbrakes_kg = if has_spoilers {
+        1.2 * mass_wing_spoilers_and_speedbrakes(mass_basic_wing)
+    } else {
+        0.0
+    };
     WingSecondaryMassBreakdown {
         high_lift_devices_kg,
         spoilers_and_speedbrakes_kg,
@@ -286,6 +292,7 @@ pub fn mass_wing(
         flap_deflection_angle,
         strut_y_location,
         wing.control_surface_area(),
+        true,
     )
 }
 
@@ -293,7 +300,8 @@ pub fn mass_wing(
 ///
 /// [`mass_wing`] uses the wing's own (zero) control-surface area. This seam is
 /// used by the checked mass path, where control-surface configuration is
-/// available and must contribute to the high-lift mass.
+/// available and must contribute to the high-lift mass. `has_spoilers` false
+/// drops the spoiler and speedbrake term for a wing that has none.
 #[allow(clippy::too_many_arguments)]
 pub fn mass_wing_with_control_surface_area(
     wing: &Wing,
@@ -306,6 +314,7 @@ pub fn mass_wing_with_control_surface_area(
     flap_deflection_angle: f64,
     strut_y_location: Option<f64>,
     control_surface_area_m2: f64,
+    has_spoilers: bool,
 ) -> f64 {
     let mass_high_lift_devices = mass_wing_high_lift_devices_with_area(
         wing,
@@ -325,7 +334,11 @@ pub fn mass_wing_with_control_surface_area(
         DEFAULT_K_E,
     );
 
-    let mass_spoilers_speedbrakes = mass_wing_spoilers_and_speedbrakes(wing, mass_basic_wing);
+    let mass_spoilers_speedbrakes = if has_spoilers {
+        mass_wing_spoilers_and_speedbrakes(mass_basic_wing)
+    } else {
+        0.0
+    };
 
     mass_basic_wing + 1.2 * (mass_high_lift_devices + mass_spoilers_speedbrakes)
 }
@@ -501,7 +514,7 @@ mod tests {
             &wing, 60_000.0, 3.75, 20_000.0, 180.0, 90.0, false, 30.0, None,
         );
         let product = mass_wing_with_control_surface_area(
-            &wing, 60_000.0, 3.75, 20_000.0, 180.0, 90.0, false, 30.0, None, 10.0,
+            &wing, 60_000.0, 3.75, 20_000.0, 180.0, 90.0, false, 30.0, None, 10.0, true,
         );
         assert!(product > plain, "product={product}, plain={plain}");
     }
@@ -523,6 +536,7 @@ mod tests {
             arguments.7,
             arguments.8,
             arguments.9,
+            true,
         );
         let total = mass_wing_with_control_surface_area(
             arguments.0,
@@ -535,6 +549,7 @@ mod tests {
             arguments.7,
             arguments.8,
             arguments.9,
+            true,
         );
         let basic = mass_wing_basic_structure(
             arguments.0,
@@ -554,12 +569,41 @@ mod tests {
             breakdown.high_lift_devices_kg + breakdown.spoilers_and_speedbrakes_kg
         );
         assert!((total - (basic + breakdown.total_kg)).abs() < 1.0e-9);
+
+        let bare = wing_secondary_mass_breakdown_with_control_surface_area(
+            arguments.0,
+            arguments.1,
+            arguments.2,
+            arguments.3,
+            arguments.4,
+            arguments.5,
+            arguments.6,
+            arguments.7,
+            arguments.8,
+            arguments.9,
+            false,
+        );
+        assert_eq!(bare.spoilers_and_speedbrakes_kg, 0.0);
+        assert_eq!(bare.high_lift_devices_kg, breakdown.high_lift_devices_kg);
+        let bare_total = mass_wing_with_control_surface_area(
+            arguments.0,
+            arguments.1,
+            arguments.2,
+            arguments.3,
+            arguments.4,
+            arguments.5,
+            arguments.6,
+            arguments.7,
+            arguments.8,
+            arguments.9,
+            false,
+        );
+        assert!((bare_total - (basic + bare.total_kg)).abs() < 1.0e-9);
     }
 
     #[test]
     fn spoilers_and_speedbrakes_mass_is_one_and_a_half_percent_of_the_basic_wing() {
-        let wing = rectangular_wing();
-        assert_eq!(mass_wing_spoilers_and_speedbrakes(&wing, 1000.0), 15.0);
+        assert_eq!(mass_wing_spoilers_and_speedbrakes(1000.0), 15.0);
     }
 
     #[test]
@@ -576,7 +620,7 @@ mod tests {
             DEFAULT_K_E,
         );
         let high_lift = mass_wing_high_lift_devices(&wing, 90.0, 30.0);
-        let spoilers = mass_wing_spoilers_and_speedbrakes(&wing, basic);
+        let spoilers = mass_wing_spoilers_and_speedbrakes(basic);
         let expected = basic + 1.2 * (high_lift + spoilers);
 
         let total = mass_wing(
@@ -823,8 +867,7 @@ mod parity_helpers {
             .iter()
             .enumerate()
         {
-            let wing = wing_by_name(&case.wing);
-            let actual = mass_wing_spoilers_and_speedbrakes(&wing, case.mass_basic_wing);
+            let actual = mass_wing_spoilers_and_speedbrakes(case.mass_basic_wing);
             comparison.scalar(
                 &format!(
                     "mass_wing_spoilers_and_speedbrakes[{index}] ({})",

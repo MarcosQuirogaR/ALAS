@@ -170,7 +170,6 @@ fn competition_labels_have_spanish_catalog_entries() {
             "Search time and evaluation rate depend on the machine and are not reproducible; the seed and budget are.",
             "UAV search completed.",
             "UAV result",
-            "Preliminary: not validated against measured flight data",
         ])
     {
         assert!(catalog.contains_key(key), "missing Spanish UAV key: {key}");

@@ -8,6 +8,12 @@ use alas_geom::aircraft::airplane::Airplane;
 
 use super::AC_CHORD_FRACTION;
 
+/// Area definitions: the tailplane uses its reference planform through the
+/// fuselage (Raymer p. 159: "commonly measured to the aircraft centerline");
+/// the fin uses its built planform above its root, so a fin seated on a
+/// pod (DC-10) excludes the part below the pod top and reads lower than a
+/// crown-referenced area (30.9 m2 built, 36.7 m2 to the crown, 53 m2 to the
+/// fuselage axis from the preset drawing).
 /// Horizontal and vertical tail volume coefficients `(Vh, Vv)`:
 /// `tail_volume_coefficients`. `Vh = Sh Lh / (S c_bar)`,
 /// `Vv = Sv Lv / (S b)`, with the moment arms taken from the wings' quarter-
@@ -29,15 +35,24 @@ fn tail_volume_coefficients_with_reference_mode(
     airplane: &Airplane,
     reference_compatibility: bool,
 ) -> (Option<f64>, Option<f64>) {
-    let s_ref = airplane.s_ref.max(1.0);
-    let c_bar = airplane.c_ref.max(0.1);
-    let b_ref = airplane.b_ref.max(1.0);
+    let s_ref = airplane
+        .s_ref
+        .max(crate::reference_dimensions::REFERENCE_AREA_FLOOR_M2);
+    let c_bar = airplane
+        .c_ref
+        .max(crate::reference_dimensions::REFERENCE_CHORD_FLOOR_M);
+    let b_ref = airplane
+        .b_ref
+        .max(crate::reference_dimensions::REFERENCE_SPAN_FLOOR_M);
+    // From the carried box: the plan buried in the body does not lengthen the arm.
     let x_wing_ac = airplane.wings.first().map_or(f64::NAN, |wing| {
-        wing.aerodynamic_center(AC_CHORD_FRACTION)[0]
+        wing.carried_box().aerodynamic_center(AC_CHORD_FRACTION)[0]
     });
 
     let vh = if airplane.wings.len() > 1 {
-        let hstab = &airplane.wings[1];
+        // Volume coefficients are defined on the theoretical tail planform, area
+        // and quarter-MAC arm alike (Raymer, Aircraft Design, ch. 6 and 7).
+        let hstab = airplane.wings[1].reference_planform();
         let l_h = (hstab.aerodynamic_center(AC_CHORD_FRACTION)[0] - x_wing_ac).max(0.0);
         let area = if reference_compatibility {
             hstab.unfolded_area()
@@ -50,7 +65,7 @@ fn tail_volume_coefficients_with_reference_mode(
     };
 
     let vv = if airplane.wings.len() > 2 {
-        let vstab = &airplane.wings[2];
+        let vstab = airplane.wings[2].reference_planform();
         let l_v = (vstab.aerodynamic_center(AC_CHORD_FRACTION)[0] - x_wing_ac).max(0.0);
         // A vertical fin's planform is the XZ surface, so projecting it onto
         // the aircraft XY reference plane would collapse its area to zero.
