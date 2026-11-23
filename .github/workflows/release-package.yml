@@ -69,7 +69,7 @@ jobs:
     timeout-minutes: 15
     steps:
       - name: Check out source
-        uses: actions/checkout@v4
+        uses: actions/checkout@v7
       - name: Check advisories and yanked crates
         uses: EmbarkStudios/cargo-deny-action@v2
         with:
@@ -90,10 +90,10 @@ jobs:
         os: [windows-latest, ubuntu-22.04]
     steps:
       - name: Check out source
-        uses: actions/checkout@v4
+        uses: actions/checkout@v7
 
       - name: Install the repository Rust toolchain
-        uses: dtolnay/rust-toolchain@1.97.1
+        uses: dtolnay/rust-toolchain@1.120.0
 
       # eframe/egui-winit link against the platform windowing and font
       # stacks at build time even though the packaging smoke run below never
@@ -131,7 +131,7 @@ jobs:
 
       # v2.9.2
       - name: Cache the build
-        uses: Swatinem/rust-cache@6323deb102c322ba6fcbdcafc7e3dddab59af2b6
+        uses: Swatinem/rust-cache@d1527c8f67ef9af357290475d4af4b0fab8f12e0
         with:
           prefix-key: package-v1
 
@@ -237,7 +237,7 @@ jobs:
           ls -la package-artifact
 
       - name: Upload package artifact (workflow-run only, not a published release)
-        uses: actions/upload-artifact@v4
+        uses: actions/upload-artifact@v7
         with:
           name: alas-${{ matrix.os }}-release-package
           path: package-artifact/
