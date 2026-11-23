@@ -74,7 +74,7 @@ rayon = "1"
 # process access unless the host registers it, which this program does not).
 # `toml` parses the `addon.toml` manifest; serde support only.
 rhai = { version = "1", default-features = false, features = ["std", "no_module", "no_time"] }
-toml = { version = "0.9", default-features = false, features = ["parse", "serde", "std"] }
+toml = { version = "1.1", default-features = false, features = ["parse", "serde", "std"] }
 
 # The three crates every procedural macro is written with. `alas-config-derive`
 # is the only member that depends on them: a derive macro receives its input as
